@@ -37,18 +37,21 @@ services:
     command: npm run start:dev
 
   frontend:
-    build: ./frontend
-    container_name: react_frontend
-    restart: unless-stopped
+    build:
+      context: ./frontend
     ports:
-      - "3000:3000"
+      - "5173:5173"
     volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
+      # Bind mount source for hot reload
+      - ./frontend:/app
+      # Anonymous volume prevents the container's node_modules
+      # (built for Linux) from being clobbered by your host's
+      # node_modules (possibly built for Mac/Windows)
+      - /app/node_modules
     environment:
+      - VITE_API_URL=http://localhost:4000
+      # Needed for HMR file watching to work reliably in Docker
       - CHOKIDAR_USEPOLLING=true
-      - WATCHPACK_POLLING=true
-    command: npm start
     depends_on:
       - backend
 
