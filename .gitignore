@@ -1,7 +1,13 @@
+.env
+
 backend/node_modules
 backend/dist
 
 frontend/node_modules
+
+orchestrator/node_modules
+orchestrator/dist
+
 
 scripting/node_modules
 scripting/src/.env

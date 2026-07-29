@@ -1,10 +1,15 @@
-import { NestFactory } from "@nestjs/core";
+import { HttpAdapterHost, NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.enableCors();
+
+  // Increase server timeout (in milliseconds)
+  const httpAdapterHost = app.get(HttpAdapterHost);
+  const server = httpAdapterHost.httpAdapter.getHttpServer();
+  server.setTimeout(120000); // 120 seconds
 
   // Swagger config
   const config = new DocumentBuilder()
