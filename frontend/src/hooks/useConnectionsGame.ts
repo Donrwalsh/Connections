@@ -1,6 +1,10 @@
 import { useReducer } from "react";
 import type { Category } from "../data/samplePuzzle";
-import { gameReducer, initGameState } from "../lib/gameReducer";
+import {
+  gameReducer,
+  initGameState,
+  type AiSolveResponse,
+} from "../lib/gameReducer";
 
 function shuffle<T>(items: T[]): T[] {
   const copy = [...items];
@@ -11,9 +15,6 @@ function shuffle<T>(items: T[]): T[] {
   return copy;
 }
 
-// Wraps the reducer so components don't dispatch raw action objects —
-// they call named functions instead. This is the seam you'd swap out
-// later if the action shape ever changed; callers wouldn't notice.
 export function useConnectionsGame(
   categories: Category[],
   remainingWords: string[],
@@ -33,6 +34,11 @@ export function useConnectionsGame(
     clearFeedback: () => dispatch({ type: "CLEAR_FEEDBACK" }),
     shuffleBoard: () =>
       dispatch({ type: "SHUFFLE", words: shuffle(state.remainingWords) }),
+    aiSolve: () => dispatch({ type: "AI_SOLVE_START" }),
+    aiSolveSuccess: (solution: AiSolveResponse) =>
+      dispatch({ type: "AI_SOLVE_SUCCESS", payload: solution }),
+    aiSolveError: (error: string) =>
+      dispatch({ type: "AI_SOLVE_FAILURE", payload: error }),
     confirmSolve: () => dispatch({ type: "CONFIRM_SOLVE" }),
   };
 }

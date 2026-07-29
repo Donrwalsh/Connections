@@ -17,6 +17,11 @@ export class AppController {
     return this.appService.getHello();
   }
 
+  @Get("puzzle/today")
+  getTodaysPuzzle() {
+    return this.appService.getTodaysPuzzle();
+  }
+
   @Get("api/latest_date")
   getLatestDate() {
     return this.appService.getLatestDate();

@@ -13,6 +13,29 @@ export interface GameState {
   shakeWords: string[];
   pendingSolve: Category | null;
   guessHistory: Difficulty[][];
+  //AI solve stuff:
+  loading: boolean;
+  error: string | null;
+  ai_solution: Record<string, any> | null;
+}
+
+// 1. Define the nested proposed group shape
+export interface ProposedGroup {
+  words: string[];
+  category: string;
+  confidence: number;
+  reasoning: string;
+}
+
+// 2. Define the inner 'data' payload
+export interface AiSolveData {
+  proposedGroup: ProposedGroup;
+}
+
+// 3. Define the full API Response payload
+export interface AiSolveResponse {
+  orchestrator: string;
+  data: AiSolveData;
 }
 
 export type GameAction =
@@ -20,6 +43,9 @@ export type GameAction =
   | { type: "SUBMIT_GUESS" }
   | { type: "DESELECT_ALL" }
   | { type: "CLEAR_FEEDBACK" }
+  | { type: "AI_SOLVE_START" }
+  | { type: "AI_SOLVE_SUCCESS"; payload: AiSolveResponse }
+  | { type: "AI_SOLVE_FAILURE"; payload: string }
   | { type: "SHUFFLE"; words: string[] }
   | { type: "CONFIRM_SOLVE" };
 
@@ -41,6 +67,9 @@ export function initGameState(
     shakeWords: [],
     pendingSolve: null,
     guessHistory: [],
+    loading: false,
+    error: null,
+    ai_solution: null,
   };
 }
 
@@ -143,6 +172,24 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         ],
       };
     }
+
+    case "AI_SOLVE_START":
+      return { ...state, loading: true, error: null };
+    case "AI_SOLVE_SUCCESS":
+      console.log("Action Payload in Reducer:", action.payload);
+      return {
+        ...state,
+        loading: false,
+        ai_solution: action.payload.data,
+        error: null,
+      };
+    case "AI_SOLVE_FAILURE":
+      return {
+        ...state,
+        loading: false,
+        ai_solution: null,
+        error: action.payload,
+      };
 
     case "DESELECT_ALL":
       return { ...state, selected: [] };
