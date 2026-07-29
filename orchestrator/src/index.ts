@@ -42,8 +42,8 @@ app.post("/solve", async (c) => {
   }
 
   try {
-    const proposedGroup = await proposeGroup(parsed.data);
-    const response: SolveResponse = { proposedGroup };
+    const { proposedGroup, prompt } = await proposeGroup(parsed.data);
+    const response: SolveResponse = { proposedGroup, prompt };
     return c.json(response, 200);
   } catch (err) {
     console.error("Solve failed:", err);

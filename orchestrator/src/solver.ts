@@ -9,6 +9,11 @@ import { buildSolvePrompt } from "./prompt.js";
 
 const MODEL = "gpt-4o-2024-08-06";
 
+export interface SolveResult {
+  proposedGroup: ProposedGroup;
+  prompt: string;
+}
+
 /**
  * Runs a single solve step: given the current puzzle state, ask the model
  * to propose one group of 4 words.
@@ -19,10 +24,15 @@ const MODEL = "gpt-4o-2024-08-06";
  * generate multiple candidates and pick the best). Keeping this function
  * focused on "one model call in, one validated group out" makes it a
  * clean seam to build that around.
+ *
+ * Returns the prompt alongside the result so the caller can surface
+ * exactly what was sent to the model (e.g. for the frontend's
+ * "show me the prompt" panel), without the caller needing to duplicate
+ * buildSolvePrompt's logic.
  */
 export async function proposeGroup(
   request: SolveRequest,
-): Promise<ProposedGroup> {
+): Promise<SolveResult> {
   const prompt = buildSolvePrompt(request);
 
   const { object } = await generateObject({
@@ -33,7 +43,7 @@ export async function proposeGroup(
 
   validateProposedGroup(object, request);
 
-  return object;
+  return { proposedGroup: object, prompt };
 }
 
 /**

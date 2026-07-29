@@ -47,6 +47,10 @@ export function Game({ puzzle }: GameProps) {
     if (!state.loading) return;
 
     const controller = new AbortController();
+    // Backend has its own 5s timeout calling the orchestrator; give it a
+    // little headroom before we give up on the whole round trip and show
+    // our own timeout message instead of spinning forever.
+    const timeoutId = setTimeout(() => controller.abort("timeout"), 8000);
 
     async function fetchAiSolve() {
       try {
@@ -55,27 +59,59 @@ export function Game({ puzzle }: GameProps) {
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ puzzleWords: state.remainingWords }),
+            body: JSON.stringify({
+              puzzleWords: state.remainingWords,
+              priorGuesses: state.priorGuesses,
+            }),
             signal: controller.signal,
           },
         );
 
-        if (!response.ok) throw new Error("Failed to get AI solution");
-
-        const data = await response.json();
-        console.log("Raw AI response:", data);
-        aiSolveSuccess(data);
-      } catch (err) {
-        if ((err as Error).name !== "AbortError") {
-          aiSolveError((err as Error).message);
+        if (!response.ok) {
+          throw new Error(`AI service returned HTTP ${response.status}.`);
         }
+
+        const result = await response.json();
+        console.log("Raw AI response:", result);
+
+        // The backend responds with HTTP 200 even when the orchestrator
+        // call failed or timed out — it reports that as
+        // { orchestrator: "unhealthy", error } in the body rather than a
+        // non-2xx status. Treat that as a failure too.
+        if (result.orchestrator !== "healthy" || !result.data) {
+          throw new Error(
+            result.error || "AI orchestrator is currently unavailable.",
+          );
+        }
+
+        aiSolveSuccess(result);
+      } catch (err) {
+        const error = err as Error;
+        if (error.name === "AbortError") {
+          if (controller.signal.reason === "timeout") {
+            aiSolveError("AI Assist timed out. Please try again.");
+          }
+          // Otherwise this is the cleanup abort from unmount/dep change —
+          // not a real failure, so stay silent as before.
+          return;
+        }
+        aiSolveError(error.message);
       }
     }
 
     fetchAiSolve();
 
-    return () => controller.abort();
-  }, [state.loading, state.remainingWords, aiSolveSuccess, aiSolveError]);
+    return () => {
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [
+    state.loading,
+    state.remainingWords,
+    state.priorGuesses,
+    aiSolveSuccess,
+    aiSolveError,
+  ]);
 
   const canSubmit = state.selected.length === 4 && state.status === "playing";
 
@@ -129,6 +165,25 @@ export function Game({ puzzle }: GameProps) {
         </div>
       )}
 
+      {state.error && (
+        <div
+          className="ai-error-banner"
+          role="alert"
+          style={{
+            backgroundColor: "#3a1414",
+            color: "#ffb4b4",
+            border: "1px solid #7a2b2b",
+            borderRadius: "10px",
+            padding: "0.85rem 1.1rem",
+            margin: "1rem auto",
+            maxWidth: "480px",
+            textAlign: "left",
+          }}
+        >
+          <strong>AI Assist unavailable:</strong> {state.error}
+        </div>
+      )}
+
       {state.ai_solution && (
         <div className="ai-solution-container">
           <h3>AI Recommendation:</h3>
@@ -148,8 +203,34 @@ export function Game({ puzzle }: GameProps) {
               overflowWrap: "anywhere",
             }}
           >
-            {JSON.stringify(state.ai_solution, null, 2)}
+            {JSON.stringify(state.ai_solution.proposedGroup, null, 2)}
           </pre>
+
+          {state.ai_solution.prompt && (
+            <details className="ai-prompt-details">
+              <summary style={{ cursor: "pointer" }}>
+                View prompt sent to the model
+              </summary>
+              <pre
+                style={{
+                  backgroundColor: "#1e1e1e",
+                  color: "#d4d4d4",
+                  padding: "1.25rem",
+                  borderRadius: "12px",
+                  textAlign: "left",
+                  fontFamily: "monospace",
+                  fontSize: "0.85rem",
+                  marginTop: "0.5rem",
+
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  overflowWrap: "anywhere",
+                }}
+              >
+                {state.ai_solution.prompt}
+              </pre>
+            </details>
+          )}
         </div>
       )}
 

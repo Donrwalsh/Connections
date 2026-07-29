@@ -2,6 +2,16 @@ import type { Category, Difficulty } from "../data/samplePuzzle";
 
 export type Feedback = "one-away" | "incorrect" | null;
 
+// Mirrors the orchestrator's GuessResult/PriorGuess schema
+// (orchestrator/src/types.ts) — kept as a plain literal union here rather
+// than importing across the frontend/orchestrator package boundary.
+export type GuessResult = "correct" | "incorrect" | "oneAway";
+
+export interface PriorGuess {
+  words: string[];
+  result: GuessResult;
+}
+
 export interface GameState {
   categories: Category[];
   remainingWords: string[];
@@ -13,6 +23,10 @@ export interface GameState {
   shakeWords: string[];
   pendingSolve: Category | null;
   guessHistory: Difficulty[][];
+  // Every submitted guess so far (correct, incorrect, or one-away), sent to
+  // the orchestrator alongside remainingWords so it doesn't repeat a wrong
+  // guess or ignore an already-solved group.
+  priorGuesses: PriorGuess[];
   //AI solve stuff:
   loading: boolean;
   error: string | null;
@@ -30,12 +44,17 @@ export interface ProposedGroup {
 // 2. Define the inner 'data' payload
 export interface AiSolveData {
   proposedGroup: ProposedGroup;
+  prompt: string;
 }
 
-// 3. Define the full API Response payload
+// 3. Define the full API Response payload — mirrors what the backend's
+// /api/solve endpoint actually returns (backend/src/app.service.ts).
+// `data` is only present when `orchestrator` is "healthy"; on failure or
+// timeout the backend still responds 200 with an `error` string instead.
 export interface AiSolveResponse {
-  orchestrator: string;
-  data: AiSolveData;
+  orchestrator: "healthy" | "unhealthy";
+  data?: AiSolveData;
+  error?: string;
 }
 
 export type GameAction =
@@ -67,6 +86,7 @@ export function initGameState(
     shakeWords: [],
     pendingSolve: null,
     guessHistory: [],
+    priorGuesses: [],
     loading: false,
     error: null,
     ai_solution: null,
@@ -151,6 +171,10 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
             ...state.guessHistory,
             difficultiesForGuess(state.categories, state.selected),
           ],
+          priorGuesses: [
+            ...state.priorGuesses,
+            { words: state.selected, result: "correct" },
+          ],
         };
       }
 
@@ -158,6 +182,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       // selection, since selected is about to become [].
       const mistakes = state.mistakes + 1;
       const overlap = largestCategoryOverlap(state.categories, state.selected);
+      const guessResult: GuessResult = overlap === 3 ? "oneAway" : "incorrect";
 
       return {
         ...state,
@@ -170,17 +195,20 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
           ...state.guessHistory,
           difficultiesForGuess(state.categories, state.selected),
         ],
+        priorGuesses: [
+          ...state.priorGuesses,
+          { words: state.selected, result: guessResult },
+        ],
       };
     }
 
     case "AI_SOLVE_START":
       return { ...state, loading: true, error: null };
     case "AI_SOLVE_SUCCESS":
-      console.log("Action Payload in Reducer:", action.payload);
       return {
         ...state,
         loading: false,
-        ai_solution: action.payload.data,
+        ai_solution: action.payload.data ?? null,
         error: null,
       };
     case "AI_SOLVE_FAILURE":

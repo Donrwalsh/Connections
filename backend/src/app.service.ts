@@ -1,5 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { Client } from "pg";
+import type { PriorGuessDto, SolveResponseDto } from "./app.controller";
 
 @Injectable()
 export class AppService {
@@ -7,7 +8,7 @@ export class AppService {
 
   private orchestratorUrl = "http://ai_orchestrator:3001";
 
-  async solve(puzzleWords: string[]) {
+  async solve(puzzleWords: string[], priorGuesses: PriorGuessDto[] = []) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
 
@@ -18,7 +19,7 @@ export class AppService {
           "Content-Type": "application/json",
           "x-internal-api-key": "potato",
         },
-        body: JSON.stringify({ puzzleWords }),
+        body: JSON.stringify({ puzzleWords, priorGuesses }),
         signal: controller.signal,
       });
 
@@ -31,7 +32,7 @@ export class AppService {
         };
       }
 
-      const data = await res.json();
+      const data: SolveResponseDto = await res.json();
       return { orchestrator: "healthy", data };
     } catch (err) {
       clearTimeout(timeout);

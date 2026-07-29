@@ -59,8 +59,12 @@ export type ProposedGroup = z.infer<typeof ProposedGroupSchema>;
 
 /**
  * Response body for POST /solve.
+ * `prompt` is the exact text sent to the model for this solve step —
+ * returned alongside the result so callers (ultimately the frontend) can
+ * show what was actually asked, e.g. for debugging or transparency.
  */
 export const SolveResponseSchema = z.object({
   proposedGroup: ProposedGroupSchema,
+  prompt: z.string(),
 });
 export type SolveResponse = z.infer<typeof SolveResponseSchema>;
