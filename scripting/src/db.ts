@@ -19,12 +19,29 @@ async function main() {
   while (latestDate <= new Date()) {
     const nextDate = new Date(latestDate);
     nextDate.setDate(nextDate.getDate() + 1);
+
     const formattedDate =
       nextDate.getFullYear() +
       "-" +
       String(nextDate.getMonth() + 1).padStart(2, "0") +
       "-" +
       String(nextDate.getDate()).padStart(2, "0");
+
+    const awkwardDates = [
+      '2024-12-12',
+      '2025-04-01',
+      '2025-10-31',
+      '2026-02-07',
+      '2026-03-07',
+      '2026-04-01',
+      '2026-05-06'
+    ]
+
+    if (awkwardDates.includes(formattedDate)) {
+      latestDate = nextDate;
+      console.log(`Skipping ${formattedDate} data because it's awkward`);
+      continue;
+    }
 
     const url = `https://www.nytimes.com/svc/connections/v2/${formattedDate}.json`;
 
