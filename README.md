@@ -1,0 +1,1 @@
+[![Frontend Tests](https://github.com/donrwalsh/Connections/actions/workflows/frontend-tests.yml/badge.svg?branch=master)](https://github.com/donrwalsh/Connections/actions/workflows/frontend-tests.yml)
