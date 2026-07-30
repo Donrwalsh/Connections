@@ -1,17 +1,24 @@
 import { Module } from "@nestjs/common";
-import { GameService } from "./game.service";
-import { GameController } from "./game.controller";
-import { Client } from "pg";
+import { Pool } from "pg";
 import { QueueModule } from "../queue/queue.module";
+import { GameController } from "./game.controller";
+import { GameService } from "./game.service";
+import { TypeOrmModule } from "@nestjs/typeorm";
+import { AnswerGroup } from "./entities/answer-group.entity";
+import { GroupMember } from "./entities/group-member.entity";
+import { Puzzle } from "./entities/puzzle.entity";
 
 @Module({
-  imports: [QueueModule],
+  imports: [
+    TypeOrmModule.forFeature([Puzzle, AnswerGroup, GroupMember]),
+    QueueModule,
+  ],
   controllers: [GameController],
   providers: [
     {
       provide: "PG",
       useFactory: async () => {
-        const client = new Client({
+        const pool = new Pool({
           host: process.env.DB_HOST,
           port: Number(process.env.DB_PORT),
           user: process.env.DB_USER,
@@ -19,9 +26,7 @@ import { QueueModule } from "../queue/queue.module";
           database: process.env.DB_NAME,
         });
 
-        await client.connect();
-        console.log("Connected to Postgres");
-        return client;
+        return pool;
       },
     },
     GameService,

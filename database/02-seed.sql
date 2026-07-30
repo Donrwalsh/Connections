@@ -1,15 +1,15 @@
-INSERT INTO Puzzle (date)
+INSERT INTO "Puzzle" ("date")
 VALUES
   ('2023-06-12');
 
-INSERT INTO AnswerGroup (puzzle_id, level, group_name)
+INSERT INTO "AnswerGroup" ("puzzle_id", "level", "group_name")
 VALUES
   (1, 0, 'WET WEATHER'),
   (1, 1, 'NBA TEAMS'),
   (1, 2, 'KEYBOARD KEYS'),
   (1, 3, 'PALINDROMES');
 
-INSERT INTO GroupMember (group_id, word, position)
+INSERT INTO "GroupMember" ("group_id", "word", "position")
 VALUES
   (1, 'HAIL', 9),
   (1, 'RAIN', 11),

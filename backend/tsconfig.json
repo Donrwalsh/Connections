@@ -16,7 +16,9 @@
     "ignoreDeprecations": "5.0",
 
     "skipLibCheck": true,
-    "types": ["node", "jest"]
+    "types": ["node", "jest"],
+
+    "strictPropertyInitialization": false
   },
   "include": ["src"]
 }

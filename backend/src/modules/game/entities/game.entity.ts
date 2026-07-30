@@ -1,3 +1,4 @@
+//Potato: can this go away?
 export interface Category {
   id: string;
   name: string;

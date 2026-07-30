@@ -1,6 +1,6 @@
 import { Controller, Get, Inject, Param } from "@nestjs/common";
+import { ApiParam } from "@nestjs/swagger";
 import { GameService } from "./game.service";
-import { strategyQueue } from "../queue/strategy.queue";
 
 @Controller("game")
 export class GameController {
@@ -17,13 +17,13 @@ export class GameController {
   }
 
   @Get("puzzle/:date")
+  @ApiParam({
+    name: "date",
+    type: String,
+    description: "Puzzle date in YYYY-MM-DD format",
+    example: "2023-08-01",
+  })
   getPuzzleByDate(@Param("date") date: string) {
     return this.gameService.getDatesPuzzle(date);
-  }
-
-  @Get("queue")
-  async queue() {
-    await this.gameService.triggerRun("2023-08-01", "random");
-    return { message: "Job added to the queue" };
   }
 }

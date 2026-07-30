@@ -1,17 +1,28 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm/dist/common/typeorm.decorators";
 import { Queue } from "bullmq";
-import { Client } from "pg";
+import { Repository } from "typeorm/browser/repository/Repository.js";
 import { STRATEGY_QUEUE } from "../queue/queue.module";
+import { Puzzle } from "./entities/puzzle.entity";
+import { GuessResult } from "../strategy/entities/guess.entity";
 
 @Injectable()
 export class GameService {
   constructor(
-    @Inject("PG") private readonly db: Client,
     @Inject(STRATEGY_QUEUE) private queue: Queue,
+    @InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>,
   ) {}
 
   async triggerRun(puzzleId: string, strategyName: string) {
     await this.queue.add("run-strategy", { puzzleId, strategyName });
+  }
+
+  async puzzleDateToId(date: string): Promise<number> {
+    const puzzle = await this.puzzleRepo.findOne({ where: { date } });
+    if (!puzzle) {
+      throw new NotFoundException(`No puzzle for date: ${date}`);
+    }
+    return puzzle.id;
   }
 
   async getDatesPuzzle(date: string) {
@@ -26,60 +37,92 @@ export class GameService {
     return await this.getPuzzleByDate(today);
   }
 
+  async evaluateGuess(
+    puzzleId: number,
+    words: string[],
+  ): Promise<{ result: GuessResult }> {
+    const puzzle = await this.puzzleRepo.findOne({
+      where: { id: puzzleId },
+      relations: {
+        answerGroups: {
+          members: true,
+        },
+      },
+    });
+
+    if (!puzzle) {
+      throw new NotFoundException(`Puzzle with ID ${puzzleId} not found`);
+    }
+
+    // Normalize guessed words for case-insensitive matching
+    const guessedSet = new Set(words.map((w) => w.trim().toLowerCase()));
+    let isOffByOne = false;
+
+    for (const group of puzzle.answerGroups) {
+      const groupWords = group.members.map((m) => m.word.trim().toLowerCase());
+
+      // Count matching words in this group
+      const matches = groupWords.filter((word) => guessedSet.has(word)).length;
+
+      // Exact match for the 4-word group
+      if (matches === 4 && groupWords.length === 4) {
+        return { result: GuessResult.SUCCESS };
+      }
+
+      // Check if 3 out of 4 words match
+      if (matches === 3) {
+        isOffByOne = true;
+      }
+    }
+
+    if (isOffByOne) {
+      return { result: GuessResult.OFF_BY_ONE };
+    }
+
+    return { result: GuessResult.FAILURE };
+  }
+
   async getLatestDate() {
-    const result = await this.db.query(
-      "SELECT MAX(date) AS latest_date FROM Puzzle",
-    );
-    return result.rows[0].latest_date;
+    const result = await this.puzzleRepo
+      .createQueryBuilder("puzzle")
+      .select("MAX(puzzle.date)", "latest_date")
+      .getRawOne();
+    return result.latest_date;
   }
 
   async getPuzzleByDate(date: string) {
-    // 1. Fetch the puzzle row (single row)
-    const puzzleRes = await this.db.query(
-      `SELECT id, date FROM Puzzle WHERE date = $1`,
-      [date],
-    );
+    // 1. Fetch puzzle with eager-loaded relations in a single query
+    const puzzle = await this.puzzleRepo.findOne({
+      where: { date },
+      relations: {
+        answerGroups: {
+          members: true, // Loads nested GroupMember array
+        },
+      },
+      order: {
+        answerGroups: {
+          level: "ASC",
+          members: {
+            position: "ASC",
+          },
+        },
+      },
+    });
 
-    if (puzzleRes.rows.length === 0)
+    // 2. Throw exception if not found
+    if (!puzzle) {
       throw new NotFoundException(`No puzzle for date: ${date}`);
-
-    const puzzle = puzzleRes.rows[0];
-
-    // 2. Fetch answer groups + members
-    const groupsRes = await this.db.query(
-      `
-      SELECT
-        ag.id AS group_id,
-        ag.group_name,
-        ag.level,
-        gm.word,
-        gm.position
-      FROM AnswerGroup ag
-      JOIN GroupMember gm ON gm.group_id = ag.id
-      WHERE ag.puzzle_id = $1
-      ORDER BY ag.level ASC, gm.position ASC;
-      `,
-      [puzzle.id],
-    );
-    // 3. Build categories array
-    const categoriesMap = new Map();
-
-    for (const row of groupsRes.rows) {
-      if (!categoriesMap.has(row.group_id)) {
-        categoriesMap.set(row.group_id, {
-          id: `cat-${row.group_id}`,
-          name: row.group_name,
-          difficulty: this.levelToColor(row.level),
-          words: [],
-        });
-      }
-
-      categoriesMap.get(row.group_id).words.push(row.word);
     }
 
+    // 3. Map relations to your response DTO/format
     return {
       date: puzzle.date,
-      categories: Array.from(categoriesMap.values()),
+      categories: puzzle.answerGroups.map((group) => ({
+        id: `cat-${group.id}`,
+        name: group.group_name,
+        difficulty: this.levelToColor(group.level),
+        words: group.members.map((member) => member.word),
+      })),
     };
   }
 

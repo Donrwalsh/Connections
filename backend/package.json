@@ -19,13 +19,15 @@
     "@nestjs/core": "^11.1.28",
     "@nestjs/platform-express": "^11.1.28",
     "@nestjs/swagger": "^11.4.6",
+    "@nestjs/typeorm": "^11.0.3",
     "axios": "^1.19.0",
     "bullmq": "^5.81.3",
     "ioredis": "^5.11.1",
     "pg": "^8.22.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "typeorm": "^1.1.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.24",

@@ -12,11 +12,11 @@ async function main() {
   await client.connect();
 
   const latestDateResult = await client.query(
-    "SELECT MAX(date) AS latest_date FROM Puzzle;",
+    'SELECT MAX(date) AS latest_date FROM "Puzzle";',
   );
   let latestDate = latestDateResult.rows[0].latest_date;
 
-  while (latestDate <= new Date()) {
+  while (true) {
     const nextDate = new Date(latestDate);
     nextDate.setDate(nextDate.getDate() + 1);
 
@@ -28,14 +28,14 @@ async function main() {
       String(nextDate.getDate()).padStart(2, "0");
 
     const awkwardDates = [
-      '2024-12-12',
-      '2025-04-01',
-      '2025-10-31',
-      '2026-02-07',
-      '2026-03-07',
-      '2026-04-01',
-      '2026-05-06'
-    ]
+      "2024-12-12",
+      "2025-04-01",
+      "2025-10-31",
+      "2026-02-07",
+      "2026-03-07",
+      "2026-04-01",
+      "2026-05-06",
+    ];
 
     if (awkwardDates.includes(formattedDate)) {
       latestDate = nextDate;
@@ -56,7 +56,7 @@ async function main() {
     const data: ConnectionsPuzzle = await response.json();
 
     const insertResultFirst = await client.query(
-      `INSERT INTO Puzzle (date)
+      `INSERT INTO "Puzzle" (date)
        VALUES ($1)
        RETURNING id`,
       [formattedDate],
@@ -70,7 +70,7 @@ async function main() {
       group_level++;
 
       const categoryResult = await client.query(
-        `INSERT INTO AnswerGroup (puzzle_id, level, group_name)
+        `INSERT INTO "AnswerGroup" (puzzle_id, level, group_name)
          VALUES ($1, $2, $3)
          RETURNING id`,
         [puzzleId, group_level, category.title],
@@ -80,7 +80,7 @@ async function main() {
 
       for (const card of category.cards) {
         await client.query(
-          `INSERT INTO GroupMember (group_id, word, position)
+          `INSERT INTO "GroupMember" (group_id, word, position)
            VALUES ($1, $2, $3)`,
           [groupId, card.content, card.position],
         );
