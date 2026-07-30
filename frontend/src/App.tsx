@@ -9,7 +9,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL}/puzzle/today`)
+    fetch(`${import.meta.env.VITE_API_URL}/game/puzzle/today`)
       .then((res) => {
         if (!res.ok) throw new Error("Failed to load puzzle data");
         return res.json();

@@ -1,7 +1,10 @@
 import { Module } from "@nestjs/common";
+import { GameService } from "./game.service";
+import { GameController } from "./game.controller";
 import { Client } from "pg";
 
 @Module({
+  controllers: [GameController],
   providers: [
     {
       provide: "PG",
@@ -19,7 +22,8 @@ import { Client } from "pg";
         return client;
       },
     },
+    GameService,
   ],
-  exports: ["PG"],
+  exports: [GameService],
 })
-export class DatabaseModule {}
+export class GameModule {}
