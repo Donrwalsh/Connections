@@ -32,6 +32,15 @@ services:
       - ./orchestrator/tsconfig.json:/app/tsconfig.json
     command: npm run dev
 
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
   backend:
     build: ./backend
     container_name: nest_backend
@@ -43,10 +52,13 @@ services:
       DB_PASSWORD: postgres
       DB_NAME: mydb
       CHOKIDAR_USEPOLLING: true
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     ports:
       - "4000:4000"
     depends_on:
       - db
+      - redis
     volumes:
       - ./backend/src:/app/src
       - ./backend/package.json:/app/package.json
@@ -72,5 +84,29 @@ services:
     depends_on:
       - backend
 
+  worker:
+    build: ./backend
+    container_name: strategy_worker
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: mydb
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+    depends_on:
+      - db
+      - redis
+      - orchestrator
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/package.json:/app/package.json
+      - ./backend/tsconfig.json:/app/tsconfig.json
+    command: npx tsx src/worker.ts
+
 volumes:
   postgres_data:
+  redis_data:

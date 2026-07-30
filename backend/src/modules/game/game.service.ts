@@ -1,9 +1,18 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { Queue } from "bullmq";
 import { Client } from "pg";
+import { STRATEGY_QUEUE } from "../queue/queue.module";
 
 @Injectable()
 export class GameService {
-  constructor(@Inject("PG") private readonly db: Client) {}
+  constructor(
+    @Inject("PG") private readonly db: Client,
+    @Inject(STRATEGY_QUEUE) private queue: Queue,
+  ) {}
+
+  async triggerRun(puzzleId: string, strategyName: string) {
+    await this.queue.add("run-strategy", { puzzleId, strategyName });
+  }
 
   async getDatesPuzzle(date: string) {
     if (!this.isValidYYYYMMDD(date)) {

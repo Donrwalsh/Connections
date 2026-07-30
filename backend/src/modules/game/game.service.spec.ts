@@ -5,11 +5,17 @@ import { GameService } from "./game.service";
 describe("GameService", () => {
   let service: GameService;
   let mockDb: { query: jest.Mock };
+  let mockQueue: { add: jest.Mock };
 
   beforeEach(async () => {
     // Create a mock DB object with a mocked query function
     mockDb = {
       query: jest.fn(),
+    };
+
+    // Create a mock for the STRATEGY_QUEUE provider/queue
+    mockQueue = {
+      add: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -18,6 +24,10 @@ describe("GameService", () => {
         {
           provide: "PG",
           useValue: mockDb,
+        },
+        {
+          provide: "STRATEGY_QUEUE", // <-- Provide the missing dependency here
+          useValue: mockQueue,
         },
       ],
     }).compile();

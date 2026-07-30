@@ -2,8 +2,10 @@ import { Module } from "@nestjs/common";
 import { GameService } from "./game.service";
 import { GameController } from "./game.controller";
 import { Client } from "pg";
+import { QueueModule } from "../queue/queue.module";
 
 @Module({
+  imports: [QueueModule],
   controllers: [GameController],
   providers: [
     {
