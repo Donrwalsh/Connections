@@ -7,6 +7,8 @@ import { TypeOrmModule } from "@nestjs/typeorm";
 import { AnswerGroup } from "./entities/answer-group.entity";
 import { GroupMember } from "./entities/group-member.entity";
 import { Puzzle } from "./entities/puzzle.entity";
+import { PuzzleIngestionService } from "./puzzle-ingestion.service";
+import { PuzzleQueueBootstrap } from "./puzzle-queue.bootstrap";
 
 @Module({
   imports: [
@@ -30,7 +32,9 @@ import { Puzzle } from "./entities/puzzle.entity";
       },
     },
     GameService,
+    PuzzleIngestionService,
+    PuzzleQueueBootstrap,
   ],
-  exports: [GameService],
+  exports: [GameService, PuzzleIngestionService],
 })
 export class GameModule {}

@@ -54,6 +54,8 @@ services:
       CHOKIDAR_USEPOLLING: true
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      PUZZLE_POPULATION_CRON: ${PUZZLE_POPULATION_CRON:-0 6 * * *}
+      PUZZLE_POPULATION_TZ: ${PUZZLE_POPULATION_TZ:-UTC}
     ports:
       - "4000:4000"
     depends_on:
@@ -97,6 +99,8 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      PUZZLE_POPULATION_CRON: ${PUZZLE_POPULATION_CRON:-0 6 * * *}
+      PUZZLE_POPULATION_TZ: ${PUZZLE_POPULATION_TZ:-UTC}
     depends_on:
       - db
       - redis

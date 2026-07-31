@@ -1,0 +1,57 @@
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+} from "@nestjs/common";
+import { Queue } from "bullmq";
+import { PUZZLE_QUEUE } from "../queue/queue.module";
+
+@Injectable()
+export class PuzzleQueueBootstrap implements OnApplicationBootstrap {
+  private readonly logger = new Logger(PuzzleQueueBootstrap.name);
+
+  constructor(@Inject(PUZZLE_QUEUE) private readonly queue: Queue) {}
+
+  async onApplicationBootstrap() {
+    // Run once immediately on startup, to catch up on anything missed.
+    // Fixed jobId => if backend and worker both fire this within the same
+    // moment, BullMQ resolves them to the same job instead of duplicating it.
+    await this.queue.add(
+      "populate-puzzles",
+      {},
+      {
+        jobId: `startup-catch-up-${new Date().toISOString().slice(0, 10)}`,
+        removeOnComplete: true,
+        removeOnFail: 50,
+        attempts: 3,
+        backoff: {
+          type: "exponential",
+          delay: 5000, // 5s, then 10s, then 20s between attempts
+        },
+      },
+    );
+
+    // Recurring daily run. upsertJobScheduler is safe to call from multiple
+    // processes/on every restart — same schedulerId + pattern is a no-op.
+    const cron = process.env.PUZZLE_POPULATION_CRON || "0 6 * * *"; // 06:00 UTC by default
+    await this.queue.upsertJobScheduler(
+      "daily-puzzle-population",
+      { pattern: cron, tz: process.env.PUZZLE_POPULATION_TZ || "UTC" },
+      {
+        name: "populate-puzzles",
+        data: {},
+        opts: {
+          removeOnComplete: true,
+          removeOnFail: 50,
+          attempts: 3,
+          backoff: { type: "exponential", delay: 5000 },
+        },
+      },
+    );
+
+    this.logger.log(
+      `Puzzle population scheduled: "${cron}" (${process.env.PUZZLE_POPULATION_TZ || "UTC"})`,
+    );
+  }
+}

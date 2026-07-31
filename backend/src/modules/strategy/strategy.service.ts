@@ -15,6 +15,7 @@ import { GameService } from "../game/game.service";
 import { StrategyRunDetailDto } from "./dto/strategy.dto";
 
 const GROUP_SIZE = 4;
+const BATCH_SIZE = 50;
 
 export class StrategyService {
   constructor(
@@ -27,8 +28,8 @@ export class StrategyService {
     @Inject(GameService) private readonly gameService: GameService,
   ) {}
 
-  async triggerRun(puzzleId: number, strategyName: string) {
-    await this.queue.add("run-strategy", { puzzleId, strategyName });
+  async triggerRun(puzzleId: number, strategyName: string, date?: string) {
+    await this.queue.add("run-strategy", { puzzleId, strategyName, date });
   }
 
   async getRunDetail(
@@ -41,7 +42,6 @@ export class StrategyService {
       );
     }
 
-    // Throws NotFoundException with a clear message if no puzzle exists for this date.
     const puzzleId = await this.gameService.puzzleDateToId(date);
 
     const run = await this.strategyRunRepo.findOne({
@@ -87,6 +87,7 @@ export class StrategyService {
     }
 
     let guessCount = await this.countGuesses(run.id);
+    const pendingGuesses: Partial<Guess>[] = [];
 
     while (true) {
       const words = combinationToWords(
@@ -97,52 +98,103 @@ export class StrategyService {
 
       guessCount++;
 
-      await this.dataSource.transaction(async (manager) => {
-        await manager.insert("Guess", {
-          puzzle: { id: puzzleId },
-          strategyRun: { id: run.id },
-          words,
-          result: evaluation.result,
-          sequenceNumber: guessCount,
-          source: GuessSource.STRATEGY,
-        });
-
-        if (evaluation.result === GuessResult.SUCCESS) {
-          // Remove solved words from the pool, reset combination to the start
-          run.availableWords = run.availableWords.filter(
-            (w) => !words.includes(w),
-          );
-          run.currentCombination = firstCombination(GROUP_SIZE);
-
-          if (run.availableWords.length === 0) {
-            run.status = StrategyRunStatus.COMPLETED;
-            run.finishedAt = new Date();
-          }
-        } else {
-          const next = nextCombination(
-            run.currentCombination,
-            run.availableWords.length,
-          );
-
-          if (next === null) {
-            // Exhausted every combination of the current pool without success.
-            // Shouldn't happen against valid puzzle data, but don't loop forever.
-            run.status = StrategyRunStatus.FAILED;
-            run.finishedAt = new Date();
-          } else {
-            run.currentCombination = next;
-          }
-        }
-
-        await manager.save(StrategyRun, run);
+      // Stage the guess in memory
+      pendingGuesses.push({
+        puzzle: { id: puzzleId } as Puzzle,
+        strategyRun: { id: run.id } as StrategyRun,
+        words,
+        result: evaluation.result,
+        sequenceNumber: guessCount,
+        source: GuessSource.STRATEGY,
       });
 
-      if (run.status !== StrategyRunStatus.RUNNING) {
+      // Update in-memory state
+      if (evaluation.result === GuessResult.SUCCESS) {
+        run.availableWords = run.availableWords.filter(
+          (w) => !words.includes(w),
+        );
+        run.currentCombination = firstCombination(GROUP_SIZE);
+
+        if (run.availableWords.length === 0) {
+          run.status = StrategyRunStatus.COMPLETED;
+          run.finishedAt = new Date();
+        }
+      } else {
+        const next = nextCombination(
+          run.currentCombination,
+          run.availableWords.length,
+        );
+
+        if (next === null) {
+          run.status = StrategyRunStatus.FAILED;
+          run.finishedAt = new Date();
+        } else {
+          run.currentCombination = next;
+        }
+      }
+
+      const isFinished = run.status !== StrategyRunStatus.RUNNING;
+      const reachedBatchLimit = pendingGuesses.length >= BATCH_SIZE;
+
+      // Flush to DB if batch size reached or run completed/failed
+      if (reachedBatchLimit || isFinished) {
+        await this.flushBatch(run, pendingGuesses);
+      }
+
+      if (isFinished) {
         break;
       }
     }
 
     return { status: run.status, guessCount };
+  }
+
+  private async flushBatch(
+    run: StrategyRun,
+    pendingGuesses: Partial<Guess>[],
+  ): Promise<void> {
+    if (pendingGuesses.length === 0) return;
+
+    // Create a shallow copy to insert and clear the original buffer
+    const guessesToInsert = [...pendingGuesses];
+    pendingGuesses.length = 0;
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.insert("Guess", guessesToInsert);
+      await manager.save(StrategyRun, run);
+    });
+  }
+
+  async getUnfinishedPuzzles(
+    startDateStr: string,
+    endDateStr: string,
+    strategyName: string,
+  ): Promise<{ id: number; date: string }[]> {
+    const rawPuzzles = await this.puzzleRepo
+      .createQueryBuilder("puzzle")
+      .leftJoin(
+        "StrategyRun",
+        "run",
+        "run.puzzleId = puzzle.id AND run.strategyName = :strategyName",
+        { strategyName },
+      )
+      .where("puzzle.date BETWEEN :startDateStr AND :endDateStr", {
+        startDateStr,
+        endDateStr,
+      })
+      .andWhere("(run.id IS NULL OR run.status != :completedStatus)", {
+        completedStatus: StrategyRunStatus.COMPLETED,
+      })
+      .select(["puzzle.id AS id", "puzzle.date AS date"])
+      .getRawMany<{ id: number; date: Date | string }>();
+
+    return rawPuzzles.map((row) => ({
+      id: Number(row.id),
+      date:
+        row.date instanceof Date
+          ? row.date.toISOString().split("T")[0]
+          : String(row.date).split("T")[0],
+    }));
   }
 
   private async loadOrCreateRun(
@@ -180,7 +232,6 @@ export class StrategyService {
   }
 
   private async countGuesses(strategyRunId: number): Promise<number> {
-    // Cheap count for the return value's guessCount; not used for control flow.
     return this.guessRepo.count({
       where: { strategyRun: { id: strategyRunId } },
     });

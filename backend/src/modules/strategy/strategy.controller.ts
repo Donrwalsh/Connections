@@ -12,27 +12,25 @@ export class StrategyController {
 
   @Get("queue")
   async queue() {
-    const startDate = new Date("2023-06-12T00:00:00Z");
-    const today = new Date();
+    const startDateStr = "2023-06-12";
+    const todayStr = new Date().toISOString().split("T")[0];
+    const strategyName = "alphabetical";
 
-    today.setUTCHours(0, 0, 0, 0);
+    // 1. Fetch all matching puzzles in a SINGLE database query
+    const puzzlesToRun = await this.strategyService.getUnfinishedPuzzles(
+      startDateStr,
+      todayStr,
+      strategyName,
+    );
 
-    const queuedDates: string[] = [];
-    const currentDate = new Date(startDate);
+    // 2. Dispatch all jobs in parallel
+    await Promise.all(
+      puzzlesToRun.map((puzzle) =>
+        this.strategyService.triggerRun(puzzle.id, strategyName),
+      ),
+    );
 
-    while (currentDate <= today) {
-      const dateStr = currentDate.toISOString().split("T")[0];
-
-      try {
-        const puzzleId = await this.gameService.puzzleDateToId(dateStr);
-        await this.strategyService.triggerRun(puzzleId, "alphabetical");
-        queuedDates.push(dateStr);
-      } catch (error) {
-        console.warn(`Skipping date ${dateStr}: Puzzle not found.`);
-      }
-
-      currentDate.setUTCDate(currentDate.getUTCDate() + 1);
-    }
+    const queuedDates = puzzlesToRun.map((p) => p.date);
 
     return {
       message: `Jobs added to queue for ${queuedDates.length} puzzles`,

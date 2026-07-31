@@ -1,9 +1,10 @@
-import { HttpAdapterHost, NestFactory } from "@nestjs/core";
-import { AppModule } from "./app.module";
-import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { createBullBoard } from "@bull-board/api";
 import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
 import { ExpressAdapter } from "@bull-board/express";
+import { HttpAdapterHost, NestFactory } from "@nestjs/core";
+import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
+import { AppModule } from "./app.module";
+import { puzzleQueue } from "./modules/queue/puzzle.queue";
 import { strategyQueue } from "./modules/queue/strategy.queue";
 
 async function bootstrap() {
@@ -20,7 +21,7 @@ async function bootstrap() {
   serverAdapter.setBasePath("/admin/queues");
 
   createBullBoard({
-    queues: [new BullMQAdapter(strategyQueue)],
+    queues: [new BullMQAdapter(strategyQueue), new BullMQAdapter(puzzleQueue)],
     serverAdapter,
   });
 

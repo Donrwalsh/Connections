@@ -1,6 +1,8 @@
 CREATE TABLE "Puzzle" (
     "id" INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    "date" DATE NOT NULL
+    "date" DATE NOT NULL,
+
+    CONSTRAINT "UQ_Puzzle_date" UNIQUE ("date")
 );
 
 CREATE TABLE "AnswerGroup" (
