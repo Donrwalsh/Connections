@@ -1,4 +1,5 @@
-import { Controller, Inject, Get } from "@nestjs/common";
+import { Controller, Inject, Get, Param } from "@nestjs/common";
+import { ApiParam } from "@nestjs/swagger";
 import { StrategyService } from "./strategy.service";
 import { GameService } from "../game/game.service";
 
@@ -14,7 +15,6 @@ export class StrategyController {
     const startDate = new Date("2023-06-12T00:00:00Z");
     const today = new Date();
 
-    // Normalize today to start-of-day UTC for clean comparison
     today.setUTCHours(0, 0, 0, 0);
 
     const queuedDates: string[] = [];
@@ -28,11 +28,9 @@ export class StrategyController {
         await this.strategyService.triggerRun(puzzleId, "alphabetical");
         queuedDates.push(dateStr);
       } catch (error) {
-        // Handles missing puzzles for specific dates gracefully
         console.warn(`Skipping date ${dateStr}: Puzzle not found.`);
       }
 
-      // Increment date by 1 day
       currentDate.setUTCDate(currentDate.getUTCDate() + 1);
     }
 
@@ -40,5 +38,25 @@ export class StrategyController {
       message: `Jobs added to queue for ${queuedDates.length} puzzles`,
       queuedDates,
     };
+  }
+
+  @Get(":strategyName/puzzle/:date")
+  @ApiParam({
+    name: "strategyName",
+    type: String,
+    description: "Strategy identifier, e.g. 'alphabetical'",
+    example: "alphabetical",
+  })
+  @ApiParam({
+    name: "date",
+    type: String,
+    description: "Puzzle date in YYYY-MM-DD format",
+    example: "2023-08-01",
+  })
+  async getRunForPuzzle(
+    @Param("strategyName") strategyName: string,
+    @Param("date") date: string,
+  ) {
+    return this.strategyService.getRunDetail(date, strategyName);
   }
 }

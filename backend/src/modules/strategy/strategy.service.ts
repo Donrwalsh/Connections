@@ -1,4 +1,4 @@
-import { Inject, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Inject, NotFoundException } from "@nestjs/common";
 import { Queue } from "bullmq";
 import { STRATEGY_QUEUE } from "../queue/queue.module";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
@@ -12,6 +12,7 @@ import {
 } from "./combinatorics";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { GameService } from "../game/game.service";
+import { StrategyRunDetailDto } from "./dto/strategy.dto";
 
 const GROUP_SIZE = 4;
 
@@ -28,6 +29,48 @@ export class StrategyService {
 
   async triggerRun(puzzleId: number, strategyName: string) {
     await this.queue.add("run-strategy", { puzzleId, strategyName });
+  }
+
+  async getRunDetail(
+    date: string,
+    strategyName: string,
+  ): Promise<StrategyRunDetailDto> {
+    if (!this.gameService.isValidYYYYMMDD(date)) {
+      throw new BadRequestException(
+        `Invalid date format: '${date}'. Expected YYYY-MM-DD.`,
+      );
+    }
+
+    // Throws NotFoundException with a clear message if no puzzle exists for this date.
+    const puzzleId = await this.gameService.puzzleDateToId(date);
+
+    const run = await this.strategyRunRepo.findOne({
+      where: { puzzleId, strategyName },
+    });
+
+    if (!run) {
+      throw new NotFoundException(
+        `Strategy '${strategyName}' has not been run for the puzzle on ${date}.`,
+      );
+    }
+
+    const guesses = await this.guessRepo.find({
+      where: { strategyRunId: run.id },
+      order: { sequenceNumber: "ASC" },
+    });
+
+    return {
+      strategyName: run.strategyName,
+      status: run.status,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+      guesses: guesses.map((g) => ({
+        sequenceNumber: g.sequenceNumber,
+        words: g.words,
+        result: g.result,
+        guessedAt: g.guessedAt,
+      })),
+    };
   }
 
   async runDeterministicStrategy(
