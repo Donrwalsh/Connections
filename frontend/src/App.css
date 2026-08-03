@@ -253,21 +253,42 @@
   padding: 0.75rem;
 }
 
+.guess-sequence__header-actions {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr); /* 2x2 grid for 4 strategies */
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
 .guess-sequence__toggle {
-  display: inline-block;
-  font-weight: 700;
-  font-size: 0.95rem;
-  letter-spacing: 0.03em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.7rem;
+  letter-spacing: 0.01em;
   text-transform: uppercase;
   cursor: pointer;
-  background-color: #2d2d24;
-  color: #fff;
-  border: none;
+  background-color: #efefe6;
+  color: #2d2d24;
+  border: 1px solid #ccc;
   border-radius: 6px;
-  padding: 0.6rem 1rem;
+  padding: 0.4rem 0.25rem;
+  white-space: nowrap;
+  transition: all 0.15s ease;
 }
 
 .guess-sequence__toggle:hover {
+  background-color: #d8d8ce;
+}
+
+.guess-sequence__toggle--active {
+  background-color: #2d2d24;
+  color: #ffffff;
+  border-color: #2d2d24;
+}
+
+.guess-sequence__toggle--active:hover {
   background-color: #46463a;
 }
 
@@ -318,5 +339,5 @@
 }
 
 .puzzle-page--panel-open .tile {
-  font-size: 0.7rem; /* Reduced from 0.95rem */
+  font-size: 0.7rem;
 }

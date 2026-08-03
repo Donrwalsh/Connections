@@ -6,6 +6,18 @@ import { StrategyService } from "./modules/strategy/strategy.service";
 import { redisConnection } from "./modules/queue/redis.config";
 import { PuzzleIngestionService } from "./modules/game/puzzle-ingestion.service";
 
+// Single source of truth for strategies
+export const SUPPORTED_STRATEGIES = [
+  "alphabetical",
+  "reverse-alphabetical",
+  "order",
+  "reverse-order",
+] as const;
+
+export type SupportedStrategy = (typeof SUPPORTED_STRATEGIES)[number];
+
+const STRATEGY_SET = new Set<string>(SUPPORTED_STRATEGIES);
+
 interface RunDeterministicStrategyJobData {
   puzzleId: number;
   strategyName: string;
@@ -23,13 +35,19 @@ async function bootstrap() {
     async (job: Job<RunDeterministicStrategyJobData>) => {
       const { puzzleId, strategyName, date } = job.data;
 
+      if (!STRATEGY_SET.has(strategyName)) {
+        throw new Error(
+          `Unsupported strategy '${strategyName}' passed to strategy-runs queue for puzzle ${puzzleId}`,
+        );
+      }
+
       logger.log(
         `starting job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName}`,
       );
 
       const result = await strategyService.runDeterministicStrategy(
         puzzleId,
-        strategyName,
+        strategyName as SupportedStrategy,
       );
 
       logger.log(

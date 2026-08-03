@@ -101,6 +101,7 @@ services:
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       PUZZLE_POPULATION_CRON: ${PUZZLE_POPULATION_CRON:-0 6 * * *}
       PUZZLE_POPULATION_TZ: ${PUZZLE_POPULATION_TZ:-UTC}
+      CHOKIDAR_USEPOLLING: "true"
     depends_on:
       - db
       - redis
@@ -109,7 +110,7 @@ services:
       - ./backend/src:/app/src
       - ./backend/package.json:/app/package.json
       - ./backend/tsconfig.json:/app/tsconfig.json
-    command: npx tsx src/worker.ts
+    command: npx tsx --watch src/worker.ts
 
 volumes:
   postgres_data:

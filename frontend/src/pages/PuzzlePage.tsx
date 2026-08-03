@@ -4,10 +4,6 @@ import { Game } from "../Game";
 import { GuessSequencePanel } from "../components/GuessSequencePanel";
 import { type Puzzle } from "../data/samplePuzzle";
 
-// Hardcoded until the "browse strategies" work lands — at that point this
-// panel likely becomes strategy-selectable rather than fixed.
-const STRATEGY_NAME = "alphabetical";
-
 export function PuzzlePage() {
   const { date } = useParams();
 
@@ -58,7 +54,9 @@ export function PuzzlePage() {
 
   return (
     <div
-      className={`puzzle-page ${isGuessPanelOpen ? "puzzle-page--panel-open" : ""}`}
+      className={`puzzle-page ${
+        isGuessPanelOpen ? "puzzle-page--panel-open" : ""
+      }`}
     >
       <div className="puzzle-page__board">
         <Game puzzle={puzzleData} />
@@ -66,7 +64,6 @@ export function PuzzlePage() {
       <div className="puzzle-page__panel">
         <GuessSequencePanel
           date={puzzleData.date}
-          strategyName={STRATEGY_NAME}
           isOpen={isGuessPanelOpen}
           onToggle={() => setIsGuessPanelOpen((open) => !open)}
         />

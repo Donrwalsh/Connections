@@ -123,6 +123,10 @@ export class GameService {
         difficulty: this.levelToColor(group.level),
         words: group.members.map((member) => member.word),
       })),
+      wordOrder: puzzle.answerGroups
+        .flatMap((group) => group.members)
+        .sort((a, b) => a.position - b.position)
+        .map((m) => m.word),
     };
   }
 

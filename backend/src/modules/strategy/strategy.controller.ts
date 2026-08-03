@@ -1,7 +1,21 @@
-import { Controller, Inject, Get, Param } from "@nestjs/common";
+import {
+  Controller,
+  Inject,
+  Get,
+  Param,
+  Post,
+  BadRequestException,
+} from "@nestjs/common";
 import { ApiParam } from "@nestjs/swagger";
 import { StrategyService } from "./strategy.service";
 import { GameService } from "../game/game.service";
+
+const VALID_STRATEGIES = [
+  "alphabetical",
+  "reverse-alphabetical",
+  "order",
+  "reverse-order",
+] as const;
 
 @Controller("strategy")
 export class StrategyController {
@@ -10,31 +24,62 @@ export class StrategyController {
     @Inject(GameService) private readonly gameService: GameService,
   ) {}
 
-  @Get("queue")
-  async queue() {
-    const startDateStr = "2023-06-12";
-    const todayStr = new Date().toISOString().split("T")[0];
-    const strategyName = "alphabetical";
+  @Post("queue/:strategyName/:date")
+  @ApiParam({
+    name: "strategyName",
+    type: String,
+    description:
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', or 'all'",
+    example: "all",
+  })
+  @ApiParam({
+    name: "date",
+    type: String,
+    description: "Puzzle date in YYYY-MM-DD format",
+    example: "2023-08-01",
+  })
+  async queueSingleStrategy(
+    @Param("strategyName") strategyName: string,
+    @Param("date") date: string,
+  ) {
+    const isAll = strategyName.toLowerCase() === "all";
 
-    // 1. Fetch all matching puzzles in a SINGLE database query
-    const puzzlesToRun = await this.strategyService.getUnfinishedPuzzles(
-      startDateStr,
-      todayStr,
-      strategyName,
-    );
+    if (!isAll && !VALID_STRATEGIES.includes(strategyName as any)) {
+      throw new BadRequestException(
+        `Invalid strategy: '${strategyName}'. Expected 'all' or one of: ${VALID_STRATEGIES.join(", ")}.`,
+      );
+    }
 
-    // 2. Dispatch all jobs in parallel
-    await Promise.all(
-      puzzlesToRun.map((puzzle) =>
-        this.strategyService.triggerRun(puzzle.id, strategyName),
-      ),
-    );
+    if (!this.gameService.isValidYYYYMMDD(date)) {
+      throw new BadRequestException(
+        `Invalid date format: '${date}'. Expected YYYY-MM-DD.`,
+      );
+    }
 
-    const queuedDates = puzzlesToRun.map((p) => p.date);
+    const puzzleId = await this.gameService.puzzleDateToId(date);
+
+    if (isAll) {
+      await Promise.all(
+        VALID_STRATEGIES.map((strat) =>
+          this.strategyService.triggerRun(puzzleId, strat, date),
+        ),
+      );
+
+      return {
+        message: `Jobs queued for all strategies on puzzle date ${date}`,
+        puzzleId,
+        date,
+        strategiesQueued: VALID_STRATEGIES,
+      };
+    }
+
+    await this.strategyService.triggerRun(puzzleId, strategyName, date);
 
     return {
-      message: `Jobs added to queue for ${queuedDates.length} puzzles`,
-      queuedDates,
+      message: `Job queued for strategy '${strategyName}' on puzzle date ${date}`,
+      puzzleId,
+      date,
+      strategyName,
     };
   }
 
@@ -42,7 +87,8 @@ export class StrategyController {
   @ApiParam({
     name: "strategyName",
     type: String,
-    description: "Strategy identifier, e.g. 'alphabetical'",
+    description:
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', or 'reverse-order'",
     example: "alphabetical",
   })
   @ApiParam({
@@ -55,6 +101,12 @@ export class StrategyController {
     @Param("strategyName") strategyName: string,
     @Param("date") date: string,
   ) {
+    if (!VALID_STRATEGIES.includes(strategyName as any)) {
+      throw new BadRequestException(
+        `Invalid strategy: '${strategyName}'. Expected one of: ${VALID_STRATEGIES.join(", ")}.`,
+      );
+    }
+
     return this.strategyService.getRunDetail(date, strategyName);
   }
 }

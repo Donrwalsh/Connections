@@ -13,7 +13,9 @@ interface GameProps {
 }
 
 export function Game({ puzzle }: GameProps) {
-  const [initialWords] = useState(() => shuffleWords(puzzle.categories));
+  const [initialWords] = useState(
+    () => puzzle.wordOrder || shuffleWords(puzzle.categories),
+  );
 
   const {
     state,

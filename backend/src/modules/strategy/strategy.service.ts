@@ -50,7 +50,7 @@ export class StrategyService {
 
     if (!run) {
       throw new NotFoundException(
-        `Strategy '${strategyName}' has not been run for the puzzle on ${date}.`,
+        `Strategy '${strategyName}' has not been run for the puzzle on${date}.`,
       );
     }
 
@@ -73,10 +73,7 @@ export class StrategyService {
     };
   }
 
-  async runDeterministicStrategy(
-    puzzleId: number,
-    strategyName = "alphabetical",
-  ) {
+  async runDeterministicStrategy(puzzleId: number, strategyName: string) {
     const run = await this.loadOrCreateRun(puzzleId, strategyName);
 
     if (run.status === StrategyRunStatus.COMPLETED) {
@@ -90,10 +87,24 @@ export class StrategyService {
     const pendingGuesses: Partial<Guess>[] = [];
 
     while (true) {
-      const words = combinationToWords(
-        run.currentCombination,
-        run.availableWords,
-      );
+      var words: string[] = [];
+
+      switch (strategyName) {
+        case "alphabetical":
+        case "reverse-alphabetical":
+        case "order":
+        case "reverse-order":
+          words = combinationToWords(
+            run.currentCombination,
+            run.availableWords,
+          );
+          break;
+        default:
+          throw new BadRequestException(
+            `Unsupported strategy name: '${strategyName}'`,
+          );
+      }
+
       const evaluation = await this.gameService.evaluateGuess(puzzleId, words);
 
       guessCount++;
@@ -216,9 +227,36 @@ export class StrategyService {
 
     if (!puzzle) throw new NotFoundException(`No puzzle with id: ${puzzleId}`);
 
-    const allWords = puzzle.answerGroups
-      .flatMap((group) => group.members.map((m) => m.word))
-      .sort((a, b) => a.localeCompare(b));
+    let allWords: string[];
+
+    switch (strategyName) {
+      case "order":
+        allWords = puzzle.answerGroups
+          .flatMap((group) => group.members)
+          .sort((a, b) => a.position - b.position)
+          .map((m) => m.word);
+        break;
+
+      case "reverse-order":
+        allWords = puzzle.answerGroups
+          .flatMap((group) => group.members)
+          .sort((a, b) => b.position - a.position)
+          .map((m) => m.word);
+        break;
+
+      case "reverse-alphabetical":
+        allWords = puzzle.answerGroups
+          .flatMap((group) => group.members.map((m) => m.word))
+          .sort((a, b) => b.localeCompare(a));
+        break;
+
+      case "alphabetical":
+      default:
+        allWords = puzzle.answerGroups
+          .flatMap((group) => group.members.map((m) => m.word))
+          .sort((a, b) => a.localeCompare(b));
+        break;
+    }
 
     const run = this.strategyRunRepo.create({
       puzzle,

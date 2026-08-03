@@ -10,38 +10,8 @@ export interface Category {
 export interface Puzzle {
   date: string;
   categories: Category[];
+  wordOrder: string[];
 }
-
-// Hardcoded for now — this shape mirrors what the NestJS API will return later
-export const samplePuzzle: Puzzle = {
-  date: "2026-07-28",
-  categories: [
-    {
-      id: "cat-1",
-      name: "Types of pasta",
-      difficulty: "yellow",
-      words: ["PENNE", "FUSILLI", "ROTINI", "FARFALLE"],
-    },
-    {
-      id: "cat-2",
-      name: "Baseball positions",
-      difficulty: "green",
-      words: ["CATCHER", "PITCHER", "SHORTSTOP", "OUTFIELD"],
-    },
-    {
-      id: "cat-3",
-      name: "___ code",
-      difficulty: "blue",
-      words: ["ZIP", "MORSE", "DRESS", "BAR"],
-    },
-    {
-      id: "cat-4",
-      name: "Homophones of numbers",
-      difficulty: "purple",
-      words: ["WON", "TOO", "FORE", "ATE"],
-    },
-  ],
-};
 
 // Flattens + shuffles the 16 words for initial board display.
 // Simple Fisher-Yates — swap for a seeded shuffle later if you want

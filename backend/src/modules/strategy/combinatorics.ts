@@ -1,5 +1,3 @@
-// strategies/combinatorics.ts
-
 /**
  * Given a k-combination expressed as sorted indices into a pool of size n,
  * returns the next combination in lexicographic order, or null if this

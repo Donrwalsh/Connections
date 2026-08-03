@@ -88,6 +88,7 @@ describe("GameService", () => {
             words: ["APPLE"],
           },
         ],
+        wordOrder: ["APPLE"],
       });
       expect(mockPuzzleRepo.findOne).toHaveBeenCalledTimes(1);
     });
@@ -112,31 +113,34 @@ describe("GameService", () => {
             id: 1,
             group_name: "Yellow Cat",
             level: 0,
-            members: [{ word: "Word 1" }, { word: "Word 2" }],
+            members: [
+              { word: "Word 1", position: 5 },
+              { word: "Word 2", position: 2 },
+            ],
           },
           {
             id: 2,
             group_name: "Green Cat",
             level: 1,
-            members: [{ word: "Word 3" }],
+            members: [{ word: "Word 3", position: 0 }],
           },
           {
             id: 3,
             group_name: "Blue Cat",
             level: 2,
-            members: [{ word: "Word 4" }],
+            members: [{ word: "Word 4", position: 4 }],
           },
           {
             id: 4,
             group_name: "Purple Cat",
             level: 3,
-            members: [{ word: "Word 5" }],
+            members: [{ word: "Word 5", position: 1 }],
           },
           {
             id: 5,
             group_name: "Fallback Cat",
             level: 99,
-            members: [{ word: "Word 6" }],
+            members: [{ word: "Word 6", position: 3 }],
           },
         ],
       };
@@ -179,6 +183,9 @@ describe("GameService", () => {
             words: ["Word 6"],
           },
         ],
+        // Sorted by each member's global board position (0-5), not by
+        // category/level order — this is what actually exercises the sort.
+        wordOrder: ["Word 3", "Word 5", "Word 2", "Word 6", "Word 4", "Word 1"],
       });
     });
   });
@@ -190,6 +197,7 @@ describe("GameService", () => {
       const spy = jest.spyOn(service, "getPuzzleByDate").mockResolvedValue({
         date: expectedToday,
         categories: [],
+        wordOrder: [],
       });
 
       await service.getTodaysPuzzle();

@@ -1,10 +1,9 @@
-import { Injectable, Logger, Inject, forwardRef } from "@nestjs/common";
+import { Injectable, Logger, Inject } from "@nestjs/common";
 import { DataSource } from "typeorm";
 import { Puzzle } from "./entities/puzzle.entity";
 import { AnswerGroup } from "./entities/answer-group.entity";
 import { GroupMember } from "./entities/group-member.entity";
 import { InjectDataSource } from "@nestjs/typeorm";
-import { StrategyService } from "../strategy/strategy.service";
 import { STRATEGY_QUEUE } from "../queue/queue.module";
 import { Queue } from "bullmq";
 
@@ -29,6 +28,13 @@ const AWKWARD_DATES = new Set([
   "2026-04-01",
   "2026-05-06",
 ]);
+
+const ALL_STRATEGIES = [
+  "alphabetical",
+  "reverse-alphabetical",
+  "order",
+  "reverse-order",
+];
 
 @Injectable()
 export class PuzzleIngestionService {
@@ -71,15 +77,19 @@ export class PuzzleIngestionService {
       const puzzleId = await this.insertPuzzle(formatted, puzzleData);
 
       if (puzzleId !== null) {
-        // Dispatch deterministic alphabetical run right after inserting
-        await this.strategyQueue.add("run-strategy", {
-          puzzleId,
-          strategyName: "alphabetical",
-          date: formatted,
-        });
+        // Dispatch all deterministic strategy runs right after inserting
+        for (const strategyName of ALL_STRATEGIES) {
+          await this.strategyQueue.add("run-strategy", {
+            puzzleId,
+            strategyName,
+            date: formatted,
+          });
+        }
 
         this.logger.log(
-          `Queued 'alphabetical' strategy for puzzle ${puzzleId} (${formatted})`,
+          `Queued all deterministic strategies (${ALL_STRATEGIES.join(
+            ", ",
+          )}) for puzzle ${puzzleId} (${formatted})`,
         );
         inserted++;
       }
@@ -88,7 +98,9 @@ export class PuzzleIngestionService {
     }
 
     this.logger.log(
-      `Ingestion complete: inserted ${inserted} puzzle(s), latest date ${this.formatDate(latestDate)}`,
+      `Ingestion complete: inserted ${inserted} puzzle(s), latest date ${this.formatDate(
+        latestDate,
+      )}`,
     );
     return { inserted, upToDate: this.formatDate(latestDate) };
   }
