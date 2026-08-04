@@ -4,6 +4,7 @@ import { getRepositoryToken } from "@nestjs/typeorm";
 import { GameService } from "./game.service";
 import { Puzzle } from "./entities/puzzle.entity";
 import { STRATEGY_QUEUE } from "../queue/queue.module";
+import { GuessResult } from "../strategy/entities/guess.entity";
 
 describe("GameService", () => {
   let service: GameService;
@@ -203,6 +204,138 @@ describe("GameService", () => {
       await service.getTodaysPuzzle();
 
       expect(spy).toHaveBeenCalledWith(expectedToday);
+    });
+  });
+
+  describe("triggerRun", () => {
+    it("should enqueue a run-strategy job with the puzzle id and strategy", async () => {
+      await service.triggerRun("42", "alphabetical");
+
+      expect(mockQueue.add).toHaveBeenCalledWith("run-strategy", {
+        puzzleId: "42",
+        strategyName: "alphabetical",
+      });
+    });
+  });
+
+  describe("puzzleDateToId", () => {
+    it("should return the puzzle id for an existing date", async () => {
+      mockPuzzleRepo.findOne.mockResolvedValueOnce({ id: 42 });
+
+      await expect(service.puzzleDateToId("2024-01-02")).resolves.toBe(42);
+      expect(mockPuzzleRepo.findOne).toHaveBeenCalledWith({
+        where: { date: "2024-01-02" },
+      });
+    });
+
+    it("should throw NotFoundException when no puzzle exists for the date", async () => {
+      mockPuzzleRepo.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.puzzleDateToId("2024-01-02")).rejects.toThrow(
+        new NotFoundException("No puzzle for date: 2024-01-02"),
+      );
+    });
+  });
+
+  describe("evaluateGuess", () => {
+    const puzzleWithGroups = (answerGroups: unknown[]) => ({
+      id: 1,
+      answerGroups,
+    });
+
+    it("should return SUCCESS when the guess exactly matches a group", async () => {
+      mockPuzzleRepo.findOne.mockResolvedValueOnce(
+        puzzleWithGroups([
+          {
+            members: [
+              { word: "APPLE" },
+              { word: "BANANA" },
+              { word: "CHERRY" },
+              { word: "DATE" },
+            ],
+          },
+        ]),
+      );
+
+      await expect(
+        service.evaluateGuess(1, [" apple ", "BANANA", "cherry", "date"]),
+      ).resolves.toEqual({ result: GuessResult.SUCCESS });
+    });
+
+    it("should return OFF_BY_ONE when exactly 3 words match a group", async () => {
+      mockPuzzleRepo.findOne.mockResolvedValueOnce(
+        puzzleWithGroups([
+          {
+            members: [
+              { word: "APPLE" },
+              { word: "BANANA" },
+              { word: "CHERRY" },
+              { word: "DATE" },
+            ],
+          },
+        ]),
+      );
+
+      await expect(
+        service.evaluateGuess(1, ["apple", "banana", "cherry", "fig"]),
+      ).resolves.toEqual({ result: GuessResult.OFF_BY_ONE });
+    });
+
+    it("should return FAILURE when no group is matched or nearly matched", async () => {
+      mockPuzzleRepo.findOne.mockResolvedValueOnce(
+        puzzleWithGroups([
+          {
+            members: [
+              { word: "APPLE" },
+              { word: "BANANA" },
+              { word: "CHERRY" },
+              { word: "DATE" },
+            ],
+          },
+        ]),
+      );
+
+      await expect(
+        service.evaluateGuess(1, ["fig", "grape", "honey", "kiwi"]),
+      ).resolves.toEqual({ result: GuessResult.FAILURE });
+    });
+
+    it("should throw NotFoundException when the puzzle does not exist", async () => {
+      mockPuzzleRepo.findOne.mockResolvedValueOnce(null);
+
+      await expect(
+        service.evaluateGuess(999, ["apple", "banana", "cherry", "date"]),
+      ).rejects.toThrow(new NotFoundException("Puzzle with ID 999 not found"));
+    });
+  });
+
+  describe("getLatestDate", () => {
+    it("should return the latest puzzle date from the raw query result", async () => {
+      mockPuzzleRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValueOnce({
+          latest_date: "2024-01-02",
+        }),
+      });
+
+      await expect(service.getLatestDate()).resolves.toBe("2024-01-02");
+      expect(mockPuzzleRepo.createQueryBuilder).toHaveBeenCalledWith("puzzle");
+    });
+  });
+
+  describe("isValidYYYYMMDD", () => {
+    it("should accept valid calendar dates", () => {
+      expect(service.isValidYYYYMMDD("2024-02-29")).toBe(true); // leap year
+      expect(service.isValidYYYYMMDD("2026-07-30")).toBe(true);
+    });
+
+    it("should reject structurally or calendar-invalid dates", () => {
+      expect(service.isValidYYYYMMDD("2023-02-29")).toBe(false); // not a leap year
+      expect(service.isValidYYYYMMDD("2024-04-31")).toBe(false); // April has 30 days
+      expect(service.isValidYYYYMMDD("2024-13-01")).toBe(false); // bad month
+      expect(service.isValidYYYYMMDD("2024-00-10")).toBe(false); // zero month
+      expect(service.isValidYYYYMMDD("not-a-date")).toBe(false);
+      expect(service.isValidYYYYMMDD("2024/01/01")).toBe(false);
     });
   });
 });
