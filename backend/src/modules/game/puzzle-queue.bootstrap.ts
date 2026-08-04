@@ -24,10 +24,10 @@ export class PuzzleQueueBootstrap implements OnApplicationBootstrap {
         jobId: `startup-catch-up-${new Date().toISOString().slice(0, 10)}`,
         removeOnComplete: true,
         removeOnFail: 50,
-        attempts: 3,
+        attempts: 5,
         backoff: {
           type: "exponential",
-          delay: 5000, // 5s, then 10s, then 20s between attempts
+          delay: 30000, // 30s, then 1m, 2m, 4m, 8m
         },
       },
     );
@@ -44,8 +44,8 @@ export class PuzzleQueueBootstrap implements OnApplicationBootstrap {
         opts: {
           removeOnComplete: true,
           removeOnFail: 50,
-          attempts: 3,
-          backoff: { type: "exponential", delay: 5000 },
+          attempts: 5,
+          backoff: { type: "exponential", delay: 30000 },
         },
       },
     );

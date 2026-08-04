@@ -176,13 +176,21 @@ describe("PuzzleIngestionService", () => {
       ).resolves.toEqual(PUZZLE_DATA);
     });
 
-    it("should throw when the NYT endpoint returns a server error", async () => {
+    it("should throw after exhausting retries when the NYT endpoint returns a server error", async () => {
       jest.spyOn(global, "fetch").mockResolvedValue(fetchResponse(500));
+      jest
+        .spyOn(
+          service as unknown as { delay(ms: number): Promise<void> },
+          "delay",
+        )
+        .mockResolvedValue(undefined);
 
       await expect(
         (service as unknown as { fetchNytPuzzle(d: string): Promise<unknown> })
           .fetchNytPuzzle("2024-01-02"),
-      ).rejects.toThrow("NYT fetch failed for 2024-01-02: 500");
+      ).rejects.toThrow(
+        "NYT fetch for 2024-01-02 failed after 6 attempts",
+      );
     });
   });
 

@@ -95,6 +95,9 @@ export class PuzzleIngestionService {
       }
 
       latestDate = nextDate;
+
+      // Small delay between dates to avoid triggering NYT rate limits
+      await this.delay(500);
     }
 
     this.logger.log(
@@ -117,23 +120,76 @@ export class PuzzleIngestionService {
       : this.addDays(new Date(), -1);
   }
 
+  private static readonly FETCH_MAX_RETRIES = 5;
+  private static readonly FETCH_RETRY_BASE_DELAY_MS = 1000;
+
   private async fetchNytPuzzle(
     formattedDate: string,
   ): Promise<ConnectionsPuzzle | null> {
     const url = `https://www.nytimes.com/svc/connections/v2/${formattedDate}.json`;
-    const response = await fetch(url, {
-      headers: { "User-Agent": "connections-app-ingestion/1.0" },
-    });
 
-    if (response.status === 404) return null;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const response = await fetch(url, {
+          headers: { "User-Agent": "connections-app-ingestion/1.0" },
+        });
 
-    if (!response.ok) {
-      throw new Error(
-        `NYT fetch failed for ${formattedDate}: ${response.status}`,
-      );
+        if (response.status === 404) return null;
+
+        if (response.ok) return response.json();
+
+        // Retryable status (429 rate limit, 5xx server errors) — wait and
+        // retry. Anything else (4xx) is a hard failure.
+        if (this.isRetryableStatus(response.status)) {
+          if (attempt >= PuzzleIngestionService.FETCH_MAX_RETRIES) {
+            throw new Error(
+              `NYT fetch for ${formattedDate} failed after ${
+                PuzzleIngestionService.FETCH_MAX_RETRIES + 1
+              } attempts: status ${response.status}`,
+            );
+          }
+          this.logger.warn(
+            `NYT fetch for ${formattedDate} returned ${response.status} (attempt ${attempt + 1})`,
+          );
+          await this.delay(this.computeBackoff(attempt));
+          continue;
+        }
+
+        throw new Error(
+          `NYT fetch failed for ${formattedDate}: ${response.status}`,
+        );
+      } catch (error) {
+        // TypeError from fetch() indicates a network error — retryable
+        if (!(error instanceof TypeError)) throw error;
+
+        if (attempt >= PuzzleIngestionService.FETCH_MAX_RETRIES) {
+          throw new Error(
+            `NYT fetch for ${formattedDate} failed after ${
+              PuzzleIngestionService.FETCH_MAX_RETRIES + 1
+            } attempts: ${error.message}`,
+          );
+        }
+
+        this.logger.warn(
+          `Retrying NYT fetch for ${formattedDate} (attempt ${attempt + 1}): ${error.message}`,
+        );
+      }
+
+      await this.delay(this.computeBackoff(attempt));
     }
+  }
 
-    return response.json();
+  private isRetryableStatus(status: number | undefined): boolean {
+    return status === 429 || (status !== undefined && status >= 500);
+  }
+
+  private computeBackoff(attempt: number): number {
+    const base = PuzzleIngestionService.FETCH_RETRY_BASE_DELAY_MS * 2 ** attempt;
+    return base + Math.floor(Math.random() * base * 0.2); // +0-20% jitter
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private async insertPuzzle(
