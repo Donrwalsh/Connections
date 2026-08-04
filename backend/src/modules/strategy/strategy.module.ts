@@ -1,6 +1,5 @@
 import { Module } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
-import { Pool } from "pg";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { QueueModule } from "../queue/queue.module";
 import { Guess } from "./entities/guess.entity";
@@ -16,23 +15,7 @@ import { GameModule } from "../game/game.module";
     GameModule,
   ],
   controllers: [StrategyController],
-  providers: [
-    {
-      provide: "PG",
-      useFactory: async () => {
-        const pool = new Pool({
-          host: process.env.DB_HOST,
-          port: Number(process.env.DB_PORT),
-          user: process.env.DB_USER,
-          password: process.env.DB_PASSWORD,
-          database: process.env.DB_NAME,
-        });
-
-        return pool;
-      },
-    },
-    StrategyService,
-  ],
+  providers: [StrategyService],
   exports: [StrategyService],
 })
 export class StrategyModule {}

@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
-import type { Category } from "../data/samplePuzzle";
+import type { Category } from "../data/types";
 
 const categories: Category[] = [
   {

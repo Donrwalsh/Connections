@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { Category } from "../../data/samplePuzzle";
+import type { Category } from "../../data/types";
 import { CategoryReveal } from "../CategoryReveal";
 
 const categories: Category[] = [

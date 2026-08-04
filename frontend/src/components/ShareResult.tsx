@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Difficulty } from "../data/samplePuzzle";
+import type { Difficulty } from "../data/types";
 import { buildShareText } from "../lib/shareResult";
 
 interface ShareResultProps {

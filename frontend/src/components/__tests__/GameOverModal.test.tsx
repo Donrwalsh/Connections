@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { Category } from "../../data/samplePuzzle";
+import type { Category } from "../../data/types";
 import { GameOverModal } from "../GameOverModal";
 
 const categories: Category[] = [

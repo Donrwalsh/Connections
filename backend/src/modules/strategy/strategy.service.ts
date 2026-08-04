@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { Queue } from "bullmq";
 import { STRATEGY_QUEUE } from "../queue/queue.module";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
@@ -17,6 +17,7 @@ import { StrategyRunDetailDto } from "./dto/strategy.dto";
 const GROUP_SIZE = 4;
 const BATCH_SIZE = 50;
 
+@Injectable()
 export class StrategyService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,

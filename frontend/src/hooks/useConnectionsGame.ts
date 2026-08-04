@@ -1,5 +1,5 @@
 import { useReducer } from "react";
-import type { Category } from "../data/samplePuzzle";
+import type { Category } from "../data/types";
 import {
   gameReducer,
   initGameState,

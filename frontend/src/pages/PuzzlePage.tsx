@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Game } from "../Game";
+import { Game } from "../components/Game";
 import { GuessSequencePanel } from "../components/GuessSequencePanel";
-import { type Puzzle } from "../data/samplePuzzle";
+import { type Puzzle } from "../data/types";
 
 export function PuzzlePage() {
   const { date } = useParams();

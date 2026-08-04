@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import type { Category } from "../data/samplePuzzle";
+import type { Category } from "../data/types";
 
 interface CategoryRevealProps {
   solved: Category[];

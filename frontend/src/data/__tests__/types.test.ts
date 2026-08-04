@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Category } from "../samplePuzzle";
-import { shuffleWords } from "../samplePuzzle";
+import type { Category } from "../types";
+import { shuffleWords } from "../types";
 
 const categories: Category[] = [
   {

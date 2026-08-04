@@ -1,5 +1,4 @@
 import { Module } from "@nestjs/common";
-import { Pool } from "pg";
 import { QueueModule } from "../queue/queue.module";
 import { GameController } from "./game.controller";
 import { GameService } from "./game.service";
@@ -16,25 +15,7 @@ import { PuzzleQueueBootstrap } from "./puzzle-queue.bootstrap";
     QueueModule,
   ],
   controllers: [GameController],
-  providers: [
-    {
-      provide: "PG",
-      useFactory: async () => {
-        const pool = new Pool({
-          host: process.env.DB_HOST,
-          port: Number(process.env.DB_PORT),
-          user: process.env.DB_USER,
-          password: process.env.DB_PASSWORD,
-          database: process.env.DB_NAME,
-        });
-
-        return pool;
-      },
-    },
-    GameService,
-    PuzzleIngestionService,
-    PuzzleQueueBootstrap,
-  ],
+  providers: [GameService, PuzzleIngestionService, PuzzleQueueBootstrap],
   exports: [GameService, PuzzleIngestionService],
 })
 export class GameModule {}

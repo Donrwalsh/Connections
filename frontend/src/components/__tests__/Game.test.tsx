@@ -5,8 +5,8 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Category, Puzzle } from "../../data/samplePuzzle";
-import { Game } from "../../Game";
+import type { Category, Puzzle } from "../../data/types";
+import { Game } from "../Game";
 
 const categories: Category[] = [
   {

@@ -1,4 +1,4 @@
-import type { Difficulty } from "../data/samplePuzzle";
+import type { Difficulty } from "../data/types";
 
 const EMOJI_BY_DIFFICULTY: Record<Difficulty, string> = {
   yellow: "🟨",

@@ -1,4 +1,4 @@
-import type { Category, Difficulty } from "../data/samplePuzzle";
+import type { Category, Difficulty } from "../data/types";
 
 export type Feedback = "one-away" | "incorrect" | null;
 

@@ -5,18 +5,7 @@ import { AppModule } from "./app.module";
 import { StrategyService } from "./modules/strategy/strategy.service";
 import { redisConnection } from "./modules/queue/redis.config";
 import { PuzzleIngestionService } from "./modules/game/puzzle-ingestion.service";
-
-// Single source of truth for strategies
-export const SUPPORTED_STRATEGIES = [
-  "alphabetical",
-  "reverse-alphabetical",
-  "order",
-  "reverse-order",
-] as const;
-
-export type SupportedStrategy = (typeof SUPPORTED_STRATEGIES)[number];
-
-const STRATEGY_SET = new Set<string>(SUPPORTED_STRATEGIES);
+import { SUPPORTED_STRATEGIES, STRATEGY_SET, SupportedStrategy } from "./strategies";
 
 interface RunDeterministicStrategyJobData {
   puzzleId: number;

@@ -6,6 +6,7 @@ import { GroupMember } from "./entities/group-member.entity";
 import { InjectDataSource } from "@nestjs/typeorm";
 import { STRATEGY_QUEUE } from "../queue/queue.module";
 import { Queue } from "bullmq";
+import { SUPPORTED_STRATEGIES } from "../../strategies";
 
 interface ConnectionsCard {
   content: string;
@@ -29,12 +30,7 @@ const AWKWARD_DATES = new Set([
   "2026-05-06",
 ]);
 
-const ALL_STRATEGIES = [
-  "alphabetical",
-  "reverse-alphabetical",
-  "order",
-  "reverse-order",
-];
+const ALL_STRATEGIES = SUPPORTED_STRATEGIES;
 
 @Injectable()
 export class PuzzleIngestionService {

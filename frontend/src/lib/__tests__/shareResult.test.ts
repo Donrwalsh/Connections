@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Difficulty } from "../../data/samplePuzzle";
+import type { Difficulty } from "../../data/types";
 import { buildShareText } from "../shareResult";
 
 describe("buildShareText", () => {

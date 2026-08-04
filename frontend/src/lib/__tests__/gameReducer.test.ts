@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { gameReducer, initGameState } from "../gameReducer";
-import type { Category } from "../../data/samplePuzzle";
+import type { Category } from "../../data/types";
 
 // Sample test puzzle categories matching your Category type
 const mockCategories: Category[] = [

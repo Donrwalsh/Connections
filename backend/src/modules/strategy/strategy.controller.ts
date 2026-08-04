@@ -9,13 +9,7 @@ import {
 import { ApiParam } from "@nestjs/swagger";
 import { StrategyService } from "./strategy.service";
 import { GameService } from "../game/game.service";
-
-const VALID_STRATEGIES = [
-  "alphabetical",
-  "reverse-alphabetical",
-  "order",
-  "reverse-order",
-] as const;
+import { SUPPORTED_STRATEGIES } from "../../strategies";
 
 @Controller("strategy")
 export class StrategyController {
@@ -44,9 +38,9 @@ export class StrategyController {
   ) {
     const isAll = strategyName.toLowerCase() === "all";
 
-    if (!isAll && !VALID_STRATEGIES.includes(strategyName as any)) {
+    if (!isAll && !SUPPORTED_STRATEGIES.includes(strategyName as any)) {
       throw new BadRequestException(
-        `Invalid strategy: '${strategyName}'. Expected 'all' or one of: ${VALID_STRATEGIES.join(", ")}.`,
+        `Invalid strategy: '${strategyName}'. Expected 'all' or one of: ${SUPPORTED_STRATEGIES.join(", ")}.`,
       );
     }
 
@@ -60,7 +54,7 @@ export class StrategyController {
 
     if (isAll) {
       await Promise.all(
-        VALID_STRATEGIES.map((strat) =>
+        SUPPORTED_STRATEGIES.map((strat) =>
           this.strategyService.triggerRun(puzzleId, strat, date),
         ),
       );
@@ -69,7 +63,7 @@ export class StrategyController {
         message: `Jobs queued for all strategies on puzzle date ${date}`,
         puzzleId,
         date,
-        strategiesQueued: VALID_STRATEGIES,
+        strategiesQueued: [...SUPPORTED_STRATEGIES],
       };
     }
 
@@ -101,9 +95,9 @@ export class StrategyController {
     @Param("strategyName") strategyName: string,
     @Param("date") date: string,
   ) {
-    if (!VALID_STRATEGIES.includes(strategyName as any)) {
+    if (!SUPPORTED_STRATEGIES.includes(strategyName as any)) {
       throw new BadRequestException(
-        `Invalid strategy: '${strategyName}'. Expected one of: ${VALID_STRATEGIES.join(", ")}.`,
+        `Invalid strategy: '${strategyName}'. Expected one of: ${SUPPORTED_STRATEGIES.join(", ")}.`,
       );
     }
 

@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import type { Category, Difficulty } from "../data/samplePuzzle";
+import type { Category, Difficulty } from "../data/types";
 import { ShareResult } from "./ShareResult";
 
 interface GameOverModalProps {

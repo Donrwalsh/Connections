@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
-import { Board } from "./components/Board";
-import { CategoryReveal } from "./components/CategoryReveal";
-import { GameOverModal } from "./components/GameOverModal";
-import { MistakeTracker } from "./components/MistakeTracker";
-import { shuffleWords, type Puzzle } from "./data/samplePuzzle";
-import { useConnectionsGame } from "./hooks/useConnectionsGame";
+import { Board } from "./Board";
+import { CategoryReveal } from "./CategoryReveal";
+import { GameOverModal } from "./GameOverModal";
+import { MistakeTracker } from "./MistakeTracker";
+import { shuffleWords, type Puzzle } from "../data/types";
+import { useConnectionsGame } from "../hooks/useConnectionsGame";
 
 const MAX_MISTAKES = 4;
 
