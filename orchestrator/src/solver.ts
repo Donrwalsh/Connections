@@ -1,13 +1,11 @@
 import { generateObject } from "ai";
-import { openai } from "@ai-sdk/openai";
 import {
   ProposedGroupSchema,
   type SolveRequest,
   type ProposedGroup,
 } from "./types.js";
-import { buildSolvePrompt } from "./prompt.js";
-
-const MODEL = "gpt-4o-2024-08-06";
+import { buildSolvePrompt, forbiddenIdSets } from "./prompt.js";
+import { getModel } from "./provider.js";
 
 export interface SolveResult {
   proposedGroup: ProposedGroup;
@@ -36,7 +34,7 @@ export async function proposeGroup(
   const prompt = buildSolvePrompt(request);
 
   const { object } = await generateObject({
-    model: openai(MODEL),
+    model: getModel(),
     schema: ProposedGroupSchema,
     prompt,
   });
@@ -48,31 +46,41 @@ export async function proposeGroup(
 
 /**
  * Defensive check beyond schema validation: confirms the model's proposed
- * words actually come from the puzzle's remaining word list. generateObject
- * guarantees shape (4 strings, confidence in range, etc) but not that the
- * words are real options — models occasionally hallucinate or slightly
- * misspell a word. Fail loudly here rather than silently passing bad data
- * up to the backend.
+ * IDs point at words in the puzzle's remaining word list, are unique, and
+ * don't repeat a previously-guessed group. generateObject guarantees shape
+ * (4 ints, confidence in range, etc) but not that the IDs are valid options
+ * — models occasionally hallucinate. Fail loudly here rather than silently
+ * passing bad data up to the backend.
  */
 function validateProposedGroup(
   group: ProposedGroup,
   request: SolveRequest,
 ): void {
-  const available = new Set(request.puzzleWords.map((w) => w.toLowerCase()));
-  const invalidWords = group.words.filter(
-    (w) => !available.has(w.toLowerCase()),
-  );
+  const wordCount = request.puzzleWords.length;
+  const available = new Set(Array.from({ length: wordCount }, (_, i) => i));
+  const invalidIds = group.word_ids.filter((id) => !available.has(id));
 
-  if (invalidWords.length > 0) {
+  if (invalidIds.length > 0) {
     throw new Error(
-      `Model proposed words not present in the puzzle's remaining word list: ${invalidWords.join(", ")}`,
+      `Model proposed word IDs not present in the puzzle's remaining word list: ${invalidIds.join(", ")}`,
     );
   }
 
-  const uniqueWords = new Set(group.words.map((w) => w.toLowerCase()));
-  if (uniqueWords.size !== 4) {
+  const uniqueIds = new Set(group.word_ids);
+  if (uniqueIds.size !== 4) {
     throw new Error(
-      `Model proposed a group with duplicate words: ${group.words.join(", ")}`,
+      `Model proposed a group with duplicate word IDs: ${group.word_ids.join(", ")}`,
+    );
+  }
+
+  const proposed = new Set(group.word_ids);
+  const repeated = forbiddenIdSets(request).some(
+    (ids) =>
+      ids.length === proposed.size && ids.every((id) => proposed.has(id)),
+  );
+  if (repeated) {
+    throw new Error(
+      `Model proposed a previously-guessed group: ${group.word_ids.join(", ")}`,
     );
   }
 }

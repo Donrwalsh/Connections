@@ -8,7 +8,7 @@ A multi-service application for playing and solving [NYT Connections](https://ww
 ## Features
 
 - **Playable puzzle board** — 16 words, select 4, submit; color-coded reveals (yellow/green/blue/purple), up to 4 mistakes
-- **AI Assist** — GPT-4o proposes one group of 4 words based on remaining words and prior guesses
+- **AI Assist** — GPT-4o proposes one group of 4 from the remaining words, answering by index and never repeating a previously-guessed wrong group
 - **Date navigation** — browse any puzzle from 2023-06-12 to today, plus a random picker
 - **Deterministic strategies** — four brute-force strategies (`alphabetical`, `reverse-alphabetical`, `order`, `reverse-order`) run automatically on every puzzle, with full guess-by-guess results viewable in a side panel
 - **Automatic puzzle ingestion** — a daily cron fetches new puzzles from NYT and queues all four strategies
@@ -20,12 +20,13 @@ A multi-service application for playing and solving [NYT Connections](https://ww
 |---------|-----------|-----------|------|------|
 | **Backend** | `backend/` | NestJS | 4000 | REST API, Swagger, Bull Board |
 | **Frontend** | `frontend/` | Vite + React 19 | 5173 | Single-page app |
-| **Orchestrator** | `orchestrator/` | Hono + AI SDK | 3001 | AI puzzle solving (GPT-4o) |
+| **Orchestrator** | `orchestrator/` | Hono + AI SDK | 3001 | AI puzzle solving (GPT-4o or Ollama) |
 | **Worker** | `backend/src/worker.ts` | BullMQ | — | Processes strategy + puzzle queues |
 | **Database** | `database/` | Postgres 15 | 5432 | Schema + seeds |
 | **Redis** | — | Redis 7 | 6379 | BullMQ message broker |
+| **Ollama** | — | — | 11434 | Local LLM provider — optional AI Assist backend (default: `llama3.2`) |
 
-The worker runs as a separate process from the NestJS server (started via `npx tsx --watch src/worker.ts`). It bootstraps its own NestJS app context to access services.
+The worker runs as a separate process from the NestJS server (started via `npx tsx --watch src/worker.ts`). It bootstraps its own NestJS app context to access services. The orchestrator uses GPT-4o by default; set `MODEL_PROVIDER=ollama` to run AI Assist against the bundled local Ollama service instead.
 
 ### Puzzle solving flow
 
@@ -36,7 +37,7 @@ Daily cron (06:00 UTC)
 
 Frontend "AI Assist" button
   └─ POST /api/solve ──► backend ──► POST /solve ──► orchestrator ──► GPT-4o
-       └─ validated group returned to UI
+       └─ validated index-based group returned to UI
 ```
 
 ## Getting Started
@@ -134,7 +135,7 @@ There is no single "test all" command — run each package separately. Backend t
 │   └── src/
 │       ├── components/        # Board, Tiles, GameOverModal, ShareResult, etc.
 │       ├── pages/             # PuzzlePage (the only route)
-│       ├── lib/               # gameReducer, shareResult
+│       ├── lib/               # gameReducer, renderProposedGroup, shareResult
 │       └── hooks/             # useConnectionsGame
 ├── orchestrator/              # Hono + AI SDK
 │   └── src/
@@ -152,4 +153,3 @@ There is no single "test all" command — run each package separately. Backend t
 
 - The frontend `package.json` proxy setting (`"proxy": "http://nest_backend:4000"`) is for Docker networking only — local dev uses `VITE_API_URL` instead.
 - Database schema is managed by `database/01-schema.sql` — TypeORM runs with `synchronize: false`.
-- The orchestrator is stateless; the backend sends the full remaining word list + guess history on every request.

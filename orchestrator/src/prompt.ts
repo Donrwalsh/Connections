@@ -1,5 +1,60 @@
 import type { SolveRequest } from "./types.js";
 
+const COLUMNS_PER_ROW = 4;
+
+/**
+ * Maps prior wrong-guess word sets onto indices in the remaining words
+ * list. Only guesses whose 4 words are ALL still in play can be expressed
+ * as an ID set — a "correct" guess (or any guess touching a word since
+ * solved) can't be formed from the remaining words, so it is omitted. The
+ * result is the exact set of ID groups the model must never repeat.
+ */
+export function forbiddenIdSets(request: SolveRequest): number[][] {
+  const indexByWord = new Map(
+    request.puzzleWords.map((word, i) => [word.toLowerCase(), i]),
+  );
+
+  const sets: number[][] = [];
+  for (const guess of request.priorGuesses) {
+    // "correct" groups are resolved (their words leave play) — they are
+    // context, not wrong guesses, so they never become forbidden sets.
+    if (guess.result === "correct") continue;
+
+    const ids: number[] = [];
+    let complete = true;
+    for (const word of guess.words) {
+      const id = indexByWord.get(word.toLowerCase());
+      if (id === undefined) {
+        complete = false;
+        break;
+      }
+      ids.push(id);
+    }
+    if (complete) {
+      ids.sort((a, b) => a - b);
+      sets.push(ids);
+    }
+  }
+  return sets;
+}
+
+function formatIndexedWords(words: string[]): string {
+  const entries = words.map((word, i) => `${i}: ${word}`);
+  const width = Math.max(...entries.map((entry) => entry.length)) + 2;
+
+  const rows: string[] = [];
+  for (let i = 0; i < entries.length; i += COLUMNS_PER_ROW) {
+    rows.push(
+      entries
+        .slice(i, i + COLUMNS_PER_ROW)
+        .map((entry) => entry.padEnd(width))
+        .join("")
+        .trimEnd(),
+    );
+  }
+  return rows.join("\n");
+}
+
 /**
  * Builds the prompt for a single solve step: propose ONE group of 4 from
  * the remaining words, taking into account any prior guesses and their
@@ -7,38 +62,36 @@ import type { SolveRequest } from "./types.js";
  * evolve independently of the HTTP/model-calling code.
  */
 export function buildSolvePrompt(request: SolveRequest): string {
-  const { puzzleWords, priorGuesses } = request;
+  const { puzzleWords } = request;
+  const lastId = puzzleWords.length - 1;
 
-  const wordList = puzzleWords.join(", ");
-
-  const historySection =
-    priorGuesses.length === 0
-      ? "No prior guesses have been made yet."
-      : [
-          "Prior guesses and their outcomes:",
-          ...priorGuesses.map((g, i) => {
-            const outcomeExplanation =
-              g.result === "oneAway"
-                ? "3 of these 4 words belong together in some other correct group; exactly one does not belong with the other three."
-                : g.result === "correct"
-                  ? "This group was fully correct (should not reappear in remaining words, but noted for context)."
-                  : "This exact group of 4 was wrong (not all 4 belong together).";
-            return `  ${i + 1}. [${g.words.join(", ")}] → ${g.result}. ${outcomeExplanation}`;
-          }),
-        ].join("\n");
+  const forbidden = forbiddenIdSets(request);
+  const forbiddenSection =
+    forbidden.length === 0
+      ? ""
+      : `\nFORBIDDEN — you must NOT output any of these exact ID sets, in any order:\n${forbidden
+          .map((ids) => `{${ids.join(",")}}`)
+          .join("\n")}`;
 
   return `You are solving a single step of an NYT Connections puzzle.
 
-In Connections, 16 words must be sorted into 4 groups of 4, where each group shares a hidden category (e.g. synonyms, a wordplay pattern, "types of ___", etc). Categories can be deliberately misleading — a word may seem to fit an obvious category but actually belongs to a trickier one.
+16 words are sorted into 4 groups of 4, sharing hidden categories (synonyms,
+wordplay, "types of ___", etc). Categories can be deliberately misleading.
 
-Remaining words in play: ${wordList}
+Remaining words (indexed):
+${formatIndexedWords(puzzleWords)}
+${forbiddenSection}
+Task: propose exactly ONE group of 4 word IDs (from 0-${lastId}) that share a category.
 
-${historySection}
+Before answering, verify internally:
+- All 4 IDs are between 0 and ${lastId}, no duplicates
+- The set is not one of the forbidden sets above
 
-Your task: propose exactly ONE group of 4 words from the remaining words that you believe share a category. Use any prior guess outcomes as constraints:
-- If a prior guess was "oneAway", avoid proposing that exact same group of 4 again, and consider which 3 of those words are more likely correct together.
-- If a prior guess was "incorrect", that exact group of 4 is wrong — do not propose it again.
-- Favor the grouping you are most confident about, since an incorrect guess has a real cost in the actual game.
-
-Respond with your proposed group, a short category label, your confidence (0 to 1), and a brief reasoning for the grouping.`;
+Respond with ONLY this JSON, no other text:
+{
+  "word_ids": [int, int, int, int],
+  "category": "short label",
+  "confidence": 0.0-1.0,
+  "reasoning": "brief justification"
+}`;
 }

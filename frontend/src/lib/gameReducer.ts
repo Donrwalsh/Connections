@@ -35,7 +35,7 @@ export interface GameState {
 
 // 1. Define the nested proposed group shape
 export interface ProposedGroup {
-  words: string[];
+  word_ids: number[];
   category: string;
   confidence: number;
   reasoning: string;
@@ -45,6 +45,10 @@ export interface ProposedGroup {
 export interface AiSolveData {
   proposedGroup: ProposedGroup;
   prompt: string;
+  // Snapshot of the remaining words that were sent as `puzzleWords` in the
+  // solve request, injected by the frontend so the UI can resolve word_ids
+  // back to words even after the board is shuffled or further solved.
+  words?: string[];
 }
 
 // 3. Define the full API Response payload — mirrors what the backend's

@@ -127,7 +127,7 @@ describe("useConnectionsGame", () => {
         orchestrator: "healthy",
         data: {
           proposedGroup: {
-            words: ["HAIL", "RAIN", "SLEET", "SNOW"],
+            word_ids: [0, 1, 2, 3],
             category: "WET WEATHER",
             confidence: 0.9,
             reasoning: "Precipitation",

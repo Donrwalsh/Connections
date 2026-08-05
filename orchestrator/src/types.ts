@@ -37,12 +37,16 @@ export type SolveRequest = z.infer<typeof SolveRequestSchema>;
  * The shape we ask the model to produce. Kept separate from the HTTP
  * response schema below in case we want to enrich the response later
  * without changing what we prompt the model for.
+ *
+ * Words are referenced by their index into the remaining words list
+ * (0-15) rather than by spelling, so the model answers in IDs that map
+ * unambiguously back to the puzzle state.
  */
 export const ProposedGroupSchema = z.object({
-  words: z
-    .array(z.string())
+  word_ids: z
+    .array(z.number().int().min(0).max(15))
     .length(4)
-    .describe("Exactly 4 words from the puzzle that the model believes share a category"),
+    .describe("Exactly 4 indices (0-15) into the puzzle's remaining word list that the model believes share a category"),
   category: z
     .string()
     .describe("A short label describing the shared theme/category, e.g. 'Types of ___'"),

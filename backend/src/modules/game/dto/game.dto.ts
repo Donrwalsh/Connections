@@ -14,7 +14,7 @@ export class SolveDto {
 }
 
 export interface ProposedGroupDto {
-  words: string[];
+  word_ids: number[];
   category: string;
   confidence: number;
   reasoning: string;

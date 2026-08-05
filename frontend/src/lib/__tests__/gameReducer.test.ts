@@ -234,7 +234,7 @@ describe("gameReducer", () => {
         orchestrator: "healthy" as const,
         data: {
           proposedGroup: {
-            words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+            word_ids: [0, 1, 2, 3],
             category: "FRUITS",
             confidence: 0.95,
             reasoning: "All are fruits",

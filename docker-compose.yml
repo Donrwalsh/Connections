@@ -23,7 +23,13 @@ services:
       PORT: 3001
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-openai}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
       CHOKIDAR_USEPOLLING: true
+    depends_on:
+      ollama:
+        condition: service_healthy
     ports:
       - "3001:3001"
     volumes:
@@ -112,6 +118,43 @@ services:
       - ./backend/tsconfig.json:/app/tsconfig.json
     command: npx tsx --watch src/worker.ts
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # Uncomment if you have an NVIDIA GPU and nvidia-container-toolkit installed
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  ollama-init:
+    image: curlimages/curl:latest
+    container_name: ollama_init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+    entrypoint: >
+      sh -c "
+      until curl -s http://ollama:11434 > /dev/null; do sleep 1; done &&
+      curl -X POST http://ollama:11434/api/pull -d '{\"name\": \"'\"$$OLLAMA_MODEL\"'\"}'
+      "
+
 volumes:
   postgres_data:
   redis_data:
+  ollama_data:

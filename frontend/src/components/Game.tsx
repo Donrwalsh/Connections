@@ -5,6 +5,7 @@ import { GameOverModal } from "./GameOverModal";
 import { MistakeTracker } from "./MistakeTracker";
 import { shuffleWords, type Puzzle } from "../data/types";
 import { useConnectionsGame } from "../hooks/useConnectionsGame";
+import { renderProposedGroup } from "../lib/renderProposedGroup";
 
 const MAX_MISTAKES = 4;
 
@@ -86,7 +87,12 @@ export function Game({ puzzle }: GameProps) {
           );
         }
 
-        aiSolveSuccess(result);
+        // Snapshot the words sent with the request so the UI can resolve
+        // the returned word_ids even if the board changes afterwards.
+        aiSolveSuccess({
+          ...result,
+          data: { ...result.data, words: state.remainingWords },
+        });
       } catch (err) {
         const error = err as Error;
         if (error.name === "AbortError") {
@@ -205,7 +211,10 @@ export function Game({ puzzle }: GameProps) {
               overflowWrap: "anywhere",
             }}
           >
-            {JSON.stringify(state.ai_solution.proposedGroup, null, 2)}
+            {renderProposedGroup(
+              state.ai_solution.proposedGroup,
+              state.ai_solution.words ?? [],
+            )}
           </pre>
 
           {state.ai_solution.prompt && (

@@ -183,7 +183,7 @@ describe("Game Component", () => {
           orchestrator: "healthy",
           data: {
             proposedGroup: {
-              words: ["HAIL", "RAIN", "SLEET", "SNOW"],
+              word_ids: [0, 1, 2, 3],
               category: "WET WEATHER",
               confidence: 0.95,
               reasoning: "All forms of precipitation",
@@ -198,6 +198,8 @@ describe("Game Component", () => {
     fireEvent.click(screen.getByText("AI Assist"));
 
     expect(await screen.findByText(/WET WEATHER/)).toBeInTheDocument();
+    // Comments resolve each word index back to a word on the board.
+    expect(screen.getByText(/\/\/ [A-Z]+/)).toBeInTheDocument();
     expect(screen.getByText("View prompt sent to the model")).toBeInTheDocument();
   });
 
