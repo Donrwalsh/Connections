@@ -2,6 +2,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { DataSource } from "typeorm";
 import { PuzzleIngestionService } from "./puzzle-ingestion.service";
 import { STRATEGY_QUEUE } from "../queue/queue.module";
+import { SUPPORTED_STRATEGIES } from "../../strategies";
 
 const PUZZLE_DATA = {
   categories: [
@@ -99,12 +100,17 @@ describe("PuzzleIngestionService", () => {
 
     it("should insert puzzles day-by-day until the endpoint returns 404", async () => {
       mockLatestDate(2024, 0, 1);
+      process.env.SHUFFLE_SMART_TRIALS = "5";
+      process.env.SHUFFLE_FOOLISH_TRIALS = "2";
       const fetchSpy = jest
         .spyOn(global, "fetch")
         .mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA))
         .mockResolvedValueOnce(fetchResponse(404));
 
       const result = await service.populateUntilCaughtUp();
+
+      delete process.env.SHUFFLE_SMART_TRIALS;
+      delete process.env.SHUFFLE_FOOLISH_TRIALS;
 
       expect(result).toEqual({ inserted: 1, upToDate: "2024-01-02" });
       expect(fetchSpy).toHaveBeenCalledTimes(2);
@@ -113,11 +119,30 @@ describe("PuzzleIngestionService", () => {
         expect.objectContaining({ headers: expect.any(Object) }),
       );
       expect(mockDataSource.transaction).toHaveBeenCalledTimes(1);
-      expect(mockQueue.add).toHaveBeenCalledTimes(4);
+      const deterministic = SUPPORTED_STRATEGIES.filter(
+        (s) => s !== "shuffle-smart" && s !== "shuffle-foolish",
+      );
+      const expectedJobCount = deterministic.length + 5 + 2;
+      expect(mockQueue.add).toHaveBeenCalledTimes(expectedJobCount);
+      for (const strategyName of deterministic) {
+        expect(mockQueue.add).toHaveBeenCalledWith("run-strategy", {
+          puzzleId: 42,
+          strategyName,
+          date: "2024-01-02",
+          trialNumber: 0,
+        });
+      }
       expect(mockQueue.add).toHaveBeenCalledWith("run-strategy", {
         puzzleId: 42,
-        strategyName: "alphabetical",
+        strategyName: "shuffle-smart",
         date: "2024-01-02",
+        trialNumber: 5,
+      });
+      expect(mockQueue.add).toHaveBeenCalledWith("run-strategy", {
+        puzzleId: 42,
+        strategyName: "shuffle-foolish",
+        date: "2024-01-02",
+        trialNumber: 2,
       });
     });
 

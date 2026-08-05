@@ -6,7 +6,10 @@ import { GroupMember } from "./entities/group-member.entity";
 import { InjectDataSource } from "@nestjs/typeorm";
 import { STRATEGY_QUEUE } from "../queue/queue.module";
 import { Queue } from "bullmq";
-import { SUPPORTED_STRATEGIES } from "../../strategies";
+import {
+  SUPPORTED_STRATEGIES,
+  strategyTrialNumbers,
+} from "../../strategies";
 
 interface ConnectionsCard {
   content: string;
@@ -73,17 +76,22 @@ export class PuzzleIngestionService {
       const puzzleId = await this.insertPuzzle(formatted, puzzleData);
 
       if (puzzleId !== null) {
-        // Dispatch all deterministic strategy runs right after inserting
+        // Dispatch all strategy runs right after inserting. Shuffle strategies
+        // get one job per trial (1..N); deterministic strategies get a single
+        // trial (0).
         for (const strategyName of ALL_STRATEGIES) {
-          await this.strategyQueue.add("run-strategy", {
-            puzzleId,
-            strategyName,
-            date: formatted,
-          });
+          for (const trialNumber of strategyTrialNumbers(strategyName)) {
+            await this.strategyQueue.add("run-strategy", {
+              puzzleId,
+              strategyName,
+              date: formatted,
+              trialNumber,
+            });
+          }
         }
 
         this.logger.log(
-          `Queued all deterministic strategies (${ALL_STRATEGIES.join(
+          `Queued all strategies (${ALL_STRATEGIES.join(
             ", ",
           )}) for puzzle ${puzzleId} (${formatted})`,
         );

@@ -214,6 +214,7 @@ describe("GameService", () => {
       expect(mockQueue.add).toHaveBeenCalledWith("run-strategy", {
         puzzleId: "42",
         strategyName: "alphabetical",
+        trialNumber: 0,
       });
     });
   });

@@ -11,6 +11,7 @@ interface RunDeterministicStrategyJobData {
   puzzleId: number;
   strategyName: string;
   date: string;
+  trialNumber: number;
 }
 
 async function bootstrap() {
@@ -22,7 +23,7 @@ async function bootstrap() {
   const worker = new Worker(
     "strategy-runs",
     async (job: Job<RunDeterministicStrategyJobData>) => {
-      const { puzzleId, strategyName, date } = job.data;
+      const { puzzleId, strategyName, date, trialNumber } = job.data;
 
       if (!STRATEGY_SET.has(strategyName)) {
         throw new Error(
@@ -31,16 +32,17 @@ async function bootstrap() {
       }
 
       logger.log(
-        `starting job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName}`,
+        `starting job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName} trial=${trialNumber}`,
       );
 
       const result = await strategyService.runDeterministicStrategy(
         puzzleId,
         strategyName as SupportedStrategy,
+        trialNumber,
       );
 
       logger.log(
-        `finished job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName} status=${result.status}`,
+        `finished job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName} trial=${trialNumber} status=${result.status}`,
       );
       return result;
     },

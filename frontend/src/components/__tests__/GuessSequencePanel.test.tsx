@@ -3,7 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GuessSequencePanel } from "../GuessSequencePanel";
 
 const strategyRun = {
+  id: 1,
   strategyName: "alphabetical",
+  trialNumber: 0,
   status: "completed",
   guesses: [
     {
@@ -27,6 +29,43 @@ const strategyRun = {
   ],
 };
 
+const shuffleSmartRuns = [
+  {
+    id: 11,
+    strategyName: "shuffle-smart",
+    trialNumber: 1,
+    status: "completed",
+    guesses: [
+      {
+        sequenceNumber: 1,
+        words: ["A", "B", "C", "D"],
+        result: "success",
+        guessedAt: "2024-01-15T00:00:00Z",
+      },
+      {
+        sequenceNumber: 2,
+        words: ["W", "X", "Y", "Z"],
+        result: "success",
+        guessedAt: "2024-01-15T00:00:00Z",
+      },
+    ],
+  },
+  {
+    id: 12,
+    strategyName: "shuffle-smart",
+    trialNumber: 2,
+    status: "failed",
+    guesses: [
+      {
+        sequenceNumber: 1,
+        words: ["M", "N", "O", "P"],
+        result: "failure",
+        guessedAt: "2024-01-15T00:00:00Z",
+      },
+    ],
+  },
+];
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -37,9 +76,12 @@ function setupFetch() {
     vi.fn((url: unknown) => {
       const strategyId =
         String(url).match(/\/strategy\/([^/]+)\//)?.[1] ?? "alphabetical";
+      const runs =
+        strategyId === "shuffle-smart" ? shuffleSmartRuns : [strategyRun];
       return Promise.resolve({
         ok: true,
-        json: async () => ({ ...strategyRun, strategyName: strategyId }),
+        json: async () =>
+          runs.map((run) => ({ ...run, strategyName: strategyId })),
       });
     }),
   );
@@ -146,5 +188,128 @@ describe("GuessSequencePanel Component", () => {
     );
 
     expect(await screen.findByText(/network down/)).toBeInTheDocument();
+  });
+
+  it("differentiates between shuffle-smart trials and switches between them", async () => {
+    setupFetch();
+
+    render(
+      <GuessSequencePanel date="2024-01-15" isOpen={true} onToggle={() => {}} />,
+    );
+
+    // Button shows the average guess count across trials ((2 + 1) / 2 = 1.5).
+    expect(
+      await screen.findByRole("button", {
+        name: /Show Shuffle-Smart \(1\.5\)/,
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Show Shuffle-Smart/ }),
+    );
+
+    // Both trial runs are selectable, first one is shown by default.
+    expect(
+      await screen.findByRole("button", { name: /Trial #1 · completed/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Trial #2 · failed/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Strategy: Shuffle Smart · Trial #1 · Status: completed · 2 guesses",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("W, X, Y, Z")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Trial #2 · failed/ }));
+
+    expect(
+      await screen.findByText(
+        "Strategy: Shuffle Smart · Trial #2 · Status: failed · 1 guess",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("M, N, O, P")).toBeInTheDocument();
+    expect(screen.queryByText("W, X, Y, Z")).not.toBeInTheDocument();
+  });
+
+  it("shows shuffle-foolish runs and renders duplicate guesses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        const strategyId =
+          String(url).match(/\/strategy\/([^/]+)\//)?.[1] ?? "alphabetical";
+        if (strategyId !== "shuffle-foolish") return Promise.resolve({ ok: true, json: async () => [] });
+        return Promise.resolve({
+          ok: true,
+          json: async () => [
+            {
+              id: 21,
+              strategyName: "shuffle-foolish",
+              trialNumber: 1,
+              status: "completed",
+              guesses: [
+                {
+                  sequenceNumber: 1,
+                  words: ["A", "B", "C", "D"],
+                  result: "failure",
+                  guessedAt: "2024-01-15T00:00:00Z",
+                },
+                {
+                  sequenceNumber: 2,
+                  words: ["A", "B", "C", "D"],
+                  result: "success",
+                  guessedAt: "2024-01-15T00:00:00Z",
+                },
+              ],
+            },
+          ],
+        });
+      }),
+    );
+
+    render(
+      <GuessSequencePanel date="2024-01-15" isOpen={true} onToggle={() => {}} />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Show Shuffle-Foolish/ }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Strategy: Shuffle Foolish · Status: completed · 2 guesses",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("A, B, C, D")).toHaveLength(2);
+    expect(screen.getAllByText("✗ Incorrect")).toHaveLength(1);
+  });
+
+  it("shows a message when a strategy has no runs yet", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        const strategyId =
+          String(url).match(/\/strategy\/([^/]+)\//)?.[1] ?? "alphabetical";
+        const runs = strategyId === "shuffle-smart" ? [] : [strategyRun];
+        return Promise.resolve({
+          ok: true,
+          json: async () =>
+            runs.map((run) => ({ ...run, strategyName: strategyId })),
+        });
+      }),
+    );
+
+    render(
+      <GuessSequencePanel date="2024-01-15" isOpen={true} onToggle={() => {}} />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Show Shuffle-Smart/ }),
+    );
+
+    expect(
+      await screen.findByText("No runs yet for Shuffle Smart."),
+    ).toBeInTheDocument();
   });
 });

@@ -384,6 +384,41 @@
   color: #a33;
 }
 
+.guess-sequence__empty {
+  color: #888;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.guess-sequence__trials {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.guess-sequence__trial {
+  font-size: 0.7rem;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  background-color: #efefe6;
+  color: #2d2d24;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+  transition: all 0.15s ease;
+}
+
+.guess-sequence__trial:hover {
+  background-color: #d8d8ce;
+}
+
+.guess-sequence__trial--active {
+  background-color: #2d2d24;
+  color: #ffffff;
+  border-color: #2d2d24;
+}
+
 .puzzle-page--panel-open .tile {
   font-size: 0.7rem;
 }

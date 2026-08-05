@@ -10,7 +10,9 @@ interface Guess {
 }
 
 interface StrategyRunDetail {
+  id: number;
   strategyName: string;
+  trialNumber: number;
   status: "running" | "completed" | "failed";
   guesses: Guess[];
 }
@@ -26,6 +28,8 @@ const STRATEGIES = [
   { id: "reverse-alphabetical", label: "Rev-Alphabetical" },
   { id: "order", label: "Order" },
   { id: "reverse-order", label: "Rev-Order" },
+  { id: "shuffle-smart", label: "Shuffle-Smart" },
+  { id: "shuffle-foolish", label: "Shuffle-Foolish" },
 ];
 
 export function GuessSequencePanel({
@@ -36,7 +40,7 @@ export function GuessSequencePanel({
   const [activeStrategy, setActiveStrategy] = useState<string>("alphabetical");
 
   const [strategyRuns, setStrategyRuns] = useState<
-    Record<string, StrategyRunDetail | null>
+    Record<string, StrategyRunDetail[]>
   >({});
   const [loadingStrategies, setLoadingStrategies] = useState<
     Record<string, boolean>
@@ -44,8 +48,9 @@ export function GuessSequencePanel({
   const [errorMessages, setErrorMessages] = useState<Record<string, string>>(
     {},
   );
+  const [activeRunId, setActiveRunId] = useState<number | null>(null);
 
-  // Fetch strategy step counts on mount (or date change), regardless of isOpen state
+  // Fetch strategy run lists on mount (or date change), regardless of isOpen state
   useEffect(() => {
     if (!date) return;
 
@@ -65,9 +70,9 @@ export function GuessSequencePanel({
             body?.message ?? `Request failed with status ${res.status}`,
           );
         }
-        const run: StrategyRunDetail = await res.json();
+        const runs: StrategyRunDetail[] = await res.json();
         if (!cancelled) {
-          setStrategyRuns((prev) => ({ ...prev, [strategyId]: run }));
+          setStrategyRuns((prev) => ({ ...prev, [strategyId]: runs }));
         }
       } catch (err: any) {
         if (!cancelled) {
@@ -83,7 +88,7 @@ export function GuessSequencePanel({
       }
     };
 
-    // Pre-fetch all 4 strategies right away to populate button step counts
+    // Pre-fetch all strategies right away to populate button step counts
     STRATEGIES.forEach((strat) => fetchStrategy(strat.id));
 
     return () => {
@@ -102,18 +107,27 @@ export function GuessSequencePanel({
     }
   };
 
-  const currentRun = strategyRuns[activeStrategy];
+  const currentRuns = strategyRuns[activeStrategy] ?? [];
+  const selectedRun =
+    currentRuns.find((run) => run.id === activeRunId) ?? currentRuns[0] ?? null;
   const isLoadingCurrent = loadingStrategies[activeStrategy];
   const currentError = errorMessages[activeStrategy];
+
+  const averageGuesses = (runs: StrategyRunDetail[]) => {
+    if (runs.length === 0) return null;
+    const total = runs.reduce((sum, run) => sum + run.guesses.length, 0);
+    const average = total / runs.length;
+    return Number.isInteger(average) ? String(average) : average.toFixed(1);
+  };
 
   return (
     <section className="guess-sequence">
       <div className="guess-sequence__header-actions">
         {STRATEGIES.map((strat) => {
           const isActive = isOpen && activeStrategy === strat.id;
-          const run = strategyRuns[strat.id];
+          const runs = strategyRuns[strat.id];
           const isLoading = loadingStrategies[strat.id];
-          const stepCount = run?.guesses ? run.guesses.length : null;
+          const stepCount = runs ? averageGuesses(runs) : null;
 
           return (
             <button
@@ -146,15 +160,45 @@ export function GuessSequencePanel({
             <p className="guess-sequence__error">{currentError}</p>
           )}
 
-          {!isLoadingCurrent && currentRun && (
+          {!isLoadingCurrent && !currentError && currentRuns.length === 0 && (
+            <p className="guess-sequence__empty">
+              No runs yet for {formatStrategyName(activeStrategy)}.
+            </p>
+          )}
+
+          {selectedRun && (
             <>
+              {currentRuns.length > 1 && (
+                <div className="guess-sequence__trials">
+                  {currentRuns.map((run) => (
+                    <button
+                      key={run.id}
+                      type="button"
+                      className={`guess-sequence__trial ${
+                        run.id === selectedRun.id
+                          ? "guess-sequence__trial--active"
+                          : ""
+                      }`}
+                      onClick={() => setActiveRunId(run.id)}
+                    >
+                      Trial #{run.trialNumber} · {run.status} ·{" "}
+                      {run.guesses.length} guess
+                      {run.guesses.length === 1 ? "" : "es"}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <p className="guess-sequence__status">
-                Strategy: {formatStrategyName(currentRun.strategyName)} ·
-                Status: {currentRun.status} · {currentRun.guesses.length} guess
-                {currentRun.guesses.length === 1 ? "" : "es"}
+                Strategy: {formatStrategyName(selectedRun.strategyName)}
+                {currentRuns.length > 1
+                  ? ` · Trial #${selectedRun.trialNumber}`
+                  : ""}{" "}
+                · Status: {selectedRun.status} · {selectedRun.guesses.length}{" "}
+                guess{selectedRun.guesses.length === 1 ? "" : "es"}
               </p>
               <ol className="guess-sequence__list">
-                {currentRun.guesses.map((guess) => (
+                {selectedRun.guesses.map((guess) => (
                   <li
                     key={guess.sequenceNumber}
                     className={`guess-sequence__item guess-sequence__item--${guess.result}`}

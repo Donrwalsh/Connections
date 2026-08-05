@@ -9,7 +9,9 @@ export interface GuessDto {
 }
 
 export interface StrategyRunDetailDto {
+  id: number;
   strategyName: string;
+  trialNumber: number;
   status: StrategyRunStatus;
   startedAt: Date;
   finishedAt: Date | null;

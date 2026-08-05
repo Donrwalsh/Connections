@@ -14,7 +14,11 @@ export class GameService {
   ) {}
 
   async triggerRun(puzzleId: string, strategyName: string) {
-    await this.queue.add("run-strategy", { puzzleId, strategyName });
+    await this.queue.add("run-strategy", {
+      puzzleId,
+      strategyName,
+      trialNumber: 0,
+    });
   }
 
   async puzzleDateToId(date: string): Promise<number> {

@@ -14,6 +14,7 @@ describe("StrategyService", () => {
   let mockQueue: { add: jest.Mock };
   let mockStrategyRunRepo: {
     findOne: jest.Mock;
+    find: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
   };
@@ -31,6 +32,7 @@ describe("StrategyService", () => {
     id: 7,
     puzzleId: 100,
     strategyName: "alphabetical",
+    trialNumber: 0,
     status: StrategyRunStatus.RUNNING,
     availableWords: [
       "APPLE",
@@ -51,6 +53,7 @@ describe("StrategyService", () => {
     mockQueue = { add: jest.fn().mockResolvedValue(undefined) };
     mockStrategyRunRepo = {
       findOne: jest.fn(),
+      find: jest.fn(),
       create: jest.fn(),
       save: jest.fn(),
     };
@@ -94,6 +97,7 @@ describe("StrategyService", () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+    jest.restoreAllMocks();
   });
 
   describe("triggerRun", () => {
@@ -104,6 +108,7 @@ describe("StrategyService", () => {
         puzzleId: 100,
         strategyName: "order",
         date: "2024-01-02",
+        trialNumber: 0,
       });
     });
 
@@ -114,6 +119,7 @@ describe("StrategyService", () => {
         puzzleId: 100,
         strategyName: "order",
         date: undefined,
+        trialNumber: 0,
       });
     });
   });
@@ -147,6 +153,7 @@ describe("StrategyService", () => {
       mockStrategyRunRepo.findOne.mockResolvedValueOnce({
         id: 9,
         strategyName: "order",
+        trialNumber: 0,
         status: StrategyRunStatus.COMPLETED,
         startedAt,
         finishedAt: new Date("2024-01-02T02:00:00Z"),
@@ -169,7 +176,9 @@ describe("StrategyService", () => {
       const result = await service.getRunDetail("2024-01-02", "order");
 
       expect(result).toEqual({
+        id: 9,
         strategyName: "order",
+        trialNumber: 0,
         status: StrategyRunStatus.COMPLETED,
         startedAt,
         finishedAt: new Date("2024-01-02T02:00:00Z"),
@@ -195,6 +204,179 @@ describe("StrategyService", () => {
     });
   });
 
+  describe("getRunsForPuzzle", () => {
+    it("should throw BadRequestException for an invalid date", async () => {
+      mockGameService.isValidYYYYMMDD.mockReturnValueOnce(false);
+
+      await expect(
+        service.getRunsForPuzzle("2024-13-40", "shuffle-smart"),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockGameService.puzzleDateToId).not.toHaveBeenCalled();
+    });
+
+    it("should return an empty list when no runs exist", async () => {
+      mockGameService.isValidYYYYMMDD.mockReturnValueOnce(true);
+      mockGameService.puzzleDateToId.mockResolvedValueOnce(5);
+      mockStrategyRunRepo.find.mockResolvedValueOnce([]);
+
+      const result = await service.getRunsForPuzzle(
+        "2024-01-02",
+        "shuffle-smart",
+      );
+
+      expect(result).toEqual([]);
+      expect(mockStrategyRunRepo.find).toHaveBeenCalledWith({
+        where: { puzzleId: 5, strategyName: "shuffle-smart" },
+        order: { trialNumber: "ASC" },
+      });
+    });
+
+    it("should map every trial run ordered by trialNumber", async () => {
+      const startedAt = new Date("2024-01-02T01:00:00Z");
+      const guessedAt = new Date("2024-01-02T01:01:00Z");
+
+      mockGameService.isValidYYYYMMDD.mockReturnValueOnce(true);
+      mockGameService.puzzleDateToId.mockResolvedValueOnce(5);
+      mockStrategyRunRepo.find.mockResolvedValueOnce([
+        {
+          id: 9,
+          strategyName: "shuffle-smart",
+          trialNumber: 2,
+          status: StrategyRunStatus.FAILED,
+          startedAt,
+          finishedAt: new Date("2024-01-02T02:00:00Z"),
+        },
+        {
+          id: 8,
+          strategyName: "shuffle-smart",
+          trialNumber: 1,
+          status: StrategyRunStatus.COMPLETED,
+          startedAt,
+          finishedAt: new Date("2024-01-02T01:30:00Z"),
+        },
+      ]);
+      mockGuessRepo.find
+        .mockResolvedValueOnce([
+          {
+            sequenceNumber: 1,
+            words: ["A", "B", "C", "D"],
+            result: GuessResult.FAILURE,
+            guessedAt,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            sequenceNumber: 1,
+            words: ["E", "F", "G", "H"],
+            result: GuessResult.SUCCESS,
+            guessedAt,
+          },
+        ]);
+
+      const result = await service.getRunsForPuzzle(
+        "2024-01-02",
+        "shuffle-smart",
+      );
+
+      expect(result.map((r) => r.trialNumber)).toEqual([2, 1]);
+      expect(result[0]).toEqual({
+        id: 9,
+        strategyName: "shuffle-smart",
+        trialNumber: 2,
+        status: StrategyRunStatus.FAILED,
+        startedAt,
+        finishedAt: new Date("2024-01-02T02:00:00Z"),
+        guesses: [
+          {
+            sequenceNumber: 1,
+            words: ["A", "B", "C", "D"],
+            result: GuessResult.FAILURE,
+            guessedAt,
+          },
+        ],
+      });
+      expect(result[1].guesses[0].words).toEqual(["E", "F", "G", "H"]);
+      expect(mockGuessRepo.find).toHaveBeenNthCalledWith(1, {
+        where: { strategyRunId: 9 },
+        order: { sequenceNumber: "ASC" },
+      });
+      expect(mockGuessRepo.find).toHaveBeenNthCalledWith(2, {
+        where: { strategyRunId: 8 },
+        order: { sequenceNumber: "ASC" },
+      });
+    });
+  });
+
+  describe("triggerStrategyRuns", () => {
+    it("should queue a single trial for deterministic strategies", async () => {
+      await service.triggerStrategyRuns(100, "order", "2024-01-02");
+
+      expect(mockQueue.add).toHaveBeenCalledTimes(1);
+      expect(mockQueue.add).toHaveBeenCalledWith("run-strategy", {
+        puzzleId: 100,
+        strategyName: "order",
+        date: "2024-01-02",
+        trialNumber: 0,
+      });
+    });
+
+    it("should queue one job per shuffle-smart trial", async () => {
+      process.env.SHUFFLE_SMART_TRIALS = "3";
+      try {
+        await service.triggerStrategyRuns(100, "shuffle-smart", "2024-01-02");
+      } finally {
+        delete process.env.SHUFFLE_SMART_TRIALS;
+      }
+
+      expect(mockQueue.add).toHaveBeenCalledTimes(3);
+      expect(mockQueue.add).toHaveBeenNthCalledWith(1, "run-strategy", {
+        puzzleId: 100,
+        strategyName: "shuffle-smart",
+        date: "2024-01-02",
+        trialNumber: 1,
+      });
+      expect(mockQueue.add).toHaveBeenNthCalledWith(2, "run-strategy", {
+        puzzleId: 100,
+        strategyName: "shuffle-smart",
+        date: "2024-01-02",
+        trialNumber: 2,
+      });
+      expect(mockQueue.add).toHaveBeenNthCalledWith(3, "run-strategy", {
+        puzzleId: 100,
+        strategyName: "shuffle-smart",
+        date: "2024-01-02",
+        trialNumber: 3,
+      });
+    });
+
+    it("should queue one job per shuffle-foolish trial", async () => {
+      process.env.SHUFFLE_FOOLISH_TRIALS = "2";
+      try {
+        await service.triggerStrategyRuns(
+          100,
+          "shuffle-foolish",
+          "2024-01-02",
+        );
+      } finally {
+        delete process.env.SHUFFLE_FOOLISH_TRIALS;
+      }
+
+      expect(mockQueue.add).toHaveBeenCalledTimes(2);
+      expect(mockQueue.add).toHaveBeenNthCalledWith(1, "run-strategy", {
+        puzzleId: 100,
+        strategyName: "shuffle-foolish",
+        date: "2024-01-02",
+        trialNumber: 1,
+      });
+      expect(mockQueue.add).toHaveBeenNthCalledWith(2, "run-strategy", {
+        puzzleId: 100,
+        strategyName: "shuffle-foolish",
+        date: "2024-01-02",
+        trialNumber: 2,
+      });
+    });
+  });
+
   describe("getUnfinishedPuzzles", () => {
     it("should normalize date values from raw rows", async () => {
       mockPuzzleRepo.createQueryBuilder.mockReturnValue({
@@ -202,6 +384,7 @@ describe("StrategyService", () => {
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         select: jest.fn().mockReturnThis(),
+        distinct: jest.fn().mockReturnThis(),
         getRawMany: jest.fn().mockResolvedValue([
           { id: 5, date: new Date("2024-01-02T00:00:00.000Z") },
           { id: "6", date: "2024-01-03T12:30:00.000Z" },
@@ -230,6 +413,7 @@ describe("StrategyService", () => {
         where,
         andWhere,
         select: jest.fn().mockReturnThis(),
+        distinct: jest.fn().mockReturnThis(),
         getRawMany: jest.fn().mockResolvedValue([]),
       });
 
@@ -346,6 +530,201 @@ describe("StrategyService", () => {
       ).rejects.toThrow(new BadRequestException("Unsupported strategy name: 'bogus'"));
       expect(mockGameService.evaluateGuess).not.toHaveBeenCalled();
     });
+
+    describe("shuffle-smart strategy", () => {
+      beforeEach(() => {
+        mockStrategyRunRepo.findOne.mockResolvedValue(makeRun());
+        mockGuessRepo.find.mockResolvedValue([]);
+        mockGuessRepo.count.mockResolvedValue(0);
+      });
+
+      it("should solve a puzzle by sampling random groups", async () => {
+        jest.spyOn(Math, "random").mockReturnValue(0);
+        mockGameService.evaluateGuess.mockResolvedValue({
+          result: GuessResult.SUCCESS,
+        });
+
+        const result = await service.runDeterministicStrategy(
+          100,
+          "shuffle-smart",
+        );
+
+        expect(result).toEqual({
+          status: StrategyRunStatus.COMPLETED,
+          guessCount: 2,
+        });
+        // random()=0 picks pool tail first ([FIG, GRAPE, HONEY, APPLE]), then
+        // the remaining 4 words after that group is removed.
+        expect(mockGameService.evaluateGuess).toHaveBeenNthCalledWith(1, 100, [
+          "FIG",
+          "GRAPE",
+          "HONEY",
+          "APPLE",
+        ]);
+        expect(mockGameService.evaluateGuess).toHaveBeenNthCalledWith(2, 100, [
+          "CHERRY",
+          "DATE",
+          "EGGPLANT",
+          "BANANA",
+        ]);
+        expect(mockGuessRepo.find).toHaveBeenCalledWith({
+          where: { strategyRunId: 7 },
+          select: { words: true },
+        });
+        expect(mockManager.insert).toHaveBeenCalledWith(
+          "Guess",
+          expect.arrayContaining([
+            expect.objectContaining({
+              puzzle: { id: 100 },
+              strategyRun: { id: 7 },
+              source: GuessSource.STRATEGY,
+              sequenceNumber: 1,
+            }),
+            expect.objectContaining({ sequenceNumber: 2 }),
+          ]),
+        );
+      });
+
+      it("should re-roll when a sampled group was already guessed in this run", async () => {
+        // Prior flushed guess that random()=0 would re-sample first.
+        mockGuessRepo.find.mockResolvedValue([
+          { words: ["FIG", "GRAPE", "HONEY", "APPLE"] },
+        ]);
+        mockGuessRepo.count.mockResolvedValueOnce(1);
+
+        const randomValues = [0, 0, 0, 0, 0.99, 0.99, 0.99, 0.99];
+        jest
+          .spyOn(Math, "random")
+          .mockImplementation(() => randomValues.shift() ?? 0.5);
+        mockGameService.evaluateGuess.mockResolvedValue({
+          result: GuessResult.SUCCESS,
+        });
+
+        const result = await service.runDeterministicStrategy(
+          100,
+          "shuffle-smart",
+        );
+
+        expect(result).toEqual({
+          status: StrategyRunStatus.COMPLETED,
+          guessCount: 3,
+        });
+        expect(mockGameService.evaluateGuess).toHaveBeenCalledTimes(2);
+        // First sample ([FIG, GRAPE, HONEY, APPLE]) is in the tried set, so the
+        // strategy must skip it and submit a fresh group instead.
+        const firstGuess = mockGameService.evaluateGuess.mock.calls[0][1] as
+          string[];
+        expect(new Set(firstGuess)).not.toEqual(
+          new Set(["FIG", "GRAPE", "HONEY", "APPLE"]),
+        );
+        expect(new Set(firstGuess)).toEqual(
+          new Set(["EGGPLANT", "FIG", "GRAPE", "HONEY"]),
+        );
+      });
+
+      it("should fail the run once no fresh group can be sampled", async () => {
+        // Constant random() means the same group is sampled every time; after
+        // the first guess it is always in the tried set, so sampling gives up.
+        jest.spyOn(Math, "random").mockReturnValue(0);
+        mockGameService.evaluateGuess.mockResolvedValue({
+          result: GuessResult.FAILURE,
+        });
+
+        const result = await service.runDeterministicStrategy(
+          100,
+          "shuffle-smart",
+        );
+
+        expect(result).toEqual({
+          status: StrategyRunStatus.FAILED,
+          guessCount: 1,
+        });
+        expect(mockGameService.evaluateGuess).toHaveBeenCalledTimes(1);
+        expect(mockManager.save).toHaveBeenCalledWith(
+          StrategyRun,
+          expect.objectContaining({ status: StrategyRunStatus.FAILED }),
+        );
+      });
+    });
+
+    describe("shuffle-foolish strategy", () => {
+      beforeEach(() => {
+        mockStrategyRunRepo.findOne.mockResolvedValue(makeRun());
+        mockGuessRepo.find.mockResolvedValue([]);
+        mockGuessRepo.count.mockResolvedValue(0);
+      });
+
+      it("should solve a puzzle by sampling random groups", async () => {
+        jest.spyOn(Math, "random").mockReturnValue(0);
+        mockGameService.evaluateGuess.mockResolvedValue({
+          result: GuessResult.SUCCESS,
+        });
+
+        const result = await service.runDeterministicStrategy(
+          100,
+          "shuffle-foolish",
+        );
+
+        expect(result).toEqual({
+          status: StrategyRunStatus.COMPLETED,
+          guessCount: 2,
+        });
+        expect(mockGameService.evaluateGuess).toHaveBeenNthCalledWith(1, 100, [
+          "FIG",
+          "GRAPE",
+          "HONEY",
+          "APPLE",
+        ]);
+        expect(mockGameService.evaluateGuess).toHaveBeenNthCalledWith(2, 100, [
+          "CHERRY",
+          "DATE",
+          "EGGPLANT",
+          "BANANA",
+        ]);
+        // Unlike shuffle-smart, no tried set is loaded from prior guesses.
+        expect(mockGuessRepo.find).not.toHaveBeenCalled();
+      });
+
+      it("should allow the same group to be guessed more than once", async () => {
+        // Constant random() keeps sampling the same pool tail. A failure leaves
+        // the pool untouched, so the exact same group is guessed twice.
+        jest.spyOn(Math, "random").mockReturnValue(0);
+        mockGameService.evaluateGuess
+          .mockResolvedValueOnce({ result: GuessResult.FAILURE })
+          .mockResolvedValue({ result: GuessResult.SUCCESS });
+
+        const result = await service.runDeterministicStrategy(
+          100,
+          "shuffle-foolish",
+        );
+
+        expect(result).toEqual({
+          status: StrategyRunStatus.COMPLETED,
+          guessCount: 3,
+        });
+        expect(mockGameService.evaluateGuess).toHaveBeenCalledTimes(3);
+        // The first two guesses are the exact same group.
+        expect(mockGameService.evaluateGuess).toHaveBeenNthCalledWith(1, 100, [
+          "FIG",
+          "GRAPE",
+          "HONEY",
+          "APPLE",
+        ]);
+        expect(mockGameService.evaluateGuess).toHaveBeenNthCalledWith(2, 100, [
+          "FIG",
+          "GRAPE",
+          "HONEY",
+          "APPLE",
+        ]);
+        expect(mockGameService.evaluateGuess).toHaveBeenNthCalledWith(3, 100, [
+          "CHERRY",
+          "DATE",
+          "EGGPLANT",
+          "BANANA",
+        ]);
+        expect(mockGuessRepo.find).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe("loadOrCreateRun", () => {
@@ -393,6 +772,8 @@ describe("StrategyService", () => {
 
     it.each([
       ["order", ["A", "B", "C"]],
+      ["shuffle-smart", ["A", "B", "C"]],
+      ["shuffle-foolish", ["A", "B", "C"]],
       ["reverse-order", ["C", "B", "A"]],
       ["reverse-alphabetical", ["C", "B", "A"]],
       ["alphabetical", ["A", "B", "C"]],
@@ -415,6 +796,7 @@ describe("StrategyService", () => {
         expect(mockStrategyRunRepo.create).toHaveBeenCalledWith({
           puzzle,
           strategyName,
+          trialNumber: 0,
           status: StrategyRunStatus.RUNNING,
           availableWords: expectedWords,
           currentCombination: [0, 1, 2, 3],

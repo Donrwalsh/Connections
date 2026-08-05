@@ -1,4 +1,4 @@
-import { useReducer } from "react";
+import { useCallback, useReducer } from "react";
 import type { Category } from "../data/types";
 import {
   gameReducer,
@@ -26,6 +26,19 @@ export function useConnectionsGame(
       initGameState(categories, remainingWords),
   );
 
+  // Stable identities so effects that depend on them don't re-run on every
+  // render (e.g. Game.tsx's AI solve effect keyed on state.loading).
+  const aiSolve = useCallback(() => dispatch({ type: "AI_SOLVE_START" }), []);
+  const aiSolveSuccess = useCallback(
+    (solution: AiSolveResponse) =>
+      dispatch({ type: "AI_SOLVE_SUCCESS", payload: solution }),
+    [],
+  );
+  const aiSolveError = useCallback(
+    (error: string) => dispatch({ type: "AI_SOLVE_FAILURE", payload: error }),
+    [],
+  );
+
   return {
     state,
     toggleWord: (word: string) => dispatch({ type: "TOGGLE_WORD", word }),
@@ -34,11 +47,9 @@ export function useConnectionsGame(
     clearFeedback: () => dispatch({ type: "CLEAR_FEEDBACK" }),
     shuffleBoard: () =>
       dispatch({ type: "SHUFFLE", words: shuffle(state.remainingWords) }),
-    aiSolve: () => dispatch({ type: "AI_SOLVE_START" }),
-    aiSolveSuccess: (solution: AiSolveResponse) =>
-      dispatch({ type: "AI_SOLVE_SUCCESS", payload: solution }),
-    aiSolveError: (error: string) =>
-      dispatch({ type: "AI_SOLVE_FAILURE", payload: error }),
+    aiSolve,
+    aiSolveSuccess,
+    aiSolveError,
     confirmSolve: () => dispatch({ type: "CONFIRM_SOLVE" }),
   };
 }

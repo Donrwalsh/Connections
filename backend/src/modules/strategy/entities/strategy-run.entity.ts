@@ -19,7 +19,11 @@ export enum StrategyRunStatus {
 }
 
 @Entity("StrategyRun")
-@Unique("UQ_StrategyRun_puzzle_strategyName", ["puzzleId", "strategyName"])
+@Unique("UQ_StrategyRun_puzzle_strategyName_trialNumber", [
+  "puzzleId",
+  "strategyName",
+  "trialNumber",
+])
 export class StrategyRun {
   @PrimaryGeneratedColumn()
   id: number;
@@ -33,6 +37,11 @@ export class StrategyRun {
 
   @Column({ type: "varchar" })
   strategyName: string;
+
+  // Distinguishes multiple runs of the same strategy on one puzzle. Always 0
+  // for deterministic strategies; 1..N for shuffle-smart/shuffle-foolish trials.
+  @Column({ type: "int", default: 0 })
+  trialNumber: number;
 
   @Column({
     type: "enum",

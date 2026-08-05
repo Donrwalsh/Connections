@@ -64,6 +64,7 @@ function wrongGroup(offset: number): string[] {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("Game Component", () => {
@@ -236,18 +237,15 @@ describe("Game Component", () => {
     expect(await screen.findByText(/network failure/)).toBeInTheDocument();
   });
 
-  it("shows a timeout message when the AI assist request times out", async () => {
+  it("shows a retrying status message while the AI request is slow, then clears it on success", async () => {
     vi.useFakeTimers();
+    let resolveFetch: (value: unknown) => void;
     vi.stubGlobal(
       "fetch",
       vi.fn(
-        (_url: unknown, options?: { signal?: AbortSignal }) =>
-          new Promise((_resolve, reject) => {
-            options?.signal?.addEventListener("abort", () => {
-              const error = new Error("The operation was aborted.");
-              error.name = "AbortError";
-              reject(error);
-            });
+        () =>
+          new Promise((resolve) => {
+            resolveFetch = resolve;
           }),
       ),
     );
@@ -255,13 +253,64 @@ describe("Game Component", () => {
     render(<Game puzzle={puzzle} />);
     fireEvent.click(screen.getByText("AI Assist"));
 
+    expect(
+      screen.queryByText(/Taking longer than expected/),
+    ).not.toBeInTheDocument();
+
     await act(async () => {
-      vi.advanceTimersByTime(8000);
+      vi.advanceTimersByTime(2000);
       await Promise.resolve();
       await Promise.resolve();
     });
 
-    expect(screen.getByText(/timed out/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Taking longer than expected/),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      resolveFetch?.({
+        ok: true,
+        json: async () => ({
+          orchestrator: "healthy",
+          data: {
+            proposedGroup: {
+              word_ids: [0, 1, 2, 3],
+              category: "WET WEATHER",
+              confidence: 0.95,
+              reasoning: "All forms of precipitation",
+            },
+            prompt: "Find the four connected words.",
+          },
+        }),
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText(/WET WEATHER/)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Taking longer than expected/),
+    ).not.toBeInTheDocument();
     vi.useRealTimers();
+  });
+
+  it("shows the backend's retry-exhausted error message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          orchestrator: "unhealthy",
+          error: "AI solve request failed after 4 attempts: Request timed out",
+        }),
+      }),
+    );
+
+    render(<Game puzzle={puzzle} />);
+    fireEvent.click(screen.getByText("AI Assist"));
+
+    expect(
+      await screen.findByText(/AI solve request failed after 4 attempts/),
+    ).toBeInTheDocument();
   });
 });

@@ -3,7 +3,7 @@
 
 # Connections
 
-A multi-service application for playing and solving [NYT Connections](https://www.nytimes.com/games/connections) puzzles. Play the 4×4 word-grouping puzzle in your browser, use GPT-4o for AI-powered guesses, or watch deterministic brute-force strategies work through every puzzle step-by-step.
+A multi-service application for playing and solving [NYT Connections](https://www.nytimes.com/games/connections) puzzles. Play the 4×4 word-grouping puzzle in your browser, use GPT-4o for AI-powered guesses, or watch brute-force strategies (deterministic orderings plus randomized shuffle-smart and shuffle-foolish trials) work through every puzzle step-by-step.
 
 ## Features
 
@@ -11,6 +11,7 @@ A multi-service application for playing and solving [NYT Connections](https://ww
 - **AI Assist** — GPT-4o proposes one group of 4 from the remaining words, answering by index and never repeating a previously-guessed wrong group
 - **Date navigation** — browse any puzzle from 2023-06-12 to today, plus a random picker
 - **Deterministic strategies** — four brute-force strategies (`alphabetical`, `reverse-alphabetical`, `order`, `reverse-order`) run automatically on every puzzle, with full guess-by-guess results viewable in a side panel
+- **Shuffle strategies** — `shuffle-smart` guesses random groups without repeating, `shuffle-foolish` guesses random groups and may repeat them
 - **Automatic puzzle ingestion** — a daily cron fetches new puzzles from NYT and queues all four strategies
 - **Share results** — copy an NYT-style emoji grid to your clipboard
 
@@ -33,7 +34,8 @@ The worker runs as a separate process from the NestJS server (started via `npx t
 ```
 Daily cron (06:00 UTC)
   └─ puzzle-population queue ──► worker ──► fetches NYT puzzle ──► Postgres
-       └─ queues 4 strategy runs ──► strategy-runs queue ──► worker ──► brute-force solve
+       └─ queues strategy runs ──► strategy-runs queue ──► worker ──► solve
+            (4 deterministic + SHUFFLE_SMART_TRIALS shuffle-smart trials + SHUFFLE_FOOLISH_TRIALS shuffle-foolish trials)
 
 Frontend "AI Assist" button
   └─ POST /api/solve ──► backend ──► POST /solve ──► orchestrator ──► GPT-4o
@@ -71,7 +73,7 @@ docker compose up
 | `http://localhost:4000/api/docs` | Swagger API docs |
 | `http://localhost:4000/admin/queues` | Bull Board queue dashboard |
 
-On first startup the worker fetches all historical puzzles and runs all four strategies on each. This can take a while for large backlogs.
+On first startup the worker fetches all historical puzzles and runs all strategies on each (four deterministic runs plus `SHUFFLE_SMART_TRIALS` shuffle-smart trials and `SHUFFLE_FOOLISH_TRIALS` shuffle-foolish trials). This can take a while for large backlogs.
 
 ## Configuration
 
@@ -83,6 +85,8 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `OPENAI_API_KEY` | — | OpenAI API key (orchestrator only) |
 | `PUZZLE_POPULATION_CRON` | `0 6 * * *` | Cron pattern for daily puzzle fetch (UTC by default) |
 | `PUZZLE_POPULATION_TZ` | `UTC` | Timezone for the puzzle population cron |
+| `SHUFFLE_SMART_TRIALS` | `3` | Number of shuffle-smart trials run per puzzle |
+| `SHUFFLE_FOOLISH_TRIALS` | `3` | Number of shuffle-foolish trials run per puzzle |
 | `PORT` | `3001` | Orchestrator listen port |
 
 Database and Redis settings (`DB_HOST`, `DB_PORT`, `REDIS_HOST`, etc.) are configured directly in `docker-compose.yml` — the defaults work out of the box.
@@ -95,7 +99,7 @@ Database and Redis settings (`DB_HOST`, `DB_PORT`, `REDIS_HOST`, etc.) are confi
 | `GET` | `/game/puzzle/:date` | Puzzle for a `YYYY-MM-DD` date |
 | `GET` | `/game/data/latest_date` | Most recent puzzle date |
 | `POST` | `/strategy/queue/:strategyName/:date` | Enqueue a strategy run (or `all`) |
-| `GET` | `/strategy/:strategyName/puzzle/:date` | Strategy run detail + ordered guesses |
+| `GET` | `/strategy/:strategyName/puzzle/:date` | All runs for a strategy — ordered guesses per trial |
 | `POST` | `/api/solve` | AI Assist — proxy to orchestrator |
 | `GET` | `/api/orchestrator/health` | Orchestrator health check |
 
@@ -129,7 +133,7 @@ There is no single "test all" command — run each package separately. Backend t
 │       ├── strategies.ts      # Strategy name constants
 │       └── modules/
 │           ├── game/          # Puzzle CRUD, evaluation, NYT ingestion, cron
-│           ├── strategy/      # Deterministic brute-force strategies
+│           ├── strategy/      # Brute-force + shuffle strategies
 │           └── queue/         # BullMQ queue definitions + Redis config
 ├── frontend/                  # Vite + React 19 SPA
 │   └── src/

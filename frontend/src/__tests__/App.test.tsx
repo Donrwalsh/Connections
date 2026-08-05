@@ -55,7 +55,15 @@ function setupFetch() {
     "fetch",
     vi.fn((url: unknown) => {
       if (String(url).includes("/strategy/")) {
-        return Promise.resolve({ ok: true, json: async () => strategyRun });
+        return Promise.resolve({
+          ok: true,
+          json: async () => [
+            {
+              ...strategyRun,
+              strategyName: String(url).match(/\/strategy\/([^/]+)\//)?.[1],
+            },
+          ],
+        });
       }
       return Promise.resolve({ ok: true, json: async () => puzzleResponse });
     }),

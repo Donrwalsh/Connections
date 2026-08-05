@@ -85,38 +85,63 @@ describe("AppService", () => {
       );
     });
 
-    it("should report unhealthy with the HTTP status on a non-2xx response", async () => {
+    it("should report the retry failure with the HTTP status on a non-2xx response", async () => {
       fetchSpy = jest
         .spyOn(global, "fetch")
         .mockResolvedValue(mockResponse(503, "Service Unavailable", {}));
 
-      const result = await service.solve(["A", "B", "C", "D"]);
+      const result = await service.solve(["A", "B", "C", "D"], [], {
+        maxRetries: 0,
+      });
 
       expect(result).toEqual({
         orchestrator: "unhealthy",
-        error: "HTTP 503 Service Unavailable",
+        error:
+          "AI solve request failed after 1 attempt: HTTP 503 Service Unavailable",
       });
     });
 
-    it("should report unhealthy with the error message on a network failure", async () => {
+    it("should report the retry failure message on a network failure", async () => {
       const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
       fetchSpy = jest
         .spyOn(global, "fetch")
         .mockRejectedValue(new Error("ECONNREFUSED"));
 
-      const result = await service.solve(["A", "B", "C", "D"]);
+      const result = await service.solve(["A", "B", "C", "D"], [], {
+        maxRetries: 0,
+      });
 
       expect(result).toEqual({
         orchestrator: "unhealthy",
-        error: "ECONNREFUSED",
+        error: "AI solve request failed after 1 attempt: ECONNREFUSED",
       });
       expect(logSpy).toHaveBeenCalledTimes(1);
     });
 
-    it("should report 'Unknown error' when the thrown value is not an Error", async () => {
+    it("should wrap a non-Error fetch failure into the retry failure message", async () => {
       fetchSpy = jest.spyOn(global, "fetch").mockRejectedValue("boom");
 
-      const result = await service.solve(["A", "B", "C", "D"]);
+      const result = await service.solve(["A", "B", "C", "D"], [], {
+        maxRetries: 0,
+      });
+
+      expect(result).toEqual({
+        orchestrator: "unhealthy",
+        error: "AI solve request failed after 1 attempt: boom",
+      });
+    });
+
+    it("should report 'Unknown error' when a non-Error is thrown outside the fetch", async () => {
+      fetchSpy = jest.spyOn(global, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: jest.fn().mockRejectedValue("boom"),
+      } as unknown as Response);
+
+      const result = await service.solve(["A", "B", "C", "D"], [], {
+        maxRetries: 0,
+      });
 
       expect(result).toEqual({
         orchestrator: "unhealthy",
@@ -124,7 +149,7 @@ describe("AppService", () => {
       });
     });
 
-    it("should report 'Request timed out' when the request is aborted", async () => {
+    it("should report 'Request timed out' when a single attempt is aborted", async () => {
       jest.useFakeTimers();
       jest.spyOn(console, "log").mockImplementation(() => {});
       fetchSpy = jest.spyOn(global, "fetch").mockImplementation(
@@ -139,14 +164,131 @@ describe("AppService", () => {
           }),
       );
 
-      const resultPromise = service.solve(["A", "B", "C", "D"]);
+      const resultPromise = service.solve(["A", "B", "C", "D"], [], {
+        maxRetries: 0,
+        timeoutMs: 5000,
+      });
       await jest.advanceTimersByTimeAsync(5000);
       const result = await resultPromise;
 
       expect(result).toEqual({
         orchestrator: "unhealthy",
-        error: "Request timed out",
+        error:
+          "AI solve request failed after 1 attempt: Request timed out",
       });
+    });
+
+    it("should retry with exponential backoff and succeed", async () => {
+      jest.useFakeTimers();
+      const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+      fetchSpy = jest
+        .spyOn(global, "fetch")
+        .mockRejectedValueOnce(new Error("ECONNREFUSED"))
+        .mockRejectedValueOnce(new Error("ECONNREFUSED"))
+        .mockResolvedValueOnce(mockResponse(200, "OK", body));
+
+      const resultPromise = service.solve(["A", "B", "C", "D"], [], {
+        maxRetries: 3,
+        initialDelayMs: 1000,
+      });
+
+      await jest.advanceTimersByTimeAsync(10000);
+
+      const result = await resultPromise;
+
+      expect(result).toEqual({ orchestrator: "healthy", data: body });
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("attempt 1 of 4"),
+      );
+      expect(warnSpy).toHaveBeenNthCalledWith(
+        1,
+        expect.stringContaining("Retrying in 1000ms"),
+      );
+      expect(warnSpy).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining("Retrying in 2000ms"),
+      );
+    });
+
+    it("should retry on non-2xx responses and succeed", async () => {
+      jest.useFakeTimers();
+      fetchSpy = jest
+        .spyOn(global, "fetch")
+        .mockResolvedValueOnce(mockResponse(500, "Internal Server Error", {}))
+        .mockResolvedValueOnce(mockResponse(200, "OK", body));
+
+      const resultPromise = service.solve(["A", "B", "C", "D"], [], {
+        maxRetries: 3,
+        initialDelayMs: 1000,
+      });
+
+      await jest.advanceTimersByTimeAsync(10000);
+
+      const result = await resultPromise;
+
+      expect(result).toEqual({ orchestrator: "healthy", data: body });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("should fail after all retries are exhausted with attempt count and last error", async () => {
+      jest.useFakeTimers();
+      jest.spyOn(console, "warn").mockImplementation(() => {});
+      fetchSpy = jest
+        .spyOn(global, "fetch")
+        .mockRejectedValue(new Error("ECONNREFUSED"));
+
+      const resultPromise = service.solve(["A", "B", "C", "D"], [], {
+        maxRetries: 2,
+        initialDelayMs: 1000,
+      });
+
+      await jest.advanceTimersByTimeAsync(10000);
+
+      const result = await resultPromise;
+
+      expect(result).toEqual({
+        orchestrator: "unhealthy",
+        error: "AI solve request failed after 3 attempts: ECONNREFUSED",
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+    });
+
+    it("should give the first attempt a longer timeout than subsequent attempts", async () => {
+      jest.useFakeTimers();
+      jest.spyOn(console, "warn").mockImplementation(() => {});
+      fetchSpy = jest.spyOn(global, "fetch").mockImplementation(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            const signal = (init as { signal: AbortSignal }).signal;
+            signal.addEventListener("abort", () => {
+              const err = new Error("The operation was aborted.");
+              err.name = "AbortError";
+              reject(err);
+            });
+          }),
+      );
+
+      const resultPromise = service.solve(["A", "B", "C", "D"], [], {
+        maxRetries: 1,
+      });
+
+      // First-attempt timeout is 40000ms — the request is still pending at 5s.
+      await jest.advanceTimersByTimeAsync(5000);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      // Cover the remaining first-attempt timeout (40000ms), the backoff,
+      // and the shorter 15000ms subsequent-attempt timeout in one window.
+      await jest.advanceTimersByTimeAsync(100000);
+
+      const result = await resultPromise;
+
+      expect(result).toEqual({
+        orchestrator: "unhealthy",
+        error:
+          "AI solve request failed after 2 attempts: Request timed out",
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
     });
   });
 

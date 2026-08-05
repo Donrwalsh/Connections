@@ -32,6 +32,9 @@ export function Game({ puzzle }: GameProps) {
   } = useConnectionsGame(puzzle.categories, initialWords);
 
   const [modalDismissed, setModalDismissed] = useState(false);
+  const [aiStatus, setAiStatus] = useState<"loading" | "retrying" | "idle">(
+    "idle",
+  );
 
   useEffect(() => {
     if (!state.feedback) return;
@@ -49,11 +52,13 @@ export function Game({ puzzle }: GameProps) {
   useEffect(() => {
     if (!state.loading) return;
 
+    setAiStatus("loading");
+    // The backend retries the AI call with backoff (worst case ~85s), so we
+    // wait for its final answer. If nothing has resolved after 2s we assume
+    // a retry is in flight and surface that in the status message.
+    const retryNoticeTimer = setTimeout(() => setAiStatus("retrying"), 2000);
+
     const controller = new AbortController();
-    // Backend has its own 5s timeout calling the orchestrator; give it a
-    // little headroom before we give up on the whole round trip and show
-    // our own timeout message instead of spinning forever.
-    const timeoutId = setTimeout(() => controller.abort("timeout"), 8000);
 
     async function fetchAiSolve() {
       try {
@@ -96,21 +101,20 @@ export function Game({ puzzle }: GameProps) {
       } catch (err) {
         const error = err as Error;
         if (error.name === "AbortError") {
-          if (controller.signal.reason === "timeout") {
-            aiSolveError("AI Assist timed out. Please try again.");
-          }
-          // Otherwise this is the cleanup abort from unmount/dep change —
-          // not a real failure, so stay silent as before.
+          // Cleanup abort from unmount/dep change — not a real failure, so
+          // stay silent as before.
           return;
         }
         aiSolveError(error.message);
+      } finally {
+        setAiStatus("idle");
       }
     }
 
     fetchAiSolve();
 
     return () => {
-      clearTimeout(timeoutId);
+      clearTimeout(retryNoticeTimer);
       controller.abort();
     };
   }, [
@@ -171,6 +175,12 @@ export function Game({ puzzle }: GameProps) {
             Submit
           </button>
         </div>
+      )}
+
+      {state.loading && aiStatus === "retrying" && (
+        <p className="ai-status" role="status">
+          Taking longer than expected — retrying...
+        </p>
       )}
 
       {state.error && (

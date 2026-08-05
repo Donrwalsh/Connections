@@ -29,6 +29,7 @@ CREATE TABLE "StrategyRun" (
   "id" INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   "puzzleId" INT NOT NULL REFERENCES "Puzzle"("id") ON DELETE CASCADE,
   "strategyName" VARCHAR NOT NULL,
+  "trialNumber" INT NOT NULL DEFAULT 0,
   "status" strategy_run_status_enum NOT NULL DEFAULT 'running',
   "availableWords" JSONB NOT NULL,
   "currentCombination" JSONB NOT NULL,
@@ -36,7 +37,7 @@ CREATE TABLE "StrategyRun" (
   "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "finishedAt" TIMESTAMP WITH TIME ZONE NULL,
 
-  CONSTRAINT "UQ_StrategyRun_puzzle_strategyName" UNIQUE ("puzzleId", "strategyName")
+  CONSTRAINT "UQ_StrategyRun_puzzle_strategyName_trialNumber" UNIQUE ("puzzleId", "strategyName", "trialNumber")
 );
 
 CREATE TYPE guess_result_enum AS ENUM (

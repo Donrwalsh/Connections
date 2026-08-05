@@ -23,7 +23,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', or 'all'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or 'all'",
     example: "all",
   })
   @ApiParam({
@@ -55,7 +55,7 @@ export class StrategyController {
     if (isAll) {
       await Promise.all(
         SUPPORTED_STRATEGIES.map((strat) =>
-          this.strategyService.triggerRun(puzzleId, strat, date),
+          this.strategyService.triggerStrategyRuns(puzzleId, strat, date),
         ),
       );
 
@@ -67,10 +67,10 @@ export class StrategyController {
       };
     }
 
-    await this.strategyService.triggerRun(puzzleId, strategyName, date);
+    await this.strategyService.triggerStrategyRuns(puzzleId, strategyName, date);
 
     return {
-      message: `Job queued for strategy '${strategyName}' on puzzle date ${date}`,
+      message: `Jobs queued for strategy '${strategyName}' on puzzle date ${date}`,
       puzzleId,
       date,
       strategyName,
@@ -82,7 +82,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', or 'reverse-order'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', or 'shuffle-foolish'",
     example: "alphabetical",
   })
   @ApiParam({
@@ -91,7 +91,7 @@ export class StrategyController {
     description: "Puzzle date in YYYY-MM-DD format",
     example: "2023-08-01",
   })
-  async getRunForPuzzle(
+  async getRunsForPuzzle(
     @Param("strategyName") strategyName: string,
     @Param("date") date: string,
   ) {
@@ -101,6 +101,6 @@ export class StrategyController {
       );
     }
 
-    return this.strategyService.getRunDetail(date, strategyName);
+    return this.strategyService.getRunsForPuzzle(date, strategyName);
   }
 }
