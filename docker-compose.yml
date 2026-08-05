@@ -14,6 +14,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mydb"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   orchestrator:
     build: ./orchestrator
@@ -42,10 +47,27 @@ services:
     image: redis:7-alpine
     container_name: redis
     restart: unless-stopped
+    # Persist jobs across restarts and cap memory. allkeys-lru is safe here
+    # because this Redis instance only brokers BullMQ queues, whose data is
+    # regenerable — without a bound it can grow unbounded under heavy
+    # strategy-run loads.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - "256mb"
+      - --maxmemory-policy
+      - allkeys-lru
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   backend:
     build: ./backend
@@ -67,8 +89,10 @@ services:
     ports:
       - "4000:4000"
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - ./backend/src:/app/src
       - ./backend/package.json:/app/package.json
@@ -113,9 +137,12 @@ services:
       SHUFFLE_FOOLISH_TRIALS: ${SHUFFLE_FOOLISH_TRIALS:-3}
       CHOKIDAR_USEPOLLING: "true"
     depends_on:
-      - db
-      - redis
-      - orchestrator
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      orchestrator:
+        condition: service_started
     volumes:
       - ./backend/src:/app/src
       - ./backend/package.json:/app/package.json
@@ -144,19 +171,19 @@ services:
               count: all
               capabilities: [gpu]
 
-  ollama-init:
-    image: curlimages/curl:latest
-    container_name: ollama_init
-    depends_on:
-      ollama:
-        condition: service_healthy
-    environment:
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
-    entrypoint: >
-      sh -c "
-      until curl -s http://ollama:11434 > /dev/null; do sleep 1; done &&
-      curl -X POST http://ollama:11434/api/pull -d '{\"name\": \"'\"$$OLLAMA_MODEL\"'\"}'
-      "
+  # ollama-init:
+  #   image: curlimages/curl:latest
+  #   container_name: ollama_init
+  #   depends_on:
+  #     ollama:
+  #       condition: service_healthy
+  #   environment:
+  #     OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+  #   entrypoint: >
+  #     sh -c "
+  #     until curl -s http://ollama:11434 > /dev/null; do sleep 1; done &&
+  #     curl -X POST http://ollama:11434/api/pull -d '{\"name\": \"'\"$$OLLAMA_MODEL\"'\"}'
+  #     "
 
 volumes:
   postgres_data:

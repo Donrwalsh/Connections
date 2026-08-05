@@ -44,13 +44,7 @@ export class StrategyController {
       );
     }
 
-    if (!this.gameService.isValidYYYYMMDD(date)) {
-      throw new BadRequestException(
-        `Invalid date format: '${date}'. Expected YYYY-MM-DD.`,
-      );
-    }
-
-    const puzzleId = await this.gameService.puzzleDateToId(date);
+    const puzzleId = await this.gameService.resolveDateToPuzzleId(date);
 
     if (isAll) {
       await Promise.all(
@@ -102,5 +96,43 @@ export class StrategyController {
     }
 
     return this.strategyService.getRunsForPuzzle(date, strategyName);
+  }
+
+  @Get(":strategyName/puzzle/:date/run/:trialNumber")
+  @ApiParam({
+    name: "strategyName",
+    type: String,
+    description:
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', or 'shuffle-foolish'",
+    example: "alphabetical",
+  })
+  @ApiParam({
+    name: "date",
+    type: String,
+    description: "Puzzle date in YYYY-MM-DD format",
+    example: "2023-08-01",
+  })
+  @ApiParam({
+    name: "trialNumber",
+    type: Number,
+    description: "Run trial number (0 for deterministic strategies, 1..N for shuffle strategies)",
+    example: 0,
+  })
+  async getRunDetail(
+    @Param("strategyName") strategyName: string,
+    @Param("date") date: string,
+    @Param("trialNumber") trialNumber: string,
+  ) {
+    if (!SUPPORTED_STRATEGIES.includes(strategyName as any)) {
+      throw new BadRequestException(
+        `Invalid strategy: '${strategyName}'. Expected one of: ${SUPPORTED_STRATEGIES.join(", ")}.`,
+      );
+    }
+
+    return this.strategyService.getRunDetail(
+      date,
+      strategyName,
+      Number(trialNumber),
+    );
   }
 }

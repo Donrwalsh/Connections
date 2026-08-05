@@ -1,25 +1,40 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm/dist/common/typeorm.decorators";
-import { Queue } from "bullmq";
 import { Repository } from "typeorm/browser/repository/Repository.js";
-import { STRATEGY_QUEUE } from "../queue/queue.module";
 import { Puzzle } from "./entities/puzzle.entity";
 import { GuessResult } from "../strategy/entities/guess.entity";
+import { NYT_CONNECTIONS_ORIGIN_DATE } from "./constants";
+
+export interface PuzzleCategoryDto {
+  id: string;
+  name: string;
+  difficulty: string;
+  words: string[];
+}
+
+export interface PuzzleResponseDto {
+  date: string;
+  categories: PuzzleCategoryDto[];
+  wordOrder: string[];
+}
 
 @Injectable()
 export class GameService {
+  // Puzzles are inserted once by ingestion and never mutated, so a date-keyed
+  // in-memory cache is safe and needs no invalidation.
+  private static readonly PUZZLE_CACHE_TTL_MS = 86_400_000; // 24h
+  private readonly puzzleCache = new Map<
+    string,
+    { expiresAt: number; value: PuzzleResponseDto }
+  >();
+
   constructor(
-    @Inject(STRATEGY_QUEUE) private queue: Queue,
     @InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>,
   ) {}
-
-  async triggerRun(puzzleId: string, strategyName: string) {
-    await this.queue.add("run-strategy", {
-      puzzleId,
-      strategyName,
-      trialNumber: 0,
-    });
-  }
 
   async puzzleDateToId(date: string): Promise<number> {
     const puzzle = await this.puzzleRepo.findOne({ where: { date } });
@@ -27,6 +42,20 @@ export class GameService {
       throw new NotFoundException(`No puzzle for date: ${date}`);
     }
     return puzzle.id;
+  }
+
+  /**
+   * Validates a YYYY-MM-DD date string and resolves it to a puzzle id,
+   * consolidating the validate-and-resolve dance shared by every strategy
+   * date route.
+   */
+  async resolveDateToPuzzleId(date: string): Promise<number> {
+    if (!this.isValidYYYYMMDD(date)) {
+      throw new BadRequestException(
+        `Invalid date format: '${date}'. Expected YYYY-MM-DD.`,
+      );
+    }
+    return this.puzzleDateToId(date);
   }
 
   async getDatesPuzzle(date: string) {
@@ -41,23 +70,15 @@ export class GameService {
     return await this.getPuzzleByDate(today);
   }
 
-  async evaluateGuess(
-    puzzleId: number,
+  /**
+   * Evaluates a guess against an already-loaded puzzle. The strategy worker
+   * uses this with a puzzle loaded once per run instead of re-fetching the
+   * same immutable puzzle from the DB for every single guess.
+   */
+  static evaluateGuessOnPuzzle(
+    puzzle: Puzzle,
     words: string[],
-  ): Promise<{ result: GuessResult }> {
-    const puzzle = await this.puzzleRepo.findOne({
-      where: { id: puzzleId },
-      relations: {
-        answerGroups: {
-          members: true,
-        },
-      },
-    });
-
-    if (!puzzle) {
-      throw new NotFoundException(`Puzzle with ID ${puzzleId} not found`);
-    }
-
+  ): { result: GuessResult } {
     // Normalize guessed words for case-insensitive matching
     const guessedSet = new Set(words.map((w) => w.trim().toLowerCase()));
     let isOffByOne = false;
@@ -91,10 +112,17 @@ export class GameService {
       .createQueryBuilder("puzzle")
       .select("MAX(puzzle.date)", "latest_date")
       .getRawOne();
-    return result.latest_date;
+    // Empty table: fall back to the NYT Connections origin date so callers
+    // still have a sensible "first" puzzle date to anchor on.
+    return result.latest_date ?? NYT_CONNECTIONS_ORIGIN_DATE;
   }
 
-  async getPuzzleByDate(date: string) {
+  async getPuzzleByDate(date: string): Promise<PuzzleResponseDto> {
+    const cached = this.puzzleCache.get(date);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+
     // 1. Fetch puzzle with eager-loaded relations in a single query
     const puzzle = await this.puzzleRepo.findOne({
       where: { date },
@@ -119,7 +147,7 @@ export class GameService {
     }
 
     // 3. Map relations to your response DTO/format
-    return {
+    const value: PuzzleResponseDto = {
       date: puzzle.date,
       categories: puzzle.answerGroups.map((group) => ({
         id: `cat-${group.id}`,
@@ -132,6 +160,13 @@ export class GameService {
         .sort((a, b) => a.position - b.position)
         .map((m) => m.word),
     };
+
+    this.puzzleCache.set(date, {
+      expiresAt: Date.now() + GameService.PUZZLE_CACHE_TTL_MS,
+      value,
+    });
+
+    return value;
   }
 
   private levelToColor(level: number): string {

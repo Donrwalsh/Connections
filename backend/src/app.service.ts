@@ -22,6 +22,10 @@ const SOLVE_RETRY_OPTIONS: FetchRetryOptions = {
 @Injectable()
 export class AppService {
   private orchestratorUrl = "http://ai_orchestrator:3001";
+  // Shared secret for the backend↔orchestrator boundary. "potato" is only the
+  // local-dev fallback when INTERNAL_API_KEY isn't set; compose overrides it
+  // with the value from the root .env file.
+  private readonly internalApiKey = process.env.INTERNAL_API_KEY ?? "potato";
 
   async solve(
     puzzleWords: string[],
@@ -35,7 +39,7 @@ export class AppService {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-internal-api-key": "potato",
+            "x-internal-api-key": this.internalApiKey,
           },
           body: JSON.stringify({ puzzleWords, priorGuesses }),
         },
@@ -142,7 +146,7 @@ export class AppService {
       const res = await fetch(`${this.orchestratorUrl}/health`, {
         method: "GET",
         headers: {
-          "x-internal-api-key": "potato",
+          "x-internal-api-key": this.internalApiKey,
         },
         signal: controller.signal,
       });

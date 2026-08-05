@@ -23,6 +23,7 @@ export enum GuessSource {
 
 @Entity("Guess")
 @Index(["strategyRunId", "sequenceNumber"]) // Fast ordered replay for a given run
+@Index("IDX_Guess_puzzleId", ["puzzleId"])
 export class Guess {
   @PrimaryGeneratedColumn()
   id: number;

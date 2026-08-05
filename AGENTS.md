@@ -46,7 +46,7 @@ cd orchestrator && npm run typecheck
 - **Test files use `.spec.ts` suffix** and live next to the source files (not in a separate test directory).
 - **Jest config is inline** in `backend/package.json` (not a separate `jest.config.ts`).
 - **Env vars** for the worker/orchestrator: `INTERNAL_API_KEY`, `OPENAI_API_KEY`. These are loaded from the root `.env` file via docker-compose.
-- **Database schema** lives in `database/01-schema.sql`, seed data in `database/02-seed.sql`. Postgres container mounts `database/` as init scripts.
+- **Database schema** lives in `database/01-schema.sql`. Postgres container mounts `database/` as init scripts. There is no seed data — puzzles are populated by the worker's ingestion process.
 
 ## Gotchas
 

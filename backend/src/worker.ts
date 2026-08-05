@@ -48,7 +48,7 @@ async function bootstrap() {
     },
     {
       connection: redisConnection,
-      concurrency: 5,
+      concurrency: 1, // serialize — only one strategy run at a time
     },
   );
 

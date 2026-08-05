@@ -39,14 +39,9 @@ const puzzleResponse = {
 const strategyRun = {
   strategyName: "alphabetical",
   status: "completed",
-  guesses: [
-    {
-      sequenceNumber: 1,
-      words: ["HAIL", "RAIN", "SLEET", "SNOW"],
-      result: "success",
-      guessedAt: "2024-01-15T00:00:00Z",
-    },
-  ],
+  startedAt: "2024-01-15T00:00:00Z",
+  finishedAt: "2024-01-15T00:05:00Z",
+  guessCount: 1,
 };
 
 let mockedParams: { date?: string } = {};

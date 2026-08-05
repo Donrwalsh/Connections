@@ -30,7 +30,7 @@ describe("PuzzleIngestionService", () => {
     createQueryBuilder: jest.Mock;
     transaction: jest.Mock;
   };
-  let mockQueue: { add: jest.Mock };
+  let mockQueue: { add: jest.Mock; addBulk: jest.Mock };
   let mockQuery: {
     select: jest.Mock;
     getRawOne: jest.Mock;
@@ -65,7 +65,10 @@ describe("PuzzleIngestionService", () => {
       getRepository: jest.fn().mockReturnValue(mockRepo),
     };
 
-    mockQueue = { add: jest.fn().mockResolvedValue(undefined) };
+    mockQueue = {
+      add: jest.fn().mockResolvedValue(undefined),
+      addBulk: jest.fn().mockResolvedValue(undefined),
+    };
 
     mockDataSource = {
       createQueryBuilder: jest.fn().mockReturnValue(mockQuery),
@@ -123,31 +126,47 @@ describe("PuzzleIngestionService", () => {
         (s) => s !== "shuffle-smart" && s !== "shuffle-foolish",
       );
       const expectedJobCount = deterministic.length + 5 + 2;
-      expect(mockQueue.add).toHaveBeenCalledTimes(expectedJobCount);
+      expect(mockQueue.addBulk).toHaveBeenCalledTimes(1);
+      const addedJobs = mockQueue.addBulk.mock.calls[0][0] as {
+        name: string;
+        data: {
+          puzzleId: number;
+          strategyName: string;
+          date: string;
+          trialNumber: number;
+        };
+      }[];
+      expect(addedJobs).toHaveLength(expectedJobCount);
       for (const strategyName of deterministic) {
-        expect(mockQueue.add).toHaveBeenCalledWith("run-strategy", {
-          puzzleId: 42,
-          strategyName,
-          date: "2024-01-02",
-          trialNumber: 0,
+        expect(addedJobs).toContainEqual({
+          name: "run-strategy",
+          data: { puzzleId: 42, strategyName, date: "2024-01-02", trialNumber: 0 },
+          opts: { jobId: `run-42-${strategyName}-0` },
         });
       }
-      expect(mockQueue.add).toHaveBeenCalledWith("run-strategy", {
-        puzzleId: 42,
-        strategyName: "shuffle-smart",
-        date: "2024-01-02",
-        trialNumber: 5,
+      expect(addedJobs).toContainEqual({
+        name: "run-strategy",
+        data: {
+          puzzleId: 42,
+          strategyName: "shuffle-smart",
+          date: "2024-01-02",
+          trialNumber: 5,
+        },
+        opts: { jobId: "run-42-shuffle-smart-5" },
       });
-      expect(mockQueue.add).toHaveBeenCalledWith("run-strategy", {
-        puzzleId: 42,
-        strategyName: "shuffle-foolish",
-        date: "2024-01-02",
-        trialNumber: 2,
+      expect(addedJobs).toContainEqual({
+        name: "run-strategy",
+        data: {
+          puzzleId: 42,
+          strategyName: "shuffle-foolish",
+          date: "2024-01-02",
+          trialNumber: 2,
+        },
+        opts: { jobId: "run-42-shuffle-foolish-2" },
       });
     });
 
-    it("should skip known awkward NYT dates without fetching", async () => {
-      mockLatestDate(2024, 11, 11);
+    it("should skip known awkward NYT dates without fetching", async () => {      mockLatestDate(2024, 11, 11);
 
       const fetchSpy = jest
         .spyOn(global, "fetch")
@@ -161,7 +180,7 @@ describe("PuzzleIngestionService", () => {
         expect.stringContaining("2024-12-13"),
         expect.anything(),
       );
-      expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(mockQueue.addBulk).not.toHaveBeenCalled();
     });
 
     it("should not queue strategies when the puzzle already exists", async () => {
@@ -176,7 +195,7 @@ describe("PuzzleIngestionService", () => {
       const result = await service.populateUntilCaughtUp();
 
       expect(result).toEqual({ inserted: 0, upToDate: "2024-01-02" });
-      expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(mockQueue.addBulk).not.toHaveBeenCalled();
     });
   });
 
@@ -266,16 +285,14 @@ describe("PuzzleIngestionService", () => {
       expect(result).toEqual(new Date("2024-06-15"));
     });
 
-    it("should fall back to yesterday when the table is empty", async () => {
+    it("should fall back to the day before the NYT origin date when the table is empty", async () => {
       mockQuery.getRawOne.mockResolvedValueOnce(null);
 
       const result = await (
         service as unknown as { getLatestDate(): Promise<Date> }
       ).getLatestDate();
 
-      const expected = new Date();
-      expected.setDate(expected.getDate() - 1);
-      expect(result).toEqual(expected);
+      expect(result).toEqual(new Date("2023-06-12"));
     });
   });
 

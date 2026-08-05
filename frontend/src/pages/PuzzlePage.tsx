@@ -20,7 +20,9 @@ export function PuzzlePage() {
       ? `${import.meta.env.VITE_API_URL}/game/puzzle/${date}`
       : `${import.meta.env.VITE_API_URL}/game/puzzle/today`;
 
-    fetch(endpoint)
+    const controller = new AbortController();
+
+    fetch(endpoint, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error("Failed to load puzzle data");
         return res.json();
@@ -30,10 +32,13 @@ export function PuzzlePage() {
         setIsLoading(false);
       })
       .catch((err: Error) => {
+        if (err.name === "AbortError") return;
         console.error("Error fetching backend:", err);
         setError(err.message);
         setIsLoading(false);
       });
+
+    return () => controller.abort();
   }, [date]);
 
   if (isLoading) {

@@ -148,8 +148,7 @@ There is no single "test all" command — run each package separately. Backend t
 │       ├── prompt.ts          # Prompt builder
 │       └── types.ts           # Zod schemas (request/response/model output)
 ├── database/
-│   ├── 01-schema.sql          # Tables + enums (Postgres 15)
-│   └── 02-seed.sql            # Initial puzzle (2023-06-12)
+│   └── 01-schema.sql          # Tables + enums (Postgres 15)
 └── docker-compose.yml         # Orchestrates all 5 services + Redis/Postgres
 ```
 

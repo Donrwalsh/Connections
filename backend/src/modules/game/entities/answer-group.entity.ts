@@ -5,11 +5,13 @@ import {
   ManyToOne,
   OneToMany,
   JoinColumn,
+  Index,
 } from "typeorm";
 import { Puzzle } from "./puzzle.entity";
 import { GroupMember } from "./group-member.entity";
 
 @Entity("AnswerGroup")
+@Index("UQ_AnswerGroup_puzzle_level", ["puzzle", "level"], { unique: true })
 export class AnswerGroup {
   @PrimaryGeneratedColumn("identity")
   id!: number;

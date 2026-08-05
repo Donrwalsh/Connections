@@ -5,11 +5,10 @@ import { AnswerGroup } from "./entities/answer-group.entity";
 import { GroupMember } from "./entities/group-member.entity";
 import { InjectDataSource } from "@nestjs/typeorm";
 import { STRATEGY_QUEUE } from "../queue/queue.module";
+import { runStrategyJobId } from "../queue/strategy.queue";
+import { NYT_CONNECTIONS_ORIGIN_DATE } from "./constants";
 import { Queue } from "bullmq";
-import {
-  SUPPORTED_STRATEGIES,
-  strategyTrialNumbers,
-} from "../../strategies";
+import { SUPPORTED_STRATEGIES, strategyTrialNumbers } from "../../strategies";
 
 interface ConnectionsCard {
   content: string;
@@ -78,17 +77,20 @@ export class PuzzleIngestionService {
       if (puzzleId !== null) {
         // Dispatch all strategy runs right after inserting. Shuffle strategies
         // get one job per trial (1..N); deterministic strategies get a single
-        // trial (0).
+        // trial (0). addBulk batches all of them into one Redis round-trip.
+        const jobs = [];
         for (const strategyName of ALL_STRATEGIES) {
           for (const trialNumber of strategyTrialNumbers(strategyName)) {
-            await this.strategyQueue.add("run-strategy", {
-              puzzleId,
-              strategyName,
-              date: formatted,
-              trialNumber,
+            jobs.push({
+              name: "run-strategy",
+              data: { puzzleId, strategyName, date: formatted, trialNumber },
+              opts: {
+                jobId: runStrategyJobId(puzzleId, strategyName, trialNumber),
+              },
             });
           }
         }
+        await this.strategyQueue.addBulk(jobs);
 
         this.logger.log(
           `Queued all strategies (${ALL_STRATEGIES.join(
@@ -118,10 +120,11 @@ export class PuzzleIngestionService {
       .select("MAX(puzzle.date)", "latest")
       .getRawOne();
 
-    // Fall back to "yesterday" if the table is empty so the loop starts today.
+    // Empty table: anchor the backfill one day before the NYT Connections
+    // origin date so the first date the loop fetches is the origin puzzle.
     return result?.latest
       ? new Date(result.latest)
-      : this.addDays(new Date(), -1);
+      : this.addDays(new Date(NYT_CONNECTIONS_ORIGIN_DATE), -1);
   }
 
   private static readonly FETCH_MAX_RETRIES = 5;
@@ -188,7 +191,8 @@ export class PuzzleIngestionService {
   }
 
   private computeBackoff(attempt: number): number {
-    const base = PuzzleIngestionService.FETCH_RETRY_BASE_DELAY_MS * 2 ** attempt;
+    const base =
+      PuzzleIngestionService.FETCH_RETRY_BASE_DELAY_MS * 2 ** attempt;
     return base + Math.floor(Math.random() * base * 0.2); // +0-20% jitter
   }
 

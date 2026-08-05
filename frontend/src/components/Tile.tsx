@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { motion } from "framer-motion";
 
 interface TileProps {
@@ -8,7 +9,7 @@ interface TileProps {
   onToggle: (word: string) => void;
 }
 
-export function Tile({
+function TileBase({
   word,
   isSelected,
   isConfirmed,
@@ -48,3 +49,8 @@ export function Tile({
     </motion.button>
   );
 }
+
+// With a stable onToggle (from useConnectionsGame) and memoized Tile, toggling
+// a word only re-renders the affected tile instead of all 16 on every
+// selection change.
+export const Tile = memo(TileBase);

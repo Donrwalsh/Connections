@@ -7,6 +7,13 @@ const strategyRun = {
   strategyName: "alphabetical",
   trialNumber: 0,
   status: "completed",
+  startedAt: "2024-01-15T00:00:00Z",
+  finishedAt: "2024-01-15T00:05:00Z",
+  guessCount: 3,
+};
+
+const strategyRunDetail = {
+  ...strategyRun,
   guesses: [
     {
       sequenceNumber: 1,
@@ -35,6 +42,24 @@ const shuffleSmartRuns = [
     strategyName: "shuffle-smart",
     trialNumber: 1,
     status: "completed",
+    startedAt: "2024-01-15T00:00:00Z",
+    finishedAt: "2024-01-15T00:05:00Z",
+    guessCount: 2,
+  },
+  {
+    id: 12,
+    strategyName: "shuffle-smart",
+    trialNumber: 2,
+    status: "failed",
+    startedAt: "2024-01-15T00:00:00Z",
+    finishedAt: "2024-01-15T00:05:00Z",
+    guessCount: 1,
+  },
+];
+
+const shuffleSmartDetails: Record<number, unknown> = {
+  1: {
+    ...shuffleSmartRuns[0],
     guesses: [
       {
         sequenceNumber: 1,
@@ -50,11 +75,8 @@ const shuffleSmartRuns = [
       },
     ],
   },
-  {
-    id: 12,
-    strategyName: "shuffle-smart",
-    trialNumber: 2,
-    status: "failed",
+  2: {
+    ...shuffleSmartRuns[1],
     guesses: [
       {
         sequenceNumber: 1,
@@ -64,18 +86,58 @@ const shuffleSmartRuns = [
       },
     ],
   },
-];
+};
+
+const shuffleFoolishDetail = {
+  id: 21,
+  strategyName: "shuffle-foolish",
+  trialNumber: 1,
+  status: "completed",
+  startedAt: "2024-01-15T00:00:00Z",
+  finishedAt: "2024-01-15T00:05:00Z",
+  guessCount: 2,
+  guesses: [
+    {
+      sequenceNumber: 1,
+      words: ["A", "B", "C", "D"],
+      result: "failure",
+      guessedAt: "2024-01-15T00:00:00Z",
+    },
+    {
+      sequenceNumber: 2,
+      words: ["A", "B", "C", "D"],
+      result: "success",
+      guessedAt: "2024-01-15T00:00:00Z",
+    },
+  ],
+};
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// The list endpoint returns slim runs (no guess arrays); the detail endpoint
+// (/run/:trialNumber) returns the full guess list on demand.
 function setupFetch() {
   vi.stubGlobal(
     "fetch",
     vi.fn((url: unknown) => {
+      const urlStr = String(url);
       const strategyId =
-        String(url).match(/\/strategy\/([^/]+)\//)?.[1] ?? "alphabetical";
+        urlStr.match(/\/strategy\/([^/]+)\//)?.[1] ?? "alphabetical";
+
+      const detail = urlStr.match(/\/run\/(\d+)$/);
+      if (detail) {
+        const trialNumber = Number(detail[1]);
+        const body =
+          strategyId === "shuffle-smart"
+            ? shuffleSmartDetails[trialNumber]
+            : strategyId === "shuffle-foolish"
+              ? shuffleFoolishDetail
+              : strategyRunDetail;
+        return Promise.resolve({ ok: true, json: async () => body });
+      }
+
       const runs =
         strategyId === "shuffle-smart" ? shuffleSmartRuns : [strategyRun];
       return Promise.resolve({
@@ -123,9 +185,11 @@ describe("GuessSequencePanel Component", () => {
     );
 
     expect(
-      await screen.findByText("Strategy: Alphabetical · Status: completed · 3 guesses"),
+      await screen.findByText(
+        "Strategy: Alphabetical · Status: completed · 3 guesses",
+      ),
     ).toBeInTheDocument();
-    expect(screen.getByText("A, B, C, D")).toBeInTheDocument();
+    expect(await screen.findByText("A, B, C, D")).toBeInTheDocument();
     expect(screen.getByText("✓ Correct")).toBeInTheDocument();
     expect(screen.getByText("One away")).toBeInTheDocument();
     expect(screen.getByText("✗ Incorrect")).toBeInTheDocument();
@@ -220,7 +284,7 @@ describe("GuessSequencePanel Component", () => {
         "Strategy: Shuffle Smart · Trial #1 · Status: completed · 2 guesses",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("W, X, Y, Z")).toBeInTheDocument();
+    expect(await screen.findByText("W, X, Y, Z")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Trial #2 · failed/ }));
 
@@ -229,7 +293,7 @@ describe("GuessSequencePanel Component", () => {
         "Strategy: Shuffle Smart · Trial #2 · Status: failed · 1 guess",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("M, N, O, P")).toBeInTheDocument();
+    expect(await screen.findByText("M, N, O, P")).toBeInTheDocument();
     expect(screen.queryByText("W, X, Y, Z")).not.toBeInTheDocument();
   });
 
@@ -237,9 +301,18 @@ describe("GuessSequencePanel Component", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((url: unknown) => {
+        const urlStr = String(url);
         const strategyId =
-          String(url).match(/\/strategy\/([^/]+)\//)?.[1] ?? "alphabetical";
-        if (strategyId !== "shuffle-foolish") return Promise.resolve({ ok: true, json: async () => [] });
+          urlStr.match(/\/strategy\/([^/]+)\//)?.[1] ?? "alphabetical";
+        if (urlStr.includes("/run/")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => shuffleFoolishDetail,
+          });
+        }
+        if (strategyId !== "shuffle-foolish") {
+          return Promise.resolve({ ok: true, json: async () => [] });
+        }
         return Promise.resolve({
           ok: true,
           json: async () => [
@@ -248,20 +321,7 @@ describe("GuessSequencePanel Component", () => {
               strategyName: "shuffle-foolish",
               trialNumber: 1,
               status: "completed",
-              guesses: [
-                {
-                  sequenceNumber: 1,
-                  words: ["A", "B", "C", "D"],
-                  result: "failure",
-                  guessedAt: "2024-01-15T00:00:00Z",
-                },
-                {
-                  sequenceNumber: 2,
-                  words: ["A", "B", "C", "D"],
-                  result: "success",
-                  guessedAt: "2024-01-15T00:00:00Z",
-                },
-              ],
+              guessCount: 2,
             },
           ],
         });
@@ -281,7 +341,7 @@ describe("GuessSequencePanel Component", () => {
         "Strategy: Shuffle Foolish · Status: completed · 2 guesses",
       ),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("A, B, C, D")).toHaveLength(2);
+    expect(await screen.findAllByText("A, B, C, D")).toHaveLength(2);
     expect(screen.getAllByText("✗ Incorrect")).toHaveLength(1);
   });
 

@@ -27,7 +27,22 @@ export function useConnectionsGame(
   );
 
   // Stable identities so effects that depend on them don't re-run on every
-  // render (e.g. Game.tsx's AI solve effect keyed on state.loading).
+  // render (e.g. Game.tsx's AI solve effect keyed on state.loading), and so
+  // memoized <Tile/>s skip re-renders when only unrelated state changes.
+  const toggleWord = useCallback(
+    (word: string) => dispatch({ type: "TOGGLE_WORD", word }),
+    [],
+  );
+  const submitGuess = useCallback(() => dispatch({ type: "SUBMIT_GUESS" }), []);
+  const deselectAll = useCallback(() => dispatch({ type: "DESELECT_ALL" }), []);
+  const clearFeedback = useCallback(
+    () => dispatch({ type: "CLEAR_FEEDBACK" }),
+    [],
+  );
+  const confirmSolve = useCallback(
+    () => dispatch({ type: "CONFIRM_SOLVE" }),
+    [],
+  );
   const aiSolve = useCallback(() => dispatch({ type: "AI_SOLVE_START" }), []);
   const aiSolveSuccess = useCallback(
     (solution: AiSolveResponse) =>
@@ -38,18 +53,23 @@ export function useConnectionsGame(
     (error: string) => dispatch({ type: "AI_SOLVE_FAILURE", payload: error }),
     [],
   );
+  // Recreated only when the board changes, so Shuffle always shuffles the
+  // words the player currently sees.
+  const shuffleBoard = useCallback(
+    () => dispatch({ type: "SHUFFLE", words: shuffle(state.remainingWords) }),
+    [state.remainingWords],
+  );
 
   return {
     state,
-    toggleWord: (word: string) => dispatch({ type: "TOGGLE_WORD", word }),
-    submitGuess: () => dispatch({ type: "SUBMIT_GUESS" }),
-    deselectAll: () => dispatch({ type: "DESELECT_ALL" }),
-    clearFeedback: () => dispatch({ type: "CLEAR_FEEDBACK" }),
-    shuffleBoard: () =>
-      dispatch({ type: "SHUFFLE", words: shuffle(state.remainingWords) }),
+    toggleWord,
+    submitGuess,
+    deselectAll,
+    clearFeedback,
+    shuffleBoard,
     aiSolve,
     aiSolveSuccess,
     aiSolveError,
-    confirmSolve: () => dispatch({ type: "CONFIRM_SOLVE" }),
+    confirmSolve,
   };
 }

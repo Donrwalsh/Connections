@@ -1,24 +1,18 @@
 import { Test, TestingModule } from "@nestjs/testing";
-import { NotFoundException } from "@nestjs/common";
+import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { getRepositoryToken } from "@nestjs/typeorm";
 import { GameService } from "./game.service";
 import { Puzzle } from "./entities/puzzle.entity";
-import { STRATEGY_QUEUE } from "../queue/queue.module";
 import { GuessResult } from "../strategy/entities/guess.entity";
 
 describe("GameService", () => {
   let service: GameService;
-  let mockQueue: { add: jest.Mock };
   let mockPuzzleRepo: {
     findOne: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
 
   beforeEach(async () => {
-    mockQueue = {
-      add: jest.fn(),
-    };
-
     mockPuzzleRepo = {
       findOne: jest.fn(),
       createQueryBuilder: jest.fn(),
@@ -27,10 +21,6 @@ describe("GameService", () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         GameService,
-        {
-          provide: STRATEGY_QUEUE,
-          useValue: mockQueue,
-        },
         {
           // Inject TypeORM token for Puzzle entity
           provide: getRepositoryToken(Puzzle),
@@ -207,15 +197,23 @@ describe("GameService", () => {
     });
   });
 
-  describe("triggerRun", () => {
-    it("should enqueue a run-strategy job with the puzzle id and strategy", async () => {
-      await service.triggerRun("42", "alphabetical");
+  describe("resolveDateToPuzzleId", () => {
+    it("should throw BadRequestException when the date format is invalid", async () => {
+      jest.spyOn(service, "isValidYYYYMMDD").mockReturnValueOnce(false);
 
-      expect(mockQueue.add).toHaveBeenCalledWith("run-strategy", {
-        puzzleId: "42",
-        strategyName: "alphabetical",
-        trialNumber: 0,
-      });
+      await expect(
+        service.resolveDateToPuzzleId("2024-13-40"),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("should delegate to puzzleDateToId for a valid date", async () => {
+      jest.spyOn(service, "isValidYYYYMMDD").mockReturnValueOnce(true);
+      jest.spyOn(service, "puzzleDateToId").mockResolvedValueOnce(42);
+
+      await expect(service.resolveDateToPuzzleId("2024-01-02")).resolves.toBe(
+        42,
+      );
+      expect(service.puzzleDateToId).toHaveBeenCalledWith("2024-01-02");
     });
   });
 
@@ -238,75 +236,60 @@ describe("GameService", () => {
     });
   });
 
-  describe("evaluateGuess", () => {
-    const puzzleWithGroups = (answerGroups: unknown[]) => ({
-      id: 1,
-      answerGroups,
+  describe("evaluateGuessOnPuzzle", () => {
+    const puzzle = {
+      answerGroups: [
+        {
+          members: [
+            { word: "APPLE" },
+            { word: "BANANA" },
+            { word: "CHERRY" },
+            { word: "DATE" },
+          ],
+        },
+      ],
+    } as any;
+
+    it("should return SUCCESS when the guess exactly matches a group", () => {
+      expect(
+        GameService.evaluateGuessOnPuzzle(
+          puzzle,
+          [" apple ", "BANANA", "cherry", "date"],
+        ),
+      ).toEqual({ result: GuessResult.SUCCESS });
     });
 
-    it("should return SUCCESS when the guess exactly matches a group", async () => {
-      mockPuzzleRepo.findOne.mockResolvedValueOnce(
-        puzzleWithGroups([
-          {
-            members: [
-              { word: "APPLE" },
-              { word: "BANANA" },
-              { word: "CHERRY" },
-              { word: "DATE" },
-            ],
-          },
+    it("should return OFF_BY_ONE when exactly 3 words match a group", () => {
+      expect(
+        GameService.evaluateGuessOnPuzzle(puzzle, [
+          "apple",
+          "banana",
+          "cherry",
+          "fig",
         ]),
-      );
-
-      await expect(
-        service.evaluateGuess(1, [" apple ", "BANANA", "cherry", "date"]),
-      ).resolves.toEqual({ result: GuessResult.SUCCESS });
+      ).toEqual({ result: GuessResult.OFF_BY_ONE });
     });
 
-    it("should return OFF_BY_ONE when exactly 3 words match a group", async () => {
-      mockPuzzleRepo.findOne.mockResolvedValueOnce(
-        puzzleWithGroups([
-          {
-            members: [
-              { word: "APPLE" },
-              { word: "BANANA" },
-              { word: "CHERRY" },
-              { word: "DATE" },
-            ],
-          },
+    it("should return FAILURE when no group is matched or nearly matched", () => {
+      expect(
+        GameService.evaluateGuessOnPuzzle(puzzle, [
+          "fig",
+          "grape",
+          "honey",
+          "kiwi",
         ]),
-      );
-
-      await expect(
-        service.evaluateGuess(1, ["apple", "banana", "cherry", "fig"]),
-      ).resolves.toEqual({ result: GuessResult.OFF_BY_ONE });
+      ).toEqual({ result: GuessResult.FAILURE });
     });
 
-    it("should return FAILURE when no group is matched or nearly matched", async () => {
-      mockPuzzleRepo.findOne.mockResolvedValueOnce(
-        puzzleWithGroups([
-          {
-            members: [
-              { word: "APPLE" },
-              { word: "BANANA" },
-              { word: "CHERRY" },
-              { word: "DATE" },
-            ],
-          },
+    it("should return FAILURE for a puzzle with no answer groups", () => {
+      expect(
+        GameService.evaluateGuessOnPuzzle({ answerGroups: [] } as any, [
+          "apple",
+          "banana",
+          "cherry",
+          "date",
         ]),
-      );
-
-      await expect(
-        service.evaluateGuess(1, ["fig", "grape", "honey", "kiwi"]),
-      ).resolves.toEqual({ result: GuessResult.FAILURE });
-    });
-
-    it("should throw NotFoundException when the puzzle does not exist", async () => {
-      mockPuzzleRepo.findOne.mockResolvedValueOnce(null);
-
-      await expect(
-        service.evaluateGuess(999, ["apple", "banana", "cherry", "date"]),
-      ).rejects.toThrow(new NotFoundException("Puzzle with ID 999 not found"));
+      ).toEqual({ result: GuessResult.FAILURE });
     });
   });
 
@@ -321,6 +304,17 @@ describe("GameService", () => {
 
       await expect(service.getLatestDate()).resolves.toBe("2024-01-02");
       expect(mockPuzzleRepo.createQueryBuilder).toHaveBeenCalledWith("puzzle");
+    });
+
+    it("should fall back to the NYT origin date when no puzzles exist", async () => {
+      mockPuzzleRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValueOnce({
+          latest_date: null,
+        }),
+      });
+
+      await expect(service.getLatestDate()).resolves.toBe("2023-06-13");
     });
   });
 

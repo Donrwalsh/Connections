@@ -12,12 +12,16 @@ CREATE TABLE "AnswerGroup" (
     "group_name" TEXT NOT NULL
 );
 
+CREATE UNIQUE INDEX "UQ_AnswerGroup_puzzle_level" ON "AnswerGroup" ("puzzle_id", "level");
+
 CREATE TABLE "GroupMember" (
     "id" INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     "group_id" INT NOT NULL REFERENCES "AnswerGroup"("id"),
     "word" TEXT NOT NULL,
     "position" INT NOT NULL
 );
+
+CREATE UNIQUE INDEX "UQ_GroupMember_group_word" ON "GroupMember" ("group_id", "word");
 
 CREATE TYPE strategy_run_status_enum AS ENUM (
   'running',
@@ -62,5 +66,6 @@ CREATE TABLE "Guess" (
   "guessedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE INDEX "IDX_Guess_puzzleId" ON "Guess" ("puzzleId");
 CREATE INDEX "IDX_Guess_strategyRun_sequenceNumber" 
-  ON "Guess" ("strategyRunId", "sequenceNumber");
+  ON "Guess" ("strategyRunId", "sequenceNumber") INCLUDE ("words");

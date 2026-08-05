@@ -4,10 +4,12 @@ import {
   Column,
   ManyToOne,
   JoinColumn,
+  Index,
 } from "typeorm";
 import { AnswerGroup } from "./answer-group.entity";
 
 @Entity("GroupMember")
+@Index("UQ_GroupMember_group_word", ["group", "word"], { unique: true })
 export class GroupMember {
   @PrimaryGeneratedColumn("identity")
   id!: number;

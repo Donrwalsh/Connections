@@ -12,12 +12,16 @@ import {
 } from "./combinatorics";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { GameService } from "../game/game.service";
-import { StrategyRunDetailDto } from "./dto/strategy.dto";
+import {
+  StrategyRunDetailDto,
+  StrategyRunListItemDto,
+} from "./dto/strategy.dto";
 import {
   SHUFFLE_SMART,
   SHUFFLE_FOOLISH,
   strategyTrialNumbers,
 } from "../../strategies";
+import { runStrategyJobId } from "../queue/strategy.queue";
 
 const GROUP_SIZE = 4;
 const BATCH_SIZE = 50;
@@ -45,6 +49,10 @@ export class StrategyService {
       strategyName,
       date,
       trialNumber,
+    }, {
+      // Deterministic id so duplicate enqueues of the same run collapse to a
+      // single job instead of racing to create two runs.
+      jobId: runStrategyJobId(puzzleId, strategyName, trialNumber),
     });
   }
 
@@ -57,9 +65,14 @@ export class StrategyService {
     strategyName: string,
     date: string,
   ) {
-    for (const trialNumber of strategyTrialNumbers(strategyName)) {
-      await this.triggerRun(puzzleId, strategyName, date, trialNumber);
-    }
+    const trialNumbers = strategyTrialNumbers(strategyName);
+    await this.queue.addBulk(
+      trialNumbers.map((trialNumber) => ({
+        name: "run-strategy",
+        data: { puzzleId, strategyName, date, trialNumber },
+        opts: { jobId: runStrategyJobId(puzzleId, strategyName, trialNumber) },
+      })),
+    );
   }
 
   async getRunDetail(
@@ -67,13 +80,7 @@ export class StrategyService {
     strategyName: string,
     trialNumber = 0,
   ): Promise<StrategyRunDetailDto> {
-    if (!this.gameService.isValidYYYYMMDD(date)) {
-      throw new BadRequestException(
-        `Invalid date format: '${date}'. Expected YYYY-MM-DD.`,
-      );
-    }
-
-    const puzzleId = await this.gameService.puzzleDateToId(date);
+    const puzzleId = await this.gameService.resolveDateToPuzzleId(date);
 
     const run = await this.strategyRunRepo.findOne({
       where: { puzzleId, strategyName, trialNumber },
@@ -88,37 +95,68 @@ export class StrategyService {
     const guesses = await this.guessRepo.find({
       where: { strategyRunId: run.id },
       order: { sequenceNumber: "ASC" },
+      // Restrict to the columns the detail DTO uses so the query can be
+      // served as an index-only scan off the covering index.
+      select: {
+        strategyRunId: true,
+        sequenceNumber: true,
+        words: true,
+        result: true,
+        guessedAt: true,
+      },
     });
 
     return this.mapRunDetail(run, guesses);
   }
 
+  /**
+   * Returns run metadata plus a guess count for every trial of a strategy on
+   * a puzzle — deliberately WITHOUT the full guess arrays. The list drives
+   * the strategy buttons in the UI; full guesses are fetched per-run via
+   * getRunDetail, which keeps responses small (a deterministic run can hold
+   * ~2,400 guesses).
+   */
   async getRunsForPuzzle(
     date: string,
     strategyName: string,
-  ): Promise<StrategyRunDetailDto[]> {
-    if (!this.gameService.isValidYYYYMMDD(date)) {
-      throw new BadRequestException(
-        `Invalid date format: '${date}'. Expected YYYY-MM-DD.`,
-      );
-    }
-
-    const puzzleId = await this.gameService.puzzleDateToId(date);
+  ): Promise<StrategyRunListItemDto[]> {
+    const puzzleId = await this.gameService.resolveDateToPuzzleId(date);
 
     const runs = await this.strategyRunRepo.find({
       where: { puzzleId, strategyName },
       order: { trialNumber: "ASC" },
     });
 
-    const details: StrategyRunDetailDto[] = [];
-    for (const run of runs) {
-      const guesses = await this.guessRepo.find({
-        where: { strategyRunId: run.id },
-        order: { sequenceNumber: "ASC" },
-      });
-      details.push(this.mapRunDetail(run, guesses));
+    if (runs.length === 0) {
+      return [];
     }
-    return details;
+
+    // Single grouped-count query instead of one COUNT per run (and without
+    // loading every guess row just to count them).
+    const countRows = await this.guessRepo
+      .createQueryBuilder("guess")
+      .select("guess.strategyRunId", "strategyRunId")
+      .addSelect("COUNT(guess.id)", "count")
+      .where("guess.strategyRunId IN (:...ids)", {
+        ids: runs.map((run) => run.id),
+      })
+      .groupBy("guess.strategyRunId")
+      .getRawMany<{ strategyRunId: number; count: string }>();
+
+    const countByRun = new Map<number, number>();
+    for (const row of countRows) {
+      countByRun.set(Number(row.strategyRunId), Number(row.count));
+    }
+
+    return runs.map((run) => ({
+      id: run.id,
+      strategyName: run.strategyName,
+      trialNumber: run.trialNumber,
+      status: run.status,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+      guessCount: countByRun.get(run.id) ?? 0,
+    }));
   }
 
   private mapRunDetail(
@@ -146,7 +184,14 @@ export class StrategyService {
     strategyName: string,
     trialNumber = 0,
   ) {
-    const run = await this.loadOrCreateRun(puzzleId, strategyName, trialNumber);
+    // loadOrCreateRun loads the (immutable) puzzle alongside the run so the
+    // loop below evaluates guesses in memory without a full DB reload per
+    // guess (~2,400 queries per worst-case deterministic run).
+    const { run, puzzle } = await this.loadOrCreateRun(
+      puzzleId,
+      strategyName,
+      trialNumber,
+    );
 
     if (run.status === StrategyRunStatus.COMPLETED) {
       return {
@@ -155,20 +200,23 @@ export class StrategyService {
       };
     }
 
-    let guessCount = await this.countGuesses(run.id);
-    const pendingGuesses: Partial<Guess>[] = [];
-
-    // Shuffle-smart picks groups at random, so it re-rolls until it finds a
-    // group it hasn't already proposed. Rebuild the tried set from guesses
-    // that were flushed to the DB (e.g. after a worker restart mid-run) so a
-    // resumed run still avoids duplicates. Shuffle-foolish deliberately does
-    // not deduplicate — it may guess the same group more than once.
+    let guessCount: number;
     const triedGroups = new Set<string>();
     if (strategyName === SHUFFLE_SMART) {
-      for (const key of await this.loadTriedGroups(run.id)) {
-        triedGroups.add(key);
+      // Shuffle-smart re-rolls until it finds a group it hasn't already
+      // proposed, so rebuild the tried set from guesses flushed to the DB
+      // (e.g. after a worker restart mid-run). The single query below doubles
+      // as the guess count. Shuffle-foolish deliberately does not deduplicate.
+      const priorGuesses = await this.loadGuessesForRun(run.id);
+      guessCount = priorGuesses.length;
+      for (const guess of priorGuesses) {
+        triedGroups.add(this.groupKey(guess.words));
       }
+    } else {
+      guessCount = await this.countGuesses(run.id);
     }
+
+    const pendingGuesses: Partial<Guess>[] = [];
 
     while (true) {
       let words: string[] = [];
@@ -206,10 +254,12 @@ export class StrategyService {
       }
 
       if (!noMoreGroups) {
-        const evaluation = await this.gameService.evaluateGuess(puzzleId, words);
+        const evaluation = GameService.evaluateGuessOnPuzzle(puzzle, words);
 
         guessCount++;
-        triedGroups.add(this.groupKey(words));
+        if (strategyName === SHUFFLE_SMART) {
+          triedGroups.add(this.groupKey(words));
+        }
 
         // Stage the guess in memory
         pendingGuesses.push({
@@ -313,12 +363,11 @@ export class StrategyService {
     return Math.floor(result);
   }
 
-  private async loadTriedGroups(strategyRunId: number): Promise<string[]> {
-    const guesses = await this.guessRepo.find({
+  private async loadGuessesForRun(strategyRunId: number): Promise<Guess[]> {
+    return this.guessRepo.find({
       where: { strategyRunId },
       select: { words: true },
     });
-    return guesses.map((g) => this.groupKey(g.words));
   }
 
   private async flushBatch(
@@ -337,58 +386,25 @@ export class StrategyService {
     });
   }
 
-  async getUnfinishedPuzzles(
-    startDateStr: string,
-    endDateStr: string,
-    strategyName: string,
-  ): Promise<{ id: number; date: string }[]> {
-    const rawPuzzles = await this.puzzleRepo
-      .createQueryBuilder("puzzle")
-      .leftJoin(
-        "StrategyRun",
-        "run",
-        "run.puzzleId = puzzle.id AND run.strategyName = :strategyName",
-        { strategyName },
-      )
-      .where("puzzle.date BETWEEN :startDateStr AND :endDateStr", {
-        startDateStr,
-        endDateStr,
-      })
-      .andWhere("(run.id IS NULL OR run.status != :completedStatus)", {
-        completedStatus: StrategyRunStatus.COMPLETED,
-      })
-      .select(["puzzle.id AS id", "puzzle.date AS date"])
-      .distinct(true)
-      .getRawMany<{ id: number; date: Date | string }>();
-
-    return rawPuzzles.map((row) => ({
-      id: Number(row.id),
-      date:
-        row.date instanceof Date
-          ? row.date.toISOString().split("T")[0]
-          : String(row.date).split("T")[0],
-    }));
-  }
-
   private async loadOrCreateRun(
     puzzleId: number,
     strategyName: string,
     trialNumber = 0,
-  ): Promise<StrategyRun> {
-    const existing = await this.strategyRunRepo.findOne({
-      where: { puzzle: { id: puzzleId }, strategyName, trialNumber },
-    });
-
-    if (existing) {
-      return existing;
-    }
-
+  ): Promise<{ run: StrategyRun; puzzle: Puzzle }> {
     const puzzle = await this.puzzleRepo.findOne({
       where: { id: puzzleId },
       relations: { answerGroups: { members: true } },
     });
 
     if (!puzzle) throw new NotFoundException(`No puzzle with id: ${puzzleId}`);
+
+    const existing = await this.strategyRunRepo.findOne({
+      where: { puzzle: { id: puzzleId }, strategyName, trialNumber },
+    });
+
+    if (existing) {
+      return { run: existing, puzzle };
+    }
 
     let allWords: string[];
 
@@ -432,12 +448,15 @@ export class StrategyService {
       currentCombination: firstCombination(GROUP_SIZE),
     });
 
-    return this.strategyRunRepo.save(run);
+    const saved = await this.strategyRunRepo.save(run);
+    return { run: saved, puzzle };
   }
 
   private async countGuesses(strategyRunId: number): Promise<number> {
+    // Plain indexed-column filter instead of a relation predicate so TypeORM
+    // doesn't emit an unnecessary join/subquery.
     return this.guessRepo.count({
-      where: { strategyRun: { id: strategyRunId } },
+      where: { strategyRunId },
     });
   }
 }

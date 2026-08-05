@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type GuessResult = "success" | "failure" | "offBy1";
 
@@ -9,11 +9,17 @@ interface Guess {
   guessedAt: string;
 }
 
-interface StrategyRunDetail {
+interface StrategyRunListItem {
   id: number;
   strategyName: string;
   trialNumber: number;
   status: "running" | "completed" | "failed";
+  startedAt: string | null;
+  finishedAt: string | null;
+  guessCount: number;
+}
+
+interface StrategyRunDetail extends StrategyRunListItem {
   guesses: Guess[];
 }
 
@@ -32,6 +38,8 @@ const STRATEGIES = [
   { id: "shuffle-foolish", label: "Shuffle-Foolish" },
 ];
 
+const apiUrl = (path: string) => `${import.meta.env.VITE_API_URL}${path}`;
+
 export function GuessSequencePanel({
   date,
   isOpen,
@@ -40,7 +48,7 @@ export function GuessSequencePanel({
   const [activeStrategy, setActiveStrategy] = useState<string>("alphabetical");
 
   const [strategyRuns, setStrategyRuns] = useState<
-    Record<string, StrategyRunDetail[]>
+    Record<string, StrategyRunListItem[]>
   >({});
   const [loadingStrategies, setLoadingStrategies] = useState<
     Record<string, boolean>
@@ -49,12 +57,28 @@ export function GuessSequencePanel({
     {},
   );
   const [activeRunId, setActiveRunId] = useState<number | null>(null);
+  // Per-run detail is fetched lazily when a run is selected (full guess arrays
+  // are heavy — a deterministic run can hold ~2,400 guesses), then cached.
+  const [runDetails, setRunDetails] = useState<Record<number, StrategyRunDetail>>(
+    {},
+  );
+  const [detailLoading, setDetailLoading] = useState<Record<number, boolean>>(
+    {},
+  );
+  const [detailErrors, setDetailErrors] = useState<Record<number, string>>({});
 
-  // Fetch strategy run lists on mount (or date change), regardless of isOpen state
+  // Fetch strategy run lists on mount (or date change), regardless of isOpen
+  // state. The list is deliberately slim (no guess arrays) so six strategies
+  // load in a single parallel round of small requests.
   useEffect(() => {
     if (!date) return;
 
-    let cancelled = false;
+    const controller = new AbortController();
+
+    setRunDetails({});
+    setDetailLoading({});
+    setDetailErrors({});
+    setActiveRunId(null);
 
     const fetchStrategy = async (strategyId: string) => {
       setLoadingStrategies((prev) => ({ ...prev, [strategyId]: true }));
@@ -62,7 +86,8 @@ export function GuessSequencePanel({
 
       try {
         const res = await fetch(
-          `${import.meta.env.VITE_API_URL}/strategy/${strategyId}/puzzle/${date}`,
+          apiUrl(`/strategy/${strategyId}/puzzle/${date}`),
+          { signal: controller.signal },
         );
         if (!res.ok) {
           const body = await res.json().catch(() => null);
@@ -70,36 +95,108 @@ export function GuessSequencePanel({
             body?.message ?? `Request failed with status ${res.status}`,
           );
         }
-        const runs: StrategyRunDetail[] = await res.json();
-        if (!cancelled) {
+        const runs: StrategyRunListItem[] = await res.json();
+        if (!controller.signal.aborted) {
           setStrategyRuns((prev) => ({ ...prev, [strategyId]: runs }));
         }
-      } catch (err: any) {
-        if (!cancelled) {
+      } catch (err: unknown) {
+        if (
+          (err as Error)?.name !== "AbortError" &&
+          !controller.signal.aborted
+        ) {
           setErrorMessages((prev) => ({
             ...prev,
-            [strategyId]: err.message || "Failed to load strategy",
+            [strategyId]:
+              err instanceof Error ? err.message : "Failed to load strategy",
           }));
         }
       } finally {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setLoadingStrategies((prev) => ({ ...prev, [strategyId]: false }));
         }
       }
     };
 
-    // Pre-fetch all strategies right away to populate button step counts
     STRATEGIES.forEach((strat) => fetchStrategy(strat.id));
 
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [date]); // Triggered as soon as date is passed down
+
+  const currentRuns = strategyRuns[activeStrategy] ?? [];
+  const selectedRun =
+    currentRuns.find((run) => run.id === activeRunId) ?? currentRuns[0] ?? null;
+
+  const selectedDetail = selectedRun ? runDetails[selectedRun.id] : undefined;
+  const selectedDetailLoading = selectedRun
+    ? detailLoading[selectedRun.id]
+    : false;
+  const selectedDetailError = selectedRun
+    ? detailErrors[selectedRun.id]
+    : undefined;
+
+  // Ids whose detail is already fetched/cached, so the effect below skips them
+  // without reading state it would otherwise have to declare as a dependency.
+  const fetchedRunIds = useRef<Set<number>>(new Set());
+
+  // Lazy-load the full guess list for the selected run, but only while the
+  // panel is open. Fetches are cached per run and aborted on unmount/switch.
+  useEffect(() => {
+    if (!isOpen || !date || !selectedRun) return;
+    if (fetchedRunIds.current.has(selectedRun.id)) return;
+
+    const controller = new AbortController();
+    setDetailLoading((prev) => ({ ...prev, [selectedRun.id]: true }));
+    setDetailErrors((prev) => ({ ...prev, [selectedRun.id]: "" }));
+
+    fetch(
+      apiUrl(
+        `/strategy/${selectedRun.strategyName}/puzzle/${date}/run/${selectedRun.trialNumber}`,
+      ),
+      { signal: controller.signal },
+    )
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          throw new Error(
+            body?.message ?? `Request failed with status ${res.status}`,
+          );
+        }
+        return res.json();
+      })
+      .then((detail: StrategyRunDetail) => {
+        if (!controller.signal.aborted) {
+          setRunDetails((prev) => ({ ...prev, [selectedRun.id]: detail }));
+          fetchedRunIds.current.add(selectedRun.id);
+        }
+      })
+      .catch((err: unknown) => {
+        if (
+          (err as Error)?.name !== "AbortError" &&
+          !controller.signal.aborted
+        ) {
+          setDetailErrors((prev) => ({
+            ...prev,
+            [selectedRun.id]:
+              err instanceof Error ? err.message : "Failed to load run detail",
+          }));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setDetailLoading((prev) => ({ ...prev, [selectedRun.id]: false }));
+        }
+      });
+
+    return () => controller.abort();
+  }, [isOpen, date, selectedRun]);
 
   const handleStrategyClick = (strategyId: string) => {
     if (isOpen && activeStrategy === strategyId) {
       onToggle();
     } else {
+      if (strategyId !== activeStrategy) {
+        setActiveRunId(null);
+      }
       setActiveStrategy(strategyId);
       if (!isOpen) {
         onToggle();
@@ -107,15 +204,12 @@ export function GuessSequencePanel({
     }
   };
 
-  const currentRuns = strategyRuns[activeStrategy] ?? [];
-  const selectedRun =
-    currentRuns.find((run) => run.id === activeRunId) ?? currentRuns[0] ?? null;
   const isLoadingCurrent = loadingStrategies[activeStrategy];
   const currentError = errorMessages[activeStrategy];
 
-  const averageGuesses = (runs: StrategyRunDetail[]) => {
+  const averageGuesses = (runs: StrategyRunListItem[]) => {
     if (runs.length === 0) return null;
-    const total = runs.reduce((sum, run) => sum + run.guesses.length, 0);
+    const total = runs.reduce((sum, run) => sum + run.guessCount, 0);
     const average = total / runs.length;
     return Number.isInteger(average) ? String(average) : average.toFixed(1);
   };
@@ -182,8 +276,8 @@ export function GuessSequencePanel({
                       onClick={() => setActiveRunId(run.id)}
                     >
                       Trial #{run.trialNumber} · {run.status} ·{" "}
-                      {run.guesses.length} guess
-                      {run.guesses.length === 1 ? "" : "es"}
+                      {run.guessCount} guess
+                      {run.guessCount === 1 ? "" : "es"}
                     </button>
                   ))}
                 </div>
@@ -194,27 +288,41 @@ export function GuessSequencePanel({
                 {currentRuns.length > 1
                   ? ` · Trial #${selectedRun.trialNumber}`
                   : ""}{" "}
-                · Status: {selectedRun.status} · {selectedRun.guesses.length}{" "}
-                guess{selectedRun.guesses.length === 1 ? "" : "es"}
+                · Status: {selectedRun.status} · {selectedRun.guessCount} guess
+                {selectedRun.guessCount === 1 ? "" : "es"}
               </p>
-              <ol className="guess-sequence__list">
-                {selectedRun.guesses.map((guess) => (
-                  <li
-                    key={guess.sequenceNumber}
-                    className={`guess-sequence__item guess-sequence__item--${guess.result}`}
-                  >
-                    <span className="guess-sequence__seq">
-                      #{guess.sequenceNumber}
-                    </span>
-                    <span className="guess-sequence__words">
-                      {guess.words.join(", ")}
-                    </span>
-                    <span className="guess-sequence__result">
-                      {formatResult(guess.result)}
-                    </span>
-                  </li>
-                ))}
-              </ol>
+
+              {selectedDetailLoading && (
+                <p>
+                  Loading {formatStrategyName(selectedRun.strategyName)} run
+                  detail...
+                </p>
+              )}
+
+              {selectedDetailError && (
+                <p className="guess-sequence__error">{selectedDetailError}</p>
+              )}
+
+              {selectedDetail && (
+                <ol className="guess-sequence__list">
+                  {selectedDetail.guesses.map((guess) => (
+                    <li
+                      key={guess.sequenceNumber}
+                      className={`guess-sequence__item guess-sequence__item--${guess.result}`}
+                    >
+                      <span className="guess-sequence__seq">
+                        #{guess.sequenceNumber}
+                      </span>
+                      <span className="guess-sequence__words">
+                        {guess.words.join(", ")}
+                      </span>
+                      <span className="guess-sequence__result">
+                        {formatResult(guess.result)}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </>
           )}
         </div>

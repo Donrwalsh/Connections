@@ -17,3 +17,13 @@ export interface StrategyRunDetailDto {
   finishedAt: Date | null;
   guesses: GuessDto[];
 }
+
+export interface StrategyRunListItemDto {
+  id: number;
+  strategyName: string;
+  trialNumber: number;
+  status: StrategyRunStatus;
+  startedAt: Date;
+  finishedAt: Date | null;
+  guessCount: number;
+}
