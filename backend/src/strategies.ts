@@ -17,10 +17,7 @@ export const SHUFFLE_FOOLISH = "shuffle-foolish" as const;
 export const DEFAULT_SHUFFLE_SMART_TRIALS = 3;
 export const DEFAULT_SHUFFLE_FOOLISH_TRIALS = 3;
 
-function positiveTrialCount(
-  raw: string | undefined,
-  fallback: number,
-): number {
+function positiveTrialCount(raw: string | undefined, fallback: number): number {
   const parsed = Number(raw);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
@@ -29,9 +26,7 @@ function positiveTrialCount(
  * Number of shuffle-smart trials to run per puzzle, from SHUFFLE_SMART_TRIALS.
  * Falls back to DEFAULT_SHUFFLE_SMART_TRIALS for missing/invalid values.
  */
-export function shuffleSmartTrialCount(
-  env: NodeJS.ProcessEnv = process.env,
-): number {
+export function shuffleSmartTrialCount(env: NodeJS.ProcessEnv = process.env): number {
   return positiveTrialCount(env.SHUFFLE_SMART_TRIALS, DEFAULT_SHUFFLE_SMART_TRIALS);
 }
 
@@ -39,13 +34,8 @@ export function shuffleSmartTrialCount(
  * Number of shuffle-foolish trials to run per puzzle, from SHUFFLE_FOOLISH_TRIALS.
  * Falls back to DEFAULT_SHUFFLE_FOOLISH_TRIALS for missing/invalid values.
  */
-export function shuffleFoolishTrialCount(
-  env: NodeJS.ProcessEnv = process.env,
-): number {
-  return positiveTrialCount(
-    env.SHUFFLE_FOOLISH_TRIALS,
-    DEFAULT_SHUFFLE_FOOLISH_TRIALS,
-  );
+export function shuffleFoolishTrialCount(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.SHUFFLE_FOOLISH_TRIALS, DEFAULT_SHUFFLE_FOOLISH_TRIALS);
 }
 
 /**

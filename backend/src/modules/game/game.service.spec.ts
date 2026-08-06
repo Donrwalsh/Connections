@@ -42,12 +42,8 @@ describe("GameService", () => {
 
   describe("getDatesPuzzle", () => {
     it("should throw NotFoundException if date format is invalid", async () => {
-      await expect(service.getDatesPuzzle("2026-13-40")).rejects.toThrow(
-        NotFoundException,
-      );
-      await expect(service.getDatesPuzzle("invalid-date")).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.getDatesPuzzle("2026-13-40")).rejects.toThrow(NotFoundException);
+      await expect(service.getDatesPuzzle("invalid-date")).rejects.toThrow(NotFoundException);
       expect(mockPuzzleRepo.findOne).not.toHaveBeenCalled();
     });
 
@@ -201,18 +197,16 @@ describe("GameService", () => {
     it("should throw BadRequestException when the date format is invalid", async () => {
       jest.spyOn(service, "isValidYYYYMMDD").mockReturnValueOnce(false);
 
-      await expect(
-        service.resolveDateToPuzzleId("2024-13-40"),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.resolveDateToPuzzleId("2024-13-40")).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it("should delegate to puzzleDateToId for a valid date", async () => {
       jest.spyOn(service, "isValidYYYYMMDD").mockReturnValueOnce(true);
       jest.spyOn(service, "puzzleDateToId").mockResolvedValueOnce(42);
 
-      await expect(service.resolveDateToPuzzleId("2024-01-02")).resolves.toBe(
-        42,
-      );
+      await expect(service.resolveDateToPuzzleId("2024-01-02")).resolves.toBe(42);
       expect(service.puzzleDateToId).toHaveBeenCalledWith("2024-01-02");
     });
   });
@@ -240,50 +234,32 @@ describe("GameService", () => {
     const puzzle = {
       answerGroups: [
         {
-          members: [
-            { word: "APPLE" },
-            { word: "BANANA" },
-            { word: "CHERRY" },
-            { word: "DATE" },
-          ],
+          members: [{ word: "APPLE" }, { word: "BANANA" }, { word: "CHERRY" }, { word: "DATE" }],
         },
       ],
-    } as any;
+    } as unknown as Puzzle;
 
     it("should return SUCCESS when the guess exactly matches a group", () => {
       expect(
-        GameService.evaluateGuessOnPuzzle(
-          puzzle,
-          [" apple ", "BANANA", "cherry", "date"],
-        ),
+        GameService.evaluateGuessOnPuzzle(puzzle, [" apple ", "BANANA", "cherry", "date"]),
       ).toEqual({ result: GuessResult.SUCCESS });
     });
 
     it("should return OFF_BY_ONE when exactly 3 words match a group", () => {
       expect(
-        GameService.evaluateGuessOnPuzzle(puzzle, [
-          "apple",
-          "banana",
-          "cherry",
-          "fig",
-        ]),
+        GameService.evaluateGuessOnPuzzle(puzzle, ["apple", "banana", "cherry", "fig"]),
       ).toEqual({ result: GuessResult.OFF_BY_ONE });
     });
 
     it("should return FAILURE when no group is matched or nearly matched", () => {
-      expect(
-        GameService.evaluateGuessOnPuzzle(puzzle, [
-          "fig",
-          "grape",
-          "honey",
-          "kiwi",
-        ]),
-      ).toEqual({ result: GuessResult.FAILURE });
+      expect(GameService.evaluateGuessOnPuzzle(puzzle, ["fig", "grape", "honey", "kiwi"])).toEqual({
+        result: GuessResult.FAILURE,
+      });
     });
 
     it("should return FAILURE for a puzzle with no answer groups", () => {
       expect(
-        GameService.evaluateGuessOnPuzzle({ answerGroups: [] } as any, [
+        GameService.evaluateGuessOnPuzzle({ answerGroups: [] } as unknown as Puzzle, [
           "apple",
           "banana",
           "cherry",
@@ -314,7 +290,7 @@ describe("GameService", () => {
         }),
       });
 
-      await expect(service.getLatestDate()).resolves.toBe("2023-06-13");
+      await expect(service.getLatestDate()).resolves.toBe("2023-06-12");
     });
   });
 

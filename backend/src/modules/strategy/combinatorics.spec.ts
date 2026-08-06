@@ -1,8 +1,4 @@
-import {
-  combinationToWords,
-  firstCombination,
-  nextCombination,
-} from "./combinatorics";
+import { combinationToWords, firstCombination, nextCombination } from "./combinatorics";
 
 describe("combinatorics", () => {
   describe("nextCombination", () => {
@@ -61,12 +57,7 @@ describe("combinatorics", () => {
     const pool = ["APPLE", "BANANA", "CHERRY", "DATE", "FIG"];
 
     it("should map indices to the corresponding pool entries", () => {
-      expect(combinationToWords([0, 1, 2, 3], pool)).toEqual([
-        "APPLE",
-        "BANANA",
-        "CHERRY",
-        "DATE",
-      ]);
+      expect(combinationToWords([0, 1, 2, 3], pool)).toEqual(["APPLE", "BANANA", "CHERRY", "DATE"]);
       expect(combinationToWords([1, 4], pool)).toEqual(["BANANA", "FIG"]);
     });
 

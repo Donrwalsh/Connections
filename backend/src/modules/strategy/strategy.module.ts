@@ -9,11 +9,7 @@ import { StrategyService } from "./strategy.service";
 import { GameModule } from "../game/game.module";
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Puzzle, StrategyRun, Guess]),
-    QueueModule,
-    GameModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Puzzle, StrategyRun, Guess]), QueueModule, GameModule],
   controllers: [StrategyController],
   providers: [StrategyService],
   exports: [StrategyService],

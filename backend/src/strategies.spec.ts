@@ -43,9 +43,7 @@ describe("strategies", () => {
     });
 
     it("should read a valid positive integer", () => {
-      expect(
-        shuffleFoolishTrialCount({ SHUFFLE_FOOLISH_TRIALS: "4" }),
-      ).toBe(4);
+      expect(shuffleFoolishTrialCount({ SHUFFLE_FOOLISH_TRIALS: "4" })).toBe(4);
     });
   });
 
@@ -59,9 +57,9 @@ describe("strategies", () => {
     });
 
     it("should return 1..N for shuffle-smart", () => {
-      expect(
-        strategyTrialNumbers("shuffle-smart", { SHUFFLE_SMART_TRIALS: "3" }),
-      ).toEqual([1, 2, 3]);
+      expect(strategyTrialNumbers("shuffle-smart", { SHUFFLE_SMART_TRIALS: "3" })).toEqual([
+        1, 2, 3,
+      ]);
       expect(strategyTrialNumbers("shuffle-smart", {})).toEqual([1, 2, 3]);
     });
 

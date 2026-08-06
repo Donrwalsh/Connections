@@ -1,0 +1,35 @@
+# Optional override for hosts with an NVIDIA GPU and nvidia-container-toolkit.
+#
+# Usage — pass the SAME -f flags to down and up so the ollama-init one-shot
+# isn't left orphaned (a stale container references the old network and makes
+# the next `up` fail with "network ... not found"):
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml down --remove-orphans
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+#
+# Without this file, the ollama container runs on CPU (slow but functional).
+# The ollama-init service below pulls the configured model into the shared
+# ollama_data volume on startup (GPU or CPU — the model download is the same).
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  ollama-init:
+    image: curlimages/curl:latest
+    container_name: ollama_init
+    restart: "no"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+    entrypoint: >
+      sh -c "
+      until curl -s http://ollama:11434 > /dev/null; do sleep 1; done &&
+      curl -X POST http://ollama:11434/api/pull -d '{\"name\": \"'\"$$OLLAMA_MODEL\"'\"}'
+      "

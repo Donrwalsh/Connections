@@ -8,6 +8,12 @@ export interface GuessDto {
   guessedAt: Date;
 }
 
+export interface StrategyRunDetailMeta {
+  total: number;
+  page: number;
+  limit: number;
+}
+
 export interface StrategyRunDetailDto {
   id: number;
   strategyName: string;
@@ -16,6 +22,7 @@ export interface StrategyRunDetailDto {
   startedAt: Date;
   finishedAt: Date | null;
   guesses: GuessDto[];
+  meta: StrategyRunDetailMeta;
 }
 
 export interface StrategyRunListItemDto {

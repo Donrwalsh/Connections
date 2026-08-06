@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Header,
-  Inject,
-  Param,
-  Res,
-} from "@nestjs/common";
+import { Controller, Get, Header, Inject, Param, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { ApiParam } from "@nestjs/swagger";
 import { GameService } from "./game.service";
@@ -34,10 +27,7 @@ export class GameController {
     description: "Puzzle date in YYYY-MM-DD format",
     example: "2023-08-01",
   })
-  async getPuzzleByDate(
-    @Param("date") date: string,
-    @Res({ passthrough: true }) res: Response,
-  ) {
+  async getPuzzleByDate(@Param("date") date: string, @Res({ passthrough: true }) res: Response) {
     const puzzle = await this.gameService.getDatesPuzzle(date);
     res.setHeader("Cache-Control", "public, max-age=86400, immutable");
     return puzzle;

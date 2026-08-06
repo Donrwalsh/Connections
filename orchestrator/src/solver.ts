@@ -52,7 +52,7 @@ export async function proposeGroup(
  * — models occasionally hallucinate. Fail loudly here rather than silently
  * passing bad data up to the backend.
  */
-function validateProposedGroup(
+export function validateProposedGroup(
   group: ProposedGroup,
   request: SolveRequest,
 ): void {

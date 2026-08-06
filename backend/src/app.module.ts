@@ -1,9 +1,12 @@
 import { Module } from "@nestjs/common";
+import { APP_GUARD } from "@nestjs/core";
+import { ConfigModule } from "@nestjs/config";
+import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
+import { TypeOrmModule } from "@nestjs/typeorm";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
-import { ConfigModule } from "@nestjs/config";
+import { loadEnv } from "./config/env";
 import { GameModule } from "./modules/game/game.module";
-import { TypeOrmModule } from "@nestjs/typeorm";
 import { AnswerGroup } from "./modules/game/entities/answer-group.entity";
 import { GroupMember } from "./modules/game/entities/group-member.entity";
 import { Puzzle } from "./modules/game/entities/puzzle.entity";
@@ -13,9 +16,10 @@ import { StrategyRun } from "./modules/strategy/entities/strategy-run.entity";
 
 @Module({
   imports: [
-    // Global configurations (optional but recommended)
+    // Global configuration — validate fails fast on missing required secrets.
     ConfigModule.forRoot({
       isGlobal: true,
+      validate: loadEnv,
     }),
 
     TypeOrmModule.forRoot({
@@ -27,13 +31,25 @@ import { StrategyRun } from "./modules/strategy/entities/strategy-run.entity";
       database: process.env.DB_NAME,
       entities: [Puzzle, AnswerGroup, GroupMember, StrategyRun, Guess],
       synchronize: false,
+      migrations: [__dirname + "/migrations/*{.ts,.js}"],
+      migrationsRun: true,
     }),
+
+    // Sensible global default; the OpenAI-backed /api/solve route is
+    // throttled much more aggressively in AppController.
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
 
     // Feature Modules
     GameModule,
     StrategyModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}

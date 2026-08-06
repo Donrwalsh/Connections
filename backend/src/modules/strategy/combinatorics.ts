@@ -5,10 +5,7 @@
  *
  * e.g. poolSize=5, k=4: [0,1,2,3] -> [0,1,2,4] -> [0,1,3,4] -> [0,2,3,4] -> [1,2,3,4] -> null
  */
-export function nextCombination(
-  indices: number[],
-  poolSize: number,
-): number[] | null {
+export function nextCombination(indices: number[], poolSize: number): number[] | null {
   const k = indices.length;
   const next = [...indices];
 
@@ -28,10 +25,7 @@ export function nextCombination(
   return next;
 }
 
-export function combinationToWords(
-  indices: number[],
-  pool: string[],
-): string[] {
+export function combinationToWords(indices: number[], pool: string[]): string[] {
   return indices.map((i) => pool[i]);
 }
 

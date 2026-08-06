@@ -1,16 +1,26 @@
-FROM node:24-alpine
+# --- build stage ---
+# Multi-stage build: Vite bundles the app into static assets in the first
+# stage; the second stage serves those from a minimal nginx image.
+FROM node:24-alpine AS build
 
 WORKDIR /app
 
-# Copy only package files first so npm install is cached
-# separately from source changes — rebuilds are much faster.
+# VITE_API_URL is baked into the bundle at build time. Override at image
+# build time with `--build-arg VITE_API_URL=https://api.example.com`.
+ARG VITE_API_URL=http://localhost:4000
+ENV VITE_API_URL=$VITE_API_URL
+
+# Install deps before copying source so this layer is cached across rebuilds.
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
-# Source gets bind-mounted over this in docker-compose for dev,
-# but copying it here means `docker build` alone still works standalone.
 COPY . .
+RUN npm run build
 
-EXPOSE 5173
+# --- serve stage ---
+FROM nginx:alpine
 
-CMD ["npm", "run", "dev", "--", "--host"]
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+
+EXPOSE 80

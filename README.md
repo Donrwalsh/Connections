@@ -1,5 +1,6 @@
 [![Frontend Tests](https://github.com/donrwalsh/Connections/actions/workflows/frontend-tests.yml/badge.svg?branch=master)](https://github.com/donrwalsh/Connections/actions/workflows/frontend-tests.yml)
 [![Backend Tests](https://github.com/donrwalsh/Connections/actions/workflows/backend-tests.yml/badge.svg?branch=master)](https://github.com/donrwalsh/Connections/actions/workflows/backend-tests.yml)
+[![Orchestrator Tests](https://github.com/donrwalsh/Connections/actions/workflows/orchestrator-tests.yml/badge.svg?branch=master)](https://github.com/donrwalsh/Connections/actions/workflows/orchestrator-tests.yml)
 
 # Connections
 
@@ -71,7 +72,7 @@ docker compose up
 |-----|------|
 | `http://localhost:5173` | Frontend |
 | `http://localhost:4000/api/docs` | Swagger API docs |
-| `http://localhost:4000/admin/queues` | Bull Board queue dashboard |
+| `http://localhost:4000/admin/queues` | Bull Board queue dashboard (basic auth — `BULL_BOARD_USER` / `BULL_BOARD_PASS`, defaults `admin` / `bullboard`) |
 
 On first startup the worker fetches all historical puzzles and runs all strategies on each (four deterministic runs plus `SHUFFLE_SMART_TRIALS` shuffle-smart trials and `SHUFFLE_FOOLISH_TRIALS` shuffle-foolish trials). This can take a while for large backlogs.
 
@@ -81,15 +82,18 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INTERNAL_API_KEY` | — | Shared secret for backend↔orchestrator communication (`x-internal-api-key` header) |
+| `INTERNAL_API_KEY` | — | Shared secret for backend↔orchestrator communication (`x-internal-api-key` header) — **required** |
 | `OPENAI_API_KEY` | — | OpenAI API key (orchestrator only) |
+| `BULL_BOARD_USER` / `BULL_BOARD_PASS` | `admin` / `bullboard` | Basic-auth credentials for the Bull Board dashboard (must be set together, or not at all) |
+| `CORS_ORIGIN` | `http://localhost:5173` | Comma-separated list of allowed frontend origins |
+| `ORCHESTRATOR_URL` | `http://orchestrator:3001` | Backend's URL for reaching the orchestrator |
 | `PUZZLE_POPULATION_CRON` | `0 6 * * *` | Cron pattern for daily puzzle fetch (UTC by default) |
 | `PUZZLE_POPULATION_TZ` | `UTC` | Timezone for the puzzle population cron |
 | `SHUFFLE_SMART_TRIALS` | `3` | Number of shuffle-smart trials run per puzzle |
 | `SHUFFLE_FOOLISH_TRIALS` | `3` | Number of shuffle-foolish trials run per puzzle |
 | `PORT` | `3001` | Orchestrator listen port |
 
-Database and Redis settings (`DB_HOST`, `DB_PORT`, `REDIS_HOST`, etc.) are configured directly in `docker-compose.yml` — the defaults work out of the box.
+Postgres and Redis connection settings (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `REDIS_HOST`, `REDIS_PORT`) are read from the same `.env` — see [`.env.sample`](.env.sample) for defaults.
 
 ## API Endpoints
 
@@ -100,8 +104,8 @@ Database and Redis settings (`DB_HOST`, `DB_PORT`, `REDIS_HOST`, etc.) are confi
 | `GET` | `/game/data/latest_date` | Most recent puzzle date |
 | `POST` | `/strategy/queue/:strategyName/:date` | Enqueue a strategy run (or `all`) |
 | `GET` | `/strategy/:strategyName/puzzle/:date` | All runs for a strategy — ordered guesses per trial |
-| `POST` | `/api/solve` | AI Assist — proxy to orchestrator |
-| `GET` | `/api/orchestrator/health` | Orchestrator health check |
+| `POST` | `/api/solve` | AI Assist — proxy to orchestrator (throttled to 5/min/IP) |
+| `GET` | `/health` | Liveness/readiness probe (503 when the DB is down) |
 
 ## Development & Testing
 
@@ -111,8 +115,17 @@ Requires Node 24.
 # Backend (Jest)
 cd backend && npm test
 
+# Backend end-to-end tests — needs a running Postgres + Redis (see below)
+cd backend && npm run test:e2e
+
+# Backend lint / format
+cd backend && npm run lint && npm run format
+
 # Frontend (Vitest — use test:run for single pass)
 cd frontend && npm run test:run
+
+# Orchestrator (Vitest)
+cd orchestrator && npm run test:run
 
 # Full typecheck
 cd backend && npm run build
@@ -120,22 +133,32 @@ cd frontend && npm run build
 cd orchestrator && npm run typecheck
 ```
 
-There is no single "test all" command — run each package separately. Backend tests require `--forceExit` (already in the script) because BullMQ and TypeORM connections stay open after tests complete.
+There is no single "test all" command — run each package separately. Backend unit tests require `--forceExit` (already in the script) because BullMQ and TypeORM connections stay open after tests complete.
+
+The backend E2E suite (`backend/test/app.e2e-spec.ts`) boots the real NestJS app against a dedicated Postgres database and Redis. It reuses the compose Postgres (`docker compose up -d db redis`) but connects to a separate `connections_test` database that is created and migrated on first run, so it never touches the dev data:
 
 ## Project Structure
 
 ```
 ├── backend/                   # NestJS API server + worker
-│   └── src/
-│       ├── main.ts            # Bootstrap, Swagger, Bull Board
-│       ├── app.controller.ts  # /api/solve, /api/orchestrator/health
-│       ├── worker.ts          # Standalone BullMQ worker process
-│       ├── strategies.ts      # Strategy name constants
-│       └── modules/
-│           ├── game/          # Puzzle CRUD, evaluation, NYT ingestion, cron
-│           ├── strategy/      # Brute-force + shuffle strategies
-│           └── queue/         # BullMQ queue definitions + Redis config
+│   ├── src/
+│   │   ├── main.ts            # Bootstrap (loads env, starts server)
+│   │   ├── app.setup.ts       # Shared HTTP pipeline (CORS, validation, Bull Board, Swagger)
+│   │   ├── app.controller.ts  # /health, /api/solve
+│   │   ├── app.service.ts     # Orchestrator proxy (retry/backoff), health checks
+│   │   ├── config/env.ts      # Typed env loading — fails fast on missing secrets
+│   │   ├── migrations/        # TypeORM migrations (initial schema baseline)
+│   │   ├── worker.ts          # Standalone BullMQ worker process
+│   │   ├── strategies.ts      # Strategy name constants
+│   │   └── modules/
+│   │       ├── game/          # Puzzle CRUD, evaluation, NYT ingestion, cron
+│   │       ├── strategy/      # Brute-force + shuffle strategies
+│   │       └── queue/         # BullMQ queue definitions + Redis config
+│   └── test/                  # jest-e2e config + app.e2e-spec.ts (needs Postgres/Redis)
 ├── frontend/                  # Vite + React 19 SPA
+│   ├── Dockerfile             # Production multi-stage build (Vite → nginx)
+│   ├── Dockerfile.dev         # Dev image used by docker compose (hot reload)
+│   ├── nginx.conf             # SPA fallback + immutable asset caching
 │   └── src/
 │       ├── components/        # Board, Tiles, GameOverModal, ShareResult, etc.
 │       ├── pages/             # PuzzlePage (the only route)
@@ -143,16 +166,18 @@ There is no single "test all" command — run each package separately. Backend t
 │       └── hooks/             # useConnectionsGame
 ├── orchestrator/              # Hono + AI SDK
 │   └── src/
-│       ├── index.ts           # Hono server + auth middleware
+│       ├── index.ts           # Server bootstrap
+│       ├── app.ts             # Hono routes + auth middleware (testable)
 │       ├── solver.ts          # generateObject call to GPT-4o
 │       ├── prompt.ts          # Prompt builder
 │       └── types.ts           # Zod schemas (request/response/model output)
 ├── database/
-│   └── 01-schema.sql          # Tables + enums (Postgres 15)
-└── docker-compose.yml         # Orchestrates all 5 services + Redis/Postgres
+│   └── 01-schema.sql          # Tables + enums (Postgres 15) — baseline for migrations
+└── docker-compose.yml         # Orchestrates all services + Redis/Postgres
 ```
 
 ## Notes
 
 - The frontend `package.json` proxy setting (`"proxy": "http://nest_backend:4000"`) is for Docker networking only — local dev uses `VITE_API_URL` instead.
-- Database schema is managed by `database/01-schema.sql` — TypeORM runs with `synchronize: false`.
+- Database schema is managed by `database/01-schema.sql`, which TypeORM migrations treat as the baseline. The app runs with `synchronize: false` and `migrationsRun: true`; the baseline migration in `backend/src/migrations/` is idempotent so it also bootstraps empty databases (CI, fresh local Postgres).
+- For a production frontend image, build with the multi-stage `frontend/Dockerfile` (Vite build served by nginx). Pass the API base at build time: `docker build --build-arg VITE_API_URL=https://api.example.com -f frontend/Dockerfile frontend/`.

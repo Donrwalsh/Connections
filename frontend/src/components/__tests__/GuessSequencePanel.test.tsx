@@ -14,6 +14,7 @@ const strategyRun = {
 
 const strategyRunDetail = {
   ...strategyRun,
+  meta: { total: 3, page: 1, limit: 200 },
   guesses: [
     {
       sequenceNumber: 1,
@@ -60,6 +61,7 @@ const shuffleSmartRuns = [
 const shuffleSmartDetails: Record<number, unknown> = {
   1: {
     ...shuffleSmartRuns[0],
+    meta: { total: 2, page: 1, limit: 200 },
     guesses: [
       {
         sequenceNumber: 1,
@@ -77,6 +79,7 @@ const shuffleSmartDetails: Record<number, unknown> = {
   },
   2: {
     ...shuffleSmartRuns[1],
+    meta: { total: 1, page: 1, limit: 200 },
     guesses: [
       {
         sequenceNumber: 1,
@@ -96,6 +99,7 @@ const shuffleFoolishDetail = {
   startedAt: "2024-01-15T00:00:00Z",
   finishedAt: "2024-01-15T00:05:00Z",
   guessCount: 2,
+  meta: { total: 2, page: 1, limit: 200 },
   guesses: [
     {
       sequenceNumber: 1,
@@ -126,7 +130,7 @@ function setupFetch() {
       const strategyId =
         urlStr.match(/\/strategy\/([^/]+)\//)?.[1] ?? "alphabetical";
 
-      const detail = urlStr.match(/\/run\/(\d+)$/);
+      const detail = urlStr.match(/\/run\/(\d+)/);
       if (detail) {
         const trialNumber = Number(detail[1]);
         const body =

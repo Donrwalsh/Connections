@@ -3,13 +3,16 @@ import {
   Inject,
   Get,
   Param,
+  ParseIntPipe,
   Post,
+  Query,
+  DefaultValuePipe,
   BadRequestException,
 } from "@nestjs/common";
 import { ApiParam } from "@nestjs/swagger";
 import { StrategyService } from "./strategy.service";
 import { GameService } from "../game/game.service";
-import { SUPPORTED_STRATEGIES } from "../../strategies";
+import { STRATEGY_SET } from "../../strategies";
 
 @Controller("strategy")
 export class StrategyController {
@@ -38,9 +41,9 @@ export class StrategyController {
   ) {
     const isAll = strategyName.toLowerCase() === "all";
 
-    if (!isAll && !SUPPORTED_STRATEGIES.includes(strategyName as any)) {
+    if (!isAll && !STRATEGY_SET.has(strategyName)) {
       throw new BadRequestException(
-        `Invalid strategy: '${strategyName}'. Expected 'all' or one of: ${SUPPORTED_STRATEGIES.join(", ")}.`,
+        `Invalid strategy: '${strategyName}'. Expected 'all' or one of: ${[...STRATEGY_SET].join(", ")}.`,
       );
     }
 
@@ -48,7 +51,7 @@ export class StrategyController {
 
     if (isAll) {
       await Promise.all(
-        SUPPORTED_STRATEGIES.map((strat) =>
+        [...STRATEGY_SET].map((strat) =>
           this.strategyService.triggerStrategyRuns(puzzleId, strat, date),
         ),
       );
@@ -57,7 +60,7 @@ export class StrategyController {
         message: `Jobs queued for all strategies on puzzle date ${date}`,
         puzzleId,
         date,
-        strategiesQueued: [...SUPPORTED_STRATEGIES],
+        strategiesQueued: [...STRATEGY_SET],
       };
     }
 
@@ -85,13 +88,10 @@ export class StrategyController {
     description: "Puzzle date in YYYY-MM-DD format",
     example: "2023-08-01",
   })
-  async getRunsForPuzzle(
-    @Param("strategyName") strategyName: string,
-    @Param("date") date: string,
-  ) {
-    if (!SUPPORTED_STRATEGIES.includes(strategyName as any)) {
+  async getRunsForPuzzle(@Param("strategyName") strategyName: string, @Param("date") date: string) {
+    if (!STRATEGY_SET.has(strategyName)) {
       throw new BadRequestException(
-        `Invalid strategy: '${strategyName}'. Expected one of: ${SUPPORTED_STRATEGIES.join(", ")}.`,
+        `Invalid strategy: '${strategyName}'. Expected one of: ${[...STRATEGY_SET].join(", ")}.`,
       );
     }
 
@@ -121,18 +121,16 @@ export class StrategyController {
   async getRunDetail(
     @Param("strategyName") strategyName: string,
     @Param("date") date: string,
-    @Param("trialNumber") trialNumber: string,
+    @Param("trialNumber", ParseIntPipe) trialNumber: number,
+    @Query("page", new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query("limit", new DefaultValuePipe(200), ParseIntPipe) limit: number,
   ) {
-    if (!SUPPORTED_STRATEGIES.includes(strategyName as any)) {
+    if (!STRATEGY_SET.has(strategyName)) {
       throw new BadRequestException(
-        `Invalid strategy: '${strategyName}'. Expected one of: ${SUPPORTED_STRATEGIES.join(", ")}.`,
+        `Invalid strategy: '${strategyName}'. Expected one of: ${[...STRATEGY_SET].join(", ")}.`,
       );
     }
 
-    return this.strategyService.getRunDetail(
-      date,
-      strategyName,
-      Number(trialNumber),
-    );
+    return this.strategyService.getRunDetail(date, strategyName, trialNumber, page, limit);
   }
 }

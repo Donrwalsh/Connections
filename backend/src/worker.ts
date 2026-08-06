@@ -5,7 +5,7 @@ import { AppModule } from "./app.module";
 import { StrategyService } from "./modules/strategy/strategy.service";
 import { redisConnection } from "./modules/queue/redis.config";
 import { PuzzleIngestionService } from "./modules/game/puzzle-ingestion.service";
-import { SUPPORTED_STRATEGIES, STRATEGY_SET, SupportedStrategy } from "./strategies";
+import { STRATEGY_SET, SupportedStrategy } from "./strategies";
 
 interface RunDeterministicStrategyJobData {
   puzzleId: number;
@@ -52,7 +52,7 @@ async function bootstrap() {
     },
   );
 
-  worker.on("completed", (job) => {
+  worker.on("completed", () => {
     // logger.log(`job ${job.id} completed`);  noisy
   });
 
@@ -91,9 +91,7 @@ async function bootstrap() {
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
 
-  logger.log(
-    "listening for jobs on 'strategy-runs' and 'puzzle-population' queues",
-  );
+  logger.log("listening for jobs on 'strategy-runs' and 'puzzle-population' queues");
 }
 
 bootstrap();

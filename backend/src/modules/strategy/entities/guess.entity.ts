@@ -22,7 +22,10 @@ export enum GuessSource {
 }
 
 @Entity("Guess")
-@Index(["strategyRunId", "sequenceNumber"]) // Fast ordered replay for a given run
+// Fast ordered replay for a given run. The actual DDL (schema.sql /
+// InitialSchema migration) creates this as a covering index that also
+// INCLUDEs "words"; TypeORM can't express INCLUDE clauses, so the index is
+// declared only in the migration and not repeated here.
 @Index("IDX_Guess_puzzleId", ["puzzleId"])
 export class Guess {
   @PrimaryGeneratedColumn()

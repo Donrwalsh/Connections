@@ -18,5 +18,12 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // Effects here deliberately reset fetch lifecycle state (loading/status)
+      // before kicking off a request (e.g. PuzzlePage on date change, AI solve
+      // in Game). This is an intentional data-fetch pattern, not an accidental
+      // cascading render, so disable the new react-hooks v7 heuristic.
+      'react-hooks/set-state-in-effect': 'off',
+    },
   },
 ])

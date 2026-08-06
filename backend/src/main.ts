@@ -1,47 +1,20 @@
-import { createBullBoard } from "@bull-board/api";
-import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
-import { ExpressAdapter } from "@bull-board/express";
-import { HttpAdapterHost, NestFactory } from "@nestjs/core";
-import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
+import { Logger } from "@nestjs/common";
+import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
-import { puzzleQueue } from "./modules/queue/puzzle.queue";
-import { strategyQueue } from "./modules/queue/strategy.queue";
+import { configureApp } from "./app.setup";
+import { loadEnv } from "./config/env";
 
 async function bootstrap() {
+  const env = loadEnv();
+  const logger = new Logger("Bootstrap");
+
   const app = await NestFactory.create(AppModule);
-  app.enableCors();
+  await configureApp(app);
 
-  // Increase server timeout (in milliseconds)
-  const httpAdapterHost = app.get(HttpAdapterHost);
-  const server = httpAdapterHost.httpAdapter.getHttpServer();
-  server.setTimeout(120000); // 120 seconds
-
-  // Bull Board
-  const serverAdapter = new ExpressAdapter();
-  serverAdapter.setBasePath("/admin/queues");
-
-  createBullBoard({
-    queues: [new BullMQAdapter(strategyQueue), new BullMQAdapter(puzzleQueue)],
-    serverAdapter,
-  });
-
-  app.use("/admin/queues", serverAdapter.getRouter());
-
-  // Swagger config
-  const config = new DocumentBuilder()
-    .setTitle("Connections API")
-    .setDescription("API documentation for the Connections backend")
-    .setVersion("1.0")
-    .addBearerAuth()
-    .build();
-
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup("api/docs", app, document);
-
-  await app.listen(4000, "0.0.0.0");
-  console.log("NestJS backend running on http://localhost:4000");
-  console.log("Swagger docs available at http://localhost:4000/api/docs");
-  console.log("Bull Board available at http://localhost:4000/admin/queues");
+  await app.listen(env.PORT, "0.0.0.0");
+  logger.log(`NestJS backend running on http://localhost:${env.PORT}`);
+  logger.log(`Swagger docs available at http://localhost:${env.PORT}/api/docs`);
+  logger.log(`Bull Board available at http://localhost:${env.PORT}/admin/queues`);
 }
 
 bootstrap();

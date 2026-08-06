@@ -5,22 +5,11 @@ import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 import { DataSource, Repository } from "typeorm";
 import { Puzzle } from "../game/entities/puzzle.entity";
-import {
-  combinationToWords,
-  firstCombination,
-  nextCombination,
-} from "./combinatorics";
+import { combinationToWords, firstCombination, nextCombination } from "./combinatorics";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { GameService } from "../game/game.service";
-import {
-  StrategyRunDetailDto,
-  StrategyRunListItemDto,
-} from "./dto/strategy.dto";
-import {
-  SHUFFLE_SMART,
-  SHUFFLE_FOOLISH,
-  strategyTrialNumbers,
-} from "../../strategies";
+import { StrategyRunDetailDto, StrategyRunListItemDto } from "./dto/strategy.dto";
+import { SHUFFLE_SMART, SHUFFLE_FOOLISH, strategyTrialNumbers } from "../../strategies";
 import { runStrategyJobId } from "../queue/strategy.queue";
 
 const GROUP_SIZE = 4;
@@ -38,33 +27,28 @@ export class StrategyService {
     @Inject(GameService) private readonly gameService: GameService,
   ) {}
 
-  async triggerRun(
-    puzzleId: number,
-    strategyName: string,
-    date?: string,
-    trialNumber = 0,
-  ) {
-    await this.queue.add("run-strategy", {
-      puzzleId,
-      strategyName,
-      date,
-      trialNumber,
-    }, {
-      // Deterministic id so duplicate enqueues of the same run collapse to a
-      // single job instead of racing to create two runs.
-      jobId: runStrategyJobId(puzzleId, strategyName, trialNumber),
-    });
+  async triggerRun(puzzleId: number, strategyName: string, date?: string, trialNumber = 0) {
+    await this.queue.add(
+      "run-strategy",
+      {
+        puzzleId,
+        strategyName,
+        date,
+        trialNumber,
+      },
+      {
+        // Deterministic id so duplicate enqueues of the same run collapse to a
+        // single job instead of racing to create two runs.
+        jobId: runStrategyJobId(puzzleId, strategyName, trialNumber),
+      },
+    );
   }
 
   /**
    * Queues one job per trial for the strategy — a single trial (0) for
    * deterministic strategies, one per shuffle-smart/shuffle-foolish trial (1..N).
    */
-  async triggerStrategyRuns(
-    puzzleId: number,
-    strategyName: string,
-    date: string,
-  ) {
+  async triggerStrategyRuns(puzzleId: number, strategyName: string, date: string) {
     const trialNumbers = strategyTrialNumbers(strategyName);
     await this.queue.addBulk(
       trialNumbers.map((trialNumber) => ({
@@ -79,6 +63,8 @@ export class StrategyService {
     date: string,
     strategyName: string,
     trialNumber = 0,
+    page = 1,
+    limit = 200,
   ): Promise<StrategyRunDetailDto> {
     const puzzleId = await this.gameService.resolveDateToPuzzleId(date);
 
@@ -92,9 +78,17 @@ export class StrategyService {
       );
     }
 
+    // A deterministic run can hold ~2,400 guesses, so detail is paginated.
+    // Clamp inputs to keep a single response bounded.
+    const safePage = Math.max(1, Math.floor(page));
+    const safeLimit = Math.min(500, Math.max(1, Math.floor(limit)));
+    const total = await this.countGuesses(run.id);
+
     const guesses = await this.guessRepo.find({
       where: { strategyRunId: run.id },
       order: { sequenceNumber: "ASC" },
+      skip: (safePage - 1) * safeLimit,
+      take: safeLimit,
       // Restrict to the columns the detail DTO uses so the query can be
       // served as an index-only scan off the covering index.
       select: {
@@ -106,7 +100,10 @@ export class StrategyService {
       },
     });
 
-    return this.mapRunDetail(run, guesses);
+    return {
+      ...this.mapRunDetail(run, guesses),
+      meta: { total, page: safePage, limit: safeLimit },
+    };
   }
 
   /**
@@ -116,10 +113,7 @@ export class StrategyService {
    * getRunDetail, which keeps responses small (a deterministic run can hold
    * ~2,400 guesses).
    */
-  async getRunsForPuzzle(
-    date: string,
-    strategyName: string,
-  ): Promise<StrategyRunListItemDto[]> {
+  async getRunsForPuzzle(date: string, strategyName: string): Promise<StrategyRunListItemDto[]> {
     const puzzleId = await this.gameService.resolveDateToPuzzleId(date);
 
     const runs = await this.strategyRunRepo.find({
@@ -159,10 +153,7 @@ export class StrategyService {
     }));
   }
 
-  private mapRunDetail(
-    run: StrategyRun,
-    guesses: Guess[],
-  ): StrategyRunDetailDto {
+  private mapRunDetail(run: StrategyRun, guesses: Guess[]): Omit<StrategyRunDetailDto, "meta"> {
     return {
       id: run.id,
       strategyName: run.strategyName,
@@ -179,19 +170,11 @@ export class StrategyService {
     };
   }
 
-  async runDeterministicStrategy(
-    puzzleId: number,
-    strategyName: string,
-    trialNumber = 0,
-  ) {
+  async runDeterministicStrategy(puzzleId: number, strategyName: string, trialNumber = 0) {
     // loadOrCreateRun loads the (immutable) puzzle alongside the run so the
     // loop below evaluates guesses in memory without a full DB reload per
     // guess (~2,400 queries per worst-case deterministic run).
-    const { run, puzzle } = await this.loadOrCreateRun(
-      puzzleId,
-      strategyName,
-      trialNumber,
-    );
+    const { run, puzzle } = await this.loadOrCreateRun(puzzleId, strategyName, trialNumber);
 
     if (run.status === StrategyRunStatus.COMPLETED) {
       return {
@@ -227,10 +210,7 @@ export class StrategyService {
         case "reverse-alphabetical":
         case "order":
         case "reverse-order":
-          words = combinationToWords(
-            run.currentCombination,
-            run.availableWords,
-          );
+          words = combinationToWords(run.currentCombination, run.availableWords);
           break;
         case SHUFFLE_SMART: {
           const picked = this.pickRandomGroup(run.availableWords, triedGroups);
@@ -248,9 +228,7 @@ export class StrategyService {
           words = this.sampleRandom(run.availableWords, GROUP_SIZE);
           break;
         default:
-          throw new BadRequestException(
-            `Unsupported strategy name: '${strategyName}'`,
-          );
+          throw new BadRequestException(`Unsupported strategy name: '${strategyName}'`);
       }
 
       if (!noMoreGroups) {
@@ -273,23 +251,15 @@ export class StrategyService {
 
         // Update in-memory state
         if (evaluation.result === GuessResult.SUCCESS) {
-          run.availableWords = run.availableWords.filter(
-            (w) => !words.includes(w),
-          );
+          run.availableWords = run.availableWords.filter((w) => !words.includes(w));
           run.currentCombination = firstCombination(GROUP_SIZE);
 
           if (run.availableWords.length === 0) {
             run.status = StrategyRunStatus.COMPLETED;
             run.finishedAt = new Date();
           }
-        } else if (
-          strategyName !== SHUFFLE_SMART &&
-          strategyName !== SHUFFLE_FOOLISH
-        ) {
-          const next = nextCombination(
-            run.currentCombination,
-            run.availableWords.length,
-          );
+        } else if (strategyName !== SHUFFLE_SMART && strategyName !== SHUFFLE_FOOLISH) {
+          const next = nextCombination(run.currentCombination, run.availableWords.length);
 
           if (next === null) {
             run.status = StrategyRunStatus.FAILED;
@@ -321,10 +291,7 @@ export class StrategyService {
    * selected group hasn't been tried before in this run. Returns null when
    * every possible group has already been proposed.
    */
-  private pickRandomGroup(
-    pool: string[],
-    tried: Set<string>,
-  ): string[] | null {
+  private pickRandomGroup(pool: string[], tried: Set<string>): string[] | null {
     if (pool.length < GROUP_SIZE) return null;
 
     const totalCombos = this.combinationCount(pool.length, GROUP_SIZE);
@@ -370,10 +337,7 @@ export class StrategyService {
     });
   }
 
-  private async flushBatch(
-    run: StrategyRun,
-    pendingGuesses: Partial<Guess>[],
-  ): Promise<void> {
+  private async flushBatch(run: StrategyRun, pendingGuesses: Partial<Guess>[]): Promise<void> {
     if (pendingGuesses.length === 0) return;
 
     // Create a shallow copy to insert and clear the original buffer

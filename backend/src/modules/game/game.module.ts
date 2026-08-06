@@ -10,10 +10,7 @@ import { PuzzleIngestionService } from "./puzzle-ingestion.service";
 import { PuzzleQueueBootstrap } from "./puzzle-queue.bootstrap";
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Puzzle, AnswerGroup, GroupMember]),
-    QueueModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Puzzle, AnswerGroup, GroupMember]), QueueModule],
   controllers: [GameController],
   providers: [GameService, PuzzleIngestionService, PuzzleQueueBootstrap],
   exports: [GameService, PuzzleIngestionService],

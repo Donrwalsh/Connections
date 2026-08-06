@@ -1,21 +1,23 @@
-version: "3.9"
-
 services:
   db:
     image: postgres:15
     container_name: postgres_db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: mydb
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-mydb}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d mydb"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-mydb}",
+        ]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -42,6 +44,16 @@ services:
       - ./orchestrator/package.json:/app/package.json
       - ./orchestrator/tsconfig.json:/app/tsconfig.json
     command: npm run dev
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://localhost:3001/health',{headers:{'x-internal-api-key':process.env.INTERNAL_API_KEY}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
@@ -76,12 +88,17 @@ services:
     environment:
       DB_HOST: db
       DB_PORT: 5432
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      DB_NAME: mydb
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DB_NAME: ${POSTGRES_DB:-mydb}
       CHOKIDAR_USEPOLLING: true
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      ORCHESTRATOR_URL: http://orchestrator:3001
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+      BULL_BOARD_USER: ${BULL_BOARD_USER:-admin}
+      BULL_BOARD_PASS: ${BULL_BOARD_PASS:-bullboard}
       PUZZLE_POPULATION_CRON: ${PUZZLE_POPULATION_CRON:-0 6 * * *}
       PUZZLE_POPULATION_TZ: ${PUZZLE_POPULATION_TZ:-UTC}
       SHUFFLE_SMART_TRIALS: ${SHUFFLE_SMART_TRIALS:-3}
@@ -98,10 +115,21 @@ services:
       - ./backend/package.json:/app/package.json
       - ./backend/tsconfig.json:/app/tsconfig.json
     command: npm run start:dev
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   frontend:
     build:
       context: ./frontend
+      dockerfile: Dockerfile.dev
     ports:
       - "5173:5173"
     volumes:
@@ -125,9 +153,9 @@ services:
     environment:
       DB_HOST: db
       DB_PORT: 5432
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      DB_NAME: mydb
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DB_NAME: ${POSTGRES_DB:-mydb}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
@@ -148,6 +176,16 @@ services:
       - ./backend/package.json:/app/package.json
       - ./backend/tsconfig.json:/app/tsconfig.json
     command: npx tsx --watch src/worker.ts
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "const R=require('ioredis');const r=new R({host:'redis',port:6379,retryStrategy:()=>null});r.ping().then(()=>process.exit(0)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   ollama:
     image: ollama/ollama:latest
@@ -157,33 +195,11 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    # Uncomment if you have an NVIDIA GPU and nvidia-container-toolkit installed
     healthcheck:
       test: ["CMD-SHELL", "ollama list || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 5
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
-  # ollama-init:
-  #   image: curlimages/curl:latest
-  #   container_name: ollama_init
-  #   depends_on:
-  #     ollama:
-  #       condition: service_healthy
-  #   environment:
-  #     OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
-  #   entrypoint: >
-  #     sh -c "
-  #     until curl -s http://ollama:11434 > /dev/null; do sleep 1; done &&
-  #     curl -X POST http://ollama:11434/api/pull -d '{\"name\": \"'\"$$OLLAMA_MODEL\"'\"}'
-  #     "
 
 volumes:
   postgres_data:

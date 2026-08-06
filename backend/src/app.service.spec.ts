@@ -1,4 +1,6 @@
 import { Test, TestingModule } from "@nestjs/testing";
+import { getDataSourceToken } from "@nestjs/typeorm";
+import { Logger } from "@nestjs/common";
 import { AppService } from "./app.service";
 
 describe("AppService", () => {
@@ -6,8 +8,16 @@ describe("AppService", () => {
   let fetchSpy: jest.SpyInstance;
 
   beforeEach(async () => {
+    process.env.INTERNAL_API_KEY = "test-key";
+
     const module: TestingModule = await Test.createTestingModule({
-      providers: [AppService],
+      providers: [
+        AppService,
+        {
+          provide: getDataSourceToken(),
+          useValue: { query: jest.fn().mockResolvedValue([{ "?column?": 1 }]) },
+        },
+      ],
     }).compile();
 
     service = module.get<AppService>(AppService);
@@ -18,11 +28,7 @@ describe("AppService", () => {
     jest.restoreAllMocks();
   });
 
-  const mockResponse = (
-    status: number,
-    statusText: string,
-    body: unknown,
-  ): Response =>
+  const mockResponse = (status: number, statusText: string, body: unknown): Response =>
     ({
       ok: status >= 200 && status < 300,
       status,
@@ -42,13 +48,12 @@ describe("AppService", () => {
     };
 
     it("should return healthy with parsed data on a 2xx response", async () => {
-      fetchSpy = jest
-        .spyOn(global, "fetch")
-        .mockResolvedValue(mockResponse(200, "OK", body));
+      fetchSpy = jest.spyOn(global, "fetch").mockResolvedValue(mockResponse(200, "OK", body));
 
-      const result = await service.solve(["A", "B", "C", "D"], [
-        { words: ["A"], result: "incorrect" },
-      ]);
+      const result = await service.solve(
+        ["A", "B", "C", "D"],
+        [{ words: ["A"], result: "incorrect" }],
+      );
 
       expect(result).toEqual({ orchestrator: "healthy", data: body });
       expect(fetchSpy).toHaveBeenCalledWith(
@@ -57,7 +62,7 @@ describe("AppService", () => {
           method: "POST",
           headers: expect.objectContaining({
             "Content-Type": "application/json",
-            "x-internal-api-key": "potato",
+            "x-internal-api-key": "test-key",
           }),
           body: JSON.stringify({
             puzzleWords: ["A", "B", "C", "D"],
@@ -68,9 +73,7 @@ describe("AppService", () => {
     });
 
     it("should default priorGuesses to an empty array", async () => {
-      fetchSpy = jest
-        .spyOn(global, "fetch")
-        .mockResolvedValue(mockResponse(200, "OK", body));
+      fetchSpy = jest.spyOn(global, "fetch").mockResolvedValue(mockResponse(200, "OK", body));
 
       await service.solve(["A", "B", "C", "D"]);
 
@@ -96,16 +99,13 @@ describe("AppService", () => {
 
       expect(result).toEqual({
         orchestrator: "unhealthy",
-        error:
-          "AI solve request failed after 1 attempt: HTTP 503 Service Unavailable",
+        error: "AI solve request failed after 1 attempt: HTTP 503 Service Unavailable",
       });
     });
 
     it("should report the retry failure message on a network failure", async () => {
-      const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
-      fetchSpy = jest
-        .spyOn(global, "fetch")
-        .mockRejectedValue(new Error("ECONNREFUSED"));
+      const logSpy = jest.spyOn(Logger.prototype, "error").mockImplementation(() => {});
+      fetchSpy = jest.spyOn(global, "fetch").mockRejectedValue(new Error("ECONNREFUSED"));
 
       const result = await service.solve(["A", "B", "C", "D"], [], {
         maxRetries: 0,
@@ -173,14 +173,13 @@ describe("AppService", () => {
 
       expect(result).toEqual({
         orchestrator: "unhealthy",
-        error:
-          "AI solve request failed after 1 attempt: Request timed out",
+        error: "AI solve request failed after 1 attempt: Request timed out",
       });
     });
 
     it("should retry with exponential backoff and succeed", async () => {
       jest.useFakeTimers();
-      const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+      const warnSpy = jest.spyOn(Logger.prototype, "warn").mockImplementation(() => {});
       fetchSpy = jest
         .spyOn(global, "fetch")
         .mockRejectedValueOnce(new Error("ECONNREFUSED"))
@@ -198,17 +197,9 @@ describe("AppService", () => {
 
       expect(result).toEqual({ orchestrator: "healthy", data: body });
       expect(fetchSpy).toHaveBeenCalledTimes(3);
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("attempt 1 of 4"),
-      );
-      expect(warnSpy).toHaveBeenNthCalledWith(
-        1,
-        expect.stringContaining("Retrying in 1000ms"),
-      );
-      expect(warnSpy).toHaveBeenNthCalledWith(
-        2,
-        expect.stringContaining("Retrying in 2000ms"),
-      );
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("attempt 1 of 4"));
+      expect(warnSpy).toHaveBeenNthCalledWith(1, expect.stringContaining("Retrying in 1000ms"));
+      expect(warnSpy).toHaveBeenNthCalledWith(2, expect.stringContaining("Retrying in 2000ms"));
     });
 
     it("should retry on non-2xx responses and succeed", async () => {
@@ -234,9 +225,7 @@ describe("AppService", () => {
     it("should fail after all retries are exhausted with attempt count and last error", async () => {
       jest.useFakeTimers();
       jest.spyOn(console, "warn").mockImplementation(() => {});
-      fetchSpy = jest
-        .spyOn(global, "fetch")
-        .mockRejectedValue(new Error("ECONNREFUSED"));
+      fetchSpy = jest.spyOn(global, "fetch").mockRejectedValue(new Error("ECONNREFUSED"));
 
       const resultPromise = service.solve(["A", "B", "C", "D"], [], {
         maxRetries: 2,
@@ -285,8 +274,7 @@ describe("AppService", () => {
 
       expect(result).toEqual({
         orchestrator: "unhealthy",
-        error:
-          "AI solve request failed after 2 attempts: Request timed out",
+        error: "AI solve request failed after 2 attempts: Request timed out",
       });
       expect(fetchSpy).toHaveBeenCalledTimes(2);
     });
@@ -321,9 +309,7 @@ describe("AppService", () => {
     });
 
     it("should report unhealthy with a stringified error on failure", async () => {
-      fetchSpy = jest
-        .spyOn(global, "fetch")
-        .mockRejectedValue(new Error("boom"));
+      fetchSpy = jest.spyOn(global, "fetch").mockRejectedValue(new Error("boom"));
 
       const result = await service.checkOrchestrator();
 
@@ -350,6 +336,35 @@ describe("AppService", () => {
       expect(result).toEqual({
         orchestrator: "unhealthy",
         error: "Error: Aborted",
+      });
+    });
+  });
+
+  describe("checkHealth", () => {
+    it("should report ok when the database responds", async () => {
+      await expect(service.checkHealth()).resolves.toEqual({
+        status: "ok",
+        db: "up",
+      });
+    });
+
+    it("should report degraded when the database is unreachable", async () => {
+      const module = await Test.createTestingModule({
+        providers: [
+          AppService,
+          {
+            provide: getDataSourceToken(),
+            useValue: {
+              query: jest.fn().mockRejectedValue(new Error("connection refused")),
+            },
+          },
+        ],
+      }).compile();
+      const degraded = module.get<AppService>(AppService);
+
+      await expect(degraded.checkHealth()).resolves.toEqual({
+        status: "degraded",
+        db: "down",
       });
     });
   });

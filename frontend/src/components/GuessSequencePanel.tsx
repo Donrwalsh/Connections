@@ -21,12 +21,51 @@ interface StrategyRunListItem {
 
 interface StrategyRunDetail extends StrategyRunListItem {
   guesses: Guess[];
+  meta: { total: number; page: number; limit: number };
 }
 
 interface GuessSequencePanelProps {
   date: string;
   isOpen: boolean;
   onToggle: () => void;
+}
+
+const DETAIL_PAGE_SIZE = 200;
+
+// The run detail endpoint is paginated (a deterministic run can hold ~2,400
+// guesses), so the panel fetches every page and concatenates them to preserve
+// the old "show the whole sequence" behavior.
+async function fetchFullRunDetail(
+  strategyName: string,
+  date: string,
+  trialNumber: number,
+  signal: AbortSignal,
+): Promise<StrategyRunDetail> {
+  const fetchPage = async (page: number): Promise<StrategyRunDetail> => {
+    const res = await fetch(
+      apiUrl(
+        `/strategy/${strategyName}/puzzle/${date}/run/${trialNumber}?page=${page}&limit=${DETAIL_PAGE_SIZE}`,
+      ),
+      { signal },
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.message ?? `Request failed with status ${res.status}`);
+    }
+    return res.json();
+  };
+
+  const first = await fetchPage(1);
+  const guesses = [...first.guesses];
+  const totalPages = Math.ceil(first.meta.total / first.meta.limit);
+
+  for (let page = 2; page <= totalPages; page++) {
+    if (signal.aborted) break;
+    const next = await fetchPage(page);
+    guesses.push(...next.guesses);
+  }
+
+  return { ...first, guesses };
 }
 
 const STRATEGIES = [
@@ -148,21 +187,12 @@ export function GuessSequencePanel({
     setDetailLoading((prev) => ({ ...prev, [selectedRun.id]: true }));
     setDetailErrors((prev) => ({ ...prev, [selectedRun.id]: "" }));
 
-    fetch(
-      apiUrl(
-        `/strategy/${selectedRun.strategyName}/puzzle/${date}/run/${selectedRun.trialNumber}`,
-      ),
-      { signal: controller.signal },
+    fetchFullRunDetail(
+      selectedRun.strategyName,
+      date,
+      selectedRun.trialNumber,
+      controller.signal,
     )
-      .then(async (res) => {
-        if (!res.ok) {
-          const body = await res.json().catch(() => null);
-          throw new Error(
-            body?.message ?? `Request failed with status ${res.status}`,
-          );
-        }
-        return res.json();
-      })
       .then((detail: StrategyRunDetail) => {
         if (!controller.signal.aborted) {
           setRunDetails((prev) => ({ ...prev, [selectedRun.id]: detail }));

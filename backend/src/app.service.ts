@@ -1,4 +1,7 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
+import { InjectDataSource } from "@nestjs/typeorm";
+import { DataSource } from "typeorm";
+import { loadEnv } from "./config/env";
 import { PriorGuessDto, SolveResponseDto } from "./modules/game/dto/game.dto";
 
 export interface FetchRetryOptions {
@@ -21,11 +24,28 @@ const SOLVE_RETRY_OPTIONS: FetchRetryOptions = {
 
 @Injectable()
 export class AppService {
-  private orchestratorUrl = "http://ai_orchestrator:3001";
-  // Shared secret for the backend↔orchestrator boundary. "potato" is only the
-  // local-dev fallback when INTERNAL_API_KEY isn't set; compose overrides it
-  // with the value from the root .env file.
-  private readonly internalApiKey = process.env.INTERNAL_API_KEY ?? "potato";
+  private readonly logger = new Logger(AppService.name);
+  private readonly orchestratorUrl = loadEnv().ORCHESTRATOR_URL;
+  // Shared secret for the backend↔orchestrator boundary. loadEnv() throws if
+  // INTERNAL_API_KEY is missing so an unconfigured deployment fails fast at
+  // startup instead of silently degrading to an unauthenticated fallback.
+  private readonly internalApiKey = loadEnv().INTERNAL_API_KEY;
+
+  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+
+  /**
+   * Liveness/readiness probe for container orchestration. Returns a
+   * "degraded" status (HTTP 503) when the database is unreachable instead of
+   * crashing, so the orchestrator can restart the container.
+   */
+  async checkHealth(): Promise<{ status: "ok" | "degraded"; db: "up" | "down" }> {
+    try {
+      await this.dataSource.query("SELECT 1");
+      return { status: "ok", db: "up" };
+    } catch {
+      return { status: "degraded", db: "down" };
+    }
+  }
 
   async solve(
     puzzleWords: string[],
@@ -57,7 +77,7 @@ export class AppService {
       return { orchestrator: "healthy", data };
     } catch (err) {
       if (err instanceof Error) {
-        console.log(err);
+        this.logger.error(err);
         return {
           orchestrator: "unhealthy",
           error: err.message,
@@ -85,8 +105,7 @@ export class AppService {
     let lastError: unknown;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const timeout =
-        timeouts[Math.min(attempt, timeouts.length - 1)] ?? DEFAULT_TIMEOUT_MS;
+      const timeout = timeouts[Math.min(attempt, timeouts.length - 1)] ?? DEFAULT_TIMEOUT_MS;
 
       try {
         const controller = new AbortController();
@@ -109,11 +128,10 @@ export class AppService {
 
       if (attempt < maxRetries) {
         const delay = initialDelayMs * 2 ** attempt;
-        console.warn(
-          `[AppService] AI solve request attempt ${attempt + 1} of ${
+        this.logger.warn(
+          `AI solve request attempt ${attempt + 1} of ${
             maxRetries + 1
-          } failed (${this.describeError(lastError)}). ` +
-            `Retrying in ${delay}ms...`,
+          } failed (${this.describeError(lastError)}). ` + `Retrying in ${delay}ms...`,
         );
         await this.sleep(delay);
       }
@@ -121,9 +139,8 @@ export class AppService {
 
     const attempts = maxRetries + 1;
     throw new Error(
-      `AI solve request failed after ${attempts} attempt${
-        attempts === 1 ? "" : "s"
-      }: ` + this.describeError(lastError),
+      `AI solve request failed after ${attempts} attempt${attempts === 1 ? "" : "s"}: ` +
+        this.describeError(lastError),
     );
   }
 

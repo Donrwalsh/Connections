@@ -18,11 +18,12 @@ const PUZZLE_DATA = {
   ],
 };
 
-const fetchResponse = (status: number, body?: unknown) => ({
-  ok: status >= 200 && status < 300,
-  status,
-  json: jest.fn().mockResolvedValue(body),
-}) as unknown as Response;
+const fetchResponse = (status: number, body?: unknown) =>
+  ({
+    ok: status >= 200 && status < 300,
+    status,
+    json: jest.fn().mockResolvedValue(body),
+  }) as unknown as Response;
 
 describe("PuzzleIngestionService", () => {
   let service: PuzzleIngestionService;
@@ -72,9 +73,7 @@ describe("PuzzleIngestionService", () => {
 
     mockDataSource = {
       createQueryBuilder: jest.fn().mockReturnValue(mockQuery),
-      transaction: jest.fn(async (cb: (manager: unknown) => Promise<unknown>) =>
-        cb(mockManager),
-      ),
+      transaction: jest.fn(async (cb: (manager: unknown) => Promise<unknown>) => cb(mockManager)),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -95,10 +94,7 @@ describe("PuzzleIngestionService", () => {
   describe("populateUntilCaughtUp", () => {
     const mockLatestDate = (year: number, month: number, day: number) =>
       jest
-        .spyOn(
-          service as unknown as { getLatestDate(): Promise<Date> },
-          "getLatestDate",
-        )
+        .spyOn(service as unknown as { getLatestDate(): Promise<Date> }, "getLatestDate")
         .mockResolvedValue(new Date(year, month, day));
 
     it("should insert puzzles day-by-day until the endpoint returns 404", async () => {
@@ -166,11 +162,10 @@ describe("PuzzleIngestionService", () => {
       });
     });
 
-    it("should skip known awkward NYT dates without fetching", async () => {      mockLatestDate(2024, 11, 11);
+    it("should skip known awkward NYT dates without fetching", async () => {
+      mockLatestDate(2024, 11, 11);
 
-      const fetchSpy = jest
-        .spyOn(global, "fetch")
-        .mockResolvedValueOnce(fetchResponse(404));
+      const fetchSpy = jest.spyOn(global, "fetch").mockResolvedValueOnce(fetchResponse(404));
 
       const result = await service.populateUntilCaughtUp();
 
@@ -204,37 +199,33 @@ describe("PuzzleIngestionService", () => {
       jest.spyOn(global, "fetch").mockResolvedValue(fetchResponse(404));
 
       await expect(
-        (service as unknown as { fetchNytPuzzle(d: string): Promise<unknown> })
-          .fetchNytPuzzle("2024-01-02"),
+        (service as unknown as { fetchNytPuzzle(d: string): Promise<unknown> }).fetchNytPuzzle(
+          "2024-01-02",
+        ),
       ).resolves.toBeNull();
     });
 
     it("should return parsed JSON on a 2xx response", async () => {
-      jest
-        .spyOn(global, "fetch")
-        .mockResolvedValue(fetchResponse(200, PUZZLE_DATA));
+      jest.spyOn(global, "fetch").mockResolvedValue(fetchResponse(200, PUZZLE_DATA));
 
       await expect(
-        (service as unknown as { fetchNytPuzzle(d: string): Promise<unknown> })
-          .fetchNytPuzzle("2024-01-02"),
+        (service as unknown as { fetchNytPuzzle(d: string): Promise<unknown> }).fetchNytPuzzle(
+          "2024-01-02",
+        ),
       ).resolves.toEqual(PUZZLE_DATA);
     });
 
     it("should throw after exhausting retries when the NYT endpoint returns a server error", async () => {
       jest.spyOn(global, "fetch").mockResolvedValue(fetchResponse(500));
       jest
-        .spyOn(
-          service as unknown as { delay(ms: number): Promise<void> },
-          "delay",
-        )
+        .spyOn(service as unknown as { delay(ms: number): Promise<void> }, "delay")
         .mockResolvedValue(undefined);
 
       await expect(
-        (service as unknown as { fetchNytPuzzle(d: string): Promise<unknown> })
-          .fetchNytPuzzle("2024-01-02"),
-      ).rejects.toThrow(
-        "NYT fetch for 2024-01-02 failed after 6 attempts",
-      );
+        (service as unknown as { fetchNytPuzzle(d: string): Promise<unknown> }).fetchNytPuzzle(
+          "2024-01-02",
+        ),
+      ).rejects.toThrow("NYT fetch for 2024-01-02 failed after 6 attempts");
     });
   });
 
@@ -292,15 +283,16 @@ describe("PuzzleIngestionService", () => {
         service as unknown as { getLatestDate(): Promise<Date> }
       ).getLatestDate();
 
-      expect(result).toEqual(new Date("2023-06-12"));
+      expect(result).toEqual(new Date("2023-06-11"));
     });
   });
 
   describe("addDays", () => {
     it("should add days across a month boundary", () => {
-      const result = (
-        service as unknown as { addDays(d: Date, n: number): Date }
-      ).addDays(new Date(2024, 0, 31), 1);
+      const result = (service as unknown as { addDays(d: Date, n: number): Date }).addDays(
+        new Date(2024, 0, 31),
+        1,
+      );
 
       expect(result).toEqual(new Date(2024, 1, 1));
     });
@@ -308,9 +300,9 @@ describe("PuzzleIngestionService", () => {
 
   describe("formatDate", () => {
     it("should zero-pad month and day", () => {
-      const result = (
-        service as unknown as { formatDate(d: Date): string }
-      ).formatDate(new Date(2024, 0, 5));
+      const result = (service as unknown as { formatDate(d: Date): string }).formatDate(
+        new Date(2024, 0, 5),
+      );
 
       expect(result).toBe("2024-01-05");
     });

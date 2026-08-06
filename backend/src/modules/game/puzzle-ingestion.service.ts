@@ -130,9 +130,7 @@ export class PuzzleIngestionService {
   private static readonly FETCH_MAX_RETRIES = 5;
   private static readonly FETCH_RETRY_BASE_DELAY_MS = 1000;
 
-  private async fetchNytPuzzle(
-    formattedDate: string,
-  ): Promise<ConnectionsPuzzle | null> {
+  private async fetchNytPuzzle(formattedDate: string): Promise<ConnectionsPuzzle | null> {
     const url = `https://www.nytimes.com/svc/connections/v2/${formattedDate}.json`;
 
     for (let attempt = 0; ; attempt++) {
@@ -162,9 +160,7 @@ export class PuzzleIngestionService {
           continue;
         }
 
-        throw new Error(
-          `NYT fetch failed for ${formattedDate}: ${response.status}`,
-        );
+        throw new Error(`NYT fetch failed for ${formattedDate}: ${response.status}`);
       } catch (error) {
         // TypeError from fetch() indicates a network error — retryable
         if (!(error instanceof TypeError)) throw error;
@@ -174,6 +170,7 @@ export class PuzzleIngestionService {
             `NYT fetch for ${formattedDate} failed after ${
               PuzzleIngestionService.FETCH_MAX_RETRIES + 1
             } attempts: ${error.message}`,
+            { cause: error },
           );
         }
 
@@ -191,8 +188,7 @@ export class PuzzleIngestionService {
   }
 
   private computeBackoff(attempt: number): number {
-    const base =
-      PuzzleIngestionService.FETCH_RETRY_BASE_DELAY_MS * 2 ** attempt;
+    const base = PuzzleIngestionService.FETCH_RETRY_BASE_DELAY_MS * 2 ** attempt;
     return base + Math.floor(Math.random() * base * 0.2); // +0-20% jitter
   }
 
@@ -216,9 +212,7 @@ export class PuzzleIngestionService {
         .execute();
 
       if (puzzle.identifiers.length === 0 || !puzzle.identifiers[0]?.id) {
-        this.logger.warn(
-          `${formattedDate} already existed — skipped (concurrent run?)`,
-        );
+        this.logger.warn(`${formattedDate} already existed — skipped (concurrent run?)`);
         return null;
       }
       const puzzleId = puzzle.identifiers[0].id;

@@ -1,10 +1,6 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from "@nestjs/common";
-import { InjectRepository } from "@nestjs/typeorm/dist/common/typeorm.decorators";
-import { Repository } from "typeorm/browser/repository/Repository.js";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
 import { Puzzle } from "./entities/puzzle.entity";
 import { GuessResult } from "../strategy/entities/guess.entity";
 import { NYT_CONNECTIONS_ORIGIN_DATE } from "./constants";
@@ -27,14 +23,9 @@ export class GameService {
   // Puzzles are inserted once by ingestion and never mutated, so a date-keyed
   // in-memory cache is safe and needs no invalidation.
   private static readonly PUZZLE_CACHE_TTL_MS = 86_400_000; // 24h
-  private readonly puzzleCache = new Map<
-    string,
-    { expiresAt: number; value: PuzzleResponseDto }
-  >();
+  private readonly puzzleCache = new Map<string, { expiresAt: number; value: PuzzleResponseDto }>();
 
-  constructor(
-    @InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>,
-  ) {}
+  constructor(@InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>) {}
 
   async puzzleDateToId(date: string): Promise<number> {
     const puzzle = await this.puzzleRepo.findOne({ where: { date } });
@@ -51,9 +42,7 @@ export class GameService {
    */
   async resolveDateToPuzzleId(date: string): Promise<number> {
     if (!this.isValidYYYYMMDD(date)) {
-      throw new BadRequestException(
-        `Invalid date format: '${date}'. Expected YYYY-MM-DD.`,
-      );
+      throw new BadRequestException(`Invalid date format: '${date}'. Expected YYYY-MM-DD.`);
     }
     return this.puzzleDateToId(date);
   }
@@ -75,10 +64,7 @@ export class GameService {
    * uses this with a puzzle loaded once per run instead of re-fetching the
    * same immutable puzzle from the DB for every single guess.
    */
-  static evaluateGuessOnPuzzle(
-    puzzle: Puzzle,
-    words: string[],
-  ): { result: GuessResult } {
+  static evaluateGuessOnPuzzle(puzzle: Puzzle, words: string[]): { result: GuessResult } {
     // Normalize guessed words for case-insensitive matching
     const guessedSet = new Set(words.map((w) => w.trim().toLowerCase()));
     let isOffByOne = false;
@@ -184,10 +170,6 @@ export class GameService {
     const [year, month, day] = dateString.split("-").map(Number);
     const date = new Date(year, month - 1, day);
 
-    return (
-      date.getFullYear() === year &&
-      date.getMonth() === month - 1 &&
-      date.getDate() === day
-    );
+    return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
   }
 }

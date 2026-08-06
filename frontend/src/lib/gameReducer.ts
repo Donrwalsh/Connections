@@ -30,7 +30,7 @@ export interface GameState {
   //AI solve stuff:
   loading: boolean;
   error: string | null;
-  ai_solution: Record<string, any> | null;
+  ai_solution: AiSolveData | null;
 }
 
 // 1. Define the nested proposed group shape

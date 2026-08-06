@@ -7,14 +7,20 @@
  * Falls back to plain JSON.stringify if the group's shape is unexpected.
  */
 export function renderProposedGroup(
-  proposedGroup: Record<string, unknown>,
+  proposedGroup: unknown,
   words: string[],
 ): string {
-  if (!Array.isArray(proposedGroup.word_ids)) {
+  if (!proposedGroup || typeof proposedGroup !== "object") {
     return JSON.stringify(proposedGroup, null, 2);
   }
 
-  const ids = proposedGroup.word_ids as number[];
+  const group = proposedGroup as Record<string, unknown>;
+
+  if (!Array.isArray(group.word_ids)) {
+    return JSON.stringify(group, null, 2);
+  }
+
+  const ids = group.word_ids as number[];
   const entries = ids.map(
     (id, i) => `${id}${i < ids.length - 1 ? "," : ""}`,
   );
@@ -28,9 +34,9 @@ export function renderProposedGroup(
   });
 
   lines.push("  ],");
-  for (const key of Object.keys(proposedGroup)) {
+  for (const key of Object.keys(group)) {
     if (key === "word_ids") continue;
-    lines.push(`  ${JSON.stringify(key)}: ${JSON.stringify(proposedGroup[key])}`);
+    lines.push(`  ${JSON.stringify(key)}: ${JSON.stringify(group[key])}`);
   }
   lines.push("}");
   return lines.join("\n");
