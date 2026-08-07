@@ -1,16 +1,16 @@
-import { Injectable, Logger, Inject } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import * as path from "path";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { DataSource } from "typeorm";
+import { Queue } from "bullmq";
 import { Puzzle } from "./entities/puzzle.entity";
 import { AnswerGroup } from "./entities/answer-group.entity";
 import { GroupMember } from "./entities/group-member.entity";
 import { InjectDataSource } from "@nestjs/typeorm";
+import { NYT_CONNECTIONS_ORIGIN_DATE } from "./constants";
 import { STRATEGY_QUEUE } from "../queue/queue.module";
 import { runStrategyJobId } from "../queue/strategy.queue";
-import { NYT_CONNECTIONS_ORIGIN_DATE } from "./constants";
-import { Queue } from "bullmq";
-import { AUTOMATIC_STRATEGIES, strategyTrialNumbers } from "../../strategies";
+import { SUPPORTED_STRATEGIES, strategyTrialNumbers } from "../../strategies";
 
 interface ConnectionsCard {
   content: string;
@@ -33,10 +33,6 @@ const AWKWARD_DATES = new Set([
   "2026-04-01",
   "2026-05-06",
 ]);
-
-// Automatic strategies exclude 'llm' (see AUTOMATIC_STRATEGIES) so LLM runs
-// are only triggered explicitly via /strategy/queue/llm/:date.
-const ALL_STRATEGIES = AUTOMATIC_STRATEGIES;
 
 @Injectable()
 export class PuzzleIngestionService {
@@ -79,28 +75,8 @@ export class PuzzleIngestionService {
       const puzzleId = await this.insertPuzzle(formatted, puzzleData);
 
       if (puzzleId !== null) {
-        // Dispatch all strategy runs right after inserting. Shuffle strategies
-        // get one job per trial (1..N); deterministic strategies get a single
-        // trial (0). addBulk batches all of them into one Redis round-trip.
-        const jobs = [];
-        for (const strategyName of ALL_STRATEGIES) {
-          for (const trialNumber of strategyTrialNumbers(strategyName)) {
-            jobs.push({
-              name: "run-strategy",
-              data: { puzzleId, strategyName, date: formatted, trialNumber },
-              opts: {
-                jobId: runStrategyJobId(puzzleId, strategyName, trialNumber),
-              },
-            });
-          }
-        }
-        await this.strategyQueue.addBulk(jobs);
-
-        this.logger.log(
-          `Queued all strategies (${ALL_STRATEGIES.join(
-            ", ",
-          )}) for puzzle ${puzzleId} (${formatted})`,
-        );
+        await this.dispatchStrategyRuns(puzzleId, formatted);
+        this.logger.log(`Inserted puzzle for ${formatted} (id ${puzzleId})`);
         inserted++;
       }
 
@@ -256,6 +232,37 @@ export class PuzzleIngestionService {
 
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Queues one job per (strategy, trial) for every supported strategy — the
+   * deterministic ones plus shuffle-smart/shuffle-foolish and 'llm' — on the
+   * freshly inserted puzzle. Uses the same deterministic job ids as the
+   * /strategy/queue endpoints, so a re-run of ingestion collapses onto the
+   * existing jobs instead of duplicating them.
+   *
+   * Best-effort: a transient queue failure must not abort the multi-day
+   * ingestion loop (the loop would be retried by BullMQ, and the already-
+   * inserted puzzle would then be skipped on retry, losing its strategy
+   * runs entirely). Failures are logged so runs can be triggered manually.
+   */
+  private async dispatchStrategyRuns(puzzleId: number, date: string): Promise<void> {
+    const jobs = SUPPORTED_STRATEGIES.flatMap((strategyName) =>
+      strategyTrialNumbers(strategyName).map((trialNumber) => ({
+        name: "run-strategy",
+        data: { puzzleId, strategyName, date, trialNumber },
+        opts: { jobId: runStrategyJobId(puzzleId, strategyName, trialNumber) },
+      })),
+    );
+
+    try {
+      await this.strategyQueue.addBulk(jobs);
+      this.logger.log(`Queued ${jobs.length} strategy run(s) for puzzle ${date} (id ${puzzleId})`);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to queue strategy runs for puzzle ${date} (id ${puzzleId}): ${(error as Error).message}`,
+      );
+    }
   }
 
   private async insertPuzzle(

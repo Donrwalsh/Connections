@@ -95,12 +95,14 @@ describe("orchestrator app", () => {
 
   it("returns the extended success body", async () => {
     proposeGroupMock.mockResolvedValueOnce({
-      proposedGroup: {
-        word_ids: [0, 1, 2, 3],
-        category: "Test",
-        confidence: 0.9,
-        reasoning: "test",
-      },
+      proposedGroups: [
+        {
+          word_ids: [0, 1, 2, 3],
+          category: "Test",
+          confidence: 0.9,
+          reasoning: "test",
+        },
+      ],
       prompt: "You are solving...",
       model: "test-model",
       contextWindow: 8192,
@@ -111,12 +113,14 @@ describe("orchestrator app", () => {
     const res = await solveRequest(SOLVE_BODY);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      proposedGroup: {
-        word_ids: [0, 1, 2, 3],
-        category: "Test",
-        confidence: 0.9,
-        reasoning: "test",
-      },
+      proposedGroups: [
+        {
+          word_ids: [0, 1, 2, 3],
+          category: "Test",
+          confidence: 0.9,
+          reasoning: "test",
+        },
+      ],
       prompt: "You are solving...",
       model: "test-model",
       contextWindow: 8192,
@@ -125,27 +129,65 @@ describe("orchestrator app", () => {
     });
   });
 
-  it("maps duplicate_group to 409", async () => {
-    proposeGroupMock.mockRejectedValueOnce(
-      new SolveError("duplicate_group", "repeated group", {
-        proposedGroup: {
+  it("passes an optional temperature through to the solve step", async () => {
+    proposeGroupMock.mockResolvedValueOnce({
+      proposedGroups: [
+        {
           word_ids: [0, 1, 2, 3],
           category: "Test",
           confidence: 0.9,
           reasoning: "test",
         },
+      ],
+      prompt: "You are solving...",
+      model: "test-model",
+      contextWindow: 8192,
+      latencyMs: 10,
+      temperature: 1.2,
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    });
+
+    const res = await solveRequest({ ...SOLVE_BODY, temperature: 1.2 });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { temperature: number };
+    expect(body.temperature).toBe(1.2);
+    expect(proposeGroupMock).toHaveBeenCalledWith(
+      expect.objectContaining({ temperature: 1.2 }),
+    );
+  });
+
+  it("rejects a temperature outside the supported range", async () => {
+    const res = await solveRequest({ ...SOLVE_BODY, temperature: 3 });
+    expect(res.status).toBe(400);
+  });
+
+  it("maps duplicate_group to 409", async () => {
+    proposeGroupMock.mockRejectedValueOnce(
+      new SolveError("duplicate_group", "repeated group", {
+        proposedGroups: [
+          {
+            word_ids: [0, 1, 2, 3],
+            category: "Test",
+            confidence: 0.9,
+            reasoning: "test",
+          },
+        ],
       }),
     );
     const res = await solveRequest(SOLVE_BODY);
     expect(res.status).toBe(409);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.code).toBe("duplicate_group");
-    expect((body.details as { proposedGroup: unknown }).proposedGroup).toEqual({
-      word_ids: [0, 1, 2, 3],
-      category: "Test",
-      confidence: 0.9,
-      reasoning: "test",
-    });
+    expect(
+      (body.details as { proposedGroups: unknown }).proposedGroups,
+    ).toEqual([
+      {
+        word_ids: [0, 1, 2, 3],
+        category: "Test",
+        confidence: 0.9,
+        reasoning: "test",
+      },
+    ]);
   });
 
   it("maps invalid_group to 400", async () => {

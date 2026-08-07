@@ -30,16 +30,21 @@ export function getModel(): LanguageModel {
     const ollama = createOllama({
       baseURL: process.env.OLLAMA_BASE_URL ?? "http://localhost:11434",
     });
-    return ollama(process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL);
+    // Pass the configured context window through as num_ctx so Ollama's real
+    // context matches the reported MODEL_CONTEXT_WINDOW telemetry value.
+    return ollama(process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL, {
+      options: { num_ctx: getContextWindow() },
+    });
   }
 
   return openai(process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL);
 }
 
 /**
- * Returns the configured context window for the active model, used to
- * report per-run context capacity in telemetry. Defaults to 8192 when
- * not configured.
+ * Returns the configured context window for the active model, from
+ * MODEL_CONTEXT_WINDOW. Used both to constrain the Ollama model (num_ctx)
+ * and to report per-run context capacity in telemetry. Defaults to 8192
+ * when not configured.
  */
 export function getContextWindow(): number {
   const raw = Number(process.env.MODEL_CONTEXT_WINDOW);

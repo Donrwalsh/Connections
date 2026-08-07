@@ -17,7 +17,7 @@ export interface ProposedGroup {
 }
 
 export interface SolveSuccess {
-  proposedGroup: ProposedGroup;
+  proposedGroups: ProposedGroup[];
   prompt: string;
   model: string;
   contextWindow: number;
@@ -26,7 +26,7 @@ export interface SolveSuccess {
 }
 
 export interface SolveErrorDetails {
-  proposedGroup?: ProposedGroup;
+  proposedGroups?: ProposedGroup[];
   prompt?: string;
   model?: string;
   contextWindow?: number;
@@ -45,6 +45,8 @@ export type SolveOutcome = { ok: true; data: SolveSuccess } | { ok: false; error
 export interface OrchestratorSolveRequest {
   puzzleWords: string[];
   priorGuesses: { words: string[]; result: "correct" | "incorrect" | "oneAway" }[];
+  temperature?: number;
+  numResponses?: number;
 }
 
 const MAX_RETRIES = 3;

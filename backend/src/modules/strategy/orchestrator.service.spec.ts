@@ -10,12 +10,14 @@ describe("OrchestratorService", () => {
   };
 
   const successBody = {
-    proposedGroup: {
-      word_ids: [0, 1, 2, 3],
-      category: "Fruit",
-      confidence: 0.9,
-      reasoning: "test",
-    },
+    proposedGroups: [
+      {
+        word_ids: [0, 1, 2, 3],
+        category: "Fruit",
+        confidence: 0.9,
+        reasoning: "test",
+      },
+    ],
     prompt: "solve step",
     model: "mistral",
     contextWindow: 8192,
@@ -67,6 +69,34 @@ describe("OrchestratorService", () => {
           "x-internal-api-key": "test-key",
         }),
         body: JSON.stringify(request),
+      }),
+    );
+  });
+
+  it("should include the temperature in the request body when provided", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
+
+    const outcome = await service.proposeGroup({ ...request, temperature: 1.4 });
+
+    expect(outcome).toEqual({ ok: true, data: successBody });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://orchestrator.test/solve",
+      expect.objectContaining({
+        body: JSON.stringify({ ...request, temperature: 1.4 }),
+      }),
+    );
+  });
+
+  it("should include the number of responses in the request body when provided", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
+
+    const outcome = await service.proposeGroup({ ...request, numResponses: 5 });
+
+    expect(outcome).toEqual({ ok: true, data: successBody });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://orchestrator.test/solve",
+      expect.objectContaining({
+        body: JSON.stringify({ ...request, numResponses: 5 }),
       }),
     );
   });

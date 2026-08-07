@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { validateProposedGroup, proposeGroup, SolveError } from "./solver.js";
-import type { ProposedGroup, SolveRequest } from "./types.js";
+import { proposeGroup } from "./solver.js";
+import { solveOutputSchema, type ProposedGroup, type SolveRequest } from "./types.js";
 
 const WORDS = ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"];
 
 function makeRequest(overrides: Partial<SolveRequest> = {}): SolveRequest {
-  return { puzzleWords: WORDS, priorGuesses: [], ...overrides };
+  return { puzzleWords: WORDS, priorGuesses: [], numResponses: 5, ...overrides };
 }
 
 function makeGroup(overrides: Partial<ProposedGroup> = {}): ProposedGroup {
@@ -18,71 +18,41 @@ function makeGroup(overrides: Partial<ProposedGroup> = {}): ProposedGroup {
   };
 }
 
-describe("validateProposedGroup", () => {
-  it("accepts a valid, unique group of in-range IDs", () => {
-    expect(() =>
-      validateProposedGroup(makeGroup(), makeRequest()),
-    ).not.toThrow();
+function makeOutput(count = 5) {
+  return {
+    object: {
+      proposed_groups: Array.from({ length: count }, () => makeGroup()),
+    },
+    usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+    response: { modelId: "test-model" },
+  };
+}
+
+describe("solveOutputSchema", () => {
+  it("accepts exactly the requested number of candidate groups", () => {
+    const schema = solveOutputSchema(5);
+
+    expect(
+      schema.safeParse({
+        proposed_groups: [makeGroup(), makeGroup(), makeGroup(), makeGroup(), makeGroup()],
+      }).success,
+    ).toBe(true);
+    expect(
+      schema.safeParse({
+        proposed_groups: [makeGroup(), makeGroup(), makeGroup(), makeGroup()],
+      }).success,
+    ).toBe(false);
+    expect(schema.safeParse({ proposed_groups: [] }).success).toBe(false);
   });
 
-  it("rejects IDs outside the remaining word list as invalid_group", () => {
-    try {
-      validateProposedGroup(
-        makeGroup({ word_ids: [0, 1, 2, 99] }),
-        makeRequest(),
-      );
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(SolveError);
-      expect((err as SolveError).code).toBe("invalid_group");
-      expect((err as SolveError).message).toMatch(
-        /not present in the puzzle's remaining word list/,
-      );
-    }
-  });
+  it("rejects a candidate that is not four word IDs", () => {
+    const schema = solveOutputSchema(1);
 
-  it("rejects duplicate IDs as invalid_group", () => {
-    try {
-      validateProposedGroup(
-        makeGroup({ word_ids: [0, 1, 1, 2] }),
-        makeRequest(),
-      );
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(SolveError);
-      expect((err as SolveError).code).toBe("invalid_group");
-      expect((err as SolveError).message).toMatch(/duplicate word IDs/);
-    }
-  });
-
-  it("rejects a group that was already guessed as duplicate_group", () => {
-    const request = makeRequest({
-      priorGuesses: [
-        { words: ["AAAA", "BBBB", "CCCC", "DDDD"], result: "incorrect" },
-      ],
-    });
-
-    // Same four words, different order, must still be caught as a repeat.
-    try {
-      validateProposedGroup(makeGroup({ word_ids: [3, 2, 1, 0] }), request);
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(SolveError);
-      expect((err as SolveError).code).toBe("duplicate_group");
-      expect((err as SolveError).message).toMatch(/previously-guessed group/);
-    }
-  });
-
-  it("does not treat a resolved (correct) guess as forbidden", () => {
-    const request = makeRequest({
-      priorGuesses: [
-        { words: ["AAAA", "BBBB", "CCCC", "DDDD"], result: "correct" },
-      ],
-    });
-
-    expect(() =>
-      validateProposedGroup(makeGroup(), request),
-    ).not.toThrow();
+    expect(
+      schema.safeParse({
+        proposed_groups: [{ ...makeGroup(), word_ids: [0, 1, 2] }],
+      }).success,
+    ).toBe(false);
   });
 });
 
@@ -98,22 +68,19 @@ describe("proposeGroup", () => {
 
   beforeEach(() => {
     generateObjectMock.mockReset();
-    generateObjectMock.mockResolvedValue({
-      object: makeGroup(),
-      usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
-      response: { modelId: "test-model" },
-    });
+    generateObjectMock.mockResolvedValue(makeOutput());
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it("returns the group plus prompt, model and usage metadata", async () => {
+  it("returns the candidate groups plus prompt, model and usage metadata", async () => {
     vi.stubEnv("MODEL_CONTEXT_WINDOW", "4096");
     const result = await proposeGroup(makeRequest());
 
-    expect(result.proposedGroup).toEqual(makeGroup());
+    expect(result.proposedGroups).toHaveLength(5);
+    expect(result.proposedGroups[0]).toEqual(makeGroup());
     expect(result.prompt).toContain("Remaining words");
     expect(result.model).toBe("test-model");
     expect(result.contextWindow).toBe(4096);
@@ -124,6 +91,24 @@ describe("proposeGroup", () => {
     });
     expect(typeof result.latencyMs).toBe("number");
     expect(generateObjectMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks the model for exactly the requested number of groups", async () => {
+    await proposeGroup(makeRequest({ numResponses: 3 }));
+
+    const call = generateObjectMock.mock.calls[0][0] as {
+      schema: { safeParse: (value: unknown) => { success: boolean } };
+    };
+    expect(
+      call.schema.safeParse({
+        proposed_groups: [makeGroup(), makeGroup(), makeGroup()],
+      }).success,
+    ).toBe(true);
+    expect(
+      call.schema.safeParse({
+        proposed_groups: [makeGroup(), makeGroup(), makeGroup(), makeGroup()],
+      }).success,
+    ).toBe(false);
   });
 
   it("classifies malformed model output as invalid_group", async () => {
@@ -143,24 +128,34 @@ describe("proposeGroup", () => {
     });
   });
 
-  it("attaches proposed group + metadata to a duplicate_group failure", async () => {
+  it("forwards the requested temperature to the model and reflects it in the result", async () => {
+    const result = await proposeGroup(makeRequest({ temperature: 1.3 }));
+
+    expect(generateObjectMock).toHaveBeenCalledWith(
+      expect.objectContaining({ temperature: 1.3 }),
+    );
+    expect(result.temperature).toBe(1.3);
+  });
+
+  it("omits temperature when the request does not provide one", async () => {
+    await proposeGroup(makeRequest());
+
+    expect(generateObjectMock).toHaveBeenCalledWith(
+      expect.not.objectContaining({ temperature: expect.any(Number) }),
+    );
+  });
+
+  it("passes previously-guessed groups through for the backend to resolve", async () => {
     const request = makeRequest({
       priorGuesses: [
         { words: ["AAAA", "BBBB", "CCCC", "DDDD"], result: "incorrect" },
       ],
     });
-    generateObjectMock.mockResolvedValueOnce({
-      object: makeGroup({ word_ids: [3, 2, 1, 0] }),
-      usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
-      response: { modelId: "test-model" },
-    });
 
-    const promise = proposeGroup(request);
-    await expect(promise).rejects.toBeInstanceOf(SolveError);
-    const err = await promise.catch((e) => e);
-    expect(err.code).toBe("duplicate_group");
-    expect(err.details.proposedGroup?.word_ids).toEqual([3, 2, 1, 0]);
-    expect(err.details.model).toBe("test-model");
-    expect(err.details.usage?.totalTokens).toBe(3);
+    const result = await proposeGroup(request);
+
+    // Duplicate-vs-fresh selection is the backend's job; the orchestrator
+    // just returns every candidate the model produced.
+    expect(result.proposedGroups[0].word_ids).toEqual([0, 1, 2, 3]);
   });
 });

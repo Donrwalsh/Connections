@@ -775,18 +775,24 @@ describe("StrategyService", () => {
   });
 
   describe("runLlmStrategy", () => {
+    const makeGroup = (
+      wordIds: number[],
+      overrides: Partial<{ category: string; confidence: number; reasoning: string }> = {},
+    ) => ({
+      word_ids: wordIds,
+      category: "Fruit",
+      confidence: 0.9,
+      reasoning: "test",
+      ...overrides,
+    });
+
     const success = (
       wordIds: number[],
       overrides: Partial<import("./orchestrator.service").SolveSuccess> = {},
     ): SolveOutcome => ({
       ok: true,
       data: {
-        proposedGroup: {
-          word_ids: wordIds,
-          category: "Fruit",
-          confidence: 0.9,
-          reasoning: "test",
-        },
+        proposedGroups: [makeGroup(wordIds)],
         prompt: "solve step",
         model: "mistral",
         contextWindow: 8192,
@@ -796,26 +802,12 @@ describe("StrategyService", () => {
       },
     });
 
-    const duplicate = (): SolveOutcome => ({
-      ok: false,
-      error: {
-        error: "repeated group",
-        code: "duplicate_group",
-        details: {
-          proposedGroup: {
-            word_ids: [0, 1, 2, 3],
-            category: "Fruit",
-            confidence: 0.5,
-            reasoning: "again",
-          },
-          prompt: "step",
-          model: "mistral",
-          contextWindow: 8192,
-          latencyMs: 10,
-          usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
-        },
-      },
-    });
+    const allDuplicates = (wordIds: number[], count = 5): SolveOutcome =>
+      success(wordIds, {
+        proposedGroups: Array.from({ length: count }, () =>
+          makeGroup(wordIds, { confidence: 0.5, reasoning: "again" }),
+        ),
+      });
 
     const malformed = (): SolveOutcome => ({
       ok: false,
@@ -865,6 +857,7 @@ describe("StrategyService", () => {
             category: "Fruit",
             confidence: 0.9,
             reasoning: "test",
+            temperature: 1,
             prompt: "solve step",
           },
         }),
@@ -889,18 +882,24 @@ describe("StrategyService", () => {
       expect(mockOrchestratorService.proposeGroup.mock.calls[0][0]).toEqual({
         puzzleWords: ["APPLE", "BANANA", "CHERRY", "DATE", "EGGPLANT", "FIG", "GRAPE", "HONEY"],
         priorGuesses: [],
+        temperature: 1,
+        numResponses: 5,
       });
       // After the first group is solved, the second call sees the remaining
       // words and the solved group mapped to the orchestrator's 'correct'.
       expect(mockOrchestratorService.proposeGroup.mock.calls[1][0]).toEqual({
         puzzleWords: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
         priorGuesses: [{ words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: "correct" }],
+        temperature: 1,
+        numResponses: 5,
       });
     });
 
     it("should resume with prior guesses loaded from the database", async () => {
+      // A persisted wrong guess (crossing both answer groups) so neither answer
+      // group is blocked as a duplicate when the run resumes.
       mockGuessRepo.find.mockResolvedValueOnce([
-        { words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: GuessResult.FAILURE },
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.FAILURE },
       ]);
       mockOrchestratorService.proposeGroup
         .mockResolvedValueOnce(success([0, 1, 2, 3]))
@@ -913,10 +912,12 @@ describe("StrategyService", () => {
       const firstCall = mockOrchestratorService.proposeGroup.mock.calls[0][0] as {
         puzzleWords: string[];
         priorGuesses: { words: string[]; result: string }[];
+        temperature: number;
       };
       expect(firstCall.priorGuesses).toEqual([
-        { words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: "incorrect" },
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: "incorrect" },
       ]);
+      expect(firstCall.temperature).toBe(1);
       expect(mockGuessRepo.find).toHaveBeenCalledWith({
         where: { strategyRunId: 7 },
         order: { sequenceNumber: "ASC" },
@@ -924,40 +925,185 @@ describe("StrategyService", () => {
       });
     });
 
-    it("should terminate with 'duplicate' once the duplicate limit is hit", async () => {
+    it("should resume the temperature from duplicates persisted in the database", async () => {
+      mockGuessRepo.find.mockResolvedValueOnce([
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.DUPLICATE },
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.DUPLICATE },
+        { words: ["CHERRY", "DATE", "FIG", "GRAPE"], result: GuessResult.FAILURE },
+      ]);
       mockOrchestratorService.proposeGroup
         .mockResolvedValueOnce(success([0, 1, 2, 3]))
-        .mockResolvedValueOnce(duplicate())
-        .mockResolvedValueOnce(duplicate())
-        .mockResolvedValueOnce(duplicate());
+        .mockResolvedValueOnce(success([0, 1, 2, 3]));
+
+      await service.runLlmStrategy(100, "llm");
+
+      // Two persisted duplicates + one persisted failure (counts toward the
+      // total guess count but not the duplicate count) => base 1 + 2 * 0.1.
+      const firstCall = mockOrchestratorService.proposeGroup.mock.calls[0][0] as {
+        temperature: number;
+        priorGuesses: { words: string[]; result: string }[];
+      };
+      expect(firstCall.temperature).toBe(1.2);
+      expect(firstCall.priorGuesses).toEqual([
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: "incorrect" },
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: "incorrect" },
+        { words: ["CHERRY", "DATE", "FIG", "GRAPE"], result: "incorrect" },
+      ]);
+    });
+
+    it("should terminate with 'duplicate' once the duplicate limit is hit", async () => {
+      process.env.LLM_MAX_DUPLICATE_GUESSES = "3";
+      try {
+        mockGuessRepo.find.mockResolvedValueOnce([
+          { words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: GuessResult.FAILURE },
+        ]);
+        mockOrchestratorService.proposeGroup.mockResolvedValue(allDuplicates([0, 1, 2, 3]));
+
+        const result = await service.runLlmStrategy(100, "llm");
+
+        expect(result).toEqual({ status: StrategyRunStatus.DUPLICATE, guessCount: 4 });
+        const inserted = mockManager.insert.mock.calls.flatMap(
+          (call) =>
+            call[1] as Array<{
+              result: GuessResult;
+              llmDetails: Record<string, unknown> | null;
+              promptTokens: number | null;
+            }>,
+        );
+        // Every candidate in each response repeats the earlier guess, so the
+        // first duplicate is what gets recorded each time.
+        expect(inserted.map((g) => g.result)).toEqual([
+          GuessResult.DUPLICATE,
+          GuessResult.DUPLICATE,
+          GuessResult.DUPLICATE,
+        ]);
+        expect(inserted[0].llmDetails).toEqual({
+          category: "Fruit",
+          confidence: 0.5,
+          reasoning: "again",
+          temperature: 1,
+          prompt: "solve step",
+        });
+        expect(inserted[0].promptTokens).toBe(10);
+        // Temperature ramps up by LLM_TEMPERATURE_STEP for each duplicate
+        // the model has produced so far: 1.0 on the first duplicate, 1.1 on
+        // the second, 1.2 on the third (which trips the limit).
+        const temperatures = mockOrchestratorService.proposeGroup.mock.calls.map(
+          (call) => (call[0] as { temperature: number }).temperature,
+        );
+        expect(temperatures).toEqual([1, 1.1, 1.2]);
+        expect(mockManager.save).toHaveBeenCalledWith(
+          StrategyRun,
+          expect.objectContaining({ status: StrategyRunStatus.DUPLICATE }),
+        );
+      } finally {
+        delete process.env.LLM_MAX_DUPLICATE_GUESSES;
+      }
+    });
+
+    it("should record the first duplicate when every candidate repeats a previous guess", async () => {
+      process.env.LLM_MAX_DUPLICATE_GUESSES = "1";
+      try {
+        mockGuessRepo.find.mockResolvedValueOnce([
+          { words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: GuessResult.FAILURE },
+        ]);
+        mockOrchestratorService.proposeGroup.mockResolvedValueOnce(
+          success([0, 1, 2, 3], {
+            proposedGroups: [
+              makeGroup([0, 1, 2, 3], { category: "DupA", confidence: 0.5, reasoning: "a" }),
+              makeGroup([3, 2, 1, 0], { category: "DupB", confidence: 0.5, reasoning: "b" }),
+            ],
+          }),
+        );
+
+        const result = await service.runLlmStrategy(100, "llm");
+
+        expect(result).toEqual({ status: StrategyRunStatus.DUPLICATE, guessCount: 2 });
+        const inserted = mockManager.insert.mock.calls.flatMap(
+          (call) =>
+            call[1] as Array<{
+              words: string[];
+              result: GuessResult;
+              llmDetails: Record<string, unknown>;
+            }>,
+        );
+        expect(inserted).toHaveLength(1);
+        expect(inserted[0].result).toBe(GuessResult.DUPLICATE);
+        expect(inserted[0].words).toEqual(["APPLE", "BANANA", "CHERRY", "DATE"]);
+        // The FIRST duplicate candidate (not the re-ordered repeat) is recorded.
+        expect(inserted[0].llmDetails.category).toBe("DupA");
+      } finally {
+        delete process.env.LLM_MAX_DUPLICATE_GUESSES;
+      }
+    });
+
+    it("should submit the first non-duplicate candidate, skipping repeats and unusable groups", async () => {
+      // A persisted wrong guess (crossing both answer groups). RepeatCat repeats
+      // it, BadCat is out of range, FreshCat solves the first group.
+      mockGuessRepo.find.mockResolvedValueOnce([
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.FAILURE },
+      ]);
+      mockOrchestratorService.proposeGroup
+        .mockResolvedValueOnce(
+          success([4, 5, 6, 7], {
+            proposedGroups: [
+              makeGroup([0, 1, 4, 5], {
+                category: "RepeatCat",
+                confidence: 0.4,
+                reasoning: "again",
+              }),
+              makeGroup([0, 1, 2, 99], { category: "BadCat", confidence: 0.3, reasoning: "bad" }),
+              makeGroup([4, 5, 6, 7], {
+                category: "FreshCat",
+                confidence: 0.9,
+                reasoning: "fresh",
+              }),
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(success([0, 1, 2, 3]));
 
       const result = await service.runLlmStrategy(100, "llm");
 
-      expect(result).toEqual({ status: StrategyRunStatus.DUPLICATE, guessCount: 4 });
+      expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 3 });
       const inserted = mockManager.insert.mock.calls.flatMap(
         (call) =>
           call[1] as Array<{
+            words: string[];
             result: GuessResult;
-            llmDetails: Record<string, unknown> | null;
-            promptTokens: number | null;
+            llmDetails: Record<string, unknown>;
           }>,
       );
-      expect(inserted.map((g) => g.result)).toEqual([
-        GuessResult.SUCCESS,
-        GuessResult.DUPLICATE,
-        GuessResult.DUPLICATE,
-        GuessResult.DUPLICATE,
+      expect(inserted).toHaveLength(2);
+      expect(inserted[0].words).toEqual(["EGGPLANT", "FIG", "GRAPE", "HONEY"]);
+      expect(inserted[0].result).toBe(GuessResult.SUCCESS);
+      expect(inserted[0].llmDetails.category).toBe("FreshCat");
+      // The duplicate repeat is never recorded — the fresh candidate wins.
+      expect(inserted).toEqual([
+        expect.not.objectContaining({ result: GuessResult.DUPLICATE }),
+        expect.not.objectContaining({ result: GuessResult.DUPLICATE }),
       ]);
-      expect(inserted[1].llmDetails).toEqual({
-        category: "Fruit",
-        confidence: 0.5,
-        reasoning: "again",
-        prompt: "step",
-      });
-      expect(inserted[1].promptTokens).toBe(1);
+    });
+
+    it("should treat a response with no usable candidates as malformed", async () => {
+      mockOrchestratorService.proposeGroup.mockResolvedValue(
+        success([0, 1, 2, 3], {
+          proposedGroups: [
+            makeGroup([0, 1, 2, 99], { category: "BadCat", confidence: 0.3, reasoning: "bad" }),
+            makeGroup([0, 1, 2], { category: "BadCat", confidence: 0.3, reasoning: "bad" }),
+          ],
+        }),
+      );
+
+      const result = await service.runLlmStrategy(100, "llm");
+
+      expect(result).toEqual({ status: StrategyRunStatus.MALFORMED_RESPONSE, guessCount: 0 });
+      expect(mockOrchestratorService.proposeGroup).toHaveBeenCalledTimes(3);
+      // No usable proposal means no guess rows, but the terminal state persists.
+      expect(mockManager.insert).not.toHaveBeenCalled();
       expect(mockManager.save).toHaveBeenCalledWith(
         StrategyRun,
-        expect.objectContaining({ status: StrategyRunStatus.DUPLICATE }),
+        expect.objectContaining({ status: StrategyRunStatus.MALFORMED_RESPONSE }),
       );
     });
 

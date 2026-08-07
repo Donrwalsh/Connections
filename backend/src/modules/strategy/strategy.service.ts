@@ -15,11 +15,13 @@ import {
   SHUFFLE_FOOLISH,
   llmMaxDuplicateGuesses,
   llmMaxMalformedResponses,
+  llmNumResponses,
+  llmTemperatureFor,
   shuffleFoolishDuplicateLimit,
   strategyTrialNumbers,
 } from "../../strategies";
 import { runStrategyJobId } from "../queue/strategy.queue";
-import { OrchestratorService } from "./orchestrator.service";
+import { OrchestratorService, type ProposedGroup } from "./orchestrator.service";
 
 const GROUP_SIZE = 4;
 const BATCH_SIZE = 50;
@@ -329,9 +331,12 @@ export class StrategyService {
 
   /**
    * Iterative LLM strategy: calls the orchestrator's /solve with the remaining
-   * words plus the full guess history, evaluates the proposed group locally,
-   * then re-prompts with the updated history until the puzzle is solved or a
-   * run limit is hit.
+   * words plus the full guess history. Each response proposes numResponses
+   * candidate groups; the first candidate that isn't a repeat of a previous
+   * guess is evaluated locally. If every candidate repeats an earlier guess,
+   * the first duplicate is recorded (so the duplicate limit and temperature
+   * ramp still apply), and the loop re-prompts with the updated history until
+   * the puzzle is solved or a run limit is hit.
    *
    * Recoverable model behaviors are bounded by config: repeating a forbidden
    * group (LLM_MAX_DUPLICATE_GUESSES) and emitting unusable output
@@ -350,26 +355,34 @@ export class StrategyService {
     }
 
     // Rebuild guess history from flushed guesses so a worker restart mid-run
-    // resumes with the same forbidden-set context the model saw before.
+    // resumes with the same forbidden-set context the model saw before. The
+    // duplicate count (and thus the sampling temperature) also resumes from
+    // the persisted history.
     const priorGuesses = (await this.loadLlmGuessesForRun(run.id)).map((guess) => ({
       words: guess.words,
       result: guess.result,
     }));
     let guessCount = priorGuesses.length;
-    let duplicateCount = 0;
+    let duplicateCount = priorGuesses.filter(
+      (guess) => guess.result === GuessResult.DUPLICATE,
+    ).length;
     let malformedCount = 0;
     const maxDuplicates = llmMaxDuplicateGuesses();
     const maxMalformed = llmMaxMalformedResponses();
+    const numResponses = llmNumResponses();
 
     const pendingGuesses: Partial<Guess>[] = [];
 
     while (true) {
+      const temperature = llmTemperatureFor(duplicateCount);
       const outcome = await this.orchestratorService.proposeGroup({
         puzzleWords: run.availableWords,
         priorGuesses: priorGuesses.map((guess) => ({
           words: guess.words,
           result: this.mapGuessResultToOrchestrator(guess.result),
         })),
+        temperature,
+        numResponses,
       });
 
       if (outcome.ok) {
@@ -381,31 +394,64 @@ export class StrategyService {
           run.contextWindow = data.contextWindow;
         }
 
-        const words = data.proposedGroup.word_ids.map((id) => run.availableWords[id]);
-        const evaluation = GameService.evaluateGuessOnPuzzle(puzzle, words);
+        const selected = this.selectProposal(data.proposedGroups, run.availableWords, priorGuesses);
 
-        guessCount++;
-        pendingGuesses.push({
-          puzzle: { id: puzzleId } as Puzzle,
-          strategyRun: { id: run.id } as StrategyRun,
-          words,
-          result: evaluation.result,
-          sequenceNumber: guessCount,
-          source: GuessSource.STRATEGY,
-          promptTokens: data.usage.promptTokens,
-          completionTokens: data.usage.completionTokens,
-          latencyMs: data.latencyMs,
-          llmDetails: this.llmDetailsFor(data.proposedGroup, data.prompt),
-        });
-        priorGuesses.push({ words, result: evaluation.result });
-
-        if (evaluation.result === GuessResult.SUCCESS) {
-          run.availableWords = run.availableWords.filter((w) => !words.includes(w));
-          run.currentCombination = firstCombination(GROUP_SIZE);
-
-          if (run.availableWords.length === 0) {
-            run.status = StrategyRunStatus.COMPLETED;
+        if (selected === null) {
+          // None of the model's candidates were usable — same as malformed.
+          malformedCount++;
+          if (malformedCount >= maxMalformed) {
+            run.status = StrategyRunStatus.MALFORMED_RESPONSE;
             run.finishedAt = new Date();
+          }
+        } else if (selected.isDuplicate) {
+          const words = selected.words;
+          duplicateCount++;
+          guessCount++;
+          pendingGuesses.push({
+            puzzle: { id: puzzleId } as Puzzle,
+            strategyRun: { id: run.id } as StrategyRun,
+            words,
+            result: GuessResult.DUPLICATE,
+            sequenceNumber: guessCount,
+            source: GuessSource.STRATEGY,
+            promptTokens: data.usage.promptTokens,
+            completionTokens: data.usage.completionTokens,
+            latencyMs: data.latencyMs,
+            llmDetails: this.llmDetailsFor(selected.group, data.prompt, temperature),
+          });
+          priorGuesses.push({ words, result: GuessResult.DUPLICATE });
+
+          if (duplicateCount >= maxDuplicates) {
+            run.status = StrategyRunStatus.DUPLICATE;
+            run.finishedAt = new Date();
+          }
+        } else {
+          const words = selected.words;
+          const evaluation = GameService.evaluateGuessOnPuzzle(puzzle, words);
+
+          guessCount++;
+          pendingGuesses.push({
+            puzzle: { id: puzzleId } as Puzzle,
+            strategyRun: { id: run.id } as StrategyRun,
+            words,
+            result: evaluation.result,
+            sequenceNumber: guessCount,
+            source: GuessSource.STRATEGY,
+            promptTokens: data.usage.promptTokens,
+            completionTokens: data.usage.completionTokens,
+            latencyMs: data.latencyMs,
+            llmDetails: this.llmDetailsFor(selected.group, data.prompt, temperature),
+          });
+          priorGuesses.push({ words, result: evaluation.result });
+
+          if (evaluation.result === GuessResult.SUCCESS) {
+            run.availableWords = run.availableWords.filter((w) => !words.includes(w));
+            run.currentCombination = firstCombination(GROUP_SIZE);
+
+            if (run.availableWords.length === 0) {
+              run.status = StrategyRunStatus.COMPLETED;
+              run.finishedAt = new Date();
+            }
           }
         }
       } else {
@@ -415,8 +461,11 @@ export class StrategyService {
           run.status = StrategyRunStatus.ERROR;
           run.finishedAt = new Date();
         } else if (code === "duplicate_group") {
+          // Defensive: a duplicate_group signal is no longer produced by the
+          // current orchestrator (duplicates are resolved from the candidate
+          // list above), but an older peer could still send one.
           duplicateCount++;
-          const group = details?.proposedGroup;
+          const group = details?.proposedGroups?.[0];
           if (group) {
             const words = group.word_ids.map((id) => run.availableWords[id]);
             guessCount++;
@@ -430,7 +479,7 @@ export class StrategyService {
               promptTokens: details?.usage?.promptTokens ?? null,
               completionTokens: details?.usage?.completionTokens ?? null,
               latencyMs: details?.latencyMs ?? null,
-              llmDetails: this.llmDetailsFor(group, details?.prompt),
+              llmDetails: this.llmDetailsFor(group, details?.prompt, temperature),
             });
             priorGuesses.push({ words, result: GuessResult.DUPLICATE });
           }
@@ -462,6 +511,48 @@ export class StrategyService {
     return { status: run.status, guessCount };
   }
 
+  /**
+   * Picks which of the model's candidate groups becomes the submitted guess.
+   * The first candidate that is well-formed (4 unique, in-range IDs) and does
+   * not repeat a previously guessed group wins. If every candidate repeats an
+   * earlier guess, the first duplicate is returned so the run's duplicate
+   * limit (and temperature ramp) can kick in. Returns null when no candidate
+   * is usable at all.
+   */
+  private selectProposal(
+    candidates: ProposedGroup[],
+    availableWords: string[],
+    priorGuesses: { words: string[]; result: GuessResult }[],
+  ): { group: ProposedGroup; words: string[]; isDuplicate: boolean } | null {
+    let firstDuplicate: { group: ProposedGroup; words: string[] } | null = null;
+
+    for (const group of candidates) {
+      const ids = group.word_ids;
+      const inRange =
+        ids.length === GROUP_SIZE &&
+        new Set(ids).size === GROUP_SIZE &&
+        ids.every((id) => id >= 0 && id < availableWords.length);
+      if (!inRange) continue;
+
+      const words = ids.map((id) => availableWords[id]);
+      const isDuplicate = priorGuesses.some(
+        (guess) => this.groupKey(guess.words) === this.groupKey(words),
+      );
+
+      if (!isDuplicate) {
+        return { group, words, isDuplicate: false };
+      }
+
+      if (firstDuplicate === null) {
+        firstDuplicate = { group, words };
+      }
+    }
+
+    return firstDuplicate
+      ? { group: firstDuplicate.group, words: firstDuplicate.words, isDuplicate: true }
+      : null;
+  }
+
   private mapGuessResultToOrchestrator(result: GuessResult): "correct" | "incorrect" | "oneAway" {
     switch (result) {
       case GuessResult.SUCCESS:
@@ -477,11 +568,13 @@ export class StrategyService {
   private llmDetailsFor(
     group: { category: string; confidence: number; reasoning: string },
     prompt: string | undefined,
+    temperature: number,
   ): Record<string, unknown> {
     return {
       category: group.category,
       confidence: group.confidence,
       reasoning: group.reasoning,
+      temperature,
       ...(prompt !== undefined ? { prompt } : {}),
     };
   }

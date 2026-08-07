@@ -5,7 +5,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { PuzzleIngestionService } from "./puzzle-ingestion.service";
 import { STRATEGY_QUEUE } from "../queue/queue.module";
-import { AUTOMATIC_STRATEGIES } from "../../strategies";
+import { SUPPORTED_STRATEGIES } from "../../strategies";
 
 const PUZZLE_DATA = {
   categories: [
@@ -34,7 +34,6 @@ describe("PuzzleIngestionService", () => {
     createQueryBuilder: jest.Mock;
     transaction: jest.Mock;
   };
-  let mockQueue: { add: jest.Mock; addBulk: jest.Mock };
   let mockQuery: {
     select: jest.Mock;
     getRawOne: jest.Mock;
@@ -44,6 +43,7 @@ describe("PuzzleIngestionService", () => {
     save: jest.Mock;
   };
   let mockExecute: jest.Mock;
+  let mockStrategyQueue: { addBulk: jest.Mock };
 
   beforeEach(async () => {
     process.env.PUZZLE_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "puzzle-cache-"));
@@ -54,6 +54,10 @@ describe("PuzzleIngestionService", () => {
     };
 
     mockExecute = jest.fn().mockResolvedValue({ identifiers: [{ id: 42 }] });
+
+    mockStrategyQueue = {
+      addBulk: jest.fn().mockResolvedValue(undefined),
+    };
 
     mockRepo = {
       createQueryBuilder: jest.fn().mockReturnValue({
@@ -71,11 +75,6 @@ describe("PuzzleIngestionService", () => {
       getRepository: jest.fn().mockReturnValue(mockRepo),
     };
 
-    mockQueue = {
-      add: jest.fn().mockResolvedValue(undefined),
-      addBulk: jest.fn().mockResolvedValue(undefined),
-    };
-
     mockDataSource = {
       createQueryBuilder: jest.fn().mockReturnValue(mockQuery),
       transaction: jest.fn(async (cb: (manager: unknown) => Promise<unknown>) => cb(mockManager)),
@@ -85,7 +84,7 @@ describe("PuzzleIngestionService", () => {
       providers: [
         PuzzleIngestionService,
         { provide: DataSource, useValue: mockDataSource },
-        { provide: STRATEGY_QUEUE, useValue: mockQueue },
+        { provide: STRATEGY_QUEUE, useValue: mockStrategyQueue },
       ],
     }).compile();
 
@@ -108,17 +107,12 @@ describe("PuzzleIngestionService", () => {
 
     it("should insert puzzles day-by-day until the endpoint returns 404", async () => {
       mockLatestDate(2024, 0, 1);
-      process.env.SHUFFLE_SMART_TRIALS = "5";
-      process.env.SHUFFLE_FOOLISH_TRIALS = "2";
       const fetchSpy = jest
         .spyOn(global, "fetch")
         .mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA))
         .mockResolvedValueOnce(fetchResponse(404));
 
       const result = await service.populateUntilCaughtUp();
-
-      delete process.env.SHUFFLE_SMART_TRIALS;
-      delete process.env.SHUFFLE_FOOLISH_TRIALS;
 
       expect(result).toEqual({ inserted: 1, upToDate: "2024-01-02" });
       expect(fetchSpy).toHaveBeenCalledTimes(2);
@@ -127,48 +121,6 @@ describe("PuzzleIngestionService", () => {
         expect.objectContaining({ headers: expect.any(Object) }),
       );
       expect(mockDataSource.transaction).toHaveBeenCalledTimes(1);
-      const deterministic = AUTOMATIC_STRATEGIES.filter(
-        (s) => s !== "shuffle-smart" && s !== "shuffle-foolish",
-      );
-      const expectedJobCount = deterministic.length + 5 + 2;
-      expect(mockQueue.addBulk).toHaveBeenCalledTimes(1);
-      const addedJobs = mockQueue.addBulk.mock.calls[0][0] as {
-        name: string;
-        data: {
-          puzzleId: number;
-          strategyName: string;
-          date: string;
-          trialNumber: number;
-        };
-      }[];
-      expect(addedJobs).toHaveLength(expectedJobCount);
-      for (const strategyName of deterministic) {
-        expect(addedJobs).toContainEqual({
-          name: "run-strategy",
-          data: { puzzleId: 42, strategyName, date: "2024-01-02", trialNumber: 0 },
-          opts: { jobId: `run-42-${strategyName}-0` },
-        });
-      }
-      expect(addedJobs).toContainEqual({
-        name: "run-strategy",
-        data: {
-          puzzleId: 42,
-          strategyName: "shuffle-smart",
-          date: "2024-01-02",
-          trialNumber: 5,
-        },
-        opts: { jobId: "run-42-shuffle-smart-5" },
-      });
-      expect(addedJobs).toContainEqual({
-        name: "run-strategy",
-        data: {
-          puzzleId: 42,
-          strategyName: "shuffle-foolish",
-          date: "2024-01-02",
-          trialNumber: 2,
-        },
-        opts: { jobId: "run-42-shuffle-foolish-2" },
-      });
     });
 
     it("should skip known awkward NYT dates without fetching", async () => {
@@ -184,10 +136,9 @@ describe("PuzzleIngestionService", () => {
         expect.stringContaining("2024-12-13"),
         expect.anything(),
       );
-      expect(mockQueue.addBulk).not.toHaveBeenCalled();
     });
 
-    it("should not queue strategies when the puzzle already exists", async () => {
+    it("should skip a puzzle that already exists", async () => {
       mockLatestDate(2024, 0, 1);
       mockExecute.mockResolvedValueOnce({ identifiers: [] });
 
@@ -199,7 +150,81 @@ describe("PuzzleIngestionService", () => {
       const result = await service.populateUntilCaughtUp();
 
       expect(result).toEqual({ inserted: 0, upToDate: "2024-01-02" });
-      expect(mockQueue.addBulk).not.toHaveBeenCalled();
+    });
+
+    it("should dispatch strategy runs for every supported strategy, including llm, when a puzzle is inserted", async () => {
+      mockLatestDate(2024, 0, 1);
+      jest
+        .spyOn(service as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(global, "fetch")
+        .mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA))
+        .mockResolvedValueOnce(fetchResponse(404));
+
+      await service.populateUntilCaughtUp();
+
+      expect(mockStrategyQueue.addBulk).toHaveBeenCalledTimes(1);
+      const jobs = mockStrategyQueue.addBulk.mock.calls[0][0] as {
+        name: string;
+        data: { puzzleId: number; strategyName: string; date: string; trialNumber: number };
+        opts: { jobId: string };
+      }[];
+
+      const strategies = new Set(jobs.map((job) => job.data.strategyName));
+      expect(strategies).toEqual(new Set(SUPPORTED_STRATEGIES));
+
+      // Deterministic strategies have one trial; shuffle strategies expand to
+      // their configured trial counts, so there is more than one job per strategy.
+      expect(jobs.length).toBeGreaterThan(SUPPORTED_STRATEGIES.length);
+
+      for (const job of jobs) {
+        expect(job.name).toBe("run-strategy");
+        expect(job.data.puzzleId).toBe(42);
+        expect(job.data.date).toBe("2024-01-02");
+        expect(job.opts.jobId).toBe(
+          `run-${job.data.puzzleId}-${job.data.strategyName}-${job.data.trialNumber}`,
+        );
+      }
+    });
+
+    it("should not dispatch strategy runs when the puzzle already exists", async () => {
+      mockLatestDate(2024, 0, 1);
+      mockExecute.mockResolvedValueOnce({ identifiers: [] });
+      jest
+        .spyOn(service as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(global, "fetch")
+        .mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA))
+        .mockResolvedValueOnce(fetchResponse(404));
+
+      await service.populateUntilCaughtUp();
+
+      expect(mockStrategyQueue.addBulk).not.toHaveBeenCalled();
+    });
+
+    it("should not fail the ingestion run when dispatching strategy runs fails", async () => {
+      mockLatestDate(2024, 0, 1);
+      mockStrategyQueue.addBulk.mockRejectedValueOnce(new Error("redis down"));
+      jest
+        .spyOn(service as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(global, "fetch")
+        .mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA))
+        .mockResolvedValueOnce(fetchResponse(404));
+      const warnSpy = jest.spyOn(
+        (service as unknown as { logger: { warn: jest.Mock } }).logger,
+        "warn",
+      );
+
+      const result = await service.populateUntilCaughtUp();
+
+      expect(result).toEqual({ inserted: 1, upToDate: "2024-01-02" });
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to queue strategy runs for puzzle 2024-01-02"),
+      );
     });
 
     it("should read from the local cache instead of fetching when a cache file exists", async () => {
@@ -268,7 +293,6 @@ describe("PuzzleIngestionService", () => {
 
       expect(result).toEqual({ inserted: 1, upToDate: "2024-01-02" });
       expect(mockDataSource.transaction).toHaveBeenCalledTimes(1);
-      expect(mockQueue.addBulk).toHaveBeenCalledTimes(1);
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining("Failed to write puzzle cache for 2024-01-02"),
       );

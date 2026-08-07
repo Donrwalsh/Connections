@@ -38,12 +38,14 @@ describe("App (e2e)", () => {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
-              proposedGroup: {
-                word_ids: [0, 1, 2, 3],
-                category: "Test category",
-                confidence: 0.99,
-                reasoning: "E2E fake",
-              },
+              proposedGroups: [
+                {
+                  word_ids: [0, 1, 2, 3],
+                  category: "Test category",
+                  confidence: 0.99,
+                  reasoning: "E2E fake",
+                },
+              ],
               prompt: `echo: ${body}`,
               model: "e2e-fake-model",
               contextWindow: 8192,
@@ -222,7 +224,7 @@ describe("App (e2e)", () => {
     expect(res.body).toEqual({
       orchestrator: "healthy",
       data: {
-        proposedGroup: expect.objectContaining({ word_ids: [0, 1, 2, 3] }),
+        proposedGroups: [expect.objectContaining({ word_ids: [0, 1, 2, 3] })],
         prompt: expect.any(String),
         model: "e2e-fake-model",
         contextWindow: 8192,

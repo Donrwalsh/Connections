@@ -30,6 +30,20 @@ export const SolveRequestSchema = z.object({
     .min(4)
     .describe("Words still in play (not yet correctly grouped)"),
   priorGuesses: z.array(PriorGuessSchema).optional().default([]),
+  numResponses: z
+    .number()
+    .int()
+    .min(1)
+    .max(10)
+    .optional()
+    .default(5)
+    .describe("How many candidate groups the model should propose in a single solve step; the backend submits the first candidate that is not a repeat of a previous guess"),
+  temperature: z
+    .number()
+    .min(0)
+    .max(2)
+    .optional()
+    .describe("Sampling temperature for this solve step; the backend raises it as duplicate guesses accumulate"),
 });
 export type SolveRequest = z.infer<typeof SolveRequestSchema>;
 
@@ -62,6 +76,24 @@ export const ProposedGroupSchema = z.object({
 export type ProposedGroup = z.infer<typeof ProposedGroupSchema>;
 
 /**
+ * The full shape we ask the model to produce: exactly `numResponses`
+ * candidate groups, ordered by the model's confidence. Kept as a factory
+ * because the requested candidate count varies per request (see
+ * SolveRequestSchema.numResponses). Shape guarantees (each group has 4 int
+ * IDs plus category/confidence/reasoning) are enforced here; content-level
+ * checks (are the IDs in range? does the group repeat a previous guess?)
+ * live on the backend, which picks the first usable candidate.
+ */
+export function solveOutputSchema(numResponses: number) {
+  return z.object({
+    proposed_groups: z
+      .array(ProposedGroupSchema)
+      .length(numResponses)
+      .describe(`Exactly ${numResponses} candidate groups, ordered by the model's confidence`),
+  });
+}
+
+/**
  * Token usage of a single model call, mirroring the AI SDK's LanguageModelUsage.
  */
 export const UsageSchema = z.object({
@@ -80,11 +112,12 @@ export type Usage = z.infer<typeof UsageSchema>;
  * telemetry without making a second request.
  */
 export const SolveResponseSchema = z.object({
-  proposedGroup: ProposedGroupSchema,
+  proposedGroups: z.array(ProposedGroupSchema),
   prompt: z.string(),
   model: z.string(),
   contextWindow: z.number().int().positive(),
   latencyMs: z.number().int().nonnegative(),
+  temperature: z.number().min(0).max(2).optional(),
   usage: UsageSchema,
 });
 export type SolveResponse = z.infer<typeof SolveResponseSchema>;
