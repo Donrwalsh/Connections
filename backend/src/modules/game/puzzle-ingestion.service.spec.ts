@@ -1,5 +1,8 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { DataSource } from "typeorm";
+import * as os from "os";
+import * as path from "path";
+import * as fs from "fs";
 import { PuzzleIngestionService } from "./puzzle-ingestion.service";
 import { STRATEGY_QUEUE } from "../queue/queue.module";
 import { SUPPORTED_STRATEGIES } from "../../strategies";
@@ -43,6 +46,8 @@ describe("PuzzleIngestionService", () => {
   let mockExecute: jest.Mock;
 
   beforeEach(async () => {
+    process.env.PUZZLE_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "puzzle-cache-"));
+
     mockQuery = {
       select: jest.fn().mockReturnThis(),
       getRawOne: jest.fn().mockResolvedValue({ latest: "2024-01-01" }),
@@ -88,6 +93,10 @@ describe("PuzzleIngestionService", () => {
   });
 
   afterEach(() => {
+    if (process.env.PUZZLE_CACHE_DIR) {
+      fs.rmSync(process.env.PUZZLE_CACHE_DIR, { recursive: true, force: true });
+    }
+    delete process.env.PUZZLE_CACHE_DIR;
     jest.restoreAllMocks();
   });
 
@@ -191,6 +200,78 @@ describe("PuzzleIngestionService", () => {
 
       expect(result).toEqual({ inserted: 0, upToDate: "2024-01-02" });
       expect(mockQueue.addBulk).not.toHaveBeenCalled();
+    });
+
+    it("should read from the local cache instead of fetching when a cache file exists", async () => {
+      mockLatestDate(2024, 0, 1);
+      fs.writeFileSync(
+        path.join(process.env.PUZZLE_CACHE_DIR!, "2024-01-02.json"),
+        JSON.stringify(PUZZLE_DATA),
+      );
+      jest
+        .spyOn(service as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+
+      const fetchSpy = jest.spyOn(global, "fetch").mockResolvedValueOnce(fetchResponse(404));
+
+      const result = await service.populateUntilCaughtUp();
+
+      expect(result).toEqual({ inserted: 1, upToDate: "2024-01-02" });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(fetchSpy).toHaveBeenCalledWith(
+        expect.stringContaining("2024-01-03"),
+        expect.anything(),
+      );
+      expect(mockDataSource.transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it("should write a fetched puzzle to the cache file before inserting", async () => {
+      mockLatestDate(2024, 0, 1);
+      jest
+        .spyOn(service as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(global, "fetch")
+        .mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA))
+        .mockResolvedValueOnce(fetchResponse(404));
+
+      await service.populateUntilCaughtUp();
+
+      const cacheFile = path.join(process.env.PUZZLE_CACHE_DIR!, "2024-01-02.json");
+      expect(fs.existsSync(cacheFile)).toBe(true);
+      expect(JSON.parse(fs.readFileSync(cacheFile, "utf8"))).toEqual(PUZZLE_DATA);
+    });
+
+    it("should not fail the ingestion run when writing to the cache fails", async () => {
+      mockLatestDate(2024, 0, 1);
+      // Point the cache dir at a path nested under a regular file so mkdir
+      // throws ENOTDIR — a real filesystem failure, no mocking required.
+      const cacheRoot = process.env.PUZZLE_CACHE_DIR!;
+      const blockerFile = path.join(cacheRoot, "blocker");
+      fs.writeFileSync(blockerFile, "");
+      process.env.PUZZLE_CACHE_DIR = path.join(blockerFile, "cache");
+      jest
+        .spyOn(service as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(global, "fetch")
+        .mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA))
+        .mockResolvedValueOnce(fetchResponse(404));
+      const warnSpy = jest.spyOn(
+        (service as unknown as { logger: { warn: jest.Mock } }).logger,
+        "warn",
+      );
+
+      const result = await service.populateUntilCaughtUp();
+
+      process.env.PUZZLE_CACHE_DIR = cacheRoot; // let afterEach clean up the temp dir
+
+      expect(result).toEqual({ inserted: 1, upToDate: "2024-01-02" });
+      expect(mockDataSource.transaction).toHaveBeenCalledTimes(1);
+      expect(mockQueue.addBulk).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to write puzzle cache for 2024-01-02"),
+      );
     });
   });
 

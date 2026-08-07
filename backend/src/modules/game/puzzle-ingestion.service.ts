@@ -1,4 +1,6 @@
 import { Injectable, Logger, Inject } from "@nestjs/common";
+import * as path from "path";
+import { mkdir, readFile, writeFile } from "fs/promises";
 import { DataSource } from "typeorm";
 import { Puzzle } from "./entities/puzzle.entity";
 import { AnswerGroup } from "./entities/answer-group.entity";
@@ -65,7 +67,7 @@ export class PuzzleIngestionService {
         continue;
       }
 
-      const puzzleData = await this.fetchNytPuzzle(formatted);
+      const puzzleData = await this.loadPuzzleData(formatted);
 
       if (puzzleData === null) {
         // 404 => no puzzle published for this date yet. We've caught up.
@@ -129,6 +131,64 @@ export class PuzzleIngestionService {
 
   private static readonly FETCH_MAX_RETRIES = 5;
   private static readonly FETCH_RETRY_BASE_DELAY_MS = 1000;
+
+  private get cacheDir(): string {
+    return process.env.PUZZLE_CACHE_DIR || path.join(process.cwd(), ".puzzle-cache");
+  }
+
+  private cacheFileFor(formattedDate: string): string {
+    return path.join(this.cacheDir, `${formattedDate}.json`);
+  }
+
+  /**
+   * Cache-first, network-fallback puzzle loader. Returns parsed puzzle data,
+   * or null when the date has no puzzle (NYT 404 — we've caught up).
+   */
+  private async loadPuzzleData(formattedDate: string): Promise<ConnectionsPuzzle | null> {
+    const cached = await this.readCachedPuzzle(formattedDate);
+
+    if (cached !== null) {
+      this.logger.log(`Loaded ${formattedDate} from local cache`);
+      return cached;
+    }
+
+    const puzzleData = await this.fetchNytPuzzle(formattedDate);
+
+    if (puzzleData !== null) {
+      await this.writePuzzleToCache(formattedDate, puzzleData);
+    }
+
+    return puzzleData;
+  }
+
+  private async readCachedPuzzle(formattedDate: string): Promise<ConnectionsPuzzle | null> {
+    try {
+      const raw = await readFile(this.cacheFileFor(formattedDate), "utf8");
+      return JSON.parse(raw) as ConnectionsPuzzle;
+    } catch (error) {
+      // No cache file (ENOENT) is the normal path — fall back to NYT. Anything
+      // else (corrupt JSON, unreadable file) also falls back to the network,
+      // and the successful fetch overwrites the stale file.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        this.logger.warn(
+          `Failed to read puzzle cache for ${formattedDate}: ${(error as Error).message}`,
+        );
+      }
+      return null;
+    }
+  }
+
+  private async writePuzzleToCache(formattedDate: string, data: ConnectionsPuzzle): Promise<void> {
+    try {
+      await mkdir(this.cacheDir, { recursive: true });
+      await writeFile(this.cacheFileFor(formattedDate), JSON.stringify(data), "utf8");
+    } catch (error) {
+      // Cache is best-effort — never fail the ingestion run over it.
+      this.logger.warn(
+        `Failed to write puzzle cache for ${formattedDate}: ${(error as Error).message}`,
+      );
+    }
+  }
 
   private async fetchNytPuzzle(formattedDate: string): Promise<ConnectionsPuzzle | null> {
     const url = `https://www.nytimes.com/svc/connections/v2/${formattedDate}.json`;

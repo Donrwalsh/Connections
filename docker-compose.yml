@@ -103,6 +103,7 @@ services:
       PUZZLE_POPULATION_TZ: ${PUZZLE_POPULATION_TZ:-UTC}
       SHUFFLE_SMART_TRIALS: ${SHUFFLE_SMART_TRIALS:-3}
       SHUFFLE_FOOLISH_TRIALS: ${SHUFFLE_FOOLISH_TRIALS:-3}
+      PUZZLE_CACHE_DIR: ${PUZZLE_CACHE_DIR:-/app/.puzzle-cache}
     ports:
       - "4000:4000"
     depends_on:
@@ -114,6 +115,7 @@ services:
       - ./backend/src:/app/src
       - ./backend/package.json:/app/package.json
       - ./backend/tsconfig.json:/app/tsconfig.json
+      - ./.puzzle-cache:/app/.puzzle-cache
     command: npm run start:dev
     healthcheck:
       test:
@@ -163,6 +165,7 @@ services:
       PUZZLE_POPULATION_TZ: ${PUZZLE_POPULATION_TZ:-UTC}
       SHUFFLE_SMART_TRIALS: ${SHUFFLE_SMART_TRIALS:-3}
       SHUFFLE_FOOLISH_TRIALS: ${SHUFFLE_FOOLISH_TRIALS:-3}
+      PUZZLE_CACHE_DIR: ${PUZZLE_CACHE_DIR:-/app/.puzzle-cache}
       CHOKIDAR_USEPOLLING: "true"
     depends_on:
       db:
@@ -175,6 +178,7 @@ services:
       - ./backend/src:/app/src
       - ./backend/package.json:/app/package.json
       - ./backend/tsconfig.json:/app/tsconfig.json
+      - ./.puzzle-cache:/app/.puzzle-cache
     command: npx tsx --watch src/worker.ts
     healthcheck:
       test:
