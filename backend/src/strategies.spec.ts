@@ -1,6 +1,13 @@
 import {
+  AUTOMATIC_STRATEGIES,
+  DEFAULT_LLM_MAX_DUPLICATE_GUESSES,
+  DEFAULT_LLM_MAX_MALFORMED_RESPONSES,
+  DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT,
   DEFAULT_SHUFFLE_FOOLISH_TRIALS,
   DEFAULT_SHUFFLE_SMART_TRIALS,
+  llmMaxDuplicateGuesses,
+  llmMaxMalformedResponses,
+  shuffleFoolishDuplicateLimit,
   shuffleFoolishTrialCount,
   shuffleSmartTrialCount,
   strategyTrialNumbers,
@@ -47,6 +54,45 @@ describe("strategies", () => {
     });
   });
 
+  describe("llmMaxDuplicateGuesses", () => {
+    it("should default when the env var is missing or invalid", () => {
+      expect(llmMaxDuplicateGuesses({})).toBe(DEFAULT_LLM_MAX_DUPLICATE_GUESSES);
+      expect(llmMaxDuplicateGuesses({ LLM_MAX_DUPLICATE_GUESSES: "abc" })).toBe(
+        DEFAULT_LLM_MAX_DUPLICATE_GUESSES,
+      );
+    });
+
+    it("should read a valid positive integer", () => {
+      expect(llmMaxDuplicateGuesses({ LLM_MAX_DUPLICATE_GUESSES: "5" })).toBe(5);
+    });
+  });
+
+  describe("llmMaxMalformedResponses", () => {
+    it("should default when the env var is missing or invalid", () => {
+      expect(llmMaxMalformedResponses({})).toBe(DEFAULT_LLM_MAX_MALFORMED_RESPONSES);
+      expect(llmMaxMalformedResponses({ LLM_MAX_MALFORMED_RESPONSES: "0" })).toBe(
+        DEFAULT_LLM_MAX_MALFORMED_RESPONSES,
+      );
+    });
+
+    it("should read a valid positive integer", () => {
+      expect(llmMaxMalformedResponses({ LLM_MAX_MALFORMED_RESPONSES: "7" })).toBe(7);
+    });
+  });
+
+  describe("shuffleFoolishDuplicateLimit", () => {
+    it("should default when the env var is missing or invalid", () => {
+      expect(shuffleFoolishDuplicateLimit({})).toBe(DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT);
+      expect(shuffleFoolishDuplicateLimit({ SHUFFLE_FOOLISH_DUPLICATE_LIMIT: "-1" })).toBe(
+        DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT,
+      );
+    });
+
+    it("should read a valid positive integer", () => {
+      expect(shuffleFoolishDuplicateLimit({ SHUFFLE_FOOLISH_DUPLICATE_LIMIT: "4" })).toBe(4);
+    });
+  });
+
   describe("strategyTrialNumbers", () => {
     it("should return a single trial 0 for deterministic strategies", () => {
       for (const strategyName of SUPPORTED_STRATEGIES.filter(
@@ -77,5 +123,22 @@ describe("strategies", () => {
     for (const strategyName of SUPPORTED_STRATEGIES) {
       expect(STRATEGY_SET.has(strategyName)).toBe(true);
     }
+  });
+
+  describe("AUTOMATIC_STRATEGIES", () => {
+    it("should be a subset of SUPPORTED_STRATEGIES", () => {
+      for (const strategyName of AUTOMATIC_STRATEGIES) {
+        expect(SUPPORTED_STRATEGIES).toContain(strategyName);
+      }
+    });
+
+    it("should exclude 'llm' until it is evaluated", () => {
+      expect(AUTOMATIC_STRATEGIES).not.toContain("llm");
+    });
+
+    it("should include every non-llm strategy", () => {
+      const expected = SUPPORTED_STRATEGIES.filter((s) => s !== "llm");
+      expect([...AUTOMATIC_STRATEGIES].sort()).toEqual([...expected].sort());
+    });
   });
 });

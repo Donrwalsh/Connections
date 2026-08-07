@@ -11,6 +11,7 @@ import { GroupMember } from "../src/modules/game/entities/group-member.entity";
 import { Puzzle } from "../src/modules/game/entities/puzzle.entity";
 import { Guess, GuessResult, GuessSource } from "../src/modules/strategy/entities/guess.entity";
 import { StrategyRun } from "../src/modules/strategy/entities/strategy-run.entity";
+import { strategyQueue } from "../src/modules/queue/strategy.queue";
 
 const TEST_DATE = "1999-12-31";
 
@@ -44,6 +45,10 @@ describe("App (e2e)", () => {
                 reasoning: "E2E fake",
               },
               prompt: `echo: ${body}`,
+              model: "e2e-fake-model",
+              contextWindow: 8192,
+              latencyMs: 42,
+              usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
             }),
           );
         } else if (req.url === "/health") {
@@ -141,6 +146,21 @@ describe("App (e2e)", () => {
     expect(res.status).toBe(400);
   });
 
+  it("POST /strategy/queue/llm/:date queues a single llm trial-0 job", async () => {
+    const res = await request(app.getHttpServer()).post(`/strategy/queue/llm/${TEST_DATE}`);
+
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({
+      message: `LLM job queued for puzzle date ${TEST_DATE}`,
+      puzzleId: expect.any(Number),
+      date: TEST_DATE,
+      strategyName: "llm",
+      trialNumber: 0,
+    });
+
+    await strategyQueue.remove(`run-${res.body.puzzleId}-llm-0`);
+  });
+
   it("GET /strategy/:strategy/puzzle/:date returns an empty run list", async () => {
     const res = await request(app.getHttpServer()).get(
       `/strategy/alphabetical/puzzle/${TEST_DATE}`,
@@ -204,6 +224,10 @@ describe("App (e2e)", () => {
       data: {
         proposedGroup: expect.objectContaining({ word_ids: [0, 1, 2, 3] }),
         prompt: expect.any(String),
+        model: "e2e-fake-model",
+        contextWindow: 8192,
+        latencyMs: 42,
+        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
       },
     });
   });

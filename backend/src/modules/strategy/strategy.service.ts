@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { Queue } from "bullmq";
 import { STRATEGY_QUEUE } from "../queue/queue.module";
-import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
+import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/strategy-run.entity";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 import { DataSource, Repository } from "typeorm";
 import { Puzzle } from "../game/entities/puzzle.entity";
@@ -9,8 +9,17 @@ import { combinationToWords, firstCombination, nextCombination } from "./combina
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { GameService } from "../game/game.service";
 import { StrategyRunDetailDto, StrategyRunListItemDto } from "./dto/strategy.dto";
-import { SHUFFLE_SMART, SHUFFLE_FOOLISH, strategyTrialNumbers } from "../../strategies";
+import {
+  LLM,
+  SHUFFLE_SMART,
+  SHUFFLE_FOOLISH,
+  llmMaxDuplicateGuesses,
+  llmMaxMalformedResponses,
+  shuffleFoolishDuplicateLimit,
+  strategyTrialNumbers,
+} from "../../strategies";
 import { runStrategyJobId } from "../queue/strategy.queue";
+import { OrchestratorService } from "./orchestrator.service";
 
 const GROUP_SIZE = 4;
 const BATCH_SIZE = 50;
@@ -25,6 +34,7 @@ export class StrategyService {
     @InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>,
     @InjectRepository(Guess) private readonly guessRepo: Repository<Guess>,
     @Inject(GameService) private readonly gameService: GameService,
+    @Inject(OrchestratorService) private readonly orchestratorService: OrchestratorService,
   ) {}
 
   async triggerRun(puzzleId: number, strategyName: string, date?: string, trialNumber = 0) {
@@ -147,6 +157,8 @@ export class StrategyService {
       strategyName: run.strategyName,
       trialNumber: run.trialNumber,
       status: run.status,
+      modelName: run.modelName,
+      contextWindow: run.contextWindow,
       startedAt: run.startedAt,
       finishedAt: run.finishedAt,
       guessCount: countByRun.get(run.id) ?? 0,
@@ -159,6 +171,8 @@ export class StrategyService {
       strategyName: run.strategyName,
       trialNumber: run.trialNumber,
       status: run.status,
+      modelName: run.modelName,
+      contextWindow: run.contextWindow,
       startedAt: run.startedAt,
       finishedAt: run.finishedAt,
       guesses: guesses.map((g) => ({
@@ -176,7 +190,7 @@ export class StrategyService {
     // guess (~2,400 queries per worst-case deterministic run).
     const { run, puzzle } = await this.loadOrCreateRun(puzzleId, strategyName, trialNumber);
 
-    if (run.status === StrategyRunStatus.COMPLETED) {
+    if (TERMINAL_STATUSES.has(run.status)) {
       return {
         status: run.status,
         guessCount: await this.countGuesses(run.id),
@@ -185,11 +199,15 @@ export class StrategyService {
 
     let guessCount: number;
     const triedGroups = new Set<string>();
-    if (strategyName === SHUFFLE_SMART) {
+    let duplicateCount = 0;
+    const tracksDuplicates = strategyName === SHUFFLE_SMART || strategyName === SHUFFLE_FOOLISH;
+    if (tracksDuplicates) {
       // Shuffle-smart re-rolls until it finds a group it hasn't already
-      // proposed, so rebuild the tried set from guesses flushed to the DB
-      // (e.g. after a worker restart mid-run). The single query below doubles
-      // as the guess count. Shuffle-foolish deliberately does not deduplicate.
+      // proposed; shuffle-foolish records repeated groups as 'duplicate'
+      // guesses so the run can be terminated once the duplicate limit is hit.
+      // Both rebuild their tried set from guesses flushed to the DB (e.g.
+      // after a worker restart mid-run). The single query below doubles as
+      // the guess count.
       const priorGuesses = await this.loadGuessesForRun(run.id);
       guessCount = priorGuesses.length;
       for (const guess of priorGuesses) {
@@ -204,6 +222,7 @@ export class StrategyService {
     while (true) {
       let words: string[] = [];
       let noMoreGroups = false;
+      let isDuplicate = false;
 
       switch (strategyName) {
         case "alphabetical":
@@ -224,48 +243,70 @@ export class StrategyService {
           break;
         }
         case SHUFFLE_FOOLISH:
-          // Pure random picks with no tried-set, so duplicates are allowed.
+          // Pure random picks. Unlike shuffle-smart, repeats are NOT re-rolled
+          // — they are recorded as 'duplicate' guesses, so an unlucky run
+          // terminates once it repeats the same group
+          // SHUFFLE_FOOLISH_DUPLICATE_LIMIT times instead of grinding forever.
           words = this.sampleRandom(run.availableWords, GROUP_SIZE);
+          isDuplicate = triedGroups.has(this.groupKey(words));
           break;
         default:
           throw new BadRequestException(`Unsupported strategy name: '${strategyName}'`);
       }
 
       if (!noMoreGroups) {
-        const evaluation = GameService.evaluateGuessOnPuzzle(puzzle, words);
-
         guessCount++;
-        if (strategyName === SHUFFLE_SMART) {
-          triedGroups.add(this.groupKey(words));
-        }
 
-        // Stage the guess in memory
-        pendingGuesses.push({
-          puzzle: { id: puzzleId } as Puzzle,
-          strategyRun: { id: run.id } as StrategyRun,
-          words,
-          result: evaluation.result,
-          sequenceNumber: guessCount,
-          source: GuessSource.STRATEGY,
-        });
+        if (isDuplicate) {
+          duplicateCount++;
+          pendingGuesses.push({
+            puzzle: { id: puzzleId } as Puzzle,
+            strategyRun: { id: run.id } as StrategyRun,
+            words,
+            result: GuessResult.DUPLICATE,
+            sequenceNumber: guessCount,
+            source: GuessSource.STRATEGY,
+          });
 
-        // Update in-memory state
-        if (evaluation.result === GuessResult.SUCCESS) {
-          run.availableWords = run.availableWords.filter((w) => !words.includes(w));
-          run.currentCombination = firstCombination(GROUP_SIZE);
-
-          if (run.availableWords.length === 0) {
-            run.status = StrategyRunStatus.COMPLETED;
+          if (duplicateCount >= shuffleFoolishDuplicateLimit()) {
+            run.status = StrategyRunStatus.DUPLICATE;
             run.finishedAt = new Date();
           }
-        } else if (strategyName !== SHUFFLE_SMART && strategyName !== SHUFFLE_FOOLISH) {
-          const next = nextCombination(run.currentCombination, run.availableWords.length);
+        } else {
+          const evaluation = GameService.evaluateGuessOnPuzzle(puzzle, words);
 
-          if (next === null) {
-            run.status = StrategyRunStatus.FAILED;
-            run.finishedAt = new Date();
-          } else {
-            run.currentCombination = next;
+          if (strategyName === SHUFFLE_SMART || strategyName === SHUFFLE_FOOLISH) {
+            triedGroups.add(this.groupKey(words));
+          }
+
+          // Stage the guess in memory
+          pendingGuesses.push({
+            puzzle: { id: puzzleId } as Puzzle,
+            strategyRun: { id: run.id } as StrategyRun,
+            words,
+            result: evaluation.result,
+            sequenceNumber: guessCount,
+            source: GuessSource.STRATEGY,
+          });
+
+          // Update in-memory state
+          if (evaluation.result === GuessResult.SUCCESS) {
+            run.availableWords = run.availableWords.filter((w) => !words.includes(w));
+            run.currentCombination = firstCombination(GROUP_SIZE);
+
+            if (run.availableWords.length === 0) {
+              run.status = StrategyRunStatus.COMPLETED;
+              run.finishedAt = new Date();
+            }
+          } else if (strategyName !== SHUFFLE_SMART && strategyName !== SHUFFLE_FOOLISH) {
+            const next = nextCombination(run.currentCombination, run.availableWords.length);
+
+            if (next === null) {
+              run.status = StrategyRunStatus.FAILED;
+              run.finishedAt = new Date();
+            } else {
+              run.currentCombination = next;
+            }
           }
         }
       }
@@ -284,6 +325,165 @@ export class StrategyService {
     }
 
     return { status: run.status, guessCount };
+  }
+
+  /**
+   * Iterative LLM strategy: calls the orchestrator's /solve with the remaining
+   * words plus the full guess history, evaluates the proposed group locally,
+   * then re-prompts with the updated history until the puzzle is solved or a
+   * run limit is hit.
+   *
+   * Recoverable model behaviors are bounded by config: repeating a forbidden
+   * group (LLM_MAX_DUPLICATE_GUESSES) and emitting unusable output
+   * (LLM_MAX_MALFORMED_RESPONSES) end the run with 'duplicate' /
+   * 'malformedResponse' statuses. Model/network failures abort it with
+   * 'error'.
+   */
+  async runLlmStrategy(puzzleId: number, strategyName: string, trialNumber = 0) {
+    const { run, puzzle } = await this.loadOrCreateRun(puzzleId, strategyName, trialNumber);
+
+    if (TERMINAL_STATUSES.has(run.status)) {
+      return {
+        status: run.status,
+        guessCount: await this.countGuesses(run.id),
+      };
+    }
+
+    // Rebuild guess history from flushed guesses so a worker restart mid-run
+    // resumes with the same forbidden-set context the model saw before.
+    const priorGuesses = (await this.loadLlmGuessesForRun(run.id)).map((guess) => ({
+      words: guess.words,
+      result: guess.result,
+    }));
+    let guessCount = priorGuesses.length;
+    let duplicateCount = 0;
+    let malformedCount = 0;
+    const maxDuplicates = llmMaxDuplicateGuesses();
+    const maxMalformed = llmMaxMalformedResponses();
+
+    const pendingGuesses: Partial<Guess>[] = [];
+
+    while (true) {
+      const outcome = await this.orchestratorService.proposeGroup({
+        puzzleWords: run.availableWords,
+        priorGuesses: priorGuesses.map((guess) => ({
+          words: guess.words,
+          result: this.mapGuessResultToOrchestrator(guess.result),
+        })),
+      });
+
+      if (outcome.ok) {
+        const data = outcome.data;
+
+        // Set run-level model metadata from the first successful call.
+        if (run.modelName === null) {
+          run.modelName = data.model;
+          run.contextWindow = data.contextWindow;
+        }
+
+        const words = data.proposedGroup.word_ids.map((id) => run.availableWords[id]);
+        const evaluation = GameService.evaluateGuessOnPuzzle(puzzle, words);
+
+        guessCount++;
+        pendingGuesses.push({
+          puzzle: { id: puzzleId } as Puzzle,
+          strategyRun: { id: run.id } as StrategyRun,
+          words,
+          result: evaluation.result,
+          sequenceNumber: guessCount,
+          source: GuessSource.STRATEGY,
+          promptTokens: data.usage.promptTokens,
+          completionTokens: data.usage.completionTokens,
+          latencyMs: data.latencyMs,
+          llmDetails: this.llmDetailsFor(data.proposedGroup, data.prompt),
+        });
+        priorGuesses.push({ words, result: evaluation.result });
+
+        if (evaluation.result === GuessResult.SUCCESS) {
+          run.availableWords = run.availableWords.filter((w) => !words.includes(w));
+          run.currentCombination = firstCombination(GROUP_SIZE);
+
+          if (run.availableWords.length === 0) {
+            run.status = StrategyRunStatus.COMPLETED;
+            run.finishedAt = new Date();
+          }
+        }
+      } else {
+        const { code, details } = outcome.error;
+
+        if (code === "model_error") {
+          run.status = StrategyRunStatus.ERROR;
+          run.finishedAt = new Date();
+        } else if (code === "duplicate_group") {
+          duplicateCount++;
+          const group = details?.proposedGroup;
+          if (group) {
+            const words = group.word_ids.map((id) => run.availableWords[id]);
+            guessCount++;
+            pendingGuesses.push({
+              puzzle: { id: puzzleId } as Puzzle,
+              strategyRun: { id: run.id } as StrategyRun,
+              words,
+              result: GuessResult.DUPLICATE,
+              sequenceNumber: guessCount,
+              source: GuessSource.STRATEGY,
+              promptTokens: details?.usage?.promptTokens ?? null,
+              completionTokens: details?.usage?.completionTokens ?? null,
+              latencyMs: details?.latencyMs ?? null,
+              llmDetails: this.llmDetailsFor(group, details?.prompt),
+            });
+            priorGuesses.push({ words, result: GuessResult.DUPLICATE });
+          }
+
+          if (duplicateCount >= maxDuplicates) {
+            run.status = StrategyRunStatus.DUPLICATE;
+            run.finishedAt = new Date();
+          }
+        } else {
+          // invalid_group — the model produced output we couldn't use.
+          malformedCount++;
+          if (malformedCount >= maxMalformed) {
+            run.status = StrategyRunStatus.MALFORMED_RESPONSE;
+            run.finishedAt = new Date();
+          }
+        }
+      }
+
+      // Flush every iteration: LLM runs are short (tens of guesses, not
+      // thousands), so batching buys nothing, and flushing each step means a
+      // worker crash loses at most one step of progress.
+      await this.flushBatch(run, pendingGuesses);
+
+      if (run.status !== StrategyRunStatus.RUNNING) {
+        break;
+      }
+    }
+
+    return { status: run.status, guessCount };
+  }
+
+  private mapGuessResultToOrchestrator(result: GuessResult): "correct" | "incorrect" | "oneAway" {
+    switch (result) {
+      case GuessResult.SUCCESS:
+        return "correct";
+      case GuessResult.OFF_BY_ONE:
+        return "oneAway";
+      default:
+        // FAILURE and DUPLICATE are both wrong groups.
+        return "incorrect";
+    }
+  }
+
+  private llmDetailsFor(
+    group: { category: string; confidence: number; reasoning: string },
+    prompt: string | undefined,
+  ): Record<string, unknown> {
+    return {
+      category: group.category,
+      confidence: group.confidence,
+      reasoning: group.reasoning,
+      ...(prompt !== undefined ? { prompt } : {}),
+    };
   }
 
   /**
@@ -337,15 +537,25 @@ export class StrategyService {
     });
   }
 
-  private async flushBatch(run: StrategyRun, pendingGuesses: Partial<Guess>[]): Promise<void> {
-    if (pendingGuesses.length === 0) return;
+  private async loadLlmGuessesForRun(strategyRunId: number): Promise<Guess[]> {
+    return this.guessRepo.find({
+      where: { strategyRunId },
+      order: { sequenceNumber: "ASC" },
+      select: { words: true, result: true },
+    });
+  }
 
-    // Create a shallow copy to insert and clear the original buffer
+  private async flushBatch(run: StrategyRun, pendingGuesses: Partial<Guess>[]): Promise<void> {
+    // Create a shallow copy to insert and clear the original buffer. The run is
+    // always saved — even with no new guesses — so terminal states reached
+    // without a recorded guess (e.g. LLM malformed/error limits) persist.
     const guessesToInsert = [...pendingGuesses];
     pendingGuesses.length = 0;
 
     await this.dataSource.transaction(async (manager) => {
-      await manager.insert("Guess", guessesToInsert);
+      if (guessesToInsert.length > 0) {
+        await manager.insert("Guess", guessesToInsert);
+      }
       await manager.save(StrategyRun, run);
     });
   }
@@ -376,6 +586,7 @@ export class StrategyService {
       case "order":
       case SHUFFLE_SMART:
       case SHUFFLE_FOOLISH:
+      case LLM:
         allWords = puzzle.answerGroups
           .flatMap((group) => group.members)
           .sort((a, b) => a.position - b.position)

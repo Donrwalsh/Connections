@@ -1,15 +1,46 @@
-import { generateObject } from "ai";
+import { generateObject, JSONParseError, NoObjectGeneratedError, TypeValidationError } from "ai";
 import {
   ProposedGroupSchema,
   type SolveRequest,
   type ProposedGroup,
+  type SolveErrorCode,
+  type Usage,
 } from "./types.js";
 import { buildSolvePrompt, forbiddenIdSets } from "./prompt.js";
-import { getModel } from "./provider.js";
+import { getContextWindow, getModel } from "./provider.js";
 
 export interface SolveResult {
   proposedGroup: ProposedGroup;
   prompt: string;
+  model: string;
+  contextWindow: number;
+  latencyMs: number;
+  usage: Usage;
+}
+
+export interface SolveErrorDetails {
+  proposedGroup?: ProposedGroup;
+  prompt?: string;
+  model?: string;
+  contextWindow?: number;
+  latencyMs?: number;
+  usage?: Usage;
+}
+
+/**
+ * Typed failure from a solve step. `code` distinguishes recoverable bad
+ * model output (duplicate/invalid groups) from unrecoverable model/network
+ * failures so the backend can react appropriately (re-prompt vs. abort).
+ */
+export class SolveError extends Error {
+  constructor(
+    readonly code: SolveErrorCode,
+    message: string,
+    readonly details: SolveErrorDetails = {},
+  ) {
+    super(message);
+    this.name = "SolveError";
+  }
 }
 
 /**
@@ -17,31 +48,88 @@ export interface SolveResult {
  * to propose one group of 4 words.
  *
  * Deliberately synchronous/single-shot for v0 — no internal retry or
- * backtrack loop yet. That logic will likely live here later, wrapping
- * this same generateObject call (e.g. re-prompt on low confidence,
- * generate multiple candidates and pick the best). Keeping this function
- * focused on "one model call in, one validated group out" makes it a
- * clean seam to build that around.
+ * backtrack loop yet. That logic lives on the backend, which re-invokes
+ * this endpoint with an updated guess history until the puzzle is solved.
  *
  * Returns the prompt alongside the result so the caller can surface
- * exactly what was sent to the model (e.g. for the frontend's
- * "show me the prompt" panel), without the caller needing to duplicate
- * buildSolvePrompt's logic.
+ * exactly what was sent to the model, without duplicating
+ * buildSolvePrompt's logic, plus model/usage metadata for telemetry.
  */
 export async function proposeGroup(
   request: SolveRequest,
 ): Promise<SolveResult> {
   const prompt = buildSolvePrompt(request);
+  const startedAt = Date.now();
 
-  const { object } = await generateObject({
-    model: getModel(),
-    schema: ProposedGroupSchema,
+  let result;
+  try {
+    result = await generateObject({
+      model: getModel(),
+      schema: ProposedGroupSchema,
+      prompt,
+    });
+  } catch (err) {
+    throw classifyModelCallError(err, { prompt });
+  }
+
+  const latencyMs = Date.now() - startedAt;
+  const model = result.response.modelId;
+  const usage: Usage = {
+    promptTokens: result.usage.inputTokens ?? 0,
+    completionTokens: result.usage.outputTokens ?? 0,
+    totalTokens: result.usage.totalTokens ?? 0,
+  };
+  const metadata: SolveErrorDetails = {
     prompt,
-  });
+    model,
+    contextWindow: getContextWindow(),
+    latencyMs,
+    usage,
+  };
 
-  validateProposedGroup(object, request);
+  try {
+    validateProposedGroup(result.object, request);
+  } catch (err) {
+    if (err instanceof SolveError) {
+      throw new SolveError(err.code, err.message, {
+        ...metadata,
+        proposedGroup: result.object,
+      });
+    }
+    throw err;
+  }
 
-  return { proposedGroup: object, prompt };
+  return {
+    proposedGroup: result.object,
+    prompt,
+    model,
+    contextWindow: getContextWindow(),
+    latencyMs,
+    usage,
+  };
+}
+
+/**
+ * Classifies an AI SDK failure from generateObject into a typed SolveError.
+ * Malformed-but-present output (no/undecodable object) is recoverable —
+ * the backend can re-prompt. Provider/network failures are not.
+ */
+function classifyModelCallError(err: unknown, details: SolveErrorDetails): SolveError {
+  const message = err instanceof Error ? err.message : "Unknown model error";
+
+  if (
+    err instanceof NoObjectGeneratedError ||
+    err instanceof TypeValidationError ||
+    err instanceof JSONParseError
+  ) {
+    return new SolveError(
+      "invalid_group",
+      `Model produced a malformed response: ${message}`,
+      details,
+    );
+  }
+
+  return new SolveError("model_error", `Model call failed: ${message}`, details);
 }
 
 /**
@@ -61,14 +149,16 @@ export function validateProposedGroup(
   const invalidIds = group.word_ids.filter((id) => !available.has(id));
 
   if (invalidIds.length > 0) {
-    throw new Error(
+    throw new SolveError(
+      "invalid_group",
       `Model proposed word IDs not present in the puzzle's remaining word list: ${invalidIds.join(", ")}`,
     );
   }
 
   const uniqueIds = new Set(group.word_ids);
   if (uniqueIds.size !== 4) {
-    throw new Error(
+    throw new SolveError(
+      "invalid_group",
       `Model proposed a group with duplicate word IDs: ${group.word_ids.join(", ")}`,
     );
   }
@@ -79,7 +169,8 @@ export function validateProposedGroup(
       ids.length === proposed.size && ids.every((id) => proposed.has(id)),
   );
   if (repeated) {
-    throw new Error(
+    throw new SolveError(
+      "duplicate_group",
       `Model proposed a previously-guessed group: ${group.word_ids.join(", ")}`,
     );
   }

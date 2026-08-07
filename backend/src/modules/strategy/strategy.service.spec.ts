@@ -8,6 +8,7 @@ import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { GameService } from "../game/game.service";
+import { OrchestratorService, type SolveOutcome } from "./orchestrator.service";
 
 describe("StrategyService", () => {
   let service: StrategyService;
@@ -27,6 +28,9 @@ describe("StrategyService", () => {
   let mockGameService: {
     resolveDateToPuzzleId: jest.Mock;
   };
+  let mockOrchestratorService: {
+    proposeGroup: jest.Mock<Promise<SolveOutcome>, unknown[]>;
+  };
   let mockManager: { insert: jest.Mock; save: jest.Mock };
   let mockDataSource: { transaction: jest.Mock };
 
@@ -38,6 +42,8 @@ describe("StrategyService", () => {
     status: StrategyRunStatus.RUNNING,
     availableWords: ["APPLE", "BANANA", "CHERRY", "DATE", "EGGPLANT", "FIG", "GRAPE", "HONEY"],
     currentCombination: [0, 1, 2, 3],
+    modelName: null,
+    contextWindow: null,
     finishedAt: null,
     ...overrides,
   });
@@ -86,6 +92,9 @@ describe("StrategyService", () => {
     mockGameService = {
       resolveDateToPuzzleId: jest.fn(),
     };
+    mockOrchestratorService = {
+      proposeGroup: jest.fn(),
+    };
     mockManager = {
       insert: jest.fn().mockResolvedValue(undefined),
       save: jest.fn().mockResolvedValue(undefined),
@@ -103,6 +112,7 @@ describe("StrategyService", () => {
         { provide: getRepositoryToken(Puzzle), useValue: mockPuzzleRepo },
         { provide: getRepositoryToken(Guess), useValue: mockGuessRepo },
         { provide: GameService, useValue: mockGameService },
+        { provide: OrchestratorService, useValue: mockOrchestratorService },
       ],
     }).compile();
 
@@ -686,13 +696,18 @@ describe("StrategyService", () => {
           ["FIG", "GRAPE", "HONEY", "APPLE"],
           ["CHERRY", "DATE", "EGGPLANT", "BANANA"],
         ]);
-        // Unlike shuffle-smart, no tried set is loaded from prior guesses.
-        expect(mockGuessRepo.find).not.toHaveBeenCalled();
+        // The tried set is rebuilt from flushed guesses (as for shuffle-smart)
+        // so duplicate detection survives a worker restart.
+        expect(mockGuessRepo.find).toHaveBeenCalledWith({
+          where: { strategyRunId: 7 },
+          select: { words: true },
+        });
       });
 
-      it("should allow the same group to be guessed more than once", async () => {
+      it("should mark repeated groups as duplicates and still solve", async () => {
         // Constant random()=0 keeps sampling [FIG, GRAPE, HONEY, APPLE], which
-        // is not an answer group, so it fails twice in a row. The next draw
+        // is not an answer group. The second draw is a duplicate (recorded as
+        // such, still under the default duplicate limit of 3). The next draw
         // (random()=0.99) samples the pool tail [EGGPLANT, FIG, GRAPE, HONEY],
         // which is an answer group, and the leftover words solve the puzzle.
         const randomValues = [0, 0, 0, 0, 0, 0, 0, 0, 0.99, 0.99, 0.99, 0.99, 0.5, 0.5, 0.5, 0.5];
@@ -712,14 +727,273 @@ describe("StrategyService", () => {
         });
         const inserted = mockManager.insert.mock.calls[0][1] as Array<{
           words: string[];
+          result: GuessResult;
         }>;
-        // The first two guesses are the exact same group.
+        // The first two guesses are the exact same group; the repeat is
+        // recorded as a 'duplicate' instead of a plain failure.
         expect(inserted[0].words).toEqual(inserted[1].words);
         expect(inserted[0].words).toEqual(["FIG", "GRAPE", "HONEY", "APPLE"]);
+        expect(inserted[1].result).toBe(GuessResult.DUPLICATE);
         expect(inserted[2].words).toEqual(["EGGPLANT", "FIG", "GRAPE", "HONEY"]);
         expect(new Set(inserted[3].words)).toEqual(new Set(["APPLE", "BANANA", "CHERRY", "DATE"]));
-        expect(mockGuessRepo.find).not.toHaveBeenCalled();
       });
+
+      it("should terminate with 'duplicate' once the duplicate limit is hit", async () => {
+        // The duplicate limit defaults to 3; constant random()=0 makes every
+        // draw the same non-answer group, so the third repeat ends the run.
+        jest.spyOn(Math, "random").mockReturnValue(0);
+        mockPuzzleRepo.findOne.mockResolvedValueOnce(
+          makePuzzle([
+            ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+            ["APPLE", "BANANA", "CHERRY", "DATE"],
+          ]),
+        );
+
+        const result = await service.runDeterministicStrategy(100, "shuffle-foolish");
+
+        expect(result).toEqual({
+          status: StrategyRunStatus.DUPLICATE,
+          guessCount: 4,
+        });
+        const inserted = mockManager.insert.mock.calls[0][1] as Array<{
+          result: GuessResult;
+        }>;
+        // First draw is a fresh (off-by-one) guess; the next three repeats hit
+        // the default duplicate limit of 3 and terminate the run.
+        expect(inserted.map((g) => g.result)).toEqual([
+          GuessResult.OFF_BY_ONE,
+          GuessResult.DUPLICATE,
+          GuessResult.DUPLICATE,
+          GuessResult.DUPLICATE,
+        ]);
+        expect(mockManager.save).toHaveBeenCalledWith(
+          StrategyRun,
+          expect.objectContaining({ status: StrategyRunStatus.DUPLICATE }),
+        );
+      });
+    });
+  });
+
+  describe("runLlmStrategy", () => {
+    const success = (
+      wordIds: number[],
+      overrides: Partial<import("./orchestrator.service").SolveSuccess> = {},
+    ): SolveOutcome => ({
+      ok: true,
+      data: {
+        proposedGroup: {
+          word_ids: wordIds,
+          category: "Fruit",
+          confidence: 0.9,
+          reasoning: "test",
+        },
+        prompt: "solve step",
+        model: "mistral",
+        contextWindow: 8192,
+        latencyMs: 500,
+        usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+        ...overrides,
+      },
+    });
+
+    const duplicate = (): SolveOutcome => ({
+      ok: false,
+      error: {
+        error: "repeated group",
+        code: "duplicate_group",
+        details: {
+          proposedGroup: {
+            word_ids: [0, 1, 2, 3],
+            category: "Fruit",
+            confidence: 0.5,
+            reasoning: "again",
+          },
+          prompt: "step",
+          model: "mistral",
+          contextWindow: 8192,
+          latencyMs: 10,
+          usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+        },
+      },
+    });
+
+    const malformed = (): SolveOutcome => ({
+      ok: false,
+      error: { error: "bad json", code: "invalid_group" },
+    });
+
+    beforeEach(() => {
+      mockStrategyRunRepo.findOne.mockResolvedValue(makeRun({ strategyName: "llm" }));
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+    });
+
+    it("should short-circuit for a terminal run", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm", status: StrategyRunStatus.COMPLETED }),
+      );
+      mockGuessRepo.count.mockResolvedValueOnce(5);
+
+      const result = await service.runLlmStrategy(100, "llm");
+
+      expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 5 });
+      expect(mockOrchestratorService.proposeGroup).not.toHaveBeenCalled();
+      expect(mockDataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it("should solve a puzzle through iterative orchestrator calls", async () => {
+      mockOrchestratorService.proposeGroup
+        .mockResolvedValueOnce(success([0, 1, 2, 3]))
+        .mockResolvedValueOnce(success([0, 1, 2, 3]));
+
+      const result = await service.runLlmStrategy(100, "llm");
+
+      expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
+      expect(mockOrchestratorService.proposeGroup).toHaveBeenCalledTimes(2);
+      const inserted = mockManager.insert.mock.calls.flatMap(
+        (call) => call[1] as Array<Record<string, unknown>>,
+      );
+      expect(inserted).toHaveLength(2);
+      expect(inserted[0]).toEqual(
+        expect.objectContaining({
+          words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+          result: GuessResult.SUCCESS,
+          promptTokens: 10,
+          completionTokens: 20,
+          latencyMs: 500,
+          llmDetails: {
+            category: "Fruit",
+            confidence: 0.9,
+            reasoning: "test",
+            prompt: "solve step",
+          },
+        }),
+      );
+      expect(mockManager.save).toHaveBeenCalledWith(
+        StrategyRun,
+        expect.objectContaining({
+          status: StrategyRunStatus.COMPLETED,
+          modelName: "mistral",
+          contextWindow: 8192,
+        }),
+      );
+    });
+
+    it("should feed prior guess history back to the orchestrator", async () => {
+      mockOrchestratorService.proposeGroup
+        .mockResolvedValueOnce(success([0, 1, 2, 3]))
+        .mockResolvedValueOnce(success([0, 1, 2, 3]));
+
+      await service.runLlmStrategy(100, "llm");
+
+      expect(mockOrchestratorService.proposeGroup.mock.calls[0][0]).toEqual({
+        puzzleWords: ["APPLE", "BANANA", "CHERRY", "DATE", "EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        priorGuesses: [],
+      });
+      // After the first group is solved, the second call sees the remaining
+      // words and the solved group mapped to the orchestrator's 'correct'.
+      expect(mockOrchestratorService.proposeGroup.mock.calls[1][0]).toEqual({
+        puzzleWords: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        priorGuesses: [{ words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: "correct" }],
+      });
+    });
+
+    it("should resume with prior guesses loaded from the database", async () => {
+      mockGuessRepo.find.mockResolvedValueOnce([
+        { words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: GuessResult.FAILURE },
+      ]);
+      mockOrchestratorService.proposeGroup
+        .mockResolvedValueOnce(success([0, 1, 2, 3]))
+        .mockResolvedValueOnce(success([0, 1, 2, 3]));
+
+      const result = await service.runLlmStrategy(100, "llm");
+
+      expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 3 });
+      // The persisted wrong guess is sent to the model as 'incorrect'.
+      const firstCall = mockOrchestratorService.proposeGroup.mock.calls[0][0] as {
+        puzzleWords: string[];
+        priorGuesses: { words: string[]; result: string }[];
+      };
+      expect(firstCall.priorGuesses).toEqual([
+        { words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: "incorrect" },
+      ]);
+      expect(mockGuessRepo.find).toHaveBeenCalledWith({
+        where: { strategyRunId: 7 },
+        order: { sequenceNumber: "ASC" },
+        select: { words: true, result: true },
+      });
+    });
+
+    it("should terminate with 'duplicate' once the duplicate limit is hit", async () => {
+      mockOrchestratorService.proposeGroup
+        .mockResolvedValueOnce(success([0, 1, 2, 3]))
+        .mockResolvedValueOnce(duplicate())
+        .mockResolvedValueOnce(duplicate())
+        .mockResolvedValueOnce(duplicate());
+
+      const result = await service.runLlmStrategy(100, "llm");
+
+      expect(result).toEqual({ status: StrategyRunStatus.DUPLICATE, guessCount: 4 });
+      const inserted = mockManager.insert.mock.calls.flatMap(
+        (call) =>
+          call[1] as Array<{
+            result: GuessResult;
+            llmDetails: Record<string, unknown> | null;
+            promptTokens: number | null;
+          }>,
+      );
+      expect(inserted.map((g) => g.result)).toEqual([
+        GuessResult.SUCCESS,
+        GuessResult.DUPLICATE,
+        GuessResult.DUPLICATE,
+        GuessResult.DUPLICATE,
+      ]);
+      expect(inserted[1].llmDetails).toEqual({
+        category: "Fruit",
+        confidence: 0.5,
+        reasoning: "again",
+        prompt: "step",
+      });
+      expect(inserted[1].promptTokens).toBe(1);
+      expect(mockManager.save).toHaveBeenCalledWith(
+        StrategyRun,
+        expect.objectContaining({ status: StrategyRunStatus.DUPLICATE }),
+      );
+    });
+
+    it("should terminate with 'malformedResponse' after consecutive invalid responses", async () => {
+      mockOrchestratorService.proposeGroup
+        .mockResolvedValueOnce(malformed())
+        .mockResolvedValueOnce(malformed())
+        .mockResolvedValueOnce(malformed());
+
+      const result = await service.runLlmStrategy(100, "llm");
+
+      expect(result).toEqual({ status: StrategyRunStatus.MALFORMED_RESPONSE, guessCount: 0 });
+      expect(mockOrchestratorService.proposeGroup).toHaveBeenCalledTimes(3);
+      // No usable proposal means no guess rows, but the terminal state persists.
+      expect(mockManager.insert).not.toHaveBeenCalled();
+      expect(mockManager.save).toHaveBeenCalledWith(
+        StrategyRun,
+        expect.objectContaining({ status: StrategyRunStatus.MALFORMED_RESPONSE }),
+      );
+    });
+
+    it("should terminate with 'error' on a model failure", async () => {
+      mockOrchestratorService.proposeGroup.mockResolvedValueOnce({
+        ok: false,
+        error: { error: "ollama is down", code: "model_error" },
+      });
+
+      const result = await service.runLlmStrategy(100, "llm");
+
+      expect(result).toEqual({ status: StrategyRunStatus.ERROR, guessCount: 0 });
+      expect(mockOrchestratorService.proposeGroup).toHaveBeenCalledTimes(1);
+      expect(mockManager.insert).not.toHaveBeenCalled();
+      expect(mockManager.save).toHaveBeenCalledWith(
+        StrategyRun,
+        expect.objectContaining({ status: StrategyRunStatus.ERROR }),
+      );
     });
   });
 
@@ -775,6 +1049,7 @@ describe("StrategyService", () => {
       ["order", ["A", "B", "C"]],
       ["shuffle-smart", ["A", "B", "C"]],
       ["shuffle-foolish", ["A", "B", "C"]],
+      ["llm", ["A", "B", "C"]],
       ["reverse-order", ["C", "B", "A"]],
       ["reverse-alphabetical", ["C", "B", "A"]],
       ["alphabetical", ["A", "B", "C"]],
@@ -826,14 +1101,16 @@ describe("StrategyService", () => {
   });
 
   describe("flushBatch", () => {
-    it("should be a no-op for an empty batch", async () => {
+    it("should persist run state even when there are no new guesses", async () => {
       await (
         service as unknown as {
           flushBatch(run: Partial<StrategyRun>, guesses: unknown[]): Promise<void>;
         }
       ).flushBatch(makeRun(), []);
 
-      expect(mockDataSource.transaction).not.toHaveBeenCalled();
+      expect(mockDataSource.transaction).toHaveBeenCalledTimes(1);
+      expect(mockManager.insert).not.toHaveBeenCalled();
+      expect(mockManager.save).toHaveBeenCalledWith(StrategyRun, expect.anything());
     });
   });
 });

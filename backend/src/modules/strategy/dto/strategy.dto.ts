@@ -19,6 +19,8 @@ export interface StrategyRunDetailDto {
   strategyName: string;
   trialNumber: number;
   status: StrategyRunStatus;
+  modelName: string | null;
+  contextWindow: number | null;
   startedAt: Date;
   finishedAt: Date | null;
   guesses: GuessDto[];
@@ -30,6 +32,8 @@ export interface StrategyRunListItemDto {
   strategyName: string;
   trialNumber: number;
   status: StrategyRunStatus;
+  modelName: string | null;
+  contextWindow: number | null;
   startedAt: Date;
   finishedAt: Date | null;
   guessCount: number;

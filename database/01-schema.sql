@@ -26,7 +26,10 @@ CREATE UNIQUE INDEX "UQ_GroupMember_group_word" ON "GroupMember" ("group_id", "w
 CREATE TYPE strategy_run_status_enum AS ENUM (
   'running',
   'completed',
-  'failed'
+  'failed',
+  'duplicate',
+  'malformedResponse',
+  'error'
 );
 
 CREATE TABLE "StrategyRun" (
@@ -37,6 +40,8 @@ CREATE TABLE "StrategyRun" (
   "status" strategy_run_status_enum NOT NULL DEFAULT 'running',
   "availableWords" JSONB NOT NULL,
   "currentCombination" JSONB NOT NULL,
+  "modelName" VARCHAR NULL,
+  "contextWindow" INT NULL,
   "startedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "finishedAt" TIMESTAMP WITH TIME ZONE NULL,
@@ -47,7 +52,8 @@ CREATE TABLE "StrategyRun" (
 CREATE TYPE guess_result_enum AS ENUM (
   'success',
   'failure',
-  'offBy1'
+  'offBy1',
+  'duplicate'
 );
 
 CREATE TYPE guess_source_enum AS ENUM (
@@ -63,6 +69,10 @@ CREATE TABLE "Guess" (
   "result" guess_result_enum NOT NULL,
   "sequenceNumber" INT NOT NULL,
   "source" guess_source_enum NOT NULL,
+  "promptTokens" INT NULL,
+  "completionTokens" INT NULL,
+  "latencyMs" INT NULL,
+  "llmDetails" JSONB NULL,
   "guessedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

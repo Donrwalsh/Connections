@@ -10,7 +10,7 @@ import { STRATEGY_QUEUE } from "../queue/queue.module";
 import { runStrategyJobId } from "../queue/strategy.queue";
 import { NYT_CONNECTIONS_ORIGIN_DATE } from "./constants";
 import { Queue } from "bullmq";
-import { SUPPORTED_STRATEGIES, strategyTrialNumbers } from "../../strategies";
+import { AUTOMATIC_STRATEGIES, strategyTrialNumbers } from "../../strategies";
 
 interface ConnectionsCard {
   content: string;
@@ -34,7 +34,9 @@ const AWKWARD_DATES = new Set([
   "2026-05-06",
 ]);
 
-const ALL_STRATEGIES = SUPPORTED_STRATEGIES;
+// Automatic strategies exclude 'llm' (see AUTOMATIC_STRATEGIES) so LLM runs
+// are only triggered explicitly via /strategy/queue/llm/:date.
+const ALL_STRATEGIES = AUTOMATIC_STRATEGIES;
 
 @Injectable()
 export class PuzzleIngestionService {

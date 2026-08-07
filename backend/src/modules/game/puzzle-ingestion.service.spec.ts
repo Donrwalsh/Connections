@@ -5,7 +5,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { PuzzleIngestionService } from "./puzzle-ingestion.service";
 import { STRATEGY_QUEUE } from "../queue/queue.module";
-import { SUPPORTED_STRATEGIES } from "../../strategies";
+import { AUTOMATIC_STRATEGIES } from "../../strategies";
 
 const PUZZLE_DATA = {
   categories: [
@@ -127,7 +127,7 @@ describe("PuzzleIngestionService", () => {
         expect.objectContaining({ headers: expect.any(Object) }),
       );
       expect(mockDataSource.transaction).toHaveBeenCalledTimes(1);
-      const deterministic = SUPPORTED_STRATEGIES.filter(
+      const deterministic = AUTOMATIC_STRATEGIES.filter(
         (s) => s !== "shuffle-smart" && s !== "shuffle-foolish",
       );
       const expectedJobCount = deterministic.length + 5 + 2;

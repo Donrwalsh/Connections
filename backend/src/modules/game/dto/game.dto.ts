@@ -41,7 +41,17 @@ export interface ProposedGroupDto {
   reasoning: string;
 }
 
+export interface SolveUsageDto {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 export interface SolveResponseDto {
   proposedGroup: ProposedGroupDto;
   prompt: string;
+  model?: string;
+  contextWindow?: number;
+  latencyMs?: number;
+  usage?: SolveUsageDto;
 }

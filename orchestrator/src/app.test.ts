@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app, SOLVE_BODY_LIMIT } from "./app.js";
+import { SolveError } from "./solver.js";
 
 const KEY = "test-internal-key";
 
@@ -14,15 +15,33 @@ function solveRequest(body: unknown) {
   });
 }
 
+const SOLVE_BODY = {
+  puzzleWords: ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"],
+};
+
 vi.mock("./solver.js", () => ({
+  SolveError: class SolveError extends Error {
+    constructor(code: string, message: string, details: unknown) {
+      super(message);
+      this.code = code;
+      this.details = details;
+    }
+    code!: string;
+    details!: unknown;
+  },
   proposeGroup: vi.fn(async () => {
     throw new Error("model call failed");
   }),
 }));
 
+import { proposeGroup } from "./solver.js";
+const proposeGroupMock = vi.mocked(proposeGroup);
+
 describe("orchestrator app", () => {
   beforeEach(() => {
     process.env.INTERNAL_API_KEY = KEY;
+    proposeGroupMock.mockReset();
+    proposeGroupMock.mockRejectedValue(new Error("model call failed"));
   });
 
   afterEach(() => {
@@ -67,12 +86,86 @@ describe("orchestrator app", () => {
   });
 
   it("returns 502 when the model call fails", async () => {
-    const res = await solveRequest({
-      puzzleWords: ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"],
-    });
+    const res = await solveRequest(SOLVE_BODY);
     expect(res.status).toBe(502);
     const body = (await res.json()) as { error: string; details: string };
     expect(body.error).toBe("Solve failed");
     expect(body.details).toContain("model call failed");
+  });
+
+  it("returns the extended success body", async () => {
+    proposeGroupMock.mockResolvedValueOnce({
+      proposedGroup: {
+        word_ids: [0, 1, 2, 3],
+        category: "Test",
+        confidence: 0.9,
+        reasoning: "test",
+      },
+      prompt: "You are solving...",
+      model: "test-model",
+      contextWindow: 8192,
+      latencyMs: 1234,
+      usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+    });
+
+    const res = await solveRequest(SOLVE_BODY);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      proposedGroup: {
+        word_ids: [0, 1, 2, 3],
+        category: "Test",
+        confidence: 0.9,
+        reasoning: "test",
+      },
+      prompt: "You are solving...",
+      model: "test-model",
+      contextWindow: 8192,
+      latencyMs: 1234,
+      usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+    });
+  });
+
+  it("maps duplicate_group to 409", async () => {
+    proposeGroupMock.mockRejectedValueOnce(
+      new SolveError("duplicate_group", "repeated group", {
+        proposedGroup: {
+          word_ids: [0, 1, 2, 3],
+          category: "Test",
+          confidence: 0.9,
+          reasoning: "test",
+        },
+      }),
+    );
+    const res = await solveRequest(SOLVE_BODY);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.code).toBe("duplicate_group");
+    expect((body.details as { proposedGroup: unknown }).proposedGroup).toEqual({
+      word_ids: [0, 1, 2, 3],
+      category: "Test",
+      confidence: 0.9,
+      reasoning: "test",
+    });
+  });
+
+  it("maps invalid_group to 400", async () => {
+    proposeGroupMock.mockRejectedValueOnce(
+      new SolveError("invalid_group", "malformed output"),
+    );
+    const res = await solveRequest(SOLVE_BODY);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.code).toBe("invalid_group");
+  });
+
+  it("maps model_error to 502", async () => {
+    proposeGroupMock.mockRejectedValueOnce(
+      new SolveError("model_error", "ollama is down"),
+    );
+    const res = await solveRequest(SOLVE_BODY);
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.code).toBe("model_error");
+    expect(body.error).toContain("ollama is down");
   });
 });

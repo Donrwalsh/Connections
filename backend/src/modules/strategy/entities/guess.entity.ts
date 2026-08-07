@@ -14,6 +14,7 @@ export enum GuessResult {
   SUCCESS = "success",
   FAILURE = "failure",
   OFF_BY_ONE = "offBy1",
+  DUPLICATE = "duplicate",
 }
 
 export enum GuessSource {
@@ -68,6 +69,22 @@ export class Guess {
     enumName: "guess_source_enum",
   })
   source: GuessSource;
+
+  // LLM telemetry (strategy guesses): token counts and round-trip latency
+  // of the model call that produced this guess.
+  @Column({ type: "int", nullable: true })
+  promptTokens: number | null;
+
+  @Column({ type: "int", nullable: true })
+  completionTokens: number | null;
+
+  @Column({ type: "int", nullable: true })
+  latencyMs: number | null;
+
+  // LLM strategy: free-form metadata (category, confidence, reasoning, and
+  // the exact prompt sent to the model for this step).
+  @Column({ type: "jsonb", nullable: true })
+  llmDetails: Record<string, unknown> | null;
 
   @CreateDateColumn({
     type: "timestamptz",

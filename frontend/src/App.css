@@ -369,6 +369,7 @@
 .guess-sequence__item--success { border-left: 4px solid #6fae4a; }
 .guess-sequence__item--offBy1  { border-left: 4px solid #d9a441; }
 .guess-sequence__item--failure { border-left: 4px solid #c0564a; }
+.guess-sequence__item--duplicate { border-left: 4px dashed #8a7fb8; }
 
 .guess-sequence__seq {
   font-weight: 700;

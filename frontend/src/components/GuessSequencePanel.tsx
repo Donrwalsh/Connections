@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-type GuessResult = "success" | "failure" | "offBy1";
+type GuessResult = "success" | "failure" | "offBy1" | "duplicate";
 
 interface Guess {
   sequenceNumber: number;
@@ -13,7 +13,7 @@ interface StrategyRunListItem {
   id: number;
   strategyName: string;
   trialNumber: number;
-  status: "running" | "completed" | "failed";
+  status: "running" | "completed" | "failed" | "duplicate" | "malformedResponse" | "error";
   startedAt: string | null;
   finishedAt: string | null;
   guessCount: number;
@@ -75,8 +75,8 @@ const STRATEGIES = [
   { id: "reverse-order", label: "Rev-Order" },
   { id: "shuffle-smart", label: "Shuffle-Smart" },
   { id: "shuffle-foolish", label: "Shuffle-Foolish" },
+  { id: "llm", label: "LLM" },
 ];
-
 const apiUrl = (path: string) => `${import.meta.env.VITE_API_URL}${path}`;
 
 export function GuessSequencePanel({
@@ -367,12 +367,15 @@ function formatResult(result: GuessResult): string {
       return "✓ Correct";
     case "offBy1":
       return "One away";
+    case "duplicate":
+      return "Duplicate";
     case "failure":
       return "✗ Incorrect";
   }
 }
 
 function formatStrategyName(strategyName: string): string {
+  if (strategyName === "llm") return "LLM";
   return strategyName
     .split("-")
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))

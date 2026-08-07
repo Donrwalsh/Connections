@@ -62,13 +62,49 @@ export const ProposedGroupSchema = z.object({
 export type ProposedGroup = z.infer<typeof ProposedGroupSchema>;
 
 /**
+ * Token usage of a single model call, mirroring the AI SDK's LanguageModelUsage.
+ */
+export const UsageSchema = z.object({
+  promptTokens: z.number().int().nonnegative(),
+  completionTokens: z.number().int().nonnegative(),
+  totalTokens: z.number().int().nonnegative(),
+});
+export type Usage = z.infer<typeof UsageSchema>;
+
+/**
  * Response body for POST /solve.
  * `prompt` is the exact text sent to the model for this solve step —
  * returned alongside the result so callers (ultimately the frontend) can
  * show what was actually asked, e.g. for debugging or transparency.
+ * The model metadata/usage fields let the backend record per-guess LLM
+ * telemetry without making a second request.
  */
 export const SolveResponseSchema = z.object({
   proposedGroup: ProposedGroupSchema,
   prompt: z.string(),
+  model: z.string(),
+  contextWindow: z.number().int().positive(),
+  latencyMs: z.number().int().nonnegative(),
+  usage: UsageSchema,
 });
 export type SolveResponse = z.infer<typeof SolveResponseSchema>;
+
+/**
+ * Why a solve step failed. Distinct codes let the backend decide whether
+ * the model simply repeated a forbidden group (recoverable by re-prompting
+ * until a limit), emitted malformed output (same), or hit a real
+ * model/network failure (unrecoverable).
+ */
+export const SolveErrorCodeSchema = z.enum([
+  "duplicate_group",
+  "invalid_group",
+  "model_error",
+]);
+export type SolveErrorCode = z.infer<typeof SolveErrorCodeSchema>;
+
+export const SolveErrorResponseSchema = z.object({
+  error: z.string(),
+  code: SolveErrorCodeSchema,
+  details: z.unknown().optional(),
+});
+export type SolveErrorResponse = z.infer<typeof SolveErrorResponseSchema>;

@@ -4,6 +4,7 @@ import type { LanguageModel } from "ai";
 
 export const DEFAULT_OPENAI_MODEL = "gpt-4o-2024-08-06";
 export const DEFAULT_OLLAMA_MODEL = "llama3.2";
+export const DEFAULT_CONTEXT_WINDOW = 8192;
 
 export type ModelProvider = "openai" | "ollama";
 
@@ -33,4 +34,14 @@ export function getModel(): LanguageModel {
   }
 
   return openai(process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL);
+}
+
+/**
+ * Returns the configured context window for the active model, used to
+ * report per-run context capacity in telemetry. Defaults to 8192 when
+ * not configured.
+ */
+export function getContextWindow(): number {
+  const raw = Number(process.env.MODEL_CONTEXT_WINDOW);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_CONTEXT_WINDOW;
 }

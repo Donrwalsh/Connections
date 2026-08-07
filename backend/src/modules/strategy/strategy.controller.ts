@@ -12,7 +12,7 @@ import {
 import { ApiParam } from "@nestjs/swagger";
 import { StrategyService } from "./strategy.service";
 import { GameService } from "../game/game.service";
-import { STRATEGY_SET } from "../../strategies";
+import { AUTOMATIC_STRATEGIES, LLM, STRATEGY_SET } from "../../strategies";
 
 @Controller("strategy")
 export class StrategyController {
@@ -21,12 +21,35 @@ export class StrategyController {
     @Inject(GameService) private readonly gameService: GameService,
   ) {}
 
+  // Dedicated LLM queue endpoint. Declared before the generic
+  // queue/:strategyName/:date route so the more specific pattern wins.
+  @Post("queue/llm/:date")
+  @ApiParam({
+    name: "date",
+    type: String,
+    description: "Puzzle date in YYYY-MM-DD format",
+    example: "2023-08-01",
+  })
+  async queueLlmStrategy(@Param("date") date: string) {
+    const puzzleId = await this.gameService.resolveDateToPuzzleId(date);
+
+    await this.strategyService.triggerStrategyRuns(puzzleId, LLM, date);
+
+    return {
+      message: `LLM job queued for puzzle date ${date}`,
+      puzzleId,
+      date,
+      strategyName: LLM,
+      trialNumber: 0,
+    };
+  }
+
   @Post("queue/:strategyName/:date")
   @ApiParam({
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or 'all'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or 'all' (excludes 'llm' — use POST /strategy/queue/llm/:date for that)",
     example: "all",
   })
   @ApiParam({
@@ -51,16 +74,17 @@ export class StrategyController {
 
     if (isAll) {
       await Promise.all(
-        [...STRATEGY_SET].map((strat) =>
+        AUTOMATIC_STRATEGIES.map((strat) =>
           this.strategyService.triggerStrategyRuns(puzzleId, strat, date),
         ),
       );
 
       return {
-        message: `Jobs queued for all strategies on puzzle date ${date}`,
+        message: `Jobs queued for all automatic strategies on puzzle date ${date} (llm is excluded — queue it explicitly)`,
         puzzleId,
         date,
-        strategiesQueued: [...STRATEGY_SET],
+        strategiesQueued: [...AUTOMATIC_STRATEGIES],
+        excluded: [LLM],
       };
     }
 
@@ -79,7 +103,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', or 'shuffle-foolish'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or 'llm'",
     example: "alphabetical",
   })
   @ApiParam({
@@ -103,7 +127,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', or 'shuffle-foolish'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or 'llm'",
     example: "alphabetical",
   })
   @ApiParam({

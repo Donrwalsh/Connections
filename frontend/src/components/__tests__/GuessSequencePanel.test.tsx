@@ -349,6 +349,82 @@ describe("GuessSequencePanel Component", () => {
     expect(screen.getAllByText("✗ Incorrect")).toHaveLength(1);
   });
 
+  it("shows LLM runs and renders duplicate + terminal statuses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        const urlStr = String(url);
+        const strategyId =
+          urlStr.match(/\/strategy\/([^/]+)\//)?.[1] ?? "alphabetical";
+        if (urlStr.includes("/run/")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              id: 31,
+              strategyName: "llm",
+              trialNumber: 0,
+              status: "duplicate",
+              startedAt: "2024-01-15T00:00:00Z",
+              finishedAt: "2024-01-15T00:05:00Z",
+              guessCount: 3,
+              meta: { total: 3, page: 1, limit: 200 },
+              guesses: [
+                {
+                  sequenceNumber: 1,
+                  words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+                  result: "success",
+                  guessedAt: "2024-01-15T00:00:00Z",
+                },
+                {
+                  sequenceNumber: 2,
+                  words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+                  result: "duplicate",
+                  guessedAt: "2024-01-15T00:00:00Z",
+                },
+                {
+                  sequenceNumber: 3,
+                  words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+                  result: "duplicate",
+                  guessedAt: "2024-01-15T00:00:00Z",
+                },
+              ],
+            }),
+          });
+        }
+        if (strategyId !== "llm") {
+          return Promise.resolve({ ok: true, json: async () => [] });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => [
+            {
+              id: 31,
+              strategyName: "llm",
+              trialNumber: 0,
+              status: "duplicate",
+              guessCount: 3,
+            },
+          ],
+        });
+      }),
+    );
+
+    render(
+      <GuessSequencePanel date="2024-01-15" isOpen={true} onToggle={() => {}} />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /Show LLM/ }));
+
+    expect(
+      await screen.findByText("Strategy: LLM · Status: duplicate · 3 guesses"),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findAllByText("APPLE, BANANA, CHERRY, DATE"),
+    ).toHaveLength(3);
+    expect(screen.getAllByText("Duplicate")).toHaveLength(2);
+    expect(screen.getByText("✓ Correct")).toBeInTheDocument();
+  });
+
   it("shows a message when a strategy has no runs yet", async () => {
     vi.stubGlobal(
       "fetch",

@@ -6,12 +6,13 @@ import { Guess } from "./entities/guess.entity";
 import { StrategyRun } from "./entities/strategy-run.entity";
 import { StrategyController } from "./strategy.controller";
 import { StrategyService } from "./strategy.service";
+import { OrchestratorService } from "./orchestrator.service";
 import { GameModule } from "../game/game.module";
 
 @Module({
   imports: [TypeOrmModule.forFeature([Puzzle, StrategyRun, Guess]), QueueModule, GameModule],
   controllers: [StrategyController],
-  providers: [StrategyService],
+  providers: [StrategyService, OrchestratorService],
   exports: [StrategyService],
 })
 export class StrategyModule {}

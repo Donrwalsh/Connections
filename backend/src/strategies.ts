@@ -5,6 +5,7 @@ export const SUPPORTED_STRATEGIES = [
   "reverse-order",
   "shuffle-smart",
   "shuffle-foolish",
+  "llm",
 ] as const;
 
 export type SupportedStrategy = (typeof SUPPORTED_STRATEGIES)[number];
@@ -13,9 +14,23 @@ export const STRATEGY_SET = new Set<string>(SUPPORTED_STRATEGIES);
 
 export const SHUFFLE_SMART = "shuffle-smart" as const;
 export const SHUFFLE_FOOLISH = "shuffle-foolish" as const;
+export const LLM = "llm" as const;
+
+/**
+ * Strategies queued automatically when a puzzle is ingested or when the bulk
+ * 'all' queue endpoint is used. Deliberately excludes 'llm' — LLM runs cost
+ * real tokens and are only triggered explicitly via /strategy/queue/llm/:date
+ * until the strategy has been evaluated.
+ */
+export const AUTOMATIC_STRATEGIES: readonly string[] = SUPPORTED_STRATEGIES.filter(
+  (strategyName) => strategyName !== LLM,
+);
 
 export const DEFAULT_SHUFFLE_SMART_TRIALS = 3;
 export const DEFAULT_SHUFFLE_FOOLISH_TRIALS = 3;
+export const DEFAULT_LLM_MAX_DUPLICATE_GUESSES = 3;
+export const DEFAULT_LLM_MAX_MALFORMED_RESPONSES = 3;
+export const DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT = 3;
 
 function positiveTrialCount(raw: string | undefined, fallback: number): number {
   const parsed = Number(raw);
@@ -36,6 +51,35 @@ export function shuffleSmartTrialCount(env: NodeJS.ProcessEnv = process.env): nu
  */
 export function shuffleFoolishTrialCount(env: NodeJS.ProcessEnv = process.env): number {
   return positiveTrialCount(env.SHUFFLE_FOOLISH_TRIALS, DEFAULT_SHUFFLE_FOOLISH_TRIALS);
+}
+
+/**
+ * Maximum duplicate guesses before an LLM run is terminated with a
+ * 'duplicate' status, from LLM_MAX_DUPLICATE_GUESSES. Guards against a
+ * cooperative-but-confused model that keeps re-proposing the same group.
+ */
+export function llmMaxDuplicateGuesses(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.LLM_MAX_DUPLICATE_GUESSES, DEFAULT_LLM_MAX_DUPLICATE_GUESSES);
+}
+
+/**
+ * Maximum malformed responses (unusable/non-parseable model output) before
+ * an LLM run is terminated with a 'malformedResponse' status, from
+ * LLM_MAX_MALFORMED_RESPONSES.
+ */
+export function llmMaxMalformedResponses(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.LLM_MAX_MALFORMED_RESPONSES, DEFAULT_LLM_MAX_MALFORMED_RESPONSES);
+}
+
+/**
+ * Maximum duplicate guesses before a shuffle-foolish trial is terminated
+ * with a 'duplicate' status, from SHUFFLE_FOOLISH_DUPLICATE_LIMIT.
+ */
+export function shuffleFoolishDuplicateLimit(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(
+    env.SHUFFLE_FOOLISH_DUPLICATE_LIMIT,
+    DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT,
+  );
 }
 
 /**

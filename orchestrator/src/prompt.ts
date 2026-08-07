@@ -69,29 +69,29 @@ export function buildSolvePrompt(request: SolveRequest): string {
   const forbiddenSection =
     forbidden.length === 0
       ? ""
-      : `\nFORBIDDEN — you must NOT output any of these exact ID sets, in any order:\n${forbidden
-          .map((ids) => `{${ids.join(",")}}`)
-          .join("\n")}`;
+      : `\nFORBIDDEN SETS (Previously attempted — DO NOT REPEAT):\n${forbidden
+          .map((ids) => `- [${ids.join(", ")}]`)
+          .join("\n")}\n`;
 
   return `You are solving a single step of an NYT Connections puzzle.
 
-16 words are sorted into 4 groups of 4, sharing hidden categories (synonyms,
-wordplay, "types of ___", etc). Categories can be deliberately misleading.
+16 words are sorted into 4 groups of 4, sharing hidden categories (synonyms, wordplay, "types of ___", etc). Categories can be deliberately misleading.
 
 Remaining words (indexed):
 ${formatIndexedWords(puzzleWords)}
 ${forbiddenSection}
-Task: propose exactly ONE group of 4 word IDs (from 0-${lastId}) that share a category.
+Task: Propose exactly ONE group of 4 unique word IDs (from 0 to ${lastId}) sharing a valid category.
 
-Before answering, verify internally:
-- All 4 IDs are between 0 and ${lastId}, no duplicates
-- The set is not one of the forbidden sets above
+STRICT CONSTRAINTS:
+1. Select 4 distinct IDs between 0 and ${lastId}.
+2. The selected array MUST NOT match any set in FORBIDDEN SETS (regardless of element order).
+3. First write out your step-by-step evaluation, then select the final word IDs.
 
-Respond with ONLY this JSON, no other text:
+Respond strictly with valid JSON using this exact key order:
 {
-  "word_ids": [int, int, int, int],
+  "reasoning": "Explain the category step-by-step and verify the set is not in FORBIDDEN SETS",
   "category": "short label",
-  "confidence": 0.0-1.0,
-  "reasoning": "brief justification"
+  "word_ids": [int, int, int, int],
+  "confidence": 0.0-1.0
 }`;
 }
