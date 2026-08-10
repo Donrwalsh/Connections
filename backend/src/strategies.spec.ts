@@ -2,6 +2,7 @@ import {
   AUTOMATIC_STRATEGIES,
   DEFAULT_LLM_MAX_DUPLICATE_GUESSES,
   DEFAULT_LLM_MAX_MALFORMED_RESPONSES,
+  DEFAULT_LLM_MAX_MODEL_ERRORS,
   DEFAULT_LLM_NUM_RESPONSES,
   DEFAULT_LLM_TEMPERATURE_BASE,
   DEFAULT_LLM_TEMPERATURE_STEP,
@@ -10,6 +11,7 @@ import {
   DEFAULT_SHUFFLE_SMART_TRIALS,
   llmMaxDuplicateGuesses,
   llmMaxMalformedResponses,
+  llmMaxModelErrors,
   llmNumResponses,
   llmTemperatureBase,
   llmTemperatureFor,
@@ -84,6 +86,18 @@ describe("strategies", () => {
 
     it("should read a valid positive integer", () => {
       expect(llmMaxMalformedResponses({ LLM_MAX_MALFORMED_RESPONSES: "7" })).toBe(7);
+    });
+  });
+
+  describe("llmMaxModelErrors", () => {
+    it("should default when the env var is missing or invalid", () => {
+      expect(llmMaxModelErrors({})).toBe(DEFAULT_LLM_MAX_MODEL_ERRORS);
+      expect(llmMaxModelErrors({ LLM_MAX_MODEL_ERRORS: "0" })).toBe(DEFAULT_LLM_MAX_MODEL_ERRORS);
+      expect(llmMaxModelErrors({ LLM_MAX_MODEL_ERRORS: "abc" })).toBe(DEFAULT_LLM_MAX_MODEL_ERRORS);
+    });
+
+    it("should read a valid positive integer", () => {
+      expect(llmMaxModelErrors({ LLM_MAX_MODEL_ERRORS: "9" })).toBe(9);
     });
   });
 

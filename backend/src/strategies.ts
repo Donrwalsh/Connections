@@ -30,6 +30,7 @@ export const DEFAULT_SHUFFLE_SMART_TRIALS = 3;
 export const DEFAULT_SHUFFLE_FOOLISH_TRIALS = 3;
 export const DEFAULT_LLM_MAX_DUPLICATE_GUESSES = 10;
 export const DEFAULT_LLM_MAX_MALFORMED_RESPONSES = 3;
+export const DEFAULT_LLM_MAX_MODEL_ERRORS = 5;
 export const DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT = 3;
 
 // Candidate count per LLM solve step: the model proposes this many groups in
@@ -92,6 +93,17 @@ export function llmMaxDuplicateGuesses(env: NodeJS.ProcessEnv = process.env): nu
  */
 export function llmMaxMalformedResponses(env: NodeJS.ProcessEnv = process.env): number {
   return positiveTrialCount(env.LLM_MAX_MALFORMED_RESPONSES, DEFAULT_LLM_MAX_MALFORMED_RESPONSES);
+}
+
+/**
+ * Maximum consecutive transient model failures (e.g. the Ollama model still
+ * loading, or the orchestrator warming up) an LLM run tolerates before it is
+ * terminated with an 'error' status, from LLM_MAX_MODEL_ERRORS. Each failure
+ * is retried with an exponential backoff instead of killing the run outright,
+ * so a cold-started model has time to load.
+ */
+export function llmMaxModelErrors(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.LLM_MAX_MODEL_ERRORS, DEFAULT_LLM_MAX_MODEL_ERRORS);
 }
 
 /**

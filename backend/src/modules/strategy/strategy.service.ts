@@ -15,6 +15,7 @@ import {
   SHUFFLE_FOOLISH,
   llmMaxDuplicateGuesses,
   llmMaxMalformedResponses,
+  llmMaxModelErrors,
   llmNumResponses,
   llmTemperatureFor,
   shuffleFoolishDuplicateLimit,
@@ -25,6 +26,11 @@ import { OrchestratorService, type ProposedGroup } from "./orchestrator.service"
 
 const GROUP_SIZE = 4;
 const BATCH_SIZE = 50;
+
+// Backoff between retries of a transient model failure (e.g. the Ollama model
+// still loading after a cold start). Exponential from 1s, capped at 5min.
+const MODEL_ERROR_RETRY_BASE_DELAY_MS = 1000;
+const MODEL_ERROR_RETRY_MAX_DELAY_MS = 300000;
 
 @Injectable()
 export class StrategyService {
@@ -341,8 +347,9 @@ export class StrategyService {
    * Recoverable model behaviors are bounded by config: repeating a forbidden
    * group (LLM_MAX_DUPLICATE_GUESSES) and emitting unusable output
    * (LLM_MAX_MALFORMED_RESPONSES) end the run with 'duplicate' /
-   * 'malformedResponse' statuses. Model/network failures abort it with
-   * 'error'.
+   * 'malformedResponse' statuses. Transient model/network failures
+   * (LLM_MAX_MODEL_ERRORS consecutive) are retried with backoff — e.g. while
+   * the Ollama model is still loading — before the run aborts with 'error'.
    */
   async runLlmStrategy(puzzleId: number, strategyName: string, trialNumber = 0) {
     const { run, puzzle } = await this.loadOrCreateRun(puzzleId, strategyName, trialNumber);
@@ -369,7 +376,9 @@ export class StrategyService {
     let malformedCount = 0;
     const maxDuplicates = llmMaxDuplicateGuesses();
     const maxMalformed = llmMaxMalformedResponses();
+    const maxModelErrors = llmMaxModelErrors();
     const numResponses = llmNumResponses();
+    let consecutiveModelErrors = 0;
 
     const pendingGuesses: Partial<Guess>[] = [];
 
@@ -387,6 +396,7 @@ export class StrategyService {
 
       if (outcome.ok) {
         const data = outcome.data;
+        consecutiveModelErrors = 0;
 
         // Set run-level model metadata from the first successful call.
         if (run.modelName === null) {
@@ -458,8 +468,16 @@ export class StrategyService {
         const { code, details } = outcome.error;
 
         if (code === "model_error") {
-          run.status = StrategyRunStatus.ERROR;
-          run.finishedAt = new Date();
+          // A model failure is usually transient — the Ollama model is still
+          // loading or the orchestrator just warmed up. Keep the run alive and
+          // retry with backoff instead of killing it, so a cold-started model
+          // gets time to load. Only give up after maxModelErrors consecutive
+          // failures so a genuinely broken provider still ends the run.
+          consecutiveModelErrors++;
+          if (consecutiveModelErrors >= maxModelErrors) {
+            run.status = StrategyRunStatus.ERROR;
+            run.finishedAt = new Date();
+          }
         } else if (code === "duplicate_group") {
           // Defensive: a duplicate_group signal is no longer produced by the
           // current orchestrator (duplicates are resolved from the candidate
@@ -502,6 +520,12 @@ export class StrategyService {
       // thousands), so batching buys nothing, and flushing each step means a
       // worker crash loses at most one step of progress.
       await this.flushBatch(run, pendingGuesses);
+
+      // After a transient model failure, pause before re-prompting so the
+      // model has time to finish loading.
+      if (run.status === StrategyRunStatus.RUNNING && consecutiveModelErrors > 0) {
+        await this.delay(this.modelErrorBackoff(consecutiveModelErrors));
+      }
 
       if (run.status !== StrategyRunStatus.RUNNING) {
         break;
@@ -613,6 +637,21 @@ export class StrategyService {
 
   private groupKey(words: string[]): string {
     return [...words].sort().join("|");
+  }
+
+  /**
+   * Exponential backoff (1s, 2s, 4s, ... capped at 5min) before retrying a
+   * solve step after a transient model failure.
+   */
+  private modelErrorBackoff(consecutiveErrors: number): number {
+    return Math.min(
+      MODEL_ERROR_RETRY_MAX_DELAY_MS,
+      MODEL_ERROR_RETRY_BASE_DELAY_MS * 2 ** (consecutiveErrors - 1),
+    );
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private combinationCount(n: number, k: number): number {

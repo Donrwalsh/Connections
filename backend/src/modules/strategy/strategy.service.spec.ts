@@ -1125,21 +1125,53 @@ describe("StrategyService", () => {
       );
     });
 
-    it("should terminate with 'error' on a model failure", async () => {
-      mockOrchestratorService.proposeGroup.mockResolvedValueOnce({
-        ok: false,
-        error: { error: "ollama is down", code: "model_error" },
-      });
+    it("should retry after a transient model error and not fail the run", async () => {
+      jest
+        .spyOn(service as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      mockOrchestratorService.proposeGroup
+        .mockResolvedValueOnce({
+          ok: false,
+          error: { error: "model is loading", code: "model_error" },
+        })
+        .mockResolvedValueOnce(success([0, 1, 2, 3]))
+        .mockResolvedValueOnce(success([0, 1, 2, 3]));
 
       const result = await service.runLlmStrategy(100, "llm");
 
-      expect(result).toEqual({ status: StrategyRunStatus.ERROR, guessCount: 0 });
-      expect(mockOrchestratorService.proposeGroup).toHaveBeenCalledTimes(1);
-      expect(mockManager.insert).not.toHaveBeenCalled();
-      expect(mockManager.save).toHaveBeenCalledWith(
+      expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
+      // The transient failure did not kill the run — it retried and solved.
+      expect(mockOrchestratorService.proposeGroup).toHaveBeenCalledTimes(3);
+      expect(mockManager.save).not.toHaveBeenCalledWith(
         StrategyRun,
         expect.objectContaining({ status: StrategyRunStatus.ERROR }),
       );
+    });
+
+    it("should terminate with 'error' only after max consecutive model errors", async () => {
+      jest
+        .spyOn(service as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      process.env.LLM_MAX_MODEL_ERRORS = "2";
+      try {
+        mockOrchestratorService.proposeGroup.mockResolvedValue({
+          ok: false,
+          error: { error: "ollama is down", code: "model_error" },
+        });
+
+        const result = await service.runLlmStrategy(100, "llm");
+
+        expect(result).toEqual({ status: StrategyRunStatus.ERROR, guessCount: 0 });
+        // 2 transient failures, each retried with backoff, then give up.
+        expect(mockOrchestratorService.proposeGroup).toHaveBeenCalledTimes(2);
+        expect(mockManager.insert).not.toHaveBeenCalled();
+        expect(mockManager.save).toHaveBeenCalledWith(
+          StrategyRun,
+          expect.objectContaining({ status: StrategyRunStatus.ERROR }),
+        );
+      } finally {
+        delete process.env.LLM_MAX_MODEL_ERRORS;
+      }
     });
   });
 
