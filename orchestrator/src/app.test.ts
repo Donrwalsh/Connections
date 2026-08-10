@@ -107,6 +107,10 @@ describe("orchestrator app", () => {
       model: "test-model",
       contextWindow: 8192,
       latencyMs: 1234,
+      temperature: 1.0,
+      numResponses: 1,
+      promptAttempts: 1,
+      duplicatesRejected: 0,
       usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
     });
 
@@ -125,6 +129,10 @@ describe("orchestrator app", () => {
       model: "test-model",
       contextWindow: 8192,
       latencyMs: 1234,
+      temperature: 1.0,
+      numResponses: 1,
+      promptAttempts: 1,
+      duplicatesRejected: 0,
       usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
     });
   });
@@ -144,6 +152,9 @@ describe("orchestrator app", () => {
       contextWindow: 8192,
       latencyMs: 10,
       temperature: 1.2,
+      numResponses: 1,
+      promptAttempts: 1,
+      duplicatesRejected: 0,
       usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
     });
 

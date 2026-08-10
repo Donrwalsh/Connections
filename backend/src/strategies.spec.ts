@@ -3,6 +3,7 @@ import {
   DEFAULT_LLM_MAX_DUPLICATE_GUESSES,
   DEFAULT_LLM_MAX_MALFORMED_RESPONSES,
   DEFAULT_LLM_MAX_MODEL_ERRORS,
+  DEFAULT_LLM_MAX_PROMPTS,
   DEFAULT_LLM_NUM_RESPONSES,
   DEFAULT_LLM_TEMPERATURE_BASE,
   DEFAULT_LLM_TEMPERATURE_STEP,
@@ -12,9 +13,9 @@ import {
   llmMaxDuplicateGuesses,
   llmMaxMalformedResponses,
   llmMaxModelErrors,
+  llmMaxPrompts,
   llmNumResponses,
   llmTemperatureBase,
-  llmTemperatureFor,
   llmTemperatureStep,
   shuffleFoolishDuplicateLimit,
   shuffleFoolishTrialCount,
@@ -117,6 +118,18 @@ describe("strategies", () => {
     });
   });
 
+  describe("llmMaxPrompts", () => {
+    it("should default when the env var is missing or invalid", () => {
+      expect(llmMaxPrompts({})).toBe(DEFAULT_LLM_MAX_PROMPTS);
+      expect(llmMaxPrompts({ LLM_MAX_PROMPTS: "abc" })).toBe(DEFAULT_LLM_MAX_PROMPTS);
+      expect(llmMaxPrompts({ LLM_MAX_PROMPTS: "0" })).toBe(DEFAULT_LLM_MAX_PROMPTS);
+    });
+
+    it("should read a valid positive integer", () => {
+      expect(llmMaxPrompts({ LLM_MAX_PROMPTS: "7" })).toBe(7);
+    });
+  });
+
   describe("shuffleFoolishDuplicateLimit", () => {
     it("should default when the env var is missing or invalid", () => {
       expect(shuffleFoolishDuplicateLimit({})).toBe(DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT);
@@ -149,29 +162,6 @@ describe("strategies", () => {
 
     it("should read a valid positive number", () => {
       expect(llmTemperatureStep({ LLM_TEMPERATURE_STEP: "0.15" })).toBe(0.15);
-    });
-  });
-
-  describe("llmTemperatureFor", () => {
-    it("should return the base temperature with no duplicates", () => {
-      expect(llmTemperatureFor(0)).toBe(DEFAULT_LLM_TEMPERATURE_BASE);
-    });
-
-    it("should raise the temperature by the step per duplicate", () => {
-      expect(llmTemperatureFor(1)).toBe(
-        DEFAULT_LLM_TEMPERATURE_BASE + DEFAULT_LLM_TEMPERATURE_STEP,
-      );
-      expect(llmTemperatureFor(5)).toBe(
-        DEFAULT_LLM_TEMPERATURE_BASE + 5 * DEFAULT_LLM_TEMPERATURE_STEP,
-      );
-    });
-
-    it("should cap at the maximum temperature", () => {
-      expect(llmTemperatureFor(100)).toBe(2);
-    });
-
-    it("should never drop below zero", () => {
-      expect(llmTemperatureFor(-3)).toBe(DEFAULT_LLM_TEMPERATURE_BASE);
     });
   });
 

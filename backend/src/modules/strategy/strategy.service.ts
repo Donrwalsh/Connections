@@ -11,18 +11,22 @@ import { GameService } from "../game/game.service";
 import { StrategyRunDetailDto, StrategyRunListItemDto } from "./dto/strategy.dto";
 import {
   LLM,
+  MAX_LLM_NUM_RESPONSES,
+  MAX_LLM_TEMPERATURE,
   SHUFFLE_SMART,
   SHUFFLE_FOOLISH,
   llmMaxDuplicateGuesses,
   llmMaxMalformedResponses,
   llmMaxModelErrors,
+  llmMaxPrompts,
   llmNumResponses,
-  llmTemperatureFor,
+  llmTemperatureBase,
+  llmTemperatureStep,
   shuffleFoolishDuplicateLimit,
   strategyTrialNumbers,
 } from "../../strategies";
 import { runStrategyJobId } from "../queue/strategy.queue";
-import { OrchestratorService, type ProposedGroup } from "./orchestrator.service";
+import { OrchestratorService } from "./orchestrator.service";
 
 const GROUP_SIZE = 4;
 const BATCH_SIZE = 50;
@@ -337,19 +341,21 @@ export class StrategyService {
 
   /**
    * Iterative LLM strategy: calls the orchestrator's /solve with the remaining
-   * words plus the full guess history. Each response proposes numResponses
-   * candidate groups; the first candidate that isn't a repeat of a previous
-   * guess is evaluated locally. If every candidate repeats an earlier guess,
-   * the first duplicate is recorded (so the duplicate limit and temperature
-   * ramp still apply), and the loop re-prompts with the updated history until
-   * the puzzle is solved or a run limit is hit.
+   * words plus the full guess history. Each step starts by asking the model
+   * for a single answer; when every candidate repeats a prior guess, the
+   * orchestrator re-prompts with changed parameters — alternating between a
+   * higher sampling temperature and more distinct candidates to choose from —
+   * until a fresh candidate appears or its prompt budget runs out. The
+   * parameters that produced a usable candidate are held onto here and sent
+   * on subsequent steps, so the escalation persists across the run.
    *
-   * Recoverable model behaviors are bounded by config: repeating a forbidden
-   * group (LLM_MAX_DUPLICATE_GUESSES) and emitting unusable output
-   * (LLM_MAX_MALFORMED_RESPONSES) end the run with 'duplicate' /
-   * 'malformedResponse' statuses. Transient model/network failures
-   * (LLM_MAX_MODEL_ERRORS consecutive) are retried with backoff — e.g. while
-   * the Ollama model is still loading — before the run aborts with 'error'.
+   * Recoverable model behaviors are bounded by config: the orchestrator
+   * exhausting its prompt budget on repeats (LLM_MAX_DUPLICATE_GUESSES) and
+   * emitting unusable output (LLM_MAX_MALFORMED_RESPONSES) end the run with
+   * 'duplicate' / 'malformedResponse' statuses. Transient model/network
+   * failures (LLM_MAX_MODEL_ERRORS consecutive) are retried with backoff —
+   * e.g. while the Ollama model is still loading — before the run aborts
+   * with 'error'.
    */
   async runLlmStrategy(puzzleId: number, strategyName: string, trialNumber = 0) {
     const { run, puzzle } = await this.loadOrCreateRun(puzzleId, strategyName, trialNumber);
@@ -363,7 +369,7 @@ export class StrategyService {
 
     // Rebuild guess history from flushed guesses so a worker restart mid-run
     // resumes with the same forbidden-set context the model saw before. The
-    // duplicate count (and thus the sampling temperature) also resumes from
+    // duplicate count (and thus the run's duplicate limit) also resumes from
     // the persisted history.
     const priorGuesses = (await this.loadLlmGuessesForRun(run.id)).map((guess) => ({
       words: guess.words,
@@ -377,13 +383,21 @@ export class StrategyService {
     const maxDuplicates = llmMaxDuplicateGuesses();
     const maxMalformed = llmMaxMalformedResponses();
     const maxModelErrors = llmMaxModelErrors();
-    const numResponses = llmNumResponses();
+    const maxPrompts = llmMaxPrompts();
+    const temperatureStep = llmTemperatureStep();
     let consecutiveModelErrors = 0;
+
+    // Sticky sampling parameters. The orchestrator reports the temperature and
+    // candidate count that produced each guess; we hold onto them so later
+    // solve steps start from the escalated values instead of resetting. (A
+    // worker restart mid-run resets them to base — the orchestrator simply
+    // re-escalates on demand.)
+    let temperature = llmTemperatureBase();
+    let numResponses = llmNumResponses();
 
     const pendingGuesses: Partial<Guess>[] = [];
 
     while (true) {
-      const temperature = llmTemperatureFor(duplicateCount);
       const outcome = await this.orchestratorService.proposeGroup({
         puzzleWords: run.availableWords,
         priorGuesses: priorGuesses.map((guess) => ({
@@ -392,6 +406,10 @@ export class StrategyService {
         })),
         temperature,
         numResponses,
+        temperatureStep,
+        maxTemperature: MAX_LLM_TEMPERATURE,
+        maxNumResponses: MAX_LLM_NUM_RESPONSES,
+        maxPrompts,
       });
 
       if (outcome.ok) {
@@ -404,39 +422,24 @@ export class StrategyService {
           run.contextWindow = data.contextWindow;
         }
 
-        const selected = this.selectProposal(data.proposedGroups, run.availableWords, priorGuesses);
+        // The orchestrator re-prompted until it found a candidate that does
+        // not repeat a prior guess, so the winner is the single group in the
+        // response. Hold onto the parameters that produced it so the next
+        // solve step starts from them.
+        temperature = data.temperature;
+        numResponses = data.numResponses;
 
-        if (selected === null) {
-          // None of the model's candidates were usable — same as malformed.
+        const group = data.proposedGroups[0];
+        if (!group) {
+          // Defensive: the orchestrator is not expected to return a success
+          // with no candidate. Same as malformed.
           malformedCount++;
           if (malformedCount >= maxMalformed) {
             run.status = StrategyRunStatus.MALFORMED_RESPONSE;
             run.finishedAt = new Date();
           }
-        } else if (selected.isDuplicate) {
-          const words = selected.words;
-          duplicateCount++;
-          guessCount++;
-          pendingGuesses.push({
-            puzzle: { id: puzzleId } as Puzzle,
-            strategyRun: { id: run.id } as StrategyRun,
-            words,
-            result: GuessResult.DUPLICATE,
-            sequenceNumber: guessCount,
-            source: GuessSource.STRATEGY,
-            promptTokens: data.usage.promptTokens,
-            completionTokens: data.usage.completionTokens,
-            latencyMs: data.latencyMs,
-            llmDetails: this.llmDetailsFor(selected.group, data.prompt, temperature),
-          });
-          priorGuesses.push({ words, result: GuessResult.DUPLICATE });
-
-          if (duplicateCount >= maxDuplicates) {
-            run.status = StrategyRunStatus.DUPLICATE;
-            run.finishedAt = new Date();
-          }
         } else {
-          const words = selected.words;
+          const words = group.word_ids.map((id) => run.availableWords[id]);
           const evaluation = GameService.evaluateGuessOnPuzzle(puzzle, words);
 
           guessCount++;
@@ -449,8 +452,13 @@ export class StrategyService {
             source: GuessSource.STRATEGY,
             promptTokens: data.usage.promptTokens,
             completionTokens: data.usage.completionTokens,
+            totalTokens: data.usage.totalTokens,
             latencyMs: data.latencyMs,
-            llmDetails: this.llmDetailsFor(selected.group, data.prompt, temperature),
+            temperature,
+            numResponses,
+            promptAttempts: data.promptAttempts,
+            duplicatesRejected: data.duplicatesRejected,
+            llmDetails: this.llmDetailsFor(group, data.prompt),
           });
           priorGuesses.push({ words, result: evaluation.result });
 
@@ -479,9 +487,11 @@ export class StrategyService {
             run.finishedAt = new Date();
           }
         } else if (code === "duplicate_group") {
-          // Defensive: a duplicate_group signal is no longer produced by the
-          // current orchestrator (duplicates are resolved from the candidate
-          // list above), but an older peer could still send one.
+          // Defensive: the orchestrator already re-prompts (raising the
+          // temperature / requesting more candidates) before it reports a
+          // duplicate_group, so this means it exhausted its prompt budget. The
+          // first repeated group is recorded so the duplicate limit can kick
+          // in and the run terminates instead of retrying forever.
           duplicateCount++;
           const group = details?.proposedGroups?.[0];
           if (group) {
@@ -496,8 +506,13 @@ export class StrategyService {
               source: GuessSource.STRATEGY,
               promptTokens: details?.usage?.promptTokens ?? null,
               completionTokens: details?.usage?.completionTokens ?? null,
+              totalTokens: details?.usage?.totalTokens ?? null,
               latencyMs: details?.latencyMs ?? null,
-              llmDetails: this.llmDetailsFor(group, details?.prompt, temperature),
+              temperature: details?.temperature ?? temperature,
+              numResponses: details?.numResponses ?? numResponses,
+              promptAttempts: details?.promptAttempts ?? 1,
+              duplicatesRejected: details?.duplicatesRejected ?? 0,
+              llmDetails: this.llmDetailsFor(group, details?.prompt),
             });
             priorGuesses.push({ words, result: GuessResult.DUPLICATE });
           }
@@ -543,40 +558,6 @@ export class StrategyService {
    * limit (and temperature ramp) can kick in. Returns null when no candidate
    * is usable at all.
    */
-  private selectProposal(
-    candidates: ProposedGroup[],
-    availableWords: string[],
-    priorGuesses: { words: string[]; result: GuessResult }[],
-  ): { group: ProposedGroup; words: string[]; isDuplicate: boolean } | null {
-    let firstDuplicate: { group: ProposedGroup; words: string[] } | null = null;
-
-    for (const group of candidates) {
-      const ids = group.word_ids;
-      const inRange =
-        ids.length === GROUP_SIZE &&
-        new Set(ids).size === GROUP_SIZE &&
-        ids.every((id) => id >= 0 && id < availableWords.length);
-      if (!inRange) continue;
-
-      const words = ids.map((id) => availableWords[id]);
-      const isDuplicate = priorGuesses.some(
-        (guess) => this.groupKey(guess.words) === this.groupKey(words),
-      );
-
-      if (!isDuplicate) {
-        return { group, words, isDuplicate: false };
-      }
-
-      if (firstDuplicate === null) {
-        firstDuplicate = { group, words };
-      }
-    }
-
-    return firstDuplicate
-      ? { group: firstDuplicate.group, words: firstDuplicate.words, isDuplicate: true }
-      : null;
-  }
-
   private mapGuessResultToOrchestrator(result: GuessResult): "correct" | "incorrect" | "oneAway" {
     switch (result) {
       case GuessResult.SUCCESS:
@@ -592,13 +573,11 @@ export class StrategyService {
   private llmDetailsFor(
     group: { category: string; confidence: number; reasoning: string },
     prompt: string | undefined,
-    temperature: number,
   ): Record<string, unknown> {
     return {
       category: group.category,
       confidence: group.confidence,
       reasoning: group.reasoning,
-      temperature,
       ...(prompt !== undefined ? { prompt } : {}),
     };
   }

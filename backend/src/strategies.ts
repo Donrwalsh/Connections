@@ -33,15 +33,25 @@ export const DEFAULT_LLM_MAX_MALFORMED_RESPONSES = 3;
 export const DEFAULT_LLM_MAX_MODEL_ERRORS = 5;
 export const DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT = 3;
 
-// Candidate count per LLM solve step: the model proposes this many groups in
-// one response and the backend submits the first one that isn't a repeat of
-// a previous guess. Cap guards against oversized model outputs.
-export const DEFAULT_LLM_NUM_RESPONSES = 5;
+// Starting candidate count per LLM solve step: the model is tasked with
+// producing a single answer. When every candidate repeats a previous guess,
+// the orchestrator re-prompts with changed parameters (see
+// LLM_MAX_PROMPTS below), requesting more distinct candidates as one of its
+// two escalation levers. Cap guards against oversized model outputs.
+export const DEFAULT_LLM_NUM_RESPONSES = 1;
 export const MAX_LLM_NUM_RESPONSES = 10;
 
-// Temperature ramp: each duplicate guess nudges the model's sampling
-// temperature up by LLM_TEMPERATURE_STEP, starting from LLM_TEMPERATURE_BASE,
-// capped at MAX_LLM_TEMPERATURE (the OpenAI API's ceiling).
+// How many prompts a single solve step may make before the orchestrator
+// gives up on a fresh candidate and reports a duplicate/invalid failure.
+// Each re-prompt alternates between raising the sampling temperature and
+// asking for more distinct candidates to choose from.
+export const DEFAULT_LLM_MAX_PROMPTS = 5;
+
+// Temperature ramp: each temperature-raising re-prompt nudges the model's
+// sampling temperature up by LLM_TEMPERATURE_STEP, starting from
+// LLM_TEMPERATURE_BASE, capped at MAX_LLM_TEMPERATURE (the OpenAI API's
+// ceiling). The value that produced a usable candidate is echoed back to the
+// backend, which holds onto it for subsequent solve steps.
 export const DEFAULT_LLM_TEMPERATURE_BASE = 1.0;
 export const DEFAULT_LLM_TEMPERATURE_STEP = 0.1;
 export const MAX_LLM_TEMPERATURE = 2;
@@ -107,9 +117,12 @@ export function llmMaxModelErrors(env: NodeJS.ProcessEnv = process.env): number 
 }
 
 /**
- * Number of candidate groups the model proposes per solve step, from
- * LLM_NUM_RESPONSES (clamped to [1, MAX_LLM_NUM_RESPONSES]). The backend
- * submits the first candidate that is not a repeat of a previous guess.
+ * Starting number of candidate groups the model proposes per solve step, from
+ * LLM_NUM_RESPONSES (clamped to [1, MAX_LLM_NUM_RESPONSES]). Each step begins
+ * by asking the model to produce this many candidates; when they all repeat a
+ * previous guess, the orchestrator re-prompts with changed parameters and may
+ * request up to MAX_LLM_NUM_RESPONSES distinct candidates. The count that
+ * produced a usable candidate is echoed back and held onto for later steps.
  */
 export function llmNumResponses(env: NodeJS.ProcessEnv = process.env): number {
   return Math.min(
@@ -119,32 +132,30 @@ export function llmNumResponses(env: NodeJS.ProcessEnv = process.env): number {
 }
 
 /**
+ * Maximum number of prompts a single solve step may make before giving up on
+ * a fresh candidate, from LLM_MAX_PROMPTS. The orchestrator re-prompts —
+ * alternating between raising the temperature and requesting more distinct
+ * candidates — until it finds a candidate that does not repeat a prior guess.
+ */
+export function llmMaxPrompts(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.LLM_MAX_PROMPTS, DEFAULT_LLM_MAX_PROMPTS);
+}
+
+/**
  * Base sampling temperature for LLM solve steps, from LLM_TEMPERATURE_BASE.
- * Every duplicate guess the model proposes raises the temperature (see
- * llmTemperatureFor) to push it out of its current rut.
+ * The orchestrator raises it (by llmTemperatureStep per re-prompt) when the
+ * model keeps repeating prior guesses; the escalated value is echoed back and
+ * held onto for subsequent solve steps.
  */
 export function llmTemperatureBase(env: NodeJS.ProcessEnv = process.env): number {
   return nonNegativeFloat(env.LLM_TEMPERATURE_BASE, DEFAULT_LLM_TEMPERATURE_BASE);
 }
 
 /**
- * Per-duplicate temperature increment, from LLM_TEMPERATURE_STEP.
+ * Per-re-prompt temperature increment, from LLM_TEMPERATURE_STEP.
  */
 export function llmTemperatureStep(env: NodeJS.ProcessEnv = process.env): number {
   return positiveFloat(env.LLM_TEMPERATURE_STEP, DEFAULT_LLM_TEMPERATURE_STEP);
-}
-
-/**
- * Sampling temperature for a solve step given the number of duplicate groups
- * proposed so far: base + step * duplicates, clamped to [0, MAX_LLM_TEMPERATURE].
- */
-export function llmTemperatureFor(
-  duplicateCount: number,
-  env: NodeJS.ProcessEnv = process.env,
-): number {
-  const base = llmTemperatureBase(env);
-  const step = llmTemperatureStep(env);
-  return Math.min(base + step * Math.max(0, duplicateCount), MAX_LLM_TEMPERATURE);
 }
 
 /**

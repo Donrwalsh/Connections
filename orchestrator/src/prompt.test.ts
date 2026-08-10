@@ -5,7 +5,16 @@ import type { SolveRequest } from "./types.js";
 const WORDS = ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"];
 
 function makeRequest(overrides: Partial<SolveRequest> = {}): SolveRequest {
-  return { puzzleWords: WORDS, priorGuesses: [], numResponses: 5, ...overrides };
+  return {
+    puzzleWords: WORDS,
+    priorGuesses: [],
+    numResponses: 5,
+    temperatureStep: 0.1,
+    maxTemperature: 2,
+    maxNumResponses: 10,
+    maxPrompts: 5,
+    ...overrides,
+  } as SolveRequest;
 }
 
 describe("forbiddenIdSets", () => {

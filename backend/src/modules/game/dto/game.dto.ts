@@ -53,5 +53,9 @@ export interface SolveResponseDto {
   model?: string;
   contextWindow?: number;
   latencyMs?: number;
+  temperature?: number;
+  numResponses?: number;
+  promptAttempts?: number;
+  duplicatesRejected?: number;
   usage?: SolveUsageDto;
 }

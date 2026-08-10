@@ -5,7 +5,16 @@ import { solveOutputSchema, type ProposedGroup, type SolveRequest } from "./type
 const WORDS = ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"];
 
 function makeRequest(overrides: Partial<SolveRequest> = {}): SolveRequest {
-  return { puzzleWords: WORDS, priorGuesses: [], numResponses: 5, ...overrides };
+  return {
+    puzzleWords: WORDS,
+    priorGuesses: [],
+    numResponses: 1,
+    temperatureStep: 0.1,
+    maxTemperature: 2,
+    maxNumResponses: 10,
+    maxPrompts: 5,
+    ...overrides,
+  } as SolveRequest;
 }
 
 function makeGroup(overrides: Partial<ProposedGroup> = {}): ProposedGroup {
@@ -18,11 +27,9 @@ function makeGroup(overrides: Partial<ProposedGroup> = {}): ProposedGroup {
   };
 }
 
-function makeOutput(count = 5) {
+function makeOutput(groups: ProposedGroup[] = [makeGroup()]) {
   return {
-    object: {
-      proposed_groups: Array.from({ length: count }, () => makeGroup()),
-    },
+    object: { proposed_groups: groups },
     usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
     response: { modelId: "test-model" },
   };
@@ -75,15 +82,33 @@ describe("proposeGroup", () => {
     vi.unstubAllEnvs();
   });
 
-  it("returns the candidate groups plus prompt, model and usage metadata", async () => {
+  function lastTemperatures() {
+    return generateObjectMock.mock.calls.map(
+      (call) => (call[0] as { temperature: number }).temperature,
+    );
+  }
+
+  function schemaAcceptsCount(callIndex: number, count: number): boolean {
+    const call = generateObjectMock.mock.calls[callIndex][0] as {
+      schema: { safeParse: (value: unknown) => { success: boolean } };
+    };
+    return call.schema.safeParse({
+      proposed_groups: Array.from({ length: count }, () => makeGroup()),
+    }).success;
+  }
+
+  it("returns the winning candidate plus prompt, model, usage and retry metadata", async () => {
     vi.stubEnv("MODEL_CONTEXT_WINDOW", "4096");
     const result = await proposeGroup(makeRequest());
 
-    expect(result.proposedGroups).toHaveLength(5);
-    expect(result.proposedGroups[0]).toEqual(makeGroup());
+    expect(result.proposedGroups).toEqual([makeGroup()]);
     expect(result.prompt).toContain("Remaining words");
     expect(result.model).toBe("test-model");
     expect(result.contextWindow).toBe(4096);
+    expect(result.temperature).toBe(1);
+    expect(result.numResponses).toBe(1);
+    expect(result.promptAttempts).toBe(1);
+    expect(result.duplicatesRejected).toBe(0);
     expect(result.usage).toEqual({
       promptTokens: 10,
       completionTokens: 20,
@@ -111,51 +136,153 @@ describe("proposeGroup", () => {
     ).toBe(false);
   });
 
-  it("classifies malformed model output as invalid_group", async () => {
-    generateObjectMock.mockRejectedValueOnce(
-      new (class extends Error {})("boom"),
-    );
-    // NoObjectGeneratedError instance:
-    const { NoObjectGeneratedError } = await import("ai");
-    const ctor = NoObjectGeneratedError as unknown as new (msg: string) => Error;
-    generateObjectMock.mockRejectedValueOnce(new ctor("no object"));
+  it("defaults the temperature to 1 and always passes it to the model", async () => {
+    await proposeGroup(makeRequest());
 
-    await expect(proposeGroup(makeRequest())).rejects.toMatchObject({
-      code: "model_error",
-    });
-    await expect(proposeGroup(makeRequest())).rejects.toMatchObject({
-      code: "invalid_group",
-    });
+    expect(generateObjectMock).toHaveBeenCalledWith(
+      expect.objectContaining({ temperature: 1 }),
+    );
   });
 
-  it("forwards the requested temperature to the model and reflects it in the result", async () => {
-    const result = await proposeGroup(makeRequest({ temperature: 1.3 }));
+  it("starts retries at the sticky parameters supplied by the caller", async () => {
+    const result = await proposeGroup(
+      makeRequest({ temperature: 1.3, numResponses: 3 }),
+    );
 
     expect(generateObjectMock).toHaveBeenCalledWith(
       expect.objectContaining({ temperature: 1.3 }),
     );
+    expect(schemaAcceptsCount(0, 3)).toBe(true);
+    expect(schemaAcceptsCount(0, 4)).toBe(false);
     expect(result.temperature).toBe(1.3);
+    expect(result.numResponses).toBe(3);
   });
 
-  it("omits temperature when the request does not provide one", async () => {
-    await proposeGroup(makeRequest());
-
-    expect(generateObjectMock).toHaveBeenCalledWith(
-      expect.not.objectContaining({ temperature: expect.any(Number) }),
-    );
-  });
-
-  it("passes previously-guessed groups through for the backend to resolve", async () => {
+  it("re-prompts with a higher temperature when every candidate repeats a prior guess", async () => {
     const request = makeRequest({
-      priorGuesses: [
-        { words: ["AAAA", "BBBB", "CCCC", "DDDD"], result: "incorrect" },
-      ],
+      priorGuesses: [{ words: ["AAAA", "BBBB", "CCCC", "DDDD"], result: "incorrect" }],
     });
+    generateObjectMock
+      .mockResolvedValueOnce(makeOutput([makeGroup(), makeGroup()]))
+      .mockResolvedValueOnce(makeOutput([makeGroup({ word_ids: [4, 5, 6, 7] })]));
 
     const result = await proposeGroup(request);
 
-    // Duplicate-vs-fresh selection is the backend's job; the orchestrator
-    // just returns every candidate the model produced.
-    expect(result.proposedGroups[0].word_ids).toEqual([0, 1, 2, 3]);
+    expect(generateObjectMock).toHaveBeenCalledTimes(2);
+    expect(lastTemperatures()).toEqual([1, 1.1]);
+    // The candidate count stays put on the temperature-raising re-prompt.
+    expect(schemaAcceptsCount(0, 1)).toBe(true);
+    expect(schemaAcceptsCount(0, 2)).toBe(false);
+    expect(schemaAcceptsCount(1, 1)).toBe(true);
+    expect(result.proposedGroups).toEqual([makeGroup({ word_ids: [4, 5, 6, 7] })]);
+    expect(result.temperature).toBe(1.1);
+    expect(result.numResponses).toBe(1);
+    expect(result.promptAttempts).toBe(2);
+    expect(result.duplicatesRejected).toBe(2);
+  });
+
+  it("alternates escalation by requesting more distinct candidates next", async () => {
+    const request = makeRequest({
+      priorGuesses: [{ words: ["AAAA", "BBBB", "CCCC", "DDDD"], result: "incorrect" }],
+    });
+    generateObjectMock
+      .mockResolvedValueOnce(makeOutput([makeGroup()]))
+      .mockResolvedValueOnce(makeOutput([makeGroup()]))
+      .mockResolvedValueOnce(makeOutput([makeGroup({ word_ids: [4, 5, 6, 7] })]));
+
+    const result = await proposeGroup(request);
+
+    expect(generateObjectMock).toHaveBeenCalledTimes(3);
+    expect(lastTemperatures()).toEqual([1, 1.1, 1.1]);
+    // First re-prompt raises temperature; second re-prompt asks for a second
+    // distinct candidate while keeping the raised temperature.
+    expect(schemaAcceptsCount(0, 1)).toBe(true);
+    expect(schemaAcceptsCount(0, 2)).toBe(false);
+    expect(schemaAcceptsCount(1, 1)).toBe(true);
+    expect(schemaAcceptsCount(2, 2)).toBe(true);
+    expect(schemaAcceptsCount(2, 3)).toBe(false);
+    expect(result.temperature).toBe(1.1);
+    expect(result.numResponses).toBe(2);
+    expect(result.promptAttempts).toBe(3);
+  });
+
+  it("aggregates usage and latency across the re-prompts", async () => {
+    const request = makeRequest({
+      priorGuesses: [{ words: ["AAAA", "BBBB", "CCCC", "DDDD"], result: "incorrect" }],
+    });
+    generateObjectMock
+      .mockResolvedValueOnce(makeOutput([makeGroup()]))
+      .mockResolvedValueOnce(makeOutput([makeGroup({ word_ids: [4, 5, 6, 7] })]));
+
+    const result = await proposeGroup(request);
+
+    expect(result.promptAttempts).toBe(2);
+    expect(result.usage).toEqual({
+      promptTokens: 20,
+      completionTokens: 40,
+      totalTokens: 60,
+    });
+  });
+
+  it("fails with duplicate_group after exhausting the prompt budget on repeats", async () => {
+    generateObjectMock.mockResolvedValue(makeOutput([makeGroup()]));
+
+    await expect(
+      proposeGroup(
+        makeRequest({
+          priorGuesses: [{ words: ["AAAA", "BBBB", "CCCC", "DDDD"], result: "incorrect" }],
+          maxPrompts: 3,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: "duplicate_group",
+      details: {
+        promptAttempts: 3,
+        duplicatesRejected: 3,
+        proposedGroups: [makeGroup()],
+      },
+    });
+    expect(generateObjectMock).toHaveBeenCalledTimes(3);
+    // The escalations ratchet up before giving up: temp on the first re-prompt,
+    // more responses on the second.
+    expect(lastTemperatures()).toEqual([1, 1.1, 1.1]);
+    expect(schemaAcceptsCount(2, 2)).toBe(true);
+    expect(schemaAcceptsCount(2, 3)).toBe(false);
+  });
+
+  it("fails with invalid_group when the model never produces well-formed output", async () => {
+    const { NoObjectGeneratedError } = await import("ai");
+    const ctor = NoObjectGeneratedError as unknown as new (msg: string) => Error;
+    generateObjectMock.mockRejectedValue(new ctor("no object"));
+
+    await expect(proposeGroup(makeRequest({ maxPrompts: 3 }))).rejects.toMatchObject({
+      code: "invalid_group",
+      details: { promptAttempts: 3 },
+    });
+    expect(generateObjectMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("re-prompts after a recoverable malformed output and succeeds on a later attempt", async () => {
+    const { NoObjectGeneratedError } = await import("ai");
+    const ctor = NoObjectGeneratedError as unknown as new (msg: string) => Error;
+    generateObjectMock
+      .mockRejectedValueOnce(new ctor("no object"))
+      .mockResolvedValueOnce(makeOutput([makeGroup({ word_ids: [4, 5, 6, 7] })]));
+
+    const result = await proposeGroup(makeRequest());
+
+    expect(generateObjectMock).toHaveBeenCalledTimes(2);
+    expect(result.proposedGroups).toEqual([makeGroup({ word_ids: [4, 5, 6, 7] })]);
+    expect(result.promptAttempts).toBe(2);
+    expect(result.temperature).toBe(1.1);
+  });
+
+  it("does not re-prompt after an unrecoverable model error", async () => {
+    generateObjectMock.mockRejectedValueOnce(new Error("boom"));
+
+    await expect(proposeGroup(makeRequest())).rejects.toMatchObject({
+      code: "model_error",
+    });
+    expect(generateObjectMock).toHaveBeenCalledTimes(1);
   });
 });

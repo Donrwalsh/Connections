@@ -22,6 +22,10 @@ export interface SolveSuccess {
   model: string;
   contextWindow: number;
   latencyMs: number;
+  temperature: number;
+  numResponses: number;
+  promptAttempts: number;
+  duplicatesRejected: number;
   usage: SolveUsage;
 }
 
@@ -31,6 +35,10 @@ export interface SolveErrorDetails {
   model?: string;
   contextWindow?: number;
   latencyMs?: number;
+  temperature?: number;
+  numResponses?: number;
+  promptAttempts?: number;
+  duplicatesRejected?: number;
   usage?: SolveUsage;
 }
 
@@ -47,6 +55,10 @@ export interface OrchestratorSolveRequest {
   priorGuesses: { words: string[]; result: "correct" | "incorrect" | "oneAway" }[];
   temperature?: number;
   numResponses?: number;
+  temperatureStep?: number;
+  maxTemperature?: number;
+  maxNumResponses?: number;
+  maxPrompts?: number;
 }
 
 const MAX_RETRIES = 3;

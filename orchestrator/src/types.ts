@@ -36,14 +36,43 @@ export const SolveRequestSchema = z.object({
     .min(1)
     .max(10)
     .optional()
-    .default(5)
-    .describe("How many candidate groups the model should propose in a single solve step; the backend submits the first candidate that is not a repeat of a previous guess"),
+    .default(1)
+    .describe("Starting number of candidate groups the model should propose per prompt. Each solve step begins by asking for this many groups and, when every candidate repeats a prior guess, the orchestrator re-prompts with more distinct candidates (numResponses) and/or a higher temperature. The value that eventually produced a usable candidate is echoed back so the caller can hold onto it for subsequent steps"),
   temperature: z
     .number()
     .min(0)
     .max(2)
     .optional()
-    .describe("Sampling temperature for this solve step; the backend raises it as duplicate guesses accumulate"),
+    .describe("Starting sampling temperature for this solve step. When every candidate repeats a prior guess, the orchestrator re-prompts with a raised temperature; the value that produced a usable candidate is echoed back so the caller can hold onto it for subsequent steps"),
+  temperatureStep: z
+    .number()
+    .min(0)
+    .max(2)
+    .optional()
+    .default(0.1)
+    .describe("How much to raise the temperature on each temperature-raising re-prompt"),
+  maxTemperature: z
+    .number()
+    .min(0)
+    .max(2)
+    .optional()
+    .default(2)
+    .describe("Ceiling for temperature escalation (the OpenAI API's max)"),
+  maxNumResponses: z
+    .number()
+    .int()
+    .min(1)
+    .max(10)
+    .optional()
+    .default(10)
+    .describe("Ceiling for the number of distinct candidates requested per prompt"),
+  maxPrompts: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .default(5)
+    .describe("Maximum number of prompts a single solve step may make before giving up on a fresh candidate"),
 });
 export type SolveRequest = z.infer<typeof SolveRequestSchema>;
 
@@ -79,10 +108,11 @@ export type ProposedGroup = z.infer<typeof ProposedGroupSchema>;
  * The full shape we ask the model to produce: exactly `numResponses`
  * candidate groups, ordered by the model's confidence. Kept as a factory
  * because the requested candidate count varies per request (see
- * SolveRequestSchema.numResponses). Shape guarantees (each group has 4 int
- * IDs plus category/confidence/reasoning) are enforced here; content-level
- * checks (are the IDs in range? does the group repeat a previous guess?)
- * live on the backend, which picks the first usable candidate.
+ * SolveRequestSchema.numResponses, which the orchestrator raises on retries).
+ * Shape guarantees (each group has 4 int IDs plus category/confidence/reasoning)
+ * are enforced here; content-level checks (are the IDs in range? does the
+ * group repeat a previous guess?) happen in the solver, which re-prompts with
+ * changed parameters until a fresh candidate appears.
  */
 export function solveOutputSchema(numResponses: number) {
   return z.object({
@@ -105,19 +135,45 @@ export type Usage = z.infer<typeof UsageSchema>;
 
 /**
  * Response body for POST /solve.
- * `prompt` is the exact text sent to the model for this solve step —
- * returned alongside the result so callers (ultimately the frontend) can
- * show what was actually asked, e.g. for debugging or transparency.
+ * `prompt` is the exact text of the model call that produced the winning
+ * candidate — returned alongside the result so callers can show what was
+ * actually asked, e.g. for debugging or transparency.
  * The model metadata/usage fields let the backend record per-guess LLM
- * telemetry without making a second request.
+ * telemetry without making a second request, including how many times the
+ * solve step had to prompt the model (promptAttempts) and the final
+ * temperature/numResponses that produced the candidate — the caller holds
+ * these onto for subsequent solve steps.
  */
 export const SolveResponseSchema = z.object({
-  proposedGroups: z.array(ProposedGroupSchema),
+  proposedGroups: z
+    .array(ProposedGroupSchema)
+    .length(1)
+    .describe("The single selected candidate: the first well-formed group that does not repeat a prior guess"),
   prompt: z.string(),
   model: z.string(),
   contextWindow: z.number().int().positive(),
   latencyMs: z.number().int().nonnegative(),
-  temperature: z.number().min(0).max(2).optional(),
+  temperature: z
+    .number()
+    .min(0)
+    .max(2)
+    .describe("Temperature of the model call that produced the candidate"),
+  numResponses: z
+    .number()
+    .int()
+    .min(1)
+    .max(10)
+    .describe("Number of candidates requested in the model call that produced the candidate"),
+  promptAttempts: z
+    .number()
+    .int()
+    .min(1)
+    .describe("How many times the model was prompted before a usable candidate was found (1 when no re-prompt was needed)"),
+  duplicatesRejected: z
+    .number()
+    .int()
+    .nonnegative()
+    .describe("How many candidate groups that repeated a prior guess were rejected across this solve step's prompts"),
   usage: UsageSchema,
 });
 export type SolveResponse = z.infer<typeof SolveResponseSchema>;

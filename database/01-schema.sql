@@ -71,7 +71,12 @@ CREATE TABLE "Guess" (
   "source" guess_source_enum NOT NULL,
   "promptTokens" INT NULL,
   "completionTokens" INT NULL,
+  "totalTokens" INT NULL,
   "latencyMs" INT NULL,
+  "temperature" DOUBLE PRECISION NULL,
+  "numResponses" INT NULL,
+  "promptAttempts" INT NULL,
+  "duplicatesRejected" INT NULL,
   "llmDetails" JSONB NULL,
   "guessedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
