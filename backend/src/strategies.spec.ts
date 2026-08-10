@@ -6,7 +6,7 @@ import {
   DEFAULT_LLM_MAX_PROMPTS,
   DEFAULT_LLM_NUM_RESPONSES,
   DEFAULT_LLM_TEMPERATURE_BASE,
-  DEFAULT_LLM_TEMPERATURE_STEP,
+  DEFAULT_LLM_TEMPERATURE_MAX,
   DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT,
   DEFAULT_SHUFFLE_FOOLISH_TRIALS,
   DEFAULT_SHUFFLE_SMART_TRIALS,
@@ -16,6 +16,7 @@ import {
   llmMaxPrompts,
   llmNumResponses,
   llmTemperatureBase,
+  llmTemperatureMax,
   llmTemperatureStep,
   shuffleFoolishDuplicateLimit,
   shuffleFoolishTrialCount,
@@ -154,14 +155,30 @@ describe("strategies", () => {
     });
   });
 
-  describe("llmTemperatureStep", () => {
+  describe("llmTemperatureMax", () => {
     it("should default when the env var is missing or invalid", () => {
-      expect(llmTemperatureStep({})).toBe(DEFAULT_LLM_TEMPERATURE_STEP);
-      expect(llmTemperatureStep({ LLM_TEMPERATURE_STEP: "0" })).toBe(DEFAULT_LLM_TEMPERATURE_STEP);
+      expect(llmTemperatureMax({})).toBe(DEFAULT_LLM_TEMPERATURE_MAX);
+      expect(llmTemperatureMax({ LLM_TEMPERATURE_MAX: "abc" })).toBe(DEFAULT_LLM_TEMPERATURE_MAX);
+      expect(llmTemperatureMax({ LLM_TEMPERATURE_MAX: "0" })).toBe(DEFAULT_LLM_TEMPERATURE_MAX);
     });
 
     it("should read a valid positive number", () => {
-      expect(llmTemperatureStep({ LLM_TEMPERATURE_STEP: "0.15" })).toBe(0.15);
+      expect(llmTemperatureMax({ LLM_TEMPERATURE_MAX: "4.0" })).toBe(4.0);
+    });
+  });
+
+  describe("llmTemperatureStep", () => {
+    it("should derive the step from the default base and ceiling", () => {
+      expect(llmTemperatureStep({})).toBeCloseTo(
+        (DEFAULT_LLM_TEMPERATURE_MAX - DEFAULT_LLM_TEMPERATURE_BASE) / 100,
+        10,
+      );
+    });
+
+    it("should derive the step so 100 increments reach the configured ceiling", () => {
+      expect(
+        llmTemperatureStep({ LLM_TEMPERATURE_BASE: "0.5", LLM_TEMPERATURE_MAX: "3.0" }),
+      ).toBeCloseTo(0.025, 10);
     });
   });
 

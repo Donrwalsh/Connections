@@ -8,11 +8,10 @@ import { Puzzle } from "../game/entities/puzzle.entity";
 import { combinationToWords, firstCombination, nextCombination } from "./combinatorics";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { GameService } from "../game/game.service";
-import { StrategyRunDetailDto, StrategyRunListItemDto } from "./dto/strategy.dto";
+import { StrategyRunDetailDto, StrategyRunListItemDto, GuessDetailDto } from "./dto/strategy.dto";
 import {
   LLM,
   MAX_LLM_NUM_RESPONSES,
-  MAX_LLM_TEMPERATURE,
   SHUFFLE_SMART,
   SHUFFLE_FOOLISH,
   llmMaxDuplicateGuesses,
@@ -21,6 +20,7 @@ import {
   llmMaxPrompts,
   llmNumResponses,
   llmTemperatureBase,
+  llmTemperatureMax,
   llmTemperatureStep,
   shuffleFoolishDuplicateLimit,
   strategyTrialNumbers,
@@ -125,6 +125,58 @@ export class StrategyService {
     return {
       ...this.mapRunDetail(run, guesses),
       meta: { total, page: safePage, limit: safeLimit },
+    };
+  }
+
+  /**
+   * Full detail for a single guess: everything the run-detail list omits to
+   * stay index-only, most notably the LLM telemetry recorded for strategy
+   * guesses (prompt/completion tokens, latency, sampling parameters and the
+   * free-form llmDetails). Returns nulls for non-LLM guesses. Fetched lazily
+   * per guess from the frontend.
+   */
+  async getGuessDetail(
+    date: string,
+    strategyName: string,
+    trialNumber = 0,
+    sequenceNumber: number,
+  ): Promise<GuessDetailDto> {
+    const puzzleId = await this.gameService.resolveDateToPuzzleId(date);
+
+    const run = await this.strategyRunRepo.findOne({
+      where: { puzzleId, strategyName, trialNumber },
+    });
+
+    if (!run) {
+      throw new NotFoundException(
+        `Strategy '${strategyName}' has not been run for the puzzle on ${date}.`,
+      );
+    }
+
+    const guess = await this.guessRepo.findOne({
+      where: { strategyRunId: run.id, sequenceNumber },
+    });
+
+    if (!guess) {
+      throw new NotFoundException(
+        `Guess #${sequenceNumber} not found for strategy '${strategyName}' on the puzzle dated ${date}.`,
+      );
+    }
+
+    return {
+      sequenceNumber: guess.sequenceNumber,
+      words: guess.words,
+      result: guess.result,
+      guessedAt: guess.guessedAt,
+      promptTokens: guess.promptTokens,
+      completionTokens: guess.completionTokens,
+      totalTokens: guess.totalTokens,
+      latencyMs: guess.latencyMs,
+      temperature: guess.temperature,
+      numResponses: guess.numResponses,
+      promptAttempts: guess.promptAttempts,
+      duplicatesRejected: guess.duplicatesRejected,
+      llmDetails: guess.llmDetails,
     };
   }
 
@@ -385,19 +437,25 @@ export class StrategyService {
     const maxModelErrors = llmMaxModelErrors();
     const maxPrompts = llmMaxPrompts();
     const temperatureStep = llmTemperatureStep();
+    const maxTemperature = llmTemperatureMax();
     let consecutiveModelErrors = 0;
 
-    // Sticky sampling parameters. The orchestrator reports the temperature and
-    // candidate count that produced each guess; we hold onto them so later
-    // solve steps start from the escalated values instead of resetting. (A
-    // worker restart mid-run resets them to base — the orchestrator simply
-    // re-escalates on demand.)
+    // Sticky sampling temperature. The orchestrator reports the temperature
+    // that produced each guess; we hold onto it so later solve steps start
+    // from the escalated value instead of resetting. (A worker restart
+    // mid-run resets it to base — the orchestrator simply re-escalates on
+    // demand.) The candidate count, by contrast, restarts from the base value
+    // on every solve step so each guess gets a fresh shot at a single answer.
     let temperature = llmTemperatureBase();
-    let numResponses = llmNumResponses();
+    let numResponses: number;
 
     const pendingGuesses: Partial<Guess>[] = [];
 
     while (true) {
+      // Each solve step is a fresh guess: start from the base candidate count
+      // (the temperature stays sticky across the run).
+      numResponses = llmNumResponses();
+
       const outcome = await this.orchestratorService.proposeGroup({
         puzzleWords: run.availableWords,
         priorGuesses: priorGuesses.map((guess) => ({
@@ -407,7 +465,7 @@ export class StrategyService {
         temperature,
         numResponses,
         temperatureStep,
-        maxTemperature: MAX_LLM_TEMPERATURE,
+        maxTemperature,
         maxNumResponses: MAX_LLM_NUM_RESPONSES,
         maxPrompts,
       });
@@ -424,8 +482,9 @@ export class StrategyService {
 
         // The orchestrator re-prompted until it found a candidate that does
         // not repeat a prior guess, so the winner is the single group in the
-        // response. Hold onto the parameters that produced it so the next
-        // solve step starts from them.
+        // response. Hold onto the temperature that produced it so the next
+        // solve step starts from it; the escalated candidate count is only
+        // recorded here (the next step restarts from the base value).
         temperature = data.temperature;
         numResponses = data.numResponses;
 
@@ -458,7 +517,7 @@ export class StrategyService {
             numResponses,
             promptAttempts: data.promptAttempts,
             duplicatesRejected: data.duplicatesRejected,
-            llmDetails: this.llmDetailsFor(group, data.prompt),
+            llmDetails: this.llmDetailsFor(group, data.prompt, data.promptMetadata),
           });
           priorGuesses.push({ words, result: evaluation.result });
 
@@ -488,10 +547,11 @@ export class StrategyService {
           }
         } else if (code === "duplicate_group") {
           // Defensive: the orchestrator already re-prompts (raising the
-          // temperature / requesting more candidates) before it reports a
-          // duplicate_group, so this means it exhausted its prompt budget. The
-          // first repeated group is recorded so the duplicate limit can kick
-          // in and the run terminates instead of retrying forever.
+          // temperature and requesting more distinct candidates) before it
+          // reports a duplicate_group, so this means it exhausted its prompt
+          // budget. The first repeated group is recorded so the duplicate
+          // limit can kick in and the run terminates instead of retrying
+          // forever.
           duplicateCount++;
           const group = details?.proposedGroups?.[0];
           if (group) {
@@ -512,7 +572,7 @@ export class StrategyService {
               numResponses: details?.numResponses ?? numResponses,
               promptAttempts: details?.promptAttempts ?? 1,
               duplicatesRejected: details?.duplicatesRejected ?? 0,
-              llmDetails: this.llmDetailsFor(group, details?.prompt),
+              llmDetails: this.llmDetailsFor(group, details?.prompt, details?.promptMetadata),
             });
             priorGuesses.push({ words, result: GuessResult.DUPLICATE });
           }
@@ -573,12 +633,14 @@ export class StrategyService {
   private llmDetailsFor(
     group: { category: string; confidence: number; reasoning: string },
     prompt: string | undefined,
+    promptMetadata: unknown[] | undefined,
   ): Record<string, unknown> {
     return {
       category: group.category,
       confidence: group.confidence,
       reasoning: group.reasoning,
       ...(prompt !== undefined ? { prompt } : {}),
+      ...(promptMetadata !== undefined ? { promptMetadata } : {}),
     };
   }
 

@@ -37,27 +37,34 @@ export const SolveRequestSchema = z.object({
     .max(10)
     .optional()
     .default(1)
-    .describe("Starting number of candidate groups the model should propose per prompt. Each solve step begins by asking for this many groups and, when every candidate repeats a prior guess, the orchestrator re-prompts with more distinct candidates (numResponses) and/or a higher temperature. The value that eventually produced a usable candidate is echoed back so the caller can hold onto it for subsequent steps"),
+    .describe(
+      "Starting number of candidate groups the model should propose per prompt. Each solve step begins by asking for this many groups and, when every candidate repeats a prior guess, the orchestrator re-prompts, raising both the requested candidate count and the temperature. The count that eventually produced a usable candidate is echoed back so the caller can record it; each fresh solve step starts back at this base count",
+    ),
   temperature: z
     .number()
     .min(0)
-    .max(2)
+    .max(10)
     .optional()
-    .describe("Starting sampling temperature for this solve step. When every candidate repeats a prior guess, the orchestrator re-prompts with a raised temperature; the value that produced a usable candidate is echoed back so the caller can hold onto it for subsequent steps"),
+    .describe(
+      "Starting sampling temperature for this solve step. When every candidate repeats a prior guess, the orchestrator re-prompts with a raised temperature and one more requested candidate; the value that produced a usable candidate is echoed back so the caller can hold onto it for subsequent steps",
+    ),
   temperatureStep: z
     .number()
     .min(0)
-    .max(2)
+    .max(10)
     .optional()
-    .default(0.1)
-    .describe("How much to raise the temperature on each temperature-raising re-prompt"),
+    .describe(
+      "How much to raise the temperature on each re-prompt. When omitted, the solver derives it from the starting temperature and maxTemperature so that 100 increments reach the ceiling",
+    ),
   maxTemperature: z
     .number()
     .min(0)
-    .max(2)
+    .max(10)
     .optional()
-    .default(2)
-    .describe("Ceiling for temperature escalation (the OpenAI API's max)"),
+    .default(3.2)
+    .describe(
+      "Ceiling for temperature escalation (default: 3.2, the Mistral max)",
+    ),
   maxNumResponses: z
     .number()
     .int()
@@ -65,14 +72,18 @@ export const SolveRequestSchema = z.object({
     .max(10)
     .optional()
     .default(10)
-    .describe("Ceiling for the number of distinct candidates requested per prompt"),
+    .describe(
+      "Ceiling for the number of distinct candidates requested per prompt",
+    ),
   maxPrompts: z
     .number()
     .int()
     .min(1)
     .optional()
     .default(5)
-    .describe("Maximum number of prompts a single solve step may make before giving up on a fresh candidate"),
+    .describe(
+      "Maximum number of prompts a single solve step may make before giving up on a fresh candidate",
+    ),
 });
 export type SolveRequest = z.infer<typeof SolveRequestSchema>;
 
@@ -89,15 +100,21 @@ export const ProposedGroupSchema = z.object({
   word_ids: z
     .array(z.number().int().min(0).max(15))
     .length(4)
-    .describe("Exactly 4 indices (0-15) into the puzzle's remaining word list that the model believes share a category"),
+    .describe(
+      "Exactly 4 indices (0-15) into the puzzle's remaining word list that the model believes share a category",
+    ),
   category: z
     .string()
-    .describe("A short label describing the shared theme/category, e.g. 'Types of ___'"),
+    .describe(
+      "A short label describing the shared theme/category, e.g. 'Types of ___'",
+    ),
   confidence: z
     .number()
     .min(0)
     .max(1)
-    .describe("Model's self-assessed confidence that this exact grouping is correct"),
+    .describe(
+      "Model's self-assessed confidence that this exact grouping is correct",
+    ),
   reasoning: z
     .string()
     .describe("Brief explanation of why these 4 words were grouped together"),
@@ -119,7 +136,9 @@ export function solveOutputSchema(numResponses: number) {
     proposed_groups: z
       .array(ProposedGroupSchema)
       .length(numResponses)
-      .describe(`Exactly ${numResponses} candidate groups, ordered by the model's confidence`),
+      .describe(
+        `Exactly ${numResponses} candidate groups, ordered by the model's confidence`,
+      ),
   });
 }
 
@@ -134,6 +153,57 @@ export const UsageSchema = z.object({
 export type Usage = z.infer<typeof UsageSchema>;
 
 /**
+ * What a single model call within a solve step produced. Used for tracking:
+ * one entry per prompt submitted, carrying the parameters that call was made
+ * with, the measured latency/token cost, and whether its candidate was
+ * accepted, rejected as a repeat of a prior guess, unusable, or the call
+ * itself failed. The prompt text is deliberately omitted — it is large and
+ * reconstructable from the parameters plus the puzzle state.
+ */
+export const PromptMetadataSchema = z.object({
+  attempt: z
+    .number()
+    .int()
+    .min(1)
+    .describe("1-based index of this prompt within the solve step"),
+  temperature: z
+    .number()
+    .min(0)
+    .max(10)
+    .describe("Sampling temperature this prompt was submitted with"),
+  numResponses: z
+    .number()
+    .int()
+    .min(1)
+    .max(10)
+    .describe("Number of candidate groups requested from this prompt"),
+  model: z
+    .string()
+    .describe(
+      "The model this prompt was sent to (configured name, or the modelId reported on success)",
+    ),
+  contextWindow: z
+    .number()
+    .int()
+    .positive()
+    .describe("Configured context window (num_ctx) at the time of this prompt"),
+  latencyMs: z
+    .number()
+    .int()
+    .nonnegative()
+    .describe("How long the model call took, including a failed call"),
+  usage: UsageSchema.optional().describe(
+    "Token usage of this call; omitted when the call failed and no usage was reported",
+  ),
+  outcome: z
+    .enum(["accepted", "duplicate_rejected", "invalid", "error"])
+    .describe(
+      "What this prompt produced: a usable candidate, only repeats of prior guesses, unusable output, or a model/network error",
+    ),
+});
+export type PromptMetadata = z.infer<typeof PromptMetadataSchema>;
+
+/**
  * Response body for POST /solve.
  * `prompt` is the exact text of the model call that produced the winning
  * candidate — returned alongside the result so callers can show what was
@@ -143,12 +213,17 @@ export type Usage = z.infer<typeof UsageSchema>;
  * solve step had to prompt the model (promptAttempts) and the final
  * temperature/numResponses that produced the candidate — the caller holds
  * these onto for subsequent solve steps.
+ * `promptMetadata` is the per-prompt tracking record (parameters, latency,
+ * usage and outcome for every model call the step made) — the prompt text
+ * itself is omitted since it is large.
  */
 export const SolveResponseSchema = z.object({
   proposedGroups: z
     .array(ProposedGroupSchema)
     .length(1)
-    .describe("The single selected candidate: the first well-formed group that does not repeat a prior guess"),
+    .describe(
+      "The single selected candidate: the first well-formed group that does not repeat a prior guess",
+    ),
   prompt: z.string(),
   model: z.string(),
   contextWindow: z.number().int().positive(),
@@ -156,25 +231,36 @@ export const SolveResponseSchema = z.object({
   temperature: z
     .number()
     .min(0)
-    .max(2)
+    .max(10)
     .describe("Temperature of the model call that produced the candidate"),
   numResponses: z
     .number()
     .int()
     .min(1)
     .max(10)
-    .describe("Number of candidates requested in the model call that produced the candidate"),
+    .describe(
+      "Number of candidates requested in the model call that produced the candidate",
+    ),
   promptAttempts: z
     .number()
     .int()
     .min(1)
-    .describe("How many times the model was prompted before a usable candidate was found (1 when no re-prompt was needed)"),
+    .describe(
+      "How many times the model was prompted before a usable candidate was found (1 when no re-prompt was needed)",
+    ),
   duplicatesRejected: z
     .number()
     .int()
     .nonnegative()
-    .describe("How many candidate groups that repeated a prior guess were rejected across this solve step's prompts"),
+    .describe(
+      "How many candidate groups that repeated a prior guess were rejected across this solve step's prompts",
+    ),
   usage: UsageSchema,
+  promptMetadata: z
+    .array(PromptMetadataSchema)
+    .describe(
+      "Per-prompt tracking record for every model call this solve step made",
+    ),
 });
 export type SolveResponse = z.infer<typeof SolveResponseSchema>;
 

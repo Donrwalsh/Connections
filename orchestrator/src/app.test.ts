@@ -112,6 +112,18 @@ describe("orchestrator app", () => {
       promptAttempts: 1,
       duplicatesRejected: 0,
       usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+      promptMetadata: [
+        {
+          attempt: 1,
+          temperature: 1.0,
+          numResponses: 1,
+          model: "test-model",
+          contextWindow: 8192,
+          latencyMs: 1234,
+          usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+          outcome: "accepted",
+        },
+      ],
     });
 
     const res = await solveRequest(SOLVE_BODY);
@@ -134,6 +146,18 @@ describe("orchestrator app", () => {
       promptAttempts: 1,
       duplicatesRejected: 0,
       usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+      promptMetadata: [
+        {
+          attempt: 1,
+          temperature: 1.0,
+          numResponses: 1,
+          model: "test-model",
+          contextWindow: 8192,
+          latencyMs: 1234,
+          usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+          outcome: "accepted",
+        },
+      ],
     });
   });
 
@@ -156,6 +180,7 @@ describe("orchestrator app", () => {
       promptAttempts: 1,
       duplicatesRejected: 0,
       usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      promptMetadata: [],
     });
 
     const res = await solveRequest({ ...SOLVE_BODY, temperature: 1.2 });
@@ -168,7 +193,7 @@ describe("orchestrator app", () => {
   });
 
   it("rejects a temperature outside the supported range", async () => {
-    const res = await solveRequest({ ...SOLVE_BODY, temperature: 3 });
+    const res = await solveRequest({ ...SOLVE_BODY, temperature: 11 });
     expect(res.status).toBe(400);
   });
 

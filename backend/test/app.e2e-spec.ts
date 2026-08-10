@@ -215,6 +215,66 @@ describe("App (e2e)", () => {
     ]);
   });
 
+  it("GET /strategy/:strategy/puzzle/:date/run/:trialNumber/guess/:sequenceNumber returns the LLM telemetry for a single guess", async () => {
+    const puzzle = await dataSource.getRepository(Puzzle).findOneByOrFail({ date: TEST_DATE });
+    const run = await dataSource.getRepository(StrategyRun).save({
+      puzzle,
+      strategyName: "llm",
+      trialNumber: 0,
+      availableWords: ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"],
+      currentCombination: [0, 1, 2, 3],
+    });
+    const guess = await dataSource.getRepository(Guess).save({
+      puzzle,
+      strategyRun: run,
+      words: ["AAAA", "BBBB", "CCCC", "DDDD"],
+      result: GuessResult.SUCCESS,
+      sequenceNumber: 1,
+      source: GuessSource.STRATEGY,
+      promptTokens: 1027,
+      completionTokens: 593,
+      totalTokens: 1620,
+      latencyMs: 5647,
+      temperature: 1.2,
+      numResponses: 3,
+      promptAttempts: 2,
+      duplicatesRejected: 1,
+      llmDetails: {
+        category: "Test category",
+        confidence: 0.99,
+        reasoning: "E2E fake",
+        prompt: "solve step",
+      },
+    });
+
+    const res = await request(app.getHttpServer()).get(
+      `/strategy/llm/puzzle/${TEST_DATE}/run/0/guess/1`,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      sequenceNumber: 1,
+      words: ["AAAA", "BBBB", "CCCC", "DDDD"],
+      result: "success",
+      guessedAt: expect.any(String),
+      promptTokens: 1027,
+      completionTokens: 593,
+      totalTokens: 1620,
+      latencyMs: 5647,
+      temperature: 1.2,
+      numResponses: 3,
+      promptAttempts: 2,
+      duplicatesRejected: 1,
+      llmDetails: {
+        category: "Test category",
+        confidence: 0.99,
+        reasoning: "E2E fake",
+        prompt: "solve step",
+      },
+    });
+    expect(guess.id).toBeTruthy();
+  });
+
   it("POST /api/solve proxies to the orchestrator", async () => {
     const res = await request(app.getHttpServer())
       .post("/api/solve")

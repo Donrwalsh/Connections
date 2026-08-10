@@ -23,6 +23,18 @@ describe("OrchestratorService", () => {
     contextWindow: 8192,
     latencyMs: 5,
     usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+    promptMetadata: [
+      {
+        attempt: 1,
+        temperature: 0,
+        numResponses: 1,
+        model: "mistral",
+        contextWindow: 8192,
+        latencyMs: 5,
+        usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+        outcome: "accepted",
+      },
+    ],
   };
 
   const mockResponse = (init: {
@@ -196,5 +208,31 @@ describe("OrchestratorService", () => {
     if (!outcome.ok) {
       expect(outcome.error.error).toContain("ECONNREFUSED");
     }
+  });
+
+  it("should not retry after a request times out", async () => {
+    const abortError = new Error("The operation was aborted.");
+    abortError.name = "AbortError";
+    mockFetch.mockRejectedValue(abortError);
+
+    const outcome = await service.proposeGroup(request);
+
+    // A timeout means the whole multi-prompt step exceeded its budget; the
+    // orchestrator is likely still working on the aborted request, so retrying
+    // would just queue behind it. The strategy worker re-runs the guess step
+    // on its own backoff schedule instead.
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(outcome).toEqual({
+      ok: false,
+      error: { error: "Request timed out", code: "model_error" },
+    });
+  });
+
+  it("should surface the per-prompt metadata from a successful solve", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
+
+    const outcome = await service.proposeGroup(request);
+
+    expect(outcome).toEqual({ ok: true, data: successBody });
   });
 });

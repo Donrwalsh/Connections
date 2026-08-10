@@ -41,6 +41,19 @@ export function getModel(): LanguageModel {
 }
 
 /**
+ * Returns the configured model name for the active provider, from
+ * OLLAMA_MODEL/OPENAI_MODEL. Unlike `result.response.modelId` this is known
+ * even for a failed call, so per-prompt telemetry can always name the model
+ * the prompt was sent to.
+ */
+export function getModelName(): string {
+  if (getModelProvider() === "ollama") {
+    return process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL;
+  }
+  return process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL;
+}
+
+/**
  * Returns the configured context window for the active model, from
  * MODEL_CONTEXT_WINDOW. Used both to constrain the Ollama model (num_ctx)
  * and to report per-run context capacity in telemetry. Defaults to 8192

@@ -64,7 +64,9 @@ export function oneAwayIdSets(request: SolveRequest): number[][] {
 function formatSetLines(request: SolveRequest, sets: number[][]): string {
   return sets
     .map((ids) => {
-      const wordList = ids.map((id) => `"${request.puzzleWords[id]}"`).join(", ");
+      const wordList = ids
+        .map((id) => `"${request.puzzleWords[id]}"`)
+        .join(", ");
       return `- [${ids.join(", ")}] (${wordList})`;
     })
     .join("\n");
@@ -99,51 +101,117 @@ export function buildSolvePrompt(request: SolveRequest): string {
   const numResponses = request.numResponses;
 
   const forbidden = forbiddenIdSets(request);
-  const forbiddenSection =
-    forbidden.length === 0
-      ? ""
-      : `\nFORBIDDEN SETS (Previously attempted — DO NOT REPEAT):\n${formatSetLines(
-          request,
-          forbidden,
-        )}\n`;
-
   const oneAway = oneAwayIdSets(request);
-  const oneAwaySection =
-    oneAway.length === 0
-      ? ""
-      : `\nONE-AWAY SETS (Exactly 3 of the 4 words are correct — use these as templates, never repeat them as-is):\n${formatSetLines(
-          request,
-          oneAway,
-        )}\n
-HINT: In each ONE-AWAY SET exactly 3 words belong to the same category and the 4th does not. Keep 3 words from a ONE-AWAY SET together and try substituting each other remaining word for the fourth — a candidate that differs from a ONE-AWAY SET by exactly one word is especially promising.\n`;
+  const hasForbidden = forbidden.length > 0;
+  const hasOneAway = oneAway.length > 0;
 
-  return `You are solving a single step of an NYT Connections puzzle.
+  // Every section below that references one-away or forbidden sets is emitted
+  // only when that kind of set is actually present, so the model never gets
+  // hints or constraints about signal it cannot see.
 
-16 words are sorted into 4 groups of 4, sharing hidden categories (synonyms, wordplay, "types of ___", etc). Categories can be deliberately misleading.
+  const intro =
+    hasForbidden && hasOneAway
+      ? "You are solving a single step of an NYT Connections puzzle. Any previous guesses you have made are included as forbidden sets or one-away sets depending on the result of the guess."
+      : hasForbidden
+        ? "You are solving a single step of an NYT Connections puzzle. Any previous wrong guesses you have made are included as forbidden sets."
+        : hasOneAway
+          ? "You are solving a single step of an NYT Connections puzzle. Any previous guesses you have made that were one away are included as one-away sets."
+          : "You are solving a single step of an NYT Connections puzzle.";
 
-Remaining words (indexed):
-${formatIndexedWords(puzzleWords)}
-${forbiddenSection}
-${oneAwaySection}
-Task: Propose exactly ${numResponses} DISTINCT candidate groups of 4 unique word IDs (from 0 to ${lastId}). Every candidate must be a different set of 4 word IDs that share a valid category, and no candidate may repeat a FORBIDDEN SET. Order the candidates by your confidence, strongest first.
+  const setBlocks: string[] = [];
+  if (hasForbidden) {
+    setBlocks.push(
+      `FORBIDDEN SETS (Previously attempted — DO NOT REPEAT):\n${formatSetLines(
+        request,
+        forbidden,
+      )}`,
+    );
+  }
+  if (hasOneAway) {
+    setBlocks.push(
+      `ONE-AWAY SETS (Exactly 3 of these 4 words belong to a true category):\n${formatSetLines(
+        request,
+        oneAway,
+      )}`,
+    );
+  }
 
-STRICT CONSTRAINTS:
-1. Provide exactly ${numResponses} groups.
-2. Each group selects 4 distinct IDs between 0 and ${lastId}.
-3. No group may match any set in FORBIDDEN SETS (regardless of element order).
-4. All ${numResponses} groups must be different from one another.
-5. First write out your step-by-step evaluation for each candidate — including how it uses any ONE-AWAY SETS — then select the final word IDs.
-6. Leverage every ONE-AWAY SET: it tells you 3 of its 4 words share a category, so explore candidates that keep those 3 words together and change the fourth. Prefer such candidates over unrelated groupings.
+  const hintList: string[] = [];
+  if (hasOneAway) {
+    hintList.push(
+      "OVERLAP INFERENCE: Look for shared 3-word combinations across ONE-AWAY SETS. These shared subsets strongly hint at 3 words of a true category.",
+      "BALANCED EXPLORATION: Use ONE-AWAY overlaps to test untried 4th-word swaps, but do not rely on them exclusively. The One-Away list is often your best option for proposing a reasonable solution, but you may use a fresh guess if you prefer.",
+      'Note on "One-Away" Signals: Distinct 3-word "one-away" set candidates may point toward mutually exclusive candidate categories; do not assume a shared 3-word core triad spans across all observed sets.',
+    );
+  }
+  if (hasForbidden) {
+    hintList.push(
+      "Any candidate set on the forbidden list invalidates large overlaps. At most 2 of its words can coexist in a valid solution group (3 or 4 words together are strictly ruled out).",
+    );
+  }
 
-Respond strictly with valid JSON using this exact structure:
-{
-  "proposed_groups": [
-    {
-      "reasoning": "Explain the category step-by-step, verify the set is not in FORBIDDEN SETS, and note which 3 words from a ONE-AWAY SET the candidate keeps",
-      "category": "short label",
-      "word_ids": [int, int, int, int],
-      "confidence": 0.0-1.0
-    }
-  ]
-}`;
+  const setTheoryRules = hasOneAway
+    ? [
+        "CRITICAL SET-THEORY RULES: (Use this for ONE-AWAY analysis if applicable)",
+        "1. TRIAD INTERSECTION MUST BE EXACT: A 3-word triad [A, B, C] is ONLY valid if ALL 3 IDs appear in EVERY source set used to build it. Do not claim a triad exists if an ID is missing from any source set.",
+        "2. ELIMINATED WORDS ARE 4th-POSITION SWAPS: For a valid triad [A, B, C] derived from one-away set [A, B, C, D], ONLY 'D' is eliminated. Never list A, B, or C as eliminated words.",
+        "3. 4th WORD SELECTION: To form a 4-word candidate, select EXACTLY ONE untried ID from outside the triad [A, B, C]. Never select an ID that is already inside the triad.",
+      ].join("\n")
+    : "";
+
+  const constraintList: string[] = [
+    `Provide exactly ${numResponses} distinct candidate groups of 4 unique word IDs (from 0 to ${lastId}).`,
+  ];
+  if (hasForbidden) {
+    constraintList.push(
+      "No group may match any set in FORBIDDEN SETS (regardless of element order).",
+    );
+  }
+  if (hasOneAway) {
+    constraintList.push(
+      "First, identify any Core Triads inferred from single or intersecting ONE-AWAY sets, list the eliminated 4th words, and list all remaining untried 4th words to test.",
+      "Order candidates strictly by priority: multi-set triangulated triads first, single-set triads second, fresh board groupings last.",
+    );
+  }
+
+  const reasoningNote: string[] = [];
+  if (hasForbidden) {
+    reasoningNote.push("verify the set is not in FORBIDDEN SETS");
+  }
+  if (hasOneAway) {
+    reasoningNote.push(
+      "include any core triad analysis you may have performed in order to obtain this grouping",
+    );
+  }
+  const reasoningGuidance =
+    reasoningNote.length === 0
+      ? "Explain the category step-by-step."
+      : `Explain the category step-by-step and ${reasoningNote.join("; also ")}.`;
+
+  const sections: string[] = [
+    intro,
+    `16 words are sorted into 4 groups of 4, sharing hidden categories (synonyms, wordplay, "types of ___", etc). Categories can be deliberately misleading.`,
+    `Remaining words (indexed):\n${formatIndexedWords(puzzleWords)}`,
+  ];
+  sections.push(...setBlocks);
+  if (hintList.length > 0) {
+    sections.push(
+      `STRATEGY & HINTS:\n${hintList
+        .map((hint, i) => `${i + 1}. ${hint}`)
+        .join("\n")}`,
+    );
+  }
+  if (setTheoryRules) {
+    sections.push(setTheoryRules);
+  }
+  sections.push(
+    `STRICT CONSTRAINTS:\n${constraintList
+      .map((constraint, i) => `${i + 1}. ${constraint}`)
+      .join("\n")}`,
+  );
+  sections.push(
+    `Respond strictly with valid JSON using this exact structure:\n{\n  "proposed_groups": [\n    {\n      "reasoning": "${reasoningGuidance}",\n      "category": "short label",\n      "word_ids": [int, int, int, int],\n      "confidence": 0.0-1.0\n    }\n  ]\n}`,
+  );
+
+  return sections.join("\n\n");
 }

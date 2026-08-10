@@ -157,4 +157,45 @@ export class StrategyController {
 
     return this.strategyService.getRunDetail(date, strategyName, trialNumber, page, limit);
   }
+
+  @Get(":strategyName/puzzle/:date/run/:trialNumber/guess/:sequenceNumber")
+  @ApiParam({
+    name: "strategyName",
+    type: String,
+    description:
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or 'llm'",
+    example: "alphabetical",
+  })
+  @ApiParam({
+    name: "date",
+    type: String,
+    description: "Puzzle date in YYYY-MM-DD format",
+    example: "2023-08-01",
+  })
+  @ApiParam({
+    name: "trialNumber",
+    type: Number,
+    description: "Run trial number (0 for deterministic strategies, 1..N for shuffle strategies)",
+    example: 0,
+  })
+  @ApiParam({
+    name: "sequenceNumber",
+    type: Number,
+    description: "The guess's 1-based sequence number within the run",
+    example: 1,
+  })
+  async getGuessDetail(
+    @Param("strategyName") strategyName: string,
+    @Param("date") date: string,
+    @Param("trialNumber", ParseIntPipe) trialNumber: number,
+    @Param("sequenceNumber", ParseIntPipe) sequenceNumber: number,
+  ) {
+    if (!STRATEGY_SET.has(strategyName)) {
+      throw new BadRequestException(
+        `Invalid strategy: '${strategyName}'. Expected one of: ${[...STRATEGY_SET].join(", ")}.`,
+      );
+    }
+
+    return this.strategyService.getGuessDetail(date, strategyName, trialNumber, sequenceNumber);
+  }
 }

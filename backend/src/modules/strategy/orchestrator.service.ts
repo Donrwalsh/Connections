@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { loadEnv } from "../../config/env";
+import { loadEnv, orchestratorTimeoutMs } from "../../config/env";
 
 export type SolveErrorCode = "duplicate_group" | "invalid_group" | "model_error";
 
@@ -7,6 +7,17 @@ export interface SolveUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+}
+
+export interface PromptMetadata {
+  attempt: number;
+  temperature: number;
+  numResponses: number;
+  model: string;
+  contextWindow: number;
+  latencyMs: number;
+  usage?: SolveUsage;
+  outcome: "accepted" | "duplicate_rejected" | "invalid" | "error";
 }
 
 export interface ProposedGroup {
@@ -27,6 +38,7 @@ export interface SolveSuccess {
   promptAttempts: number;
   duplicatesRejected: number;
   usage: SolveUsage;
+  promptMetadata: PromptMetadata[];
 }
 
 export interface SolveErrorDetails {
@@ -40,6 +52,7 @@ export interface SolveErrorDetails {
   promptAttempts?: number;
   duplicatesRejected?: number;
   usage?: SolveUsage;
+  promptMetadata?: PromptMetadata[];
 }
 
 export interface SolveFailure {
@@ -63,9 +76,11 @@ export interface OrchestratorSolveRequest {
 
 const MAX_RETRIES = 3;
 const INITIAL_DELAY_MS = 1000;
-// The first call in a session is slow because the model is cold-loaded;
-// give it much more room than the warm subsequent attempts.
-const TIMEOUTS_MS = [40000, 15000];
+// A single solve step makes up to LLM_MAX_PROMPTS (default 5) sequential model
+// calls with escalating candidate counts, so a legitimate step can take well
+// over a minute. Budget the whole step on every attempt rather than sizing for
+// one model call (the old 40s/15s split assumed a single call plus cold start).
+const TIMEOUT_MS = orchestratorTimeoutMs();
 
 /**
  * Thin client for the orchestrator's POST /solve endpoint. The LLM strategy
@@ -84,7 +99,7 @@ export class OrchestratorService {
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const response = await this.fetchOnce(request, attempt);
+        const response = await this.fetchOnce(request);
 
         if (response.ok) {
           const data: SolveSuccess = await response.json();
@@ -110,6 +125,19 @@ export class OrchestratorService {
         // unexpected status are treated as transport failures: retry.
         lastError = new Error(`HTTP ${response.status} ${response.statusText}`);
       } catch (err) {
+        // A timeout means the step exceeded its budget. The orchestrator is
+        // likely still working on the aborted request, so retrying would just
+        // queue behind it and burn the budget again. Fail fast — the strategy
+        // worker re-runs the guess step on its own backoff schedule.
+        if (err instanceof Error && err.name === "AbortError") {
+          return {
+            ok: false,
+            error: {
+              error: "Request timed out",
+              code: "model_error",
+            },
+          };
+        }
         lastError = err;
       }
 
@@ -132,10 +160,9 @@ export class OrchestratorService {
     };
   }
 
-  private async fetchOnce(request: OrchestratorSolveRequest, attempt: number): Promise<Response> {
-    const timeout = TIMEOUTS_MS[Math.min(attempt, TIMEOUTS_MS.length - 1)];
+  private async fetchOnce(request: OrchestratorSolveRequest): Promise<Response> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
     try {
       return await fetch(`${this.orchestratorUrl}/solve`, {

@@ -243,7 +243,7 @@ describe("AppService", () => {
       expect(fetchSpy).toHaveBeenCalledTimes(3);
     });
 
-    it("should give the first attempt a longer timeout than subsequent attempts", async () => {
+    it("should not retry after a request times out", async () => {
       jest.useFakeTimers();
       jest.spyOn(console, "warn").mockImplementation(() => {});
       fetchSpy = jest.spyOn(global, "fetch").mockImplementation(
@@ -260,23 +260,21 @@ describe("AppService", () => {
 
       const resultPromise = service.solve(["A", "B", "C", "D"], [], {
         maxRetries: 1,
+        timeoutMs: 5000,
       });
 
-      // First-attempt timeout is 40000ms — the request is still pending at 5s.
       await jest.advanceTimersByTimeAsync(5000);
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-
-      // Cover the remaining first-attempt timeout (40000ms), the backoff,
-      // and the shorter 15000ms subsequent-attempt timeout in one window.
-      await jest.advanceTimersByTimeAsync(100000);
-
       const result = await resultPromise;
 
+      // A timeout means the step exceeded its budget (a solve step runs up to
+      // LLM_MAX_PROMPTS sequential model calls). The orchestrator is likely
+      // still working on the aborted request, so retrying would just queue
+      // behind it — fail after the single attempt instead.
       expect(result).toEqual({
         orchestrator: "unhealthy",
-        error: "AI solve request failed after 2 attempts: Request timed out",
+        error: "AI solve request failed after 1 attempt: Request timed out",
       });
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
   });
 

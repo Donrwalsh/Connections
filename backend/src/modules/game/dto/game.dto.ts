@@ -47,6 +47,17 @@ export interface SolveUsageDto {
   totalTokens: number;
 }
 
+export interface PromptMetadataDto {
+  attempt: number;
+  temperature: number;
+  numResponses: number;
+  model: string;
+  contextWindow: number;
+  latencyMs: number;
+  usage?: SolveUsageDto;
+  outcome: "accepted" | "duplicate_rejected" | "invalid" | "error";
+}
+
 export interface SolveResponseDto {
   proposedGroup: ProposedGroupDto;
   prompt: string;
@@ -58,4 +69,5 @@ export interface SolveResponseDto {
   promptAttempts?: number;
   duplicatesRejected?: number;
   usage?: SolveUsageDto;
+  promptMetadata?: PromptMetadataDto[];
 }

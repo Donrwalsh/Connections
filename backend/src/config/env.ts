@@ -8,6 +8,7 @@ export interface AppEnv {
   REDIS_PORT: number;
   INTERNAL_API_KEY: string;
   ORCHESTRATOR_URL: string;
+  ORCHESTRATOR_TIMEOUT_MS: number;
   PORT: number;
   CORS_ORIGIN: string;
   BULL_BOARD_USER: string;
@@ -26,6 +27,18 @@ function required(name: string, value: string | undefined): string {
 function optionalInt(name: string, value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) && value !== undefined ? parsed : fallback;
+}
+
+/**
+ * Per-attempt HTTP timeout for backend→orchestrator solve calls, from
+ * ORCHESTRATOR_TIMEOUT_MS. A single solve step makes up to LLM_MAX_PROMPTS
+ * (default 5) sequential model calls with escalating candidate counts, so the
+ * budget must cover a whole multi-prompt step, not one model call. The value
+ * is applied to every attempt — timeout failures are not retried by the
+ * caller (see orchestrator/app.service), which keeps the wait bounded.
+ */
+export function orchestratorTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  return optionalInt("ORCHESTRATOR_TIMEOUT_MS", env.ORCHESTRATOR_TIMEOUT_MS, 120000);
 }
 
 /**
@@ -51,6 +64,7 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
     REDIS_PORT: optionalInt("REDIS_PORT", env.REDIS_PORT, 6379),
     INTERNAL_API_KEY: required("INTERNAL_API_KEY", env.INTERNAL_API_KEY),
     ORCHESTRATOR_URL: env.ORCHESTRATOR_URL ?? "http://ai_orchestrator:3001",
+    ORCHESTRATOR_TIMEOUT_MS: orchestratorTimeoutMs(env),
     PORT: optionalInt("PORT", env.PORT, 4000),
     CORS_ORIGIN: env.CORS_ORIGIN ?? "http://localhost:5173",
     BULL_BOARD_USER: bullBoardUser ?? "",

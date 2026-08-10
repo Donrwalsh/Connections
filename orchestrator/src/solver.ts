@@ -1,22 +1,31 @@
-import { generateObject, JSONParseError, NoObjectGeneratedError, TypeValidationError } from "ai";
+import {
+  generateObject,
+  JSONParseError,
+  NoObjectGeneratedError,
+  TypeValidationError,
+} from "ai";
 import {
   solveOutputSchema,
   type SolveRequest,
   type ProposedGroup,
   type SolveErrorCode,
   type Usage,
+  type PromptMetadata,
 } from "./types.js";
 import { buildSolvePrompt, forbiddenIdSets } from "./prompt.js";
-import { getContextWindow, getModel } from "./provider.js";
+import { getContextWindow, getModel, getModelName } from "./provider.js";
 
 const GROUP_SIZE = 4;
 
-const DEFAULT_TEMPERATURE = 1;
+const DEFAULT_TEMPERATURE = 0;
 const DEFAULT_NUM_RESPONSES = 1;
-const DEFAULT_TEMPERATURE_STEP = 0.1;
-const DEFAULT_MAX_TEMPERATURE = 2;
+// The temperature ramp spans exactly this many increments from the default
+// base to the ceiling (0 -> 3.2, step 0.032), so each increment is derived
+// as (ceiling - base) / steps rather than configured directly.
+const LLM_TEMPERATURE_RAMP_STEPS = 100;
+const DEFAULT_MAX_TEMPERATURE = 3.2;
 const DEFAULT_MAX_NUM_RESPONSES = 10;
-const DEFAULT_MAX_PROMPTS = 5;
+const DEFAULT_MAX_PROMPTS = 9;
 
 export interface SolveResult {
   proposedGroups: ProposedGroup[];
@@ -29,6 +38,7 @@ export interface SolveResult {
   promptAttempts: number;
   duplicatesRejected: number;
   usage: Usage;
+  promptMetadata: PromptMetadata[];
 }
 
 export interface SolveErrorDetails {
@@ -42,6 +52,7 @@ export interface SolveErrorDetails {
   promptAttempts?: number;
   duplicatesRejected?: number;
   usage?: Usage;
+  promptMetadata?: PromptMetadata[];
 }
 
 /**
@@ -67,22 +78,31 @@ export class SolveError extends Error {
  *
  * Deliberately self-contained: if every candidate repeats a previous guess
  * (or the model's output is unusable), the orchestrator re-prompts with
- * changed parameters — alternating between raising the sampling temperature
- * and requesting more distinct candidates to choose from — until a fresh
- * candidate appears or the prompt budget (maxPrompts) is exhausted.
+ * changed parameters — raising the sampling temperature and asking for one
+ * more distinct candidate on each re-prompt — until a fresh candidate appears
+ * or the prompt budget (maxPrompts) is exhausted.
  *
  * The temperature and numResponses that eventually produced the winning
- * candidate are returned so the caller (the backend) can hold onto them and
- * start subsequent solve steps from the escalated values instead of resetting.
+ * candidate are returned so the caller (the backend) can record the escalated
+ * values on the guess (the temperature is held onto for subsequent steps).
  *
  * Usage and latency are aggregated across every prompt in the step so the
  * caller's per-guess telemetry reflects the true cost of reaching an answer.
+ * `promptMetadata` records each prompt individually (parameters, latency,
+ * token usage and outcome — not the prompt text, which is large) for tracking.
  */
-export async function proposeGroup(request: SolveRequest): Promise<SolveResult> {
-  const temperatureStep = request.temperatureStep ?? DEFAULT_TEMPERATURE_STEP;
+export async function proposeGroup(
+  request: SolveRequest,
+): Promise<SolveResult> {
   const maxTemperature = request.maxTemperature ?? DEFAULT_MAX_TEMPERATURE;
   const maxNumResponses = request.maxNumResponses ?? DEFAULT_MAX_NUM_RESPONSES;
   const maxPrompts = request.maxPrompts ?? DEFAULT_MAX_PROMPTS;
+  // The per-re-prompt step is derived rather than configured: unless the
+  // caller pins it, size it so 100 increments take the base temperature to
+  // the ceiling.
+  const temperatureStep =
+    request.temperatureStep ??
+    (maxTemperature - DEFAULT_TEMPERATURE) / LLM_TEMPERATURE_RAMP_STEPS;
 
   let temperature = request.temperature ?? DEFAULT_TEMPERATURE;
   let numResponses = request.numResponses ?? DEFAULT_NUM_RESPONSES;
@@ -99,12 +119,15 @@ export async function proposeGroup(request: SolveRequest): Promise<SolveResult> 
   let attempts = 0;
   let duplicatesRejected = 0;
   let sawDuplicate = false;
-  let sawInvalid = false;
+  let invalidSeen = 0;
   let lastGroups: ProposedGroup[] = [];
   let lastPrompt = "";
   let lastModel = "";
   let lastContextWindow = getContextWindow();
-  let escalationCount = 0;
+  // One entry per model call, for tracking: the parameters each prompt was
+  // submitted with, its latency/token cost, and what it produced. The prompt
+  // text is not kept here — it is large and reconstructable.
+  const promptMetadata: PromptMetadata[] = [];
 
   /**
    * Picks the first candidate that is well-formed (4 unique, in-range IDs)
@@ -112,16 +135,21 @@ export async function proposeGroup(request: SolveRequest): Promise<SolveResult> 
    * are counted as rejected duplicates (for telemetry); structurally unusable
    * candidates are skipped without counting toward the duplicate total.
    */
-  const selectFirstUsable = (candidates: ProposedGroup[]): ProposedGroup | null => {
+  const selectFirstUsable = (
+    candidates: ProposedGroup[],
+  ): ProposedGroup | null => {
     for (const group of candidates) {
       const ids = group.word_ids;
       const wellFormed =
         ids.length === GROUP_SIZE &&
-        ids.every((id) => Number.isInteger(id) && id >= 0 && id < request.puzzleWords.length) &&
+        ids.every(
+          (id) =>
+            Number.isInteger(id) && id >= 0 && id < request.puzzleWords.length,
+        ) &&
         new Set(ids).size === GROUP_SIZE;
 
       if (!wellFormed) {
-        sawInvalid = true;
+        invalidSeen++;
         continue;
       }
 
@@ -137,35 +165,22 @@ export async function proposeGroup(request: SolveRequest): Promise<SolveResult> 
   };
 
   /**
-   * Escalates the solve step's parameters by one notch, alternating between
-   * raising the sampling temperature and asking for more distinct candidates.
-   * Returns false when both levers are already at their cap, signalling the
-   * retry loop to stop. The escalated values stick: they are used for the next
+   * Escalates the solve step's parameters by one notch, raising the sampling
+   * temperature and asking for one more distinct candidate together. Returns
+   * false when both levers are already at their cap, signalling the retry
+   * loop to stop. The escalated values stick: they are used for the next
    * prompt and echoed back to the caller on success.
    */
   const escalate = (): boolean => {
-    escalationCount++;
-    const raiseTemperature = escalationCount % 2 === 1;
     let escalated = false;
 
-    if (raiseTemperature) {
-      if (temperature < maxTemperature) {
-        temperature = Math.min(temperature + temperatureStep, maxTemperature);
-        escalated = true;
-      }
-      if (!escalated && numResponses < maxNumResponses) {
-        numResponses++;
-        escalated = true;
-      }
-    } else {
-      if (numResponses < maxNumResponses) {
-        numResponses++;
-        escalated = true;
-      }
-      if (!escalated && temperature < maxTemperature) {
-        temperature = Math.min(temperature + temperatureStep, maxTemperature);
-        escalated = true;
-      }
+    if (numResponses < maxNumResponses) {
+      numResponses++;
+      escalated = true;
+    }
+    if (temperature < maxTemperature) {
+      temperature = Math.min(temperature + temperatureStep, maxTemperature);
+      escalated = true;
     }
 
     return escalated;
@@ -186,29 +201,71 @@ export async function proposeGroup(request: SolveRequest): Promise<SolveResult> 
       });
     } catch (err) {
       const failure = classifyModelCallError(err, { prompt });
-      if (failure.code === "model_error") {
-        // Unrecoverable model/network failure — do not re-prompt.
-        throw failure;
+      const latencyMs = Date.now() - attemptStartedAt;
+      totalLatencyMs += latencyMs;
+      const errored = failure.code === "model_error";
+      promptMetadata.push({
+        attempt: attempts,
+        temperature,
+        numResponses,
+        model: getModelName(),
+        contextWindow: getContextWindow(),
+        latencyMs,
+        outcome: errored ? "error" : "invalid",
+      });
+      if (errored) {
+        // Unrecoverable model/network failure — do not re-prompt. Carry the
+        // step's prompt metadata along so the caller can record the failure.
+        throw new SolveError(failure.code, failure.message, {
+          ...failure.details,
+          promptMetadata,
+        });
       }
       // Malformed-but-present output is recoverable: escalate and re-prompt.
-      sawInvalid = true;
+      invalidSeen++;
       lastPrompt = prompt;
-      totalLatencyMs += Date.now() - attemptStartedAt;
       if (!escalate()) break;
       continue;
     }
 
     const latencyMs = Date.now() - attemptStartedAt;
     totalLatencyMs += latencyMs;
-    usage.promptTokens += result.usage.inputTokens ?? 0;
-    usage.completionTokens += result.usage.outputTokens ?? 0;
-    usage.totalTokens += result.usage.totalTokens ?? 0;
+    const attemptUsage: Usage = {
+      promptTokens: result.usage.inputTokens ?? 0,
+      completionTokens: result.usage.outputTokens ?? 0,
+      totalTokens: result.usage.totalTokens ?? 0,
+    };
+    usage.promptTokens += attemptUsage.promptTokens;
+    usage.completionTokens += attemptUsage.completionTokens;
+    usage.totalTokens += attemptUsage.totalTokens;
     lastGroups = result.object.proposed_groups;
     lastPrompt = prompt;
     lastModel = result.response.modelId;
     lastContextWindow = getContextWindow();
 
+    // Per-attempt outcome: distinguish duplicates and malformed output seen
+    // only in this prompt from the step-level cumulative counters.
+    const duplicatesBefore = duplicatesRejected;
+    const invalidBefore = invalidSeen;
     const selected = selectFirstUsable(result.object.proposed_groups);
+    const duplicateAttempt = duplicatesRejected > duplicatesBefore;
+    const invalidAttempt = invalidSeen > invalidBefore;
+
+    promptMetadata.push({
+      attempt: attempts,
+      temperature,
+      numResponses,
+      model: lastModel,
+      contextWindow: lastContextWindow,
+      latencyMs,
+      usage: attemptUsage,
+      outcome: selected
+        ? "accepted"
+        : duplicateAttempt
+          ? "duplicate_rejected"
+          : "invalid",
+    });
+
     if (selected) {
       return {
         proposedGroups: [selected],
@@ -221,6 +278,7 @@ export async function proposeGroup(request: SolveRequest): Promise<SolveResult> 
         promptAttempts: attempts,
         duplicatesRejected,
         usage,
+        promptMetadata,
       };
     }
 
@@ -231,7 +289,9 @@ export async function proposeGroup(request: SolveRequest): Promise<SolveResult> 
   // duplicate failure when the model kept circling back to prior guesses —
   // that's the recoverable, observable failure mode — and fall back to
   // invalid output when it never produced a well-formed group at all.
-  const code: SolveErrorCode = sawDuplicate ? "duplicate_group" : "invalid_group";
+  const code: SolveErrorCode = sawDuplicate
+    ? "duplicate_group"
+    : "invalid_group";
   const message =
     code === "duplicate_group"
       ? `Model repeated previously-guessed groups across ${attempts} prompt${attempts === 1 ? "" : "s"}`
@@ -248,6 +308,7 @@ export async function proposeGroup(request: SolveRequest): Promise<SolveResult> 
     promptAttempts: attempts,
     duplicatesRejected,
     usage,
+    promptMetadata,
   });
 }
 
@@ -261,7 +322,10 @@ function idSetKey(ids: number[]): string {
  * retry loop re-prompts with changed parameters. Provider/network failures
  * are not.
  */
-function classifyModelCallError(err: unknown, details: SolveErrorDetails): SolveError {
+function classifyModelCallError(
+  err: unknown,
+  details: SolveErrorDetails,
+): SolveError {
   const message = err instanceof Error ? err.message : "Unknown model error";
 
   if (
@@ -276,5 +340,9 @@ function classifyModelCallError(err: unknown, details: SolveErrorDetails): Solve
     );
   }
 
-  return new SolveError("model_error", `Model call failed: ${message}`, details);
+  return new SolveError(
+    "model_error",
+    `Model call failed: ${message}`,
+    details,
+  );
 }

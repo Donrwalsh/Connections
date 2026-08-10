@@ -103,22 +103,26 @@ describe("buildSolvePrompt", () => {
     expect(prompt).toContain("- [0, 1, 2, 3]");
   });
 
-  it("omits the forbidden section when nothing is forbidden", () => {
+  it("omits all forbidden guidance when nothing is forbidden", () => {
     const prompt = buildSolvePrompt(makeRequest());
-    // The static constraints always reference the FORBIDDEN SETS concept,
-    // but the "Previously attempted" section itself must be absent.
+
+    expect(prompt).not.toContain("FORBIDDEN SETS");
     expect(prompt).not.toContain("Previously attempted");
+    expect(prompt).not.toContain("Any candidate set on the forbidden list");
+    expect(prompt).not.toContain(
+      "No group may match any set in FORBIDDEN SETS",
+    );
   });
 
   it("asks for exactly the configured number of candidate groups", () => {
     const prompt = buildSolvePrompt(makeRequest({ numResponses: 3 }));
 
-    expect(prompt).toContain("Propose exactly 3 DISTINCT candidate groups");
-    expect(prompt).toContain("1. Provide exactly 3 groups.");
+    expect(prompt).toContain("Provide exactly 3 distinct candidate groups");
+    expect(prompt).toContain("1. Provide exactly 3 distinct candidate groups");
     expect(prompt).toContain('"proposed_groups"');
   });
 
-  it("lists one-away guesses in their own block with a usage hint", () => {
+  it("keeps one-away guidance and lists one-away guesses in their own block", () => {
     const prompt = buildSolvePrompt(
       makeRequest({
         priorGuesses: [
@@ -128,16 +132,17 @@ describe("buildSolvePrompt", () => {
     );
 
     expect(prompt).toContain("ONE-AWAY SETS");
-    expect(prompt).toContain("Exactly 3 of the 4 words are correct");
     expect(prompt).toContain("- [0, 1, 2, 3]");
-    // The hint tells the model to keep 3 words together and swap the fourth.
-    expect(prompt).toContain("Keep 3 words from a ONE-AWAY SET together");
-    expect(prompt).toContain("Leverage every ONE-AWAY SET");
+    expect(prompt).toContain("do not rely on them exclusively");
+    expect(prompt).toContain("CRITICAL SET-THEORY RULES");
+    expect(prompt).toContain(
+      "No group may match any set in FORBIDDEN SETS (regardless of element order)",
+    );
     // The same set is still forbidden to repeat.
     expect(prompt).toContain("FORBIDDEN SETS");
   });
 
-  it("omits the one-away block and hint when there are no one-away guesses", () => {
+  it("omits one-away guidance when only forbidden sets exist", () => {
     const prompt = buildSolvePrompt(
       makeRequest({
         priorGuesses: [
@@ -146,9 +151,50 @@ describe("buildSolvePrompt", () => {
       }),
     );
 
-    // The static constraints reference the ONE-AWAY SETS concept, but the
-    // guess list and the hint section themselves must be absent.
-    expect(prompt).not.toContain("ONE-AWAY SETS (Exactly 3 of the 4 words are correct");
-    expect(prompt).not.toContain("HINT: In each ONE-AWAY SET");
+    // Forbidden guidance stays, one-away guidance disappears.
+    expect(prompt).toContain("FORBIDDEN SETS");
+    expect(prompt).toContain("Any candidate set on the forbidden list");
+    expect(prompt).not.toContain("ONE-AWAY SETS");
+    expect(prompt).not.toContain("OVERLAP INFERENCE");
+    expect(prompt).not.toContain("CRITICAL SET-THEORY RULES");
+    expect(prompt).not.toContain("core triad analysis");
+  });
+
+  it("omits forbidden and one-away guidance when the sets reference words no longer in play", () => {
+    // "GONE" is not among the remaining words, so any set mentioning it cannot
+    // be expressed against the current board and must be dropped entirely —
+    // along with every hint, rule and constraint that referenced it.
+    const prompt = buildSolvePrompt(
+      makeRequest({
+        priorGuesses: [
+          { words: ["AAAA", "BBBB", "CCCC", "GONE"], result: "incorrect" },
+          { words: ["EEEE", "FFFF", "GGGG", "GONE"], result: "oneAway" },
+        ],
+      }),
+    );
+
+    expect(prompt).not.toContain("FORBIDDEN SETS");
+    expect(prompt).not.toContain("ONE-AWAY SETS");
+    expect(prompt).not.toContain("GONE");
+    expect(prompt).not.toContain("OVERLAP INFERENCE");
+    expect(prompt).not.toContain("CRITICAL SET-THEORY RULES");
+    expect(prompt).not.toContain(
+      "No group may match any set in FORBIDDEN SETS",
+    );
+    // With neither set type in play, the reasoning guidance falls back to plain.
+    expect(prompt).toContain(
+      '"reasoning": "Explain the category step-by-step."',
+    );
+  });
+
+  it("keeps only generic guidance when there are no prior guesses", () => {
+    const prompt = buildSolvePrompt(makeRequest());
+
+    expect(prompt).toContain("1. Provide exactly 5 distinct candidate groups");
+    expect(prompt).not.toContain("one-away");
+    expect(prompt).not.toContain("forbidden");
+    expect(prompt).toContain(
+      '"reasoning": "Explain the category step-by-step."',
+    );
   });
 });

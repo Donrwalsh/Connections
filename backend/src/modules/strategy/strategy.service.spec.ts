@@ -23,6 +23,7 @@ describe("StrategyService", () => {
   let mockGuessRepo: {
     count: jest.Mock;
     find: jest.Mock;
+    findOne: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
   let mockGameService: {
@@ -87,6 +88,7 @@ describe("StrategyService", () => {
     mockGuessRepo = {
       count: jest.fn().mockResolvedValue(0),
       find: jest.fn(),
+      findOne: jest.fn(),
       createQueryBuilder: jest.fn(),
     };
     mockGameService = {
@@ -283,6 +285,103 @@ describe("StrategyService", () => {
       expect(mockGuessRepo.find).toHaveBeenCalledWith(
         expect.objectContaining({ skip: 0, take: 500 }),
       );
+    });
+  });
+
+  describe("getGuessDetail", () => {
+    it("should throw NotFoundException when the run does not exist", async () => {
+      mockGameService.resolveDateToPuzzleId.mockResolvedValueOnce(5);
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.getGuessDetail("2024-01-02", "llm", 0, 1)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it("should throw NotFoundException when the guess does not exist", async () => {
+      mockGameService.resolveDateToPuzzleId.mockResolvedValueOnce(5);
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm" }));
+      mockGuessRepo.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.getGuessDetail("2024-01-02", "llm", 0, 99)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it("should look up the guess scoped to the run and sequence number", async () => {
+      mockGameService.resolveDateToPuzzleId.mockResolvedValueOnce(5);
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm" }));
+      mockGuessRepo.findOne.mockResolvedValueOnce({
+        sequenceNumber: 1,
+        words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+        result: GuessResult.SUCCESS,
+        guessedAt: new Date("2024-01-02T01:01:00Z"),
+        promptTokens: 10,
+        completionTokens: 20,
+        totalTokens: 30,
+        latencyMs: 500,
+        temperature: 1,
+        numResponses: 1,
+        promptAttempts: 1,
+        duplicatesRejected: 0,
+        llmDetails: { category: "Fruit", confidence: 0.9 },
+      });
+
+      await service.getGuessDetail("2024-01-02", "llm", 0, 1);
+
+      expect(mockGuessRepo.findOne).toHaveBeenCalledWith({
+        where: { strategyRunId: 7, sequenceNumber: 1 },
+      });
+    });
+
+    it("should map the guess and its LLM telemetry into a detail DTO", async () => {
+      const guessedAt = new Date("2024-01-02T01:01:00Z");
+
+      mockGameService.resolveDateToPuzzleId.mockResolvedValueOnce(5);
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm" }));
+      mockGuessRepo.findOne.mockResolvedValueOnce({
+        sequenceNumber: 2,
+        words: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        result: GuessResult.DUPLICATE,
+        guessedAt,
+        promptTokens: 1027,
+        completionTokens: 593,
+        totalTokens: 1620,
+        latencyMs: 5647,
+        temperature: 1.2,
+        numResponses: 3,
+        promptAttempts: 2,
+        duplicatesRejected: 1,
+        llmDetails: {
+          category: "Fruit",
+          confidence: 0.9,
+          reasoning: "test",
+          prompt: "solve step",
+        },
+      });
+
+      const result = await service.getGuessDetail("2024-01-02", "llm", 0, 2);
+
+      expect(result).toEqual({
+        sequenceNumber: 2,
+        words: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        result: GuessResult.DUPLICATE,
+        guessedAt,
+        promptTokens: 1027,
+        completionTokens: 593,
+        totalTokens: 1620,
+        latencyMs: 5647,
+        temperature: 1.2,
+        numResponses: 3,
+        promptAttempts: 2,
+        duplicatesRejected: 1,
+        llmDetails: {
+          category: "Fruit",
+          confidence: 0.9,
+          reasoning: "test",
+          prompt: "solve step",
+        },
+      });
     });
   });
 
@@ -797,11 +896,23 @@ describe("StrategyService", () => {
         model: "mistral",
         contextWindow: 8192,
         latencyMs: 500,
-        temperature: 1,
+        temperature: 0,
         numResponses: 1,
         promptAttempts: 1,
         duplicatesRejected: 0,
         usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+        promptMetadata: [
+          {
+            attempt: 1,
+            temperature: 0,
+            numResponses: 1,
+            model: "mistral",
+            contextWindow: 8192,
+            latencyMs: 500,
+            usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+            outcome: "accepted",
+          },
+        ],
         ...overrides,
       },
     });
@@ -822,7 +933,7 @@ describe("StrategyService", () => {
           model: "mistral",
           contextWindow: 8192,
           latencyMs: 1500,
-          temperature: 1,
+          temperature: 0,
           numResponses: 1,
           promptAttempts: 3,
           duplicatesRejected: 3,
@@ -877,7 +988,7 @@ describe("StrategyService", () => {
           completionTokens: 20,
           totalTokens: 30,
           latencyMs: 500,
-          temperature: 1,
+          temperature: 0,
           numResponses: 1,
           promptAttempts: 1,
           duplicatesRejected: 0,
@@ -886,6 +997,18 @@ describe("StrategyService", () => {
             confidence: 0.9,
             reasoning: "test",
             prompt: "solve step",
+            promptMetadata: [
+              {
+                attempt: 1,
+                temperature: 0,
+                numResponses: 1,
+                model: "mistral",
+                contextWindow: 8192,
+                latencyMs: 500,
+                usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+                outcome: "accepted",
+              },
+            ],
           },
         }),
       );
@@ -909,10 +1032,10 @@ describe("StrategyService", () => {
       expect(mockOrchestratorService.proposeGroup.mock.calls[0][0]).toEqual({
         puzzleWords: ["APPLE", "BANANA", "CHERRY", "DATE", "EGGPLANT", "FIG", "GRAPE", "HONEY"],
         priorGuesses: [],
-        temperature: 1,
+        temperature: 0,
         numResponses: 1,
-        temperatureStep: 0.1,
-        maxTemperature: 2,
+        temperatureStep: 0.032,
+        maxTemperature: 3.2,
         maxNumResponses: 10,
         maxPrompts: 5,
       });
@@ -921,10 +1044,10 @@ describe("StrategyService", () => {
       expect(mockOrchestratorService.proposeGroup.mock.calls[1][0]).toEqual({
         puzzleWords: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
         priorGuesses: [{ words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: "correct" }],
-        temperature: 1,
+        temperature: 0,
         numResponses: 1,
-        temperatureStep: 0.1,
-        maxTemperature: 2,
+        temperatureStep: 0.032,
+        maxTemperature: 3.2,
         maxNumResponses: 10,
         maxPrompts: 5,
       });
@@ -952,7 +1075,7 @@ describe("StrategyService", () => {
       expect(firstCall.priorGuesses).toEqual([
         { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: "incorrect" },
       ]);
-      expect(firstCall.temperature).toBe(1);
+      expect(firstCall.temperature).toBe(0);
       expect(mockGuessRepo.find).toHaveBeenCalledWith({
         where: { strategyRunId: 7 },
         order: { sequenceNumber: "ASC" },
@@ -960,7 +1083,7 @@ describe("StrategyService", () => {
       });
     });
 
-    it("should hold onto escalated parameters for subsequent solve steps", async () => {
+    it("should hold onto the escalated temperature but reset the candidate count per step", async () => {
       mockOrchestratorService.proposeGroup
         .mockResolvedValueOnce(
           success([0, 1, 2, 3], {
@@ -983,13 +1106,16 @@ describe("StrategyService", () => {
 
       const calls = mockOrchestratorService.proposeGroup.mock.calls;
       // The run starts at the base parameters.
-      expect(calls[0][0]).toEqual(expect.objectContaining({ temperature: 1, numResponses: 1 }));
+      expect(calls[0][0]).toEqual(expect.objectContaining({ temperature: 0, numResponses: 1 }));
       // The first response escalated, so the second solve step starts from the
-      // values that produced the previous guess instead of resetting.
-      expect(calls[1][0]).toEqual(expect.objectContaining({ temperature: 1.2, numResponses: 3 }));
+      // raised temperature, but the candidate count resets to base for each
+      // fresh guess.
+      expect(calls[1][0]).toEqual(expect.objectContaining({ temperature: 1.2, numResponses: 1 }));
       const inserted = mockManager.insert.mock.calls.flatMap(
         (call) => call[1] as Array<Record<string, unknown>>,
       );
+      // The guess record still reports the escalated candidate count that
+      // actually produced the guess.
       expect(inserted[0]).toEqual(
         expect.objectContaining({
           temperature: 1.2,
@@ -1038,7 +1164,7 @@ describe("StrategyService", () => {
             completionTokens: 60,
             totalTokens: 90,
             latencyMs: 1500,
-            temperature: 1,
+            temperature: 0,
             numResponses: 1,
             promptAttempts: 3,
             duplicatesRejected: 3,
@@ -1049,7 +1175,7 @@ describe("StrategyService", () => {
         const temperatures = mockOrchestratorService.proposeGroup.mock.calls.map(
           (call) => (call[0] as { temperature: number }).temperature,
         );
-        expect(temperatures).toEqual([1, 1, 1]);
+        expect(temperatures).toEqual([0, 0, 0]);
         expect(mockManager.save).toHaveBeenCalledWith(
           StrategyRun,
           expect.objectContaining({ status: StrategyRunStatus.DUPLICATE }),

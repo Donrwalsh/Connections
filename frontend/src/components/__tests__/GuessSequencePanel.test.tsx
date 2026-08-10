@@ -121,7 +121,9 @@ afterEach(() => {
 });
 
 // The list endpoint returns slim runs (no guess arrays); the detail endpoint
-// (/run/:trialNumber) returns the full guess list on demand.
+// (/run/:trialNumber) returns the full guess list on demand; the guess-detail
+// endpoint (/run/:trialNumber/guess/:sequenceNumber) returns LLM info for a
+// single guess.
 function setupFetch() {
   vi.stubGlobal(
     "fetch",
@@ -129,16 +131,51 @@ function setupFetch() {
       const urlStr = String(url);
       const strategyId =
         urlStr.match(/\/strategy\/([^/]+)\//)?.[1] ?? "alphabetical";
+      const trialNumber = Number(urlStr.match(/\/run\/(\d+)/)?.[1] ?? 0);
+
+      const runDetail = () =>
+        strategyId === "shuffle-smart"
+          ? (shuffleSmartDetails[trialNumber] as typeof strategyRunDetail)
+          : strategyId === "shuffle-foolish"
+            ? shuffleFoolishDetail
+            : strategyRunDetail;
+
+      const guessDetail = urlStr.match(/\/guess\/(\d+)/);
+      if (guessDetail) {
+        const sequenceNumber = Number(guessDetail[1]);
+        const guess = runDetail().guesses.find(
+          (g) => g.sequenceNumber === sequenceNumber,
+        ) ?? {
+          sequenceNumber,
+          words: [],
+          result: "failure",
+          guessedAt: "2024-01-15T00:00:00Z",
+        };
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            ...guess,
+            promptTokens: 1500,
+            completionTokens: 320,
+            totalTokens: 1820,
+            latencyMs: 2340,
+            temperature: 0.7,
+            numResponses: 5,
+            promptAttempts: 2,
+            duplicatesRejected: 3,
+            llmDetails: {
+              category: "GREETINGS",
+              confidence: 0.9,
+              reasoning: `Reasoning for guess ${sequenceNumber}`,
+              prompt: `Prompt for guess ${sequenceNumber}`,
+            },
+          }),
+        });
+      }
 
       const detail = urlStr.match(/\/run\/(\d+)/);
       if (detail) {
-        const trialNumber = Number(detail[1]);
-        const body =
-          strategyId === "shuffle-smart"
-            ? shuffleSmartDetails[trialNumber]
-            : strategyId === "shuffle-foolish"
-              ? shuffleFoolishDetail
-              : strategyRunDetail;
+        const body = runDetail();
         return Promise.resolve({ ok: true, json: async () => body });
       }
 
@@ -451,5 +488,115 @@ describe("GuessSequencePanel Component", () => {
     expect(
       await screen.findByText("No runs yet for Shuffle Smart."),
     ).toBeInTheDocument();
+  });
+
+  it("opens a detail panel with LLM info when a guess is clicked", async () => {
+    setupFetch();
+
+    render(
+      <GuessSequencePanel date="2024-01-15" isOpen={true} onToggle={() => {}} />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /A, B, C, D/,
+      }),
+    );
+
+    expect(await screen.findByText("Prompt tokens")).toBeInTheDocument();
+    expect(screen.getByText("1,500")).toBeInTheDocument();
+    expect(screen.getByText("Completion tokens")).toBeInTheDocument();
+    expect(screen.getByText("320")).toBeInTheDocument();
+    expect(screen.getByText("Latency")).toBeInTheDocument();
+    expect(screen.getByText("2,340 ms")).toBeInTheDocument();
+    expect(screen.getByText("0.7")).toBeInTheDocument();
+    expect(screen.getByText("Duplicates rejected")).toBeInTheDocument();
+    expect(screen.getByText("GREETINGS")).toBeInTheDocument();
+    expect(screen.getByText("90%")).toBeInTheDocument();
+    expect(screen.getByText("Reasoning for guess 1")).toBeInTheDocument();
+    expect(screen.getByText("Prompt for guess 1")).toBeInTheDocument();
+  });
+
+  it("closes the detail panel when the open guess is clicked again", async () => {
+    setupFetch();
+
+    render(
+      <GuessSequencePanel date="2024-01-15" isOpen={true} onToggle={() => {}} />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /A, B, C, D/,
+      }),
+    );
+    expect(await screen.findByText("Prompt tokens")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /A, B, C, D/ }));
+    expect(screen.queryByText("Prompt tokens")).not.toBeInTheDocument();
+  });
+
+  it("shows only one open guess detail panel at a time (accordion)", async () => {
+    setupFetch();
+
+    render(
+      <GuessSequencePanel date="2024-01-15" isOpen={true} onToggle={() => {}} />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /A, B, C, D/,
+      }),
+    );
+    expect(await screen.findByText("Reasoning for guess 1")).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /E, F, G, H/ }),
+    );
+
+    expect(await screen.findByText("Reasoning for guess 2")).toBeInTheDocument();
+    expect(screen.queryByText("Reasoning for guess 1")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Prompt tokens")).toHaveLength(1);
+  });
+
+  it("shows an error message when the guess detail fetch fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        const urlStr = String(url);
+        const strategyId =
+          urlStr.match(/\/strategy\/([^/]+)\//)?.[1] ?? "alphabetical";
+        if (urlStr.includes("/guess/")) {
+          return Promise.resolve({
+            ok: false,
+            status: 500,
+            json: async () => ({ message: "guess not found" }),
+          });
+        }
+        if (urlStr.includes("/run/")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => strategyRunDetail,
+          });
+        }
+        const runs = strategyId === "shuffle-smart" ? [] : [strategyRun];
+        return Promise.resolve({
+          ok: true,
+          json: async () =>
+            runs.map((run) => ({ ...run, strategyName: strategyId })),
+        });
+      }),
+    );
+
+    render(
+      <GuessSequencePanel date="2024-01-15" isOpen={true} onToggle={() => {}} />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /A, B, C, D/,
+      }),
+    );
+
+    expect(await screen.findByText("guess not found")).toBeInTheDocument();
   });
 });

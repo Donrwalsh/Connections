@@ -13,15 +13,11 @@ export class LlmSolveParams1786377505000 implements MigrationInterface {
   name = "LlmSolveParams1786377505000";
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(
-      `ALTER TABLE "Guess" ADD COLUMN IF NOT EXISTS "totalTokens" INT NULL`,
-    );
+    await queryRunner.query(`ALTER TABLE "Guess" ADD COLUMN IF NOT EXISTS "totalTokens" INT NULL`);
     await queryRunner.query(
       `ALTER TABLE "Guess" ADD COLUMN IF NOT EXISTS "temperature" DOUBLE PRECISION NULL`,
     );
-    await queryRunner.query(
-      `ALTER TABLE "Guess" ADD COLUMN IF NOT EXISTS "numResponses" INT NULL`,
-    );
+    await queryRunner.query(`ALTER TABLE "Guess" ADD COLUMN IF NOT EXISTS "numResponses" INT NULL`);
     await queryRunner.query(
       `ALTER TABLE "Guess" ADD COLUMN IF NOT EXISTS "promptAttempts" INT NULL`,
     );
