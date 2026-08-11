@@ -80,7 +80,7 @@ export const SolveRequestSchema = z.object({
     .int()
     .min(1)
     .optional()
-    .default(5)
+    .default(19)
     .describe(
       "Maximum number of prompts a single solve step may make before giving up on a fresh candidate",
     ),

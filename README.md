@@ -84,15 +84,32 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 |----------|---------|-------------|
 | `INTERNAL_API_KEY` | — | Shared secret for backend↔orchestrator communication (`x-internal-api-key` header) — **required** |
 | `OPENAI_API_KEY` | — | OpenAI API key (orchestrator only) |
+| `MODEL_PROVIDER` | `openai` | AI model provider: `openai` (default) or `ollama` (local, via the bundled Ollama service) |
+| `OPENAI_MODEL` | `gpt-4o-2024-08-06` | OpenAI model id (used when `MODEL_PROVIDER=openai`) |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server base URL (used when `MODEL_PROVIDER=ollama`) |
+| `OLLAMA_MODEL` | `llama3.2` | Ollama model id (used when `MODEL_PROVIDER=ollama`) |
+| `MODEL_CONTEXT_WINDOW` | `8192` | Context window (in tokens) used to size the LLM solver prompt |
 | `BULL_BOARD_USER` / `BULL_BOARD_PASS` | `admin` / `bullboard` | Basic-auth credentials for the Bull Board dashboard (must be set together, or not at all) |
 | `CORS_ORIGIN` | `http://localhost:5173` | Comma-separated list of allowed frontend origins |
 | `ORCHESTRATOR_URL` | `http://orchestrator:3001` | Backend's URL for reaching the orchestrator |
 | `ORCHESTRATOR_TIMEOUT_MS` | `120000` | Per-attempt HTTP timeout for solve calls — must cover a whole multi-prompt step (up to `LLM_MAX_PROMPTS` model calls), since timeouts are not retried |
 | `PUZZLE_POPULATION_CRON` | `0 6 * * *` | Cron pattern for daily puzzle fetch (UTC by default) |
 | `PUZZLE_POPULATION_TZ` | `UTC` | Timezone for the puzzle population cron |
+| `PUZZLE_CACHE_DIR` | `/app/.puzzle-cache` | Directory used as a local cache of raw NYT puzzle payloads (bound to `./.puzzle-cache` on the host) |
 | `SHUFFLE_SMART_TRIALS` | `3` | Number of shuffle-smart trials run per puzzle |
 | `SHUFFLE_FOOLISH_TRIALS` | `3` | Number of shuffle-foolish trials run per puzzle |
+| `SHUFFLE_FOOLISH_DUPLICATE_LIMIT` | `3` | Maximum repeated groups a shuffle-foolish run may propose before it ends with a `duplicate` status |
+| `LLM_MAX_DUPLICATE_GUESSES` | `10` | Maximum repeated groups an LLM run may propose before it ends with a `duplicate` status |
+| `LLM_MAX_MALFORMED_RESPONSES` | `3` | Maximum consecutive malformed LLM responses before a run ends with a `malformedResponse` status |
+| `LLM_MAX_MODEL_ERRORS` | `5` | Maximum consecutive transient model failures before a run ends with an `error` status |
+| `LLM_MAX_PROMPTS` | `19` | Maximum prompts a single solve step makes before the orchestrator accepts a duplicate |
+| `LLM_NUM_RESPONSES` | `1` | Number of candidate groups the LLM proposes per solve step (clamped to 10) |
+| `LLM_TEMPERATURE_BASE` | `0` | Starting sampling temperature for LLM solve steps |
+| `LLM_TEMPERATURE_MAX` | `3.2` | Ceiling for the LLM temperature ramp (100 increments from base to ceiling) |
 | `PORT` | `3001` | Orchestrator listen port |
+| `POSTGRES_USER` | `postgres` | Postgres user (compose-level; the backend reads it as `DB_USER`) |
+| `POSTGRES_PASSWORD` | `postgres` | Postgres password (compose-level; the backend reads it as `DB_PASSWORD`) |
+| `POSTGRES_DB` | `mydb` | Postgres database name (compose-level; the backend reads it as `DB_NAME`) |
 
 Postgres and Redis connection settings (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `REDIS_HOST`, `REDIS_PORT`) are read from the same `.env` — see [`.env.sample`](.env.sample) for defaults.
 

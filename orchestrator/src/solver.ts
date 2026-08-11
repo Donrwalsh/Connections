@@ -25,7 +25,7 @@ const DEFAULT_NUM_RESPONSES = 1;
 const LLM_TEMPERATURE_RAMP_STEPS = 100;
 const DEFAULT_MAX_TEMPERATURE = 3.2;
 const DEFAULT_MAX_NUM_RESPONSES = 10;
-const DEFAULT_MAX_PROMPTS = 9;
+const DEFAULT_MAX_PROMPTS = 19;
 
 export interface SolveResult {
   proposedGroups: ProposedGroup[];

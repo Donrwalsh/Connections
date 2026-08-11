@@ -14,7 +14,7 @@ const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_INITIAL_DELAY_MS = 1000;
 const DEFAULT_TIMEOUT_MS = 30000;
 
-// A single solve step makes up to LLM_MAX_PROMPTS (default 5) sequential model
+// A single solve step makes up to LLM_MAX_PROMPTS (default 19) sequential model
 // calls with escalating candidate counts, so the budget is sized for the whole
 // step (ORCHESTRATOR_TIMEOUT_MS, default 120s) and applied to every attempt.
 // Timeout failures are not retried by fetchWithRetry — the orchestrator keeps

@@ -1037,7 +1037,7 @@ describe("StrategyService", () => {
         temperatureStep: 0.032,
         maxTemperature: 3.2,
         maxNumResponses: 10,
-        maxPrompts: 5,
+        maxPrompts: 19,
       });
       // After the first group is solved, the second call sees the remaining
       // words and the solved group mapped to the orchestrator's 'correct'.
@@ -1049,7 +1049,7 @@ describe("StrategyService", () => {
         temperatureStep: 0.032,
         maxTemperature: 3.2,
         maxNumResponses: 10,
-        maxPrompts: 5,
+        maxPrompts: 19,
       });
     });
 

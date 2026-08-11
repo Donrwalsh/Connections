@@ -32,7 +32,7 @@ function optionalInt(name: string, value: string | undefined, fallback: number):
 /**
  * Per-attempt HTTP timeout for backend→orchestrator solve calls, from
  * ORCHESTRATOR_TIMEOUT_MS. A single solve step makes up to LLM_MAX_PROMPTS
- * (default 5) sequential model calls with escalating candidate counts, so the
+ * (default 19) sequential model calls with escalating candidate counts, so the
  * budget must cover a whole multi-prompt step, not one model call. The value
  * is applied to every attempt — timeout failures are not retried by the
  * caller (see orchestrator/app.service), which keeps the wait bounded.

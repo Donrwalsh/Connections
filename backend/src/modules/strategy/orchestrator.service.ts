@@ -76,7 +76,7 @@ export interface OrchestratorSolveRequest {
 
 const MAX_RETRIES = 3;
 const INITIAL_DELAY_MS = 1000;
-// A single solve step makes up to LLM_MAX_PROMPTS (default 5) sequential model
+// A single solve step makes up to LLM_MAX_PROMPTS (default 19) sequential model
 // calls with escalating candidate counts, so a legitimate step can take well
 // over a minute. Budget the whole step on every attempt rather than sizing for
 // one model call (the old 40s/15s split assumed a single call plus cold start).

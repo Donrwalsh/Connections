@@ -46,7 +46,7 @@ export const MAX_LLM_NUM_RESPONSES = 10;
 // gives up on a fresh candidate and reports a duplicate/invalid failure.
 // Each re-prompt raises the sampling temperature and asks for one more
 // distinct candidate.
-export const DEFAULT_LLM_MAX_PROMPTS = 5;
+export const DEFAULT_LLM_MAX_PROMPTS = 19;
 
 // Temperature ramp: the sampling temperature starts at LLM_TEMPERATURE_BASE
 // and, on each re-prompt, is nudged up by a computed step (see
