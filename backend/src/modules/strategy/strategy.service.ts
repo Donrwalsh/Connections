@@ -1,6 +1,6 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { Queue } from "bullmq";
-import { STRATEGY_QUEUE } from "../queue/queue.module";
+import { STRATEGY_QUEUE, LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE } from "../queue/queue.module";
 import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/strategy-run.entity";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 import { DataSource, Repository } from "typeorm";
@@ -27,7 +27,7 @@ import {
   shuffleFoolishDuplicateLimit,
   strategyTrialNumbers,
 } from "../../strategies";
-import { runStrategyJobId } from "../queue/strategy.queue";
+import { runStrategyJobId, queueForStrategy } from "../queue/strategy.queue";
 import { OrchestratorService, type ModelProvider } from "./orchestrator.service";
 
 const GROUP_SIZE = 4;
@@ -43,6 +43,8 @@ export class StrategyService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @Inject(STRATEGY_QUEUE) private queue: Queue,
+    @Inject(LLM_OPENAI_QUEUE) private readonly llmOpenAIQueue: Queue,
+    @Inject(LLM_OLLAMA_QUEUE) private readonly llmOllamaQueue: Queue,
     @InjectRepository(StrategyRun)
     private readonly strategyRunRepo: Repository<StrategyRun>,
     @InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>,
@@ -51,8 +53,17 @@ export class StrategyService {
     @Inject(OrchestratorService) private readonly orchestratorService: OrchestratorService,
   ) {}
 
+  /**
+   * The queue a strategy's runs are dispatched to: llm-openai and llm-ollama
+   * get their own per-provider queues, everything else the shared
+   * strategy-runs queue.
+   */
+  private queueFor(strategyName: string): Queue {
+    return queueForStrategy(this.queue, this.llmOpenAIQueue, this.llmOllamaQueue, strategyName);
+  }
+
   async triggerRun(puzzleId: number, strategyName: string, date?: string, trialNumber = 0) {
-    await this.queue.add(
+    await this.queueFor(strategyName).add(
       "run-strategy",
       {
         puzzleId,
@@ -74,7 +85,7 @@ export class StrategyService {
    */
   async triggerStrategyRuns(puzzleId: number, strategyName: string, date: string) {
     const trialNumbers = strategyTrialNumbers(strategyName);
-    await this.queue.addBulk(
+    await this.queueFor(strategyName).addBulk(
       trialNumbers.map((trialNumber) => ({
         name: "run-strategy",
         data: { puzzleId, strategyName, date, trialNumber },

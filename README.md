@@ -24,12 +24,12 @@ A multi-service application for playing and solving [NYT Connections](https://ww
 | **Backend** | `backend/` | NestJS | 4000 | REST API, Swagger, Bull Board |
 | **Frontend** | `frontend/` | Vite + React 19 | 5173 | Single-page app |
 | **Orchestrator** | `orchestrator/` | Hono + AI SDK | 3001 | AI puzzle solving (OpenAI + Ollama) |
-| **Worker** | `backend/src/worker.ts` | BullMQ | — | Processes strategy + puzzle queues |
+| **Worker** | `backend/src/worker.ts` | BullMQ | — | Processes strategy, per-provider LLM, and puzzle queues |
 | **Database** | `database/` | Postgres 15 | 5432 | Schema + seeds |
 | **Redis** | — | Redis 7 | 6379 | BullMQ message broker |
 | **Ollama** | — | — | 11434 | Local LLM provider (default: `llama3.2`) |
 
-The worker runs as a separate process from the NestJS server (started via `npx tsx --watch src/worker.ts`). It bootstraps its own NestJS app context to access services. Both LLM providers are always configured and used simultaneously: the `llm-openai` strategy consults OpenAI, `llm-ollama` the bundled local Ollama service. Provider-less requests (e.g. the in-game AI Assist) use the `MODEL_PROVIDER` default (`openai`).
+The worker runs as a separate process from the NestJS server (started via `npx tsx --watch src/worker.ts`). It bootstraps its own NestJS app context to access services. Both LLM providers are always configured and used simultaneously: the `llm-openai` strategy consults OpenAI, `llm-ollama` the bundled local Ollama service. The two LLM strategies run on separate queues (`llm-openai-runs` / `llm-ollama-runs`) with their own per-provider concurrency (`LLM_OPENAI_CONCURRENCY` / `LLM_OLLAMA_CONCURRENCY`), so the providers never block each other or the deterministic strategies. Provider-less requests (e.g. the in-game AI Assist) use the `MODEL_PROVIDER` default (`openai`).
 
 ### Puzzle solving flow
 
@@ -37,7 +37,11 @@ The worker runs as a separate process from the NestJS server (started via `npx t
 Daily cron (06:00 UTC)
   └─ puzzle-population queue ──► worker ──► fetches NYT puzzle ──► Postgres
        └─ queues strategy runs ──► strategy-runs queue ──► worker ──► solve
-            (4 deterministic + SHUFFLE_SMART_TRIALS shuffle-smart trials + SHUFFLE_FOOLISH_TRIALS shuffle-foolish trials + LLM_TRIALS llm-openai trials + LLM_TRIALS llm-ollama trials)
+            (4 deterministic + SHUFFLE_SMART_TRIALS shuffle-smart trials + SHUFFLE_FOOLISH_TRIALS shuffle-foolish trials)
+       └─ queues LLM runs ──► llm-openai-runs queue ──► worker ──► OpenAI
+            (LLM_TRIALS llm-openai trials; LLM_OPENAI_CONCURRENCY at once)
+       └─ queues LLM runs ──► llm-ollama-runs queue ──► worker ──► Ollama
+            (LLM_TRIALS llm-ollama trials; LLM_OLLAMA_CONCURRENCY at once)
 
 Frontend "AI Assist" button
   └─ POST /api/solve ──► backend ──► POST /solve ──► orchestrator ──► default provider (openai)
@@ -111,6 +115,8 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `LLM_TEMPERATURE_BASE` | `0` | Starting sampling temperature for LLM solve steps (both providers) |
 | `LLM_TEMPERATURE_MAX_OPENAI` | `0.5` | Ceiling for the OpenAI temperature ramp (100 increments from base to ceiling, step 0.005) |
 | `LLM_TEMPERATURE_MAX_OLLAMA` | `1.5` | Ceiling for the Ollama temperature ramp (100 increments from base to ceiling, step 0.015) |
+| `LLM_OPENAI_CONCURRENCY` | `1` | Maximum `llm-openai` runs the worker processes at once (own queue, so it never blocks Ollama or the deterministic strategies) |
+| `LLM_OLLAMA_CONCURRENCY` | `1` | Maximum `llm-ollama` runs the worker processes at once (own queue, so it never blocks OpenAI or the deterministic strategies) |
 | `PORT` | `3001` | Orchestrator listen port |
 | `POSTGRES_USER` | `postgres` | Postgres user (compose-level; the backend reads it as `DB_USER`) |
 | `POSTGRES_PASSWORD` | `postgres` | Postgres password (compose-level; the backend reads it as `DB_PASSWORD`) |

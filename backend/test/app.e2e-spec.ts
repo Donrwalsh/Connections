@@ -19,7 +19,7 @@ import {
   StrategyRunStatus,
 } from "../src/modules/strategy/entities/strategy-run.entity";
 import { StrategyService } from "../src/modules/strategy/strategy.service";
-import { strategyQueue } from "../src/modules/queue/strategy.queue";
+import { llmOpenAIQueue } from "../src/modules/queue/strategy.queue";
 
 const TEST_DATE = "1999-12-31";
 
@@ -181,7 +181,7 @@ describe("App (e2e)", () => {
     });
 
     for (const trialNumber of res.body.trialNumbers ?? [1, 2, 3]) {
-      await strategyQueue.remove(`run-${res.body.puzzleId}-llm-openai-${trialNumber}`);
+      await llmOpenAIQueue.remove(`run-${res.body.puzzleId}-llm-openai-${trialNumber}`);
     }
   });
 

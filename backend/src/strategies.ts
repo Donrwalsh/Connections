@@ -52,6 +52,13 @@ export const DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT = 3;
 export const DEFAULT_LLM_NUM_RESPONSES = 1;
 export const MAX_LLM_NUM_RESPONSES = 10;
 
+// How many LLM strategy runs of each provider the worker may process at once.
+// Each provider has its own BullMQ queue (llm-openai-runs / llm-ollama-runs),
+// so the two providers never block each other; within a provider the worker
+// starts at most this many jobs concurrently (default 1 = fully serialized).
+export const DEFAULT_LLM_OPENAI_CONCURRENCY = 1;
+export const DEFAULT_LLM_OLLAMA_CONCURRENCY = 1;
+
 // How many prompts a single solve step may make before the orchestrator
 // gives up on a fresh candidate and reports a duplicate/invalid failure.
 // Each re-prompt raises the sampling temperature and asks for one more
@@ -114,6 +121,24 @@ export function shuffleFoolishTrialCount(env: NodeJS.ProcessEnv = process.env): 
  */
 export function llmTrialCount(env: NodeJS.ProcessEnv = process.env): number {
   return positiveTrialCount(env.LLM_TRIALS, DEFAULT_LLM_TRIALS);
+}
+
+/**
+ * How many llm-openai runs the worker may process at once, from
+ * LLM_OPENAI_CONCURRENCY. Falls back to DEFAULT_LLM_OPENAI_CONCURRENCY for
+ * missing/invalid values.
+ */
+export function llmOpenAIConcurrency(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.LLM_OPENAI_CONCURRENCY, DEFAULT_LLM_OPENAI_CONCURRENCY);
+}
+
+/**
+ * How many llm-ollama runs the worker may process at once, from
+ * LLM_OLLAMA_CONCURRENCY. Falls back to DEFAULT_LLM_OLLAMA_CONCURRENCY for
+ * missing/invalid values.
+ */
+export function llmOllamaConcurrency(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.LLM_OLLAMA_CONCURRENCY, DEFAULT_LLM_OLLAMA_CONCURRENCY);
 }
 
 /**

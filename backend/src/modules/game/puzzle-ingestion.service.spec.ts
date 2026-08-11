@@ -4,7 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import * as fs from "fs";
 import { PuzzleIngestionService } from "./puzzle-ingestion.service";
-import { STRATEGY_QUEUE } from "../queue/queue.module";
+import { STRATEGY_QUEUE, LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE } from "../queue/queue.module";
 import { SUPPORTED_STRATEGIES } from "../../strategies";
 
 const PUZZLE_DATA = {
@@ -28,6 +28,12 @@ const fetchResponse = (status: number, body?: unknown) =>
     json: jest.fn().mockResolvedValue(body),
   }) as unknown as Response;
 
+interface JobShape {
+  name: string;
+  data: { puzzleId: number; strategyName: string; date: string; trialNumber: number };
+  opts: { jobId: string };
+}
+
 describe("PuzzleIngestionService", () => {
   let service: PuzzleIngestionService;
   let mockDataSource: {
@@ -44,6 +50,8 @@ describe("PuzzleIngestionService", () => {
   };
   let mockExecute: jest.Mock;
   let mockStrategyQueue: { addBulk: jest.Mock };
+  let mockOpenAIQueue: { addBulk: jest.Mock };
+  let mockOllamaQueue: { addBulk: jest.Mock };
 
   beforeEach(async () => {
     process.env.PUZZLE_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "puzzle-cache-"));
@@ -56,6 +64,12 @@ describe("PuzzleIngestionService", () => {
     mockExecute = jest.fn().mockResolvedValue({ identifiers: [{ id: 42 }] });
 
     mockStrategyQueue = {
+      addBulk: jest.fn().mockResolvedValue(undefined),
+    };
+    mockOpenAIQueue = {
+      addBulk: jest.fn().mockResolvedValue(undefined),
+    };
+    mockOllamaQueue = {
       addBulk: jest.fn().mockResolvedValue(undefined),
     };
 
@@ -85,6 +99,8 @@ describe("PuzzleIngestionService", () => {
         PuzzleIngestionService,
         { provide: DataSource, useValue: mockDataSource },
         { provide: STRATEGY_QUEUE, useValue: mockStrategyQueue },
+        { provide: LLM_OPENAI_QUEUE, useValue: mockOpenAIQueue },
+        { provide: LLM_OLLAMA_QUEUE, useValue: mockOllamaQueue },
       ],
     }).compile();
 
@@ -164,18 +180,30 @@ describe("PuzzleIngestionService", () => {
 
       await service.populateUntilCaughtUp();
 
+      // Deterministic + shuffle strategies go to the shared strategy-runs
+      // queue; each LLM provider gets its own queue.
       expect(mockStrategyQueue.addBulk).toHaveBeenCalledTimes(1);
-      const jobs = mockStrategyQueue.addBulk.mock.calls[0][0] as {
-        name: string;
-        data: { puzzleId: number; strategyName: string; date: string; trialNumber: number };
-        opts: { jobId: string };
-      }[];
+      expect(mockOpenAIQueue.addBulk).toHaveBeenCalledTimes(1);
+      expect(mockOllamaQueue.addBulk).toHaveBeenCalledTimes(1);
+
+      const strategyJobs = mockStrategyQueue.addBulk.mock.calls[0][0] as JobShape[];
+      const openAIJobs = mockOpenAIQueue.addBulk.mock.calls[0][0] as JobShape[];
+      const ollamaJobs = mockOllamaQueue.addBulk.mock.calls[0][0] as JobShape[];
+      const jobs = [...strategyJobs, ...openAIJobs, ...ollamaJobs];
 
       const strategies = new Set(jobs.map((job) => job.data.strategyName));
       expect(strategies).toEqual(new Set(SUPPORTED_STRATEGIES));
 
-      // Deterministic strategies have one trial; shuffle strategies expand to
-      // their configured trial counts, so there is more than one job per strategy.
+      // The LLM providers land only on their own queues, and the shared queue
+      // only carries non-LLM strategies.
+      expect(openAIJobs.every((job) => job.data.strategyName === "llm-openai")).toBe(true);
+      expect(ollamaJobs.every((job) => job.data.strategyName === "llm-ollama")).toBe(true);
+      expect(strategyJobs.some((job) => job.data.strategyName === "llm-openai")).toBe(false);
+      expect(strategyJobs.some((job) => job.data.strategyName === "llm-ollama")).toBe(false);
+
+      // Deterministic strategies have one trial; shuffle and LLM strategies
+      // expand to their configured trial counts, so there is more than one job
+      // per strategy.
       expect(jobs.length).toBeGreaterThan(SUPPORTED_STRATEGIES.length);
 
       for (const job of jobs) {

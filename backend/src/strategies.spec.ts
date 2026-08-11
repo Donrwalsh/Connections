@@ -9,6 +9,8 @@ import {
   DEFAULT_LLM_TEMPERATURE_MAX_OPENAI,
   DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA,
   DEFAULT_LLM_TRIALS,
+  DEFAULT_LLM_OPENAI_CONCURRENCY,
+  DEFAULT_LLM_OLLAMA_CONCURRENCY,
   DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT,
   DEFAULT_SHUFFLE_FOOLISH_TRIALS,
   DEFAULT_SHUFFLE_SMART_TRIALS,
@@ -21,6 +23,8 @@ import {
   llmMaxModelErrors,
   llmMaxPrompts,
   llmNumResponses,
+  llmOllamaConcurrency,
+  llmOpenAIConcurrency,
   llmTemperatureBase,
   llmTemperatureMax,
   llmTemperatureStep,
@@ -85,6 +89,47 @@ describe("strategies", () => {
 
     it("should read a valid positive integer", () => {
       expect(llmTrialCount({ LLM_TRIALS: "5" })).toBe(5);
+    });
+  });
+
+  describe("llmOpenAIConcurrency", () => {
+    it("should default when the env var is missing", () => {
+      expect(llmOpenAIConcurrency({})).toBe(DEFAULT_LLM_OPENAI_CONCURRENCY);
+    });
+
+    it("should default when the env var is invalid", () => {
+      expect(llmOpenAIConcurrency({ LLM_OPENAI_CONCURRENCY: "abc" })).toBe(
+        DEFAULT_LLM_OPENAI_CONCURRENCY,
+      );
+      expect(llmOpenAIConcurrency({ LLM_OPENAI_CONCURRENCY: "0" })).toBe(
+        DEFAULT_LLM_OPENAI_CONCURRENCY,
+      );
+      expect(llmOpenAIConcurrency({ LLM_OPENAI_CONCURRENCY: "-1" })).toBe(
+        DEFAULT_LLM_OPENAI_CONCURRENCY,
+      );
+    });
+
+    it("should read a valid positive integer", () => {
+      expect(llmOpenAIConcurrency({ LLM_OPENAI_CONCURRENCY: "3" })).toBe(3);
+    });
+  });
+
+  describe("llmOllamaConcurrency", () => {
+    it("should default when the env var is missing", () => {
+      expect(llmOllamaConcurrency({})).toBe(DEFAULT_LLM_OLLAMA_CONCURRENCY);
+    });
+
+    it("should default when the env var is invalid", () => {
+      expect(llmOllamaConcurrency({ LLM_OLLAMA_CONCURRENCY: "abc" })).toBe(
+        DEFAULT_LLM_OLLAMA_CONCURRENCY,
+      );
+      expect(llmOllamaConcurrency({ LLM_OLLAMA_CONCURRENCY: "0" })).toBe(
+        DEFAULT_LLM_OLLAMA_CONCURRENCY,
+      );
+    });
+
+    it("should read a valid positive integer", () => {
+      expect(llmOllamaConcurrency({ LLM_OLLAMA_CONCURRENCY: "2" })).toBe(2);
     });
   });
 

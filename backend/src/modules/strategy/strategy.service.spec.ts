@@ -2,7 +2,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { DataSource } from "typeorm";
 import { getRepositoryToken } from "@nestjs/typeorm";
-import { STRATEGY_QUEUE } from "../queue/queue.module";
+import { STRATEGY_QUEUE, LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE } from "../queue/queue.module";
 import { StrategyService } from "./strategy.service";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { Puzzle } from "../game/entities/puzzle.entity";
@@ -14,6 +14,8 @@ import { OrchestratorService, type SolveOutcome } from "./orchestrator.service";
 describe("StrategyService", () => {
   let service: StrategyService;
   let mockQueue: { add: jest.Mock; addBulk: jest.Mock };
+  let mockOpenAIQueue: { add: jest.Mock; addBulk: jest.Mock };
+  let mockOllamaQueue: { add: jest.Mock; addBulk: jest.Mock };
   let mockStrategyRunRepo: {
     findOne: jest.Mock;
     find: jest.Mock;
@@ -76,6 +78,14 @@ describe("StrategyService", () => {
       add: jest.fn().mockResolvedValue(undefined),
       addBulk: jest.fn().mockResolvedValue(undefined),
     };
+    mockOpenAIQueue = {
+      add: jest.fn().mockResolvedValue(undefined),
+      addBulk: jest.fn().mockResolvedValue(undefined),
+    };
+    mockOllamaQueue = {
+      add: jest.fn().mockResolvedValue(undefined),
+      addBulk: jest.fn().mockResolvedValue(undefined),
+    };
     mockStrategyRunRepo = {
       findOne: jest.fn(),
       find: jest.fn(),
@@ -111,6 +121,8 @@ describe("StrategyService", () => {
         StrategyService,
         { provide: DataSource, useValue: mockDataSource },
         { provide: STRATEGY_QUEUE, useValue: mockQueue },
+        { provide: LLM_OPENAI_QUEUE, useValue: mockOpenAIQueue },
+        { provide: LLM_OLLAMA_QUEUE, useValue: mockOllamaQueue },
         { provide: getRepositoryToken(StrategyRun), useValue: mockStrategyRunRepo },
         { provide: getRepositoryToken(Puzzle), useValue: mockPuzzleRepo },
         { provide: getRepositoryToken(Guess), useValue: mockGuessRepo },
@@ -156,6 +168,40 @@ describe("StrategyService", () => {
         },
         { jobId: "run-100-order-0" },
       );
+    });
+
+    it("should route llm-openai runs to the OpenAI queue", async () => {
+      await service.triggerRun(100, "llm-openai", "2024-01-02");
+
+      expect(mockOpenAIQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
+        {
+          puzzleId: 100,
+          strategyName: "llm-openai",
+          date: "2024-01-02",
+          trialNumber: 0,
+        },
+        { jobId: "run-100-llm-openai-0" },
+      );
+      expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(mockOllamaQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("should route llm-ollama runs to the Ollama queue", async () => {
+      await service.triggerRun(100, "llm-ollama", "2024-01-02");
+
+      expect(mockOllamaQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
+        {
+          puzzleId: 100,
+          strategyName: "llm-ollama",
+          date: "2024-01-02",
+          trialNumber: 0,
+        },
+        { jobId: "run-100-llm-ollama-0" },
+      );
+      expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
     });
   });
 
@@ -569,7 +615,7 @@ describe("StrategyService", () => {
       ]);
     });
 
-    it("should queue one job per llm trial", async () => {
+    it("should queue one job per llm-openai trial on the OpenAI queue", async () => {
       process.env.LLM_TRIALS = "2";
       try {
         await service.triggerStrategyRuns(100, "llm-openai", "2024-01-02");
@@ -577,8 +623,10 @@ describe("StrategyService", () => {
         delete process.env.LLM_TRIALS;
       }
 
-      expect(mockQueue.addBulk).toHaveBeenCalledTimes(1);
-      expect(mockQueue.addBulk).toHaveBeenCalledWith([
+      expect(mockOpenAIQueue.addBulk).toHaveBeenCalledTimes(1);
+      expect(mockQueue.addBulk).not.toHaveBeenCalled();
+      expect(mockOllamaQueue.addBulk).not.toHaveBeenCalled();
+      expect(mockOpenAIQueue.addBulk).toHaveBeenCalledWith([
         {
           name: "run-strategy",
           data: {
@@ -598,6 +646,41 @@ describe("StrategyService", () => {
             trialNumber: 2,
           },
           opts: { jobId: "run-100-llm-openai-2" },
+        },
+      ]);
+    });
+
+    it("should queue one job per llm-ollama trial on the Ollama queue", async () => {
+      process.env.LLM_TRIALS = "2";
+      try {
+        await service.triggerStrategyRuns(100, "llm-ollama", "2024-01-02");
+      } finally {
+        delete process.env.LLM_TRIALS;
+      }
+
+      expect(mockOllamaQueue.addBulk).toHaveBeenCalledTimes(1);
+      expect(mockQueue.addBulk).not.toHaveBeenCalled();
+      expect(mockOpenAIQueue.addBulk).not.toHaveBeenCalled();
+      expect(mockOllamaQueue.addBulk).toHaveBeenCalledWith([
+        {
+          name: "run-strategy",
+          data: {
+            puzzleId: 100,
+            strategyName: "llm-ollama",
+            date: "2024-01-02",
+            trialNumber: 1,
+          },
+          opts: { jobId: "run-100-llm-ollama-1" },
+        },
+        {
+          name: "run-strategy",
+          data: {
+            puzzleId: 100,
+            strategyName: "llm-ollama",
+            date: "2024-01-02",
+            trialNumber: 2,
+          },
+          opts: { jobId: "run-100-llm-ollama-2" },
         },
       ]);
     });
