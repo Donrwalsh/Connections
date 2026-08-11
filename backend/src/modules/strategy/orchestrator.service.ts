@@ -29,8 +29,20 @@ export interface ProposedGroup {
   reasoning: string;
 }
 
+export type ProposalStatus = "used" | "rejected_duplicate" | "not_selected";
+
+export interface ProposalAnnotation {
+  promptNumber: number;
+  word_ids: number[];
+  category: string;
+  confidence: number;
+  reasoning: string;
+  status: ProposalStatus;
+}
+
 export interface SolveSuccess {
   proposedGroups: ProposedGroup[];
+  proposals: ProposalAnnotation[];
   prompt: string;
   model: string;
   contextWindow: number;
@@ -45,6 +57,7 @@ export interface SolveSuccess {
 
 export interface SolveErrorDetails {
   proposedGroups?: ProposedGroup[];
+  proposals?: ProposalAnnotation[];
   prompt?: string;
   model?: string;
   contextWindow?: number;

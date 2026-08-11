@@ -128,6 +128,50 @@ export const ProposedGroupSchema = z.object({
 export type ProposedGroup = z.infer<typeof ProposedGroupSchema>;
 
 /**
+ * Why a well-formed proposed group did not become the step's guess. Mirrors
+ * the disposition the solver gives each candidate: the winner is 'used',
+ * groups repeating a prior guess are 'rejected_duplicate', and fresh groups
+ * that lost to an earlier (higher-confidence) candidate in the same batch are
+ * 'not_selected'. Structurally invalid candidates (wrong length, out-of-range
+ * or duplicate ids) are not reported as proposals at all.
+ */
+export const ProposalStatusSchema = z.enum([
+  "used",
+  "rejected_duplicate",
+  "not_selected",
+]);
+export type ProposalStatus = z.infer<typeof ProposalStatusSchema>;
+
+/**
+ * A single candidate group the model proposed, annotated with the prompt that
+ * produced it and its disposition. The full list is returned so callers can
+ * persist every proposal of a solve step, not just the winner. word_ids are
+ * indices into the puzzleWords sent in the request (same as ProposedGroup).
+ */
+export const ProposalSchema = z.object({
+  promptNumber: z
+    .number()
+    .int()
+    .min(1)
+    .describe("1-based index of the prompt within the solve step that produced this group"),
+  word_ids: z
+    .array(z.number().int().min(0).max(15))
+    .length(4)
+    .describe("Indices into the puzzle's remaining word list"),
+  category: z.string().describe("Shared theme/category label chosen by the model"),
+  confidence: z
+    .number()
+    .min(0)
+    .max(1)
+    .describe("Model's self-assessed confidence in this exact grouping"),
+  reasoning: z.string().describe("Brief explanation of why these 4 words were grouped together"),
+  status: ProposalStatusSchema.describe(
+    "Whether this group was used as the guess, rejected as a repeat of a prior guess, or passed over for a higher-confidence proposal in the same batch",
+  ),
+});
+export type Proposal = z.infer<typeof ProposalSchema>;
+
+/**
  * The full shape we ask the model to produce: exactly `numResponses`
  * candidate groups, ordered by the model's confidence. Kept as a factory
  * because the requested candidate count varies per request (see
@@ -229,6 +273,11 @@ export const SolveResponseSchema = z.object({
     .length(1)
     .describe(
       "The single selected candidate: the first well-formed group that does not repeat a prior guess",
+    ),
+  proposals: z
+    .array(ProposalSchema)
+    .describe(
+      "Every well-formed candidate group proposed across this solve step's prompts, each annotated with its prompt number and disposition (used/rejected_duplicate/not_selected)",
     ),
   prompt: z.string(),
   model: z.string(),

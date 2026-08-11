@@ -7,6 +7,7 @@ import { StrategyService } from "./strategy.service";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
+import { LlmProposalStatus } from "./entities/llm-proposal.entity";
 import { GameService } from "../game/game.service";
 import { OrchestratorService, type SolveOutcome } from "./orchestrator.service";
 
@@ -98,7 +99,7 @@ describe("StrategyService", () => {
       proposeGroup: jest.fn(),
     };
     mockManager = {
-      insert: jest.fn().mockResolvedValue(undefined),
+      insert: jest.fn().mockResolvedValue({ identifiers: [{ id: 1 }] }),
       save: jest.fn().mockResolvedValue(undefined),
     };
     mockDataSource = {
@@ -918,6 +919,25 @@ describe("StrategyService", () => {
       ...overrides,
     });
 
+    const makeProposal = (
+      wordIds: number[],
+      status: "used" | "rejected_duplicate" | "not_selected" = "used",
+      overrides: Partial<{
+        promptNumber: number;
+        category: string;
+        confidence: number;
+        reasoning: string;
+      }> = {},
+    ) => ({
+      promptNumber: 1,
+      word_ids: wordIds,
+      category: "Fruit",
+      confidence: 0.9,
+      reasoning: "test",
+      status,
+      ...overrides,
+    });
+
     const success = (
       wordIds: number[],
       overrides: Partial<import("./orchestrator.service").SolveSuccess> = {},
@@ -925,6 +945,7 @@ describe("StrategyService", () => {
       ok: true,
       data: {
         proposedGroups: [makeGroup(wordIds)],
+        proposals: [makeProposal(wordIds)],
         prompt: "solve step",
         model: "mistral",
         contextWindow: 8192,
@@ -962,6 +983,13 @@ describe("StrategyService", () => {
         code: "duplicate_group",
         details: {
           proposedGroups: [makeGroup(wordIds, { confidence: 0.5, reasoning: "again" })],
+          proposals: [
+            makeProposal(wordIds, "rejected_duplicate", {
+              promptNumber: 3,
+              confidence: 0.5,
+              reasoning: "again",
+            }),
+          ],
           prompt: "solve step",
           model: "mistral",
           contextWindow: 8192,
@@ -1009,9 +1037,9 @@ describe("StrategyService", () => {
 
       expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
       expect(mockOrchestratorService.proposeGroup).toHaveBeenCalledTimes(2);
-      const inserted = mockManager.insert.mock.calls.flatMap(
-        (call) => call[1] as Array<Record<string, unknown>>,
-      );
+      const inserted = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "Guess")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
       expect(inserted).toHaveLength(2);
       expect(inserted[0]).toEqual(
         expect.objectContaining({
@@ -1051,6 +1079,32 @@ describe("StrategyService", () => {
           status: StrategyRunStatus.COMPLETED,
           modelName: "mistral",
           contextWindow: 8192,
+        }),
+      );
+
+      // Every proposed candidate is persisted, not just the winner, and the
+      // 'used' proposal is linked to the guess it became.
+      const proposalRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "LlmProposal")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(proposalRows).toHaveLength(2);
+      expect(proposalRows[0]).toEqual({
+        strategyRun: { id: 7 },
+        promptNumber: 1,
+        guessNumber: 1,
+        words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+        category: "Fruit",
+        confidence: 0.9,
+        reasoning: "test",
+        status: LlmProposalStatus.USED,
+        guess: { id: 1 },
+      });
+      expect(proposalRows[1]).toEqual(
+        expect.objectContaining({
+          guessNumber: 2,
+          words: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+          status: LlmProposalStatus.USED,
+          guess: { id: 1 },
         }),
       );
     });
@@ -1162,9 +1216,9 @@ describe("StrategyService", () => {
       // raised temperature, but the candidate count resets to base for each
       // fresh guess.
       expect(calls[1][0]).toEqual(expect.objectContaining({ temperature: 1.2, numResponses: 1 }));
-      const inserted = mockManager.insert.mock.calls.flatMap(
-        (call) => call[1] as Array<Record<string, unknown>>,
-      );
+      const inserted = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "Guess")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
       // The guess record still reports the escalated candidate count that
       // actually produced the guess.
       expect(inserted[0]).toEqual(
@@ -1188,14 +1242,16 @@ describe("StrategyService", () => {
         const result = await service.runLlmStrategy(100, "llm-openai");
 
         expect(result).toEqual({ status: StrategyRunStatus.DUPLICATE, guessCount: 4 });
-        const inserted = mockManager.insert.mock.calls.flatMap(
-          (call) =>
-            call[1] as Array<{
-              result: GuessResult;
-              llmDetails: Record<string, unknown> | null;
-              promptTokens: number | null;
-            }>,
-        );
+        const inserted = mockManager.insert.mock.calls
+          .filter((call) => call[0] === "Guess")
+          .flatMap(
+            (call) =>
+              call[1] as Array<{
+                result: GuessResult;
+                llmDetails: Record<string, unknown> | null;
+                promptTokens: number | null;
+              }>,
+          );
         // The orchestrator exhausted its prompt budget on repeats three times,
         // so each step records the repeated group it returned.
         expect(inserted.map((g) => g.result)).toEqual([
@@ -1231,6 +1287,31 @@ describe("StrategyService", () => {
           StrategyRun,
           expect.objectContaining({ status: StrategyRunStatus.DUPLICATE }),
         );
+        // The first repeated group of the last prompt becomes the recorded
+        // duplicate guess, so its proposal flips from rejected_duplicate to
+        // used and is linked to that guess.
+        const proposalRows = mockManager.insert.mock.calls
+          .filter((call) => call[0] === "LlmProposal")
+          .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+        expect(proposalRows).toHaveLength(3);
+        expect(proposalRows[0]).toEqual({
+          strategyRun: { id: 7 },
+          promptNumber: 3,
+          guessNumber: 2,
+          words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+          category: "Fruit",
+          confidence: 0.5,
+          reasoning: "again",
+          status: LlmProposalStatus.USED,
+          guess: { id: 1 },
+        });
+        expect(proposalRows[2]).toEqual(
+          expect.objectContaining({
+            guessNumber: 4,
+            status: LlmProposalStatus.USED,
+            guess: { id: 1 },
+          }),
+        );
       } finally {
         delete process.env.LLM_MAX_DUPLICATE_GUESSES;
       }
@@ -1254,14 +1335,16 @@ describe("StrategyService", () => {
         const result = await service.runLlmStrategy(100, "llm-openai");
 
         expect(result).toEqual({ status: StrategyRunStatus.DUPLICATE, guessCount: 2 });
-        const inserted = mockManager.insert.mock.calls.flatMap(
-          (call) =>
-            call[1] as Array<{
-              words: string[];
-              result: GuessResult;
-              llmDetails: Record<string, unknown>;
-            }>,
-        );
+        const inserted = mockManager.insert.mock.calls
+          .filter((call) => call[0] === "Guess")
+          .flatMap(
+            (call) =>
+              call[1] as Array<{
+                words: string[];
+                result: GuessResult;
+                llmDetails: Record<string, unknown>;
+              }>,
+          );
         expect(inserted).toHaveLength(1);
         expect(inserted[0].result).toBe(GuessResult.DUPLICATE);
         expect(inserted[0].words).toEqual(["APPLE", "BANANA", "CHERRY", "DATE"]);
@@ -1315,18 +1398,70 @@ describe("StrategyService", () => {
       const result = await service.runLlmStrategy(100, "llm-openai");
 
       expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
-      const inserted = mockManager.insert.mock.calls.flatMap(
-        (call) =>
-          call[1] as Array<{
-            words: string[];
-            result: GuessResult;
-            llmDetails: Record<string, unknown>;
-          }>,
-      );
+      const inserted = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "Guess")
+        .flatMap(
+          (call) =>
+            call[1] as Array<{
+              words: string[];
+              result: GuessResult;
+              llmDetails: Record<string, unknown>;
+            }>,
+        );
       expect(inserted).toHaveLength(2);
       expect(inserted[0].words).toEqual(["EGGPLANT", "FIG", "GRAPE", "HONEY"]);
       expect(inserted[0].result).toBe(GuessResult.SUCCESS);
       expect(inserted[0].llmDetails.category).toBe("FreshCat");
+    });
+
+    it("should persist proposals that were not selected as not_selected", async () => {
+      // A batch with a winner and fresh groups that were passed over: the
+      // orchestrator keeps them for analysis but only the winner becomes the
+      // guess.
+      mockOrchestratorService.proposeGroup
+        .mockResolvedValueOnce(
+          success([0, 1, 2, 3], {
+            proposals: [
+              makeProposal([0, 1, 2, 3], "used"),
+              makeProposal([4, 5, 6, 7], "not_selected", { category: "Veg", confidence: 0.8 }),
+              makeProposal([0, 2, 4, 6], "not_selected", { category: "Veg", confidence: 0.7 }),
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(success([0, 1, 2, 3]));
+
+      const result = await service.runLlmStrategy(100, "llm-openai");
+
+      expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
+      const proposalRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "LlmProposal")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(proposalRows).toHaveLength(4);
+      // The winner is linked to its guess; the fresh-but-skipped candidates
+      // are stored unlinked with their own disposition.
+      expect(proposalRows[0]).toEqual(
+        expect.objectContaining({
+          words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+          status: LlmProposalStatus.USED,
+          guess: { id: 1 },
+        }),
+      );
+      expect(proposalRows[1]).toEqual({
+        strategyRun: { id: 7 },
+        promptNumber: 1,
+        guessNumber: 1,
+        words: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        category: "Veg",
+        confidence: 0.8,
+        reasoning: "test",
+        status: LlmProposalStatus.NOT_SELECTED,
+      });
+      expect(proposalRows[2]).toEqual(
+        expect.objectContaining({
+          words: ["APPLE", "CHERRY", "EGGPLANT", "GRAPE"],
+          status: LlmProposalStatus.NOT_SELECTED,
+        }),
+      );
     });
 
     it("should treat a success with no proposed group as malformed", async () => {

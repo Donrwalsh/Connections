@@ -114,6 +114,9 @@ describe("proposeGroup", () => {
     const result = await proposeGroup(makeRequest());
 
     expect(result.proposedGroups).toEqual([makeGroup()]);
+    expect(result.proposals).toEqual([
+      { ...makeGroup(), promptNumber: 1, status: "used" },
+    ]);
     expect(result.prompt).toContain("Remaining words");
     expect(result.model).toBe("test-model");
     expect(result.contextWindow).toBe(4096);
@@ -208,10 +211,52 @@ describe("proposeGroup", () => {
     expect(result.proposedGroups).toEqual([
       makeGroup({ word_ids: [4, 5, 6, 7] }),
     ]);
+    expect(result.proposals).toEqual([
+      { ...makeGroup(), promptNumber: 1, status: "rejected_duplicate" },
+      { ...makeGroup(), promptNumber: 1, status: "rejected_duplicate" },
+      {
+        ...makeGroup({ word_ids: [4, 5, 6, 7] }),
+        promptNumber: 2,
+        status: "used",
+      },
+    ]);
     expect(result.temperature).toBe(0.1);
     expect(result.numResponses).toBe(2);
     expect(result.promptAttempts).toBe(2);
     expect(result.duplicatesRejected).toBe(2);
+  });
+
+  it("records fresh groups passed over in favor of a higher-confidence proposal as not_selected", async () => {
+    generateObjectMock.mockResolvedValueOnce(
+      makeOutput([
+        makeGroup(),
+        makeGroup({ word_ids: [4, 5, 6, 7], confidence: 0.8 }),
+        makeGroup({ word_ids: [0, 2, 4, 6], confidence: 0.7 }),
+      ]),
+    );
+
+    const result = await proposeGroup(makeRequest({ numResponses: 3 }));
+
+    expect(result.proposedGroups).toEqual([makeGroup()]);
+    expect(result.proposals).toEqual([
+      { ...makeGroup(), promptNumber: 1, status: "used" },
+      {
+        word_ids: [4, 5, 6, 7],
+        category: "Test",
+        confidence: 0.8,
+        reasoning: "test",
+        promptNumber: 1,
+        status: "not_selected",
+      },
+      {
+        word_ids: [0, 2, 4, 6],
+        category: "Test",
+        confidence: 0.7,
+        reasoning: "test",
+        promptNumber: 1,
+        status: "not_selected",
+      },
+    ]);
   });
 
   it("raises temperature and candidate count together on each escalation", async () => {
@@ -399,6 +444,11 @@ describe("proposeGroup", () => {
         promptAttempts: 3,
         duplicatesRejected: 3,
         proposedGroups: [makeGroup()],
+        proposals: [
+          { ...makeGroup(), promptNumber: 1, status: "rejected_duplicate" },
+          { ...makeGroup(), promptNumber: 2, status: "rejected_duplicate" },
+          { ...makeGroup(), promptNumber: 3, status: "rejected_duplicate" },
+        ],
       },
     });
     expect(generateObjectMock).toHaveBeenCalledTimes(3);

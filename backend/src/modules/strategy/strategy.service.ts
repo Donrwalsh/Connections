@@ -7,6 +7,7 @@ import { DataSource, Repository } from "typeorm";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { combinationToWords, firstCombination, nextCombination } from "./combinatorics";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
+import { LlmProposal, LlmProposalStatus } from "./entities/llm-proposal.entity";
 import { GameService } from "../game/game.service";
 import { StrategyRunDetailDto, StrategyRunListItemDto, GuessDetailDto } from "./dto/strategy.dto";
 import {
@@ -453,6 +454,10 @@ export class StrategyService {
     let numResponses: number;
 
     const pendingGuesses: Partial<Guess>[] = [];
+    // Every candidate proposal emitted by the orchestrator for the current
+    // solve step, held until the guess it belongs to is flushed so the 'used'
+    // proposal can be linked to the inserted guess row.
+    const pendingProposals: Partial<LlmProposal>[] = [];
 
     while (true) {
       // Each solve step is a fresh guess: start from the base candidate count
@@ -525,6 +530,23 @@ export class StrategyService {
           });
           priorGuesses.push({ words, result: evaluation.result });
 
+          // Persist every candidate the orchestrator proposed across this
+          // step's prompts, not just the winner. word_ids index into the
+          // run's pool before the solved words are removed below, so resolve
+          // them here.
+          for (const proposal of data.proposals) {
+            pendingProposals.push({
+              strategyRun: { id: run.id } as StrategyRun,
+              promptNumber: proposal.promptNumber,
+              guessNumber: guessCount,
+              words: proposal.word_ids.map((id) => run.availableWords[id]),
+              category: proposal.category,
+              confidence: proposal.confidence,
+              reasoning: proposal.reasoning,
+              status: proposal.status as LlmProposalStatus,
+            });
+          }
+
           if (evaluation.result === GuessResult.SUCCESS) {
             run.availableWords = run.availableWords.filter((w) => !words.includes(w));
             run.currentCombination = firstCombination(GROUP_SIZE);
@@ -586,6 +608,30 @@ export class StrategyService {
               llmDetails: this.llmDetailsFor(group, details?.prompt, details?.promptMetadata),
             });
             priorGuesses.push({ words, result: GuessResult.DUPLICATE });
+            // The guess recorded here is the first repeated group of the last
+            // prompt, so that proposal flips from rejected_duplicate to used
+            // to mark which candidate actually became the recorded guess. The
+            // rest stay as the orchestrator classified them.
+            const proposals = details?.proposals ?? [];
+            const lastPromptNumber = Math.max(0, ...proposals.map((p) => p.promptNumber));
+            const usedProposal = proposals.find(
+              (p) => p.status === "rejected_duplicate" && p.promptNumber === lastPromptNumber,
+            );
+            for (const proposal of proposals) {
+              pendingProposals.push({
+                strategyRun: { id: run.id } as StrategyRun,
+                promptNumber: proposal.promptNumber,
+                guessNumber: guessCount,
+                words: proposal.word_ids.map((id) => run.availableWords[id]),
+                category: proposal.category,
+                confidence: proposal.confidence,
+                reasoning: proposal.reasoning,
+                status:
+                  proposal === usedProposal
+                    ? LlmProposalStatus.USED
+                    : (proposal.status as LlmProposalStatus),
+              });
+            }
           }
 
           if (duplicateCount >= maxDuplicates) {
@@ -605,7 +651,7 @@ export class StrategyService {
       // Flush every iteration: LLM runs are short (tens of guesses, not
       // thousands), so batching buys nothing, and flushing each step means a
       // worker crash loses at most one step of progress.
-      await this.flushBatch(run, pendingGuesses);
+      await this.flushBatch(run, pendingGuesses, pendingProposals);
 
       // After a transient model failure, pause before re-prompting so the
       // model has time to finish loading.
@@ -738,16 +784,38 @@ export class StrategyService {
     });
   }
 
-  private async flushBatch(run: StrategyRun, pendingGuesses: Partial<Guess>[]): Promise<void> {
+  private async flushBatch(
+    run: StrategyRun,
+    pendingGuesses: Partial<Guess>[],
+    pendingProposals: Partial<LlmProposal>[] = [],
+  ): Promise<void> {
     // Create a shallow copy to insert and clear the original buffer. The run is
     // always saved — even with no new guesses — so terminal states reached
     // without a recorded guess (e.g. LLM malformed/error limits) persist.
     const guessesToInsert = [...pendingGuesses];
     pendingGuesses.length = 0;
+    const proposalsToInsert = [...pendingProposals];
+    pendingProposals.length = 0;
 
     await this.dataSource.transaction(async (manager) => {
+      // Proposals are flushed together with the guess they belong to (one solve
+      // step per flush), so a single inserted guess id links the 'used'
+      // proposal to the guess that realized it.
+      let insertedGuessId: number | undefined;
       if (guessesToInsert.length > 0) {
-        await manager.insert("Guess", guessesToInsert);
+        const result = await manager.insert("Guess", guessesToInsert);
+        insertedGuessId = result?.identifiers?.[0]?.id;
+      }
+
+      if (proposalsToInsert.length > 0) {
+        await manager.insert(
+          "LlmProposal",
+          proposalsToInsert.map((proposal) =>
+            proposal.status === LlmProposalStatus.USED && insertedGuessId !== undefined
+              ? { ...proposal, guess: { id: insertedGuessId } as Guess }
+              : proposal,
+          ),
+        );
       }
       await manager.save(StrategyRun, run);
     });

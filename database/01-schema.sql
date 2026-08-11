@@ -84,3 +84,31 @@ CREATE TABLE "Guess" (
 CREATE INDEX "IDX_Guess_puzzleId" ON "Guess" ("puzzleId");
 CREATE INDEX "IDX_Guess_strategyRun_sequenceNumber" 
   ON "Guess" ("strategyRunId", "sequenceNumber") INCLUDE ("words");
+
+CREATE TYPE llm_proposal_status_enum AS ENUM (
+  'used',
+  'rejected_duplicate',
+  'not_selected'
+);
+
+-- One row per LLM candidate group proposed by the orchestrator across every
+-- prompt of a solve step, including the ones that were rejected or never
+-- used. 'used' rows link to the Guess record they produced; 'rejected_duplicate'
+-- rows repeated a prior guess; 'not_selected' rows were fresh and well-formed
+-- but a higher-confidence proposal in the same batch won instead.
+CREATE TABLE "LlmProposal" (
+  "id" INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  "strategyRunId" INT NOT NULL REFERENCES "StrategyRun"("id") ON DELETE CASCADE,
+  "guessId" INT NULL REFERENCES "Guess"("id") ON DELETE SET NULL,
+  "promptNumber" INT NOT NULL,
+  "guessNumber" INT NULL,
+  "words" JSONB NOT NULL,
+  "category" TEXT NOT NULL,
+  "confidence" DOUBLE PRECISION NOT NULL,
+  "reasoning" TEXT NOT NULL,
+  "status" llm_proposal_status_enum NOT NULL,
+  "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX "IDX_LlmProposal_strategyRunId" ON "LlmProposal" ("strategyRunId");
+CREATE INDEX "IDX_LlmProposal_guessId" ON "LlmProposal" ("guessId");

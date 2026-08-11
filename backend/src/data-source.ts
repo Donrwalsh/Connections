@@ -4,6 +4,7 @@ import { AnswerGroup } from "./modules/game/entities/answer-group.entity";
 import { GroupMember } from "./modules/game/entities/group-member.entity";
 import { Puzzle } from "./modules/game/entities/puzzle.entity";
 import { Guess } from "./modules/strategy/entities/guess.entity";
+import { LlmProposal } from "./modules/strategy/entities/llm-proposal.entity";
 import { StrategyRun } from "./modules/strategy/entities/strategy-run.entity";
 
 /**
@@ -18,7 +19,7 @@ export const AppDataSource = new DataSource({
   username: process.env.DB_USER ?? "postgres",
   password: process.env.DB_PASSWORD ?? "postgres",
   database: process.env.DB_NAME ?? "mydb",
-  entities: [Puzzle, AnswerGroup, GroupMember, StrategyRun, Guess],
+  entities: [Puzzle, AnswerGroup, GroupMember, StrategyRun, Guess, LlmProposal],
   migrations: [__dirname + "/migrations/*{.ts,.js}"],
   synchronize: false,
 });

@@ -11,6 +11,7 @@ import {
   type SolveErrorCode,
   type Usage,
   type PromptMetadata,
+  type Proposal,
 } from "./types.js";
 import { buildSolvePrompt, forbiddenIdSets } from "./prompt.js";
 import {
@@ -34,6 +35,7 @@ const DEFAULT_MAX_PROMPTS = 19;
 
 export interface SolveResult {
   proposedGroups: ProposedGroup[];
+  proposals: Proposal[];
   prompt: string;
   model: string;
   contextWindow: number;
@@ -48,6 +50,7 @@ export interface SolveResult {
 
 export interface SolveErrorDetails {
   proposedGroups?: ProposedGroup[];
+  proposals?: Proposal[];
   prompt?: string;
   model?: string;
   contextWindow?: number;
@@ -90,6 +93,9 @@ export class SolveError extends Error {
  * The temperature and numResponses that eventually produced the winning
  * candidate are returned so the caller (the backend) can record the escalated
  * values on the guess (the temperature is held onto for subsequent steps).
+ * `proposals` carries every well-formed candidate proposed across the step's
+ * prompts with its disposition, so callers can persist all of them (not just
+ * the winner) for analysis.
  *
  * Usage and latency are aggregated across every prompt in the step so the
  * caller's per-guess telemetry reflects the true cost of reaching an answer.
@@ -120,6 +126,13 @@ export async function proposeGroup(
   // mapping the prompt uses keeps the two in sync.
   const forbidden = new Set(forbiddenIdSets(request).map(idSetKey));
 
+  const isWellFormed = (ids: number[]): boolean =>
+    ids.length === GROUP_SIZE &&
+    ids.every(
+      (id) => Number.isInteger(id) && id >= 0 && id < request.puzzleWords.length,
+    ) &&
+    new Set(ids).size === GROUP_SIZE;
+
   const startedAt = Date.now();
   let totalLatencyMs = 0;
   const usage: Usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
@@ -136,27 +149,33 @@ export async function proposeGroup(
   // submitted with, its latency/token cost, and what it produced. The prompt
   // text is not kept here — it is large and reconstructable.
   const promptMetadata: PromptMetadata[] = [];
+  // Every well-formed candidate proposed across the step's prompts, annotated
+  // with its prompt number and disposition. Structurally invalid candidates
+  // (wrong length, out-of-range or duplicate ids) are skipped, matching what
+  // a caller can meaningfully replay.
+  const proposals: Proposal[] = [];
 
   /**
-   * Picks the first candidate that is well-formed (4 unique, in-range IDs)
-   * and does not repeat a prior guess. Candidates that repeat a prior guess
-   * are counted as rejected duplicates (for telemetry); structurally unusable
+   * Classifies a batch of candidates: picks the first well-formed group that
+   * does not repeat a prior guess as the winner and records every well-formed
+   * group with its disposition. Groups before the winner that repeat a prior
+   * guess are rejected_duplicate; the winner is used; well-formed groups after
+   * the winner are fresh but were not selected (a higher-confidence proposal in
+   * the batch won), so they are recorded as not_selected. Structurally unusable
    * candidates are skipped without counting toward the duplicate total.
    */
-  const selectFirstUsable = (
+  const classifyBatch = (
     candidates: ProposedGroup[],
-  ): ProposedGroup | null => {
-    for (const group of candidates) {
-      const ids = group.word_ids;
-      const wellFormed =
-        ids.length === GROUP_SIZE &&
-        ids.every(
-          (id) =>
-            Number.isInteger(id) && id >= 0 && id < request.puzzleWords.length,
-        ) &&
-        new Set(ids).size === GROUP_SIZE;
+    promptNumber: number,
+  ): { selected: ProposedGroup | null; proposals: Proposal[] } => {
+    const batchProposals: Proposal[] = [];
+    let selected: ProposedGroup | null = null;
 
-      if (!wellFormed) {
+    for (let i = 0; i < candidates.length; i++) {
+      const group = candidates[i];
+      const ids = group.word_ids;
+
+      if (!isWellFormed(ids)) {
         invalidSeen++;
         continue;
       }
@@ -164,12 +183,45 @@ export async function proposeGroup(
       if (forbidden.has(idSetKey(ids))) {
         sawDuplicate = true;
         duplicatesRejected++;
+        batchProposals.push({
+          promptNumber,
+          word_ids: ids,
+          category: group.category,
+          confidence: group.confidence,
+          reasoning: group.reasoning,
+          status: "rejected_duplicate",
+        });
         continue;
       }
 
-      return group;
+      selected = group;
+      batchProposals.push({
+        promptNumber,
+        word_ids: ids,
+        category: group.category,
+        confidence: group.confidence,
+        reasoning: group.reasoning,
+        status: "used",
+      });
+      // Remaining well-formed candidates in this batch are fresh but were not
+      // selected — the earlier proposal won. Record them without touching the
+      // reject counters (which only cover candidates scanned before the winner).
+      for (const rest of candidates.slice(i + 1)) {
+        if (isWellFormed(rest.word_ids)) {
+          batchProposals.push({
+            promptNumber,
+            word_ids: rest.word_ids,
+            category: rest.category,
+            confidence: rest.confidence,
+            reasoning: rest.reasoning,
+            status: "not_selected",
+          });
+        }
+      }
+      break;
     }
-    return null;
+
+    return { selected, proposals: batchProposals };
   };
 
   /**
@@ -255,7 +307,11 @@ export async function proposeGroup(
     // only in this prompt from the step-level cumulative counters.
     const duplicatesBefore = duplicatesRejected;
     const invalidBefore = invalidSeen;
-    const selected = selectFirstUsable(result.object.proposed_groups);
+    const { selected, proposals: batchProposals } = classifyBatch(
+      result.object.proposed_groups,
+      attempts,
+    );
+    proposals.push(...batchProposals);
     const duplicateAttempt = duplicatesRejected > duplicatesBefore;
     const invalidAttempt = invalidSeen > invalidBefore;
 
@@ -277,6 +333,7 @@ export async function proposeGroup(
     if (selected) {
       return {
         proposedGroups: [selected],
+        proposals,
         prompt,
         model: lastModel,
         contextWindow: lastContextWindow,
@@ -307,6 +364,7 @@ export async function proposeGroup(
 
   throw new SolveError(code, message, {
     proposedGroups: lastGroups,
+    proposals,
     prompt: lastPrompt,
     model: lastModel,
     contextWindow: lastContextWindow,

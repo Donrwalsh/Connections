@@ -10,7 +10,15 @@ import { AnswerGroup } from "../src/modules/game/entities/answer-group.entity";
 import { GroupMember } from "../src/modules/game/entities/group-member.entity";
 import { Puzzle } from "../src/modules/game/entities/puzzle.entity";
 import { Guess, GuessResult, GuessSource } from "../src/modules/strategy/entities/guess.entity";
-import { StrategyRun } from "../src/modules/strategy/entities/strategy-run.entity";
+import {
+  LlmProposal,
+  LlmProposalStatus,
+} from "../src/modules/strategy/entities/llm-proposal.entity";
+import {
+  StrategyRun,
+  StrategyRunStatus,
+} from "../src/modules/strategy/entities/strategy-run.entity";
+import { StrategyService } from "../src/modules/strategy/strategy.service";
 import { strategyQueue } from "../src/modules/queue/strategy.queue";
 
 const TEST_DATE = "1999-12-31";
@@ -44,6 +52,16 @@ describe("App (e2e)", () => {
                   category: "Test category",
                   confidence: 0.99,
                   reasoning: "E2E fake",
+                },
+              ],
+              proposals: [
+                {
+                  promptNumber: 1,
+                  word_ids: [0, 1, 2, 3],
+                  category: "Test category",
+                  confidence: 0.99,
+                  reasoning: "E2E fake",
+                  status: "used",
                 },
               ],
               prompt: `echo: ${body}`,
@@ -85,7 +103,10 @@ describe("App (e2e)", () => {
   async function seedPuzzle(): Promise<void> {
     const puzzle = await dataSource.getRepository(Puzzle).save({ date: TEST_DATE });
 
-    for (const group of TEST_GROUPS) {
+    // Real NYT members carry global 0-15 board positions, and loadOrCreateRun
+    // sorts the pool by position — so the seed must use global positions too,
+    // otherwise the strategy pool interleaves words across answer groups.
+    for (const [groupIndex, group] of TEST_GROUPS.entries()) {
       const answerGroup = await dataSource.getRepository(AnswerGroup).save({
         puzzle,
         level: group.level,
@@ -95,7 +116,7 @@ describe("App (e2e)", () => {
         group.words.map((word, position) => ({
           group: answerGroup,
           word,
-          position,
+          position: groupIndex * 4 + position,
         })),
       );
     }
@@ -286,6 +307,12 @@ describe("App (e2e)", () => {
       orchestrator: "healthy",
       data: {
         proposedGroups: [expect.objectContaining({ word_ids: [0, 1, 2, 3] })],
+        proposals: [
+          expect.objectContaining({
+            word_ids: [0, 1, 2, 3],
+            status: "used",
+          }),
+        ],
         prompt: expect.any(String),
         model: "e2e-fake-model",
         contextWindow: 8192,
@@ -294,6 +321,44 @@ describe("App (e2e)", () => {
       },
     });
   });
+
+  it("persists every proposed LLM candidate as an LlmProposal row", async () => {
+    const puzzle = await dataSource.getRepository(Puzzle).findOneByOrFail({ date: TEST_DATE });
+    const strategyService = app.get(StrategyService);
+
+    // Trial 99: the llm-openai trial-0 run is already created by the telemetry
+    // test above, and this needs a fresh run.
+    const result = await strategyService.runLlmStrategy(puzzle.id, "llm-openai", 99);
+
+    // The fake orchestrator always proposes group [0, 1, 2, 3], which resolves
+    // to the next unsolved answer group on every step, so the run solves fully.
+    expect(result.status).toBe(StrategyRunStatus.COMPLETED);
+
+    const run = await dataSource.getRepository(StrategyRun).findOneByOrFail({
+      puzzleId: puzzle.id,
+      strategyName: "llm-openai",
+      trialNumber: 99,
+    });
+    const proposals = await dataSource.getRepository(LlmProposal).find({
+      where: { strategyRunId: run.id },
+      order: { guessNumber: "ASC" },
+    });
+
+    expect(proposals).toHaveLength(4);
+    expect(proposals[0]).toMatchObject({
+      promptNumber: 1,
+      guessNumber: 1,
+      category: "Test category",
+      confidence: 0.99,
+      reasoning: "E2E fake",
+      status: LlmProposalStatus.USED,
+    });
+    expect(proposals[0].words).toEqual(["AAAA", "BBBB", "CCCC", "DDDD"]);
+    // The 'used' proposal links to the guess that realized it.
+    expect(proposals[0].guessId).not.toBeNull();
+    // Each solved step leaves its own proposal row.
+    expect(proposals.map((p) => p.guessNumber)).toEqual([1, 2, 3, 4]);
+  }, 30000);
 
   it("POST /api/solve rejects an invalid body", async () => {
     const res = await request(app.getHttpServer())
