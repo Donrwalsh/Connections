@@ -109,8 +109,8 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `LLM_MAX_PROMPTS` | `19` | Maximum prompts a single solve step makes before the orchestrator accepts a duplicate |
 | `LLM_NUM_RESPONSES` | `1` | Number of candidate groups the LLM proposes per solve step (clamped to 10) |
 | `LLM_TEMPERATURE_BASE` | `0` | Starting sampling temperature for LLM solve steps (both providers) |
-| `LLM_TEMPERATURE_MAX_OPENAI` | `1.2` | Ceiling for the OpenAI temperature ramp (100 increments from base to ceiling, step 0.012) |
-| `LLM_TEMPERATURE_MAX_OLLAMA` | `3.2` | Ceiling for the Ollama temperature ramp (100 increments from base to ceiling, step 0.032) |
+| `LLM_TEMPERATURE_MAX_OPENAI` | `0.5` | Ceiling for the OpenAI temperature ramp (100 increments from base to ceiling, step 0.005) |
+| `LLM_TEMPERATURE_MAX_OLLAMA` | `1.5` | Ceiling for the Ollama temperature ramp (100 increments from base to ceiling, step 0.015) |
 | `PORT` | `3001` | Orchestrator listen port |
 | `POSTGRES_USER` | `postgres` | Postgres user (compose-level; the backend reads it as `DB_USER`) |
 | `POSTGRES_PASSWORD` | `postgres` | Postgres password (compose-level; the backend reads it as `DB_PASSWORD`) |

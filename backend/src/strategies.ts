@@ -63,13 +63,13 @@ export const DEFAULT_LLM_MAX_PROMPTS = 19;
 // llmTemperatureStep) sized so that LLM_TEMPERATURE_RAMP_STEPS increments land
 // exactly on the provider's ceiling. The two providers use different
 // temperature scales: OpenAI ranges 0 -> DEFAULT_LLM_TEMPERATURE_MAX_OPENAI
-// (step 0.012), while Ollama models like Mistral go up to
-// DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA (0 -> 3.2, step 0.032). The value that
+// (0.5, step 0.005), while Ollama models like Mistral go up to
+// DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA (1.5, step 0.015). The value that
 // produced a usable candidate is echoed back to the backend, which holds onto
 // it for subsequent solve steps.
 export const DEFAULT_LLM_TEMPERATURE_BASE = 0.0;
-export const DEFAULT_LLM_TEMPERATURE_MAX_OPENAI = 1.2;
-export const DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA = 3.2;
+export const DEFAULT_LLM_TEMPERATURE_MAX_OPENAI = 0.5;
+export const DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA = 1.5;
 // Back-compat alias: llmTemperatureMax/llmTemperatureStep default to the
 // Ollama ceiling when no provider is given.
 export const DEFAULT_LLM_TEMPERATURE_MAX = DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA;
@@ -193,7 +193,7 @@ export function llmTemperatureBase(env: NodeJS.ProcessEnv = process.env): number
  * both providers when the per-provider variable is unset. The ramp reaches
  * exactly this value after LLM_TEMPERATURE_RAMP_STEPS increments. Defaults
  * are provider-specific because the two backends use different temperature
- * scales: OpenAI tops out at 1.2, Ollama at 3.2.
+ * scales: OpenAI tops out at 0.5, Ollama at 1.5.
  */
 export function llmTemperatureMax(
   env: NodeJS.ProcessEnv = process.env,

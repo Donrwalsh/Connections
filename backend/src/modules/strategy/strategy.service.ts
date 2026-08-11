@@ -441,7 +441,7 @@ export class StrategyService {
     const maxModelErrors = llmMaxModelErrors();
     const maxPrompts = llmMaxPrompts();
     // The temperature ramp ceiling (and per-re-prompt step) is provider-
-    // specific: OpenAI ranges 0 -> 1.2, Ollama 0 -> 3.2.
+    // specific: OpenAI ranges 0 -> 0.5, Ollama 0 -> 1.5.
     const modelProvider = this.modelProviderForStrategy(strategyName);
     const temperatureStep = llmTemperatureStep(process.env, modelProvider);
     const maxTemperature = llmTemperatureMax(process.env, modelProvider);

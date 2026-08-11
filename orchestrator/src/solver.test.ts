@@ -514,8 +514,8 @@ describe("proposeGroup", () => {
     const result = await proposeGroup(request);
 
     expect(generateObjectMock).toHaveBeenCalledTimes(2);
-    expect(lastTemperatures()[1]).toBeCloseTo(0.032, 10);
-    expect(result.temperature).toBeCloseTo(0.032, 10);
+    expect(lastTemperatures()[1]).toBeCloseTo(0.015, 10);
+    expect(result.temperature).toBeCloseTo(0.015, 10);
   });
 
   it("derives a smaller temperature step for the OpenAI scale", async () => {
@@ -536,8 +536,8 @@ describe("proposeGroup", () => {
     const result = await proposeGroup(request);
 
     expect(generateObjectMock).toHaveBeenCalledTimes(2);
-    expect(lastTemperatures()[1]).toBeCloseTo(0.012, 10);
-    expect(result.temperature).toBeCloseTo(0.012, 10);
+    expect(lastTemperatures()[1]).toBeCloseTo(0.005, 10);
+    expect(result.temperature).toBeCloseTo(0.005, 10);
   });
 
   it("does not re-prompt after an unrecoverable model error", async () => {
