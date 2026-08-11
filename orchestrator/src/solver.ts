@@ -26,10 +26,13 @@ const GROUP_SIZE = 4;
 const DEFAULT_TEMPERATURE = 0;
 const DEFAULT_NUM_RESPONSES = 1;
 // The temperature ramp spans exactly this many increments from the default
-// base to the ceiling (0 -> 3.2, step 0.032), so each increment is derived
-// as (ceiling - base) / steps rather than configured directly.
+// base to the provider's ceiling, so each increment is derived as
+// (ceiling - base) / steps rather than configured directly.
 const LLM_TEMPERATURE_RAMP_STEPS = 100;
-const DEFAULT_MAX_TEMPERATURE = 3.2;
+// The two providers use different temperature scales: OpenAI tops out at 1.2
+// (step 0.012), Ollama models like Mistral at 3.2 (step 0.032).
+const DEFAULT_MAX_TEMPERATURE_OPENAI = 1.2;
+const DEFAULT_MAX_TEMPERATURE_OLLAMA = 3.2;
 const DEFAULT_MAX_NUM_RESPONSES = 10;
 const DEFAULT_MAX_PROMPTS = 19;
 
@@ -108,7 +111,11 @@ export async function proposeGroup(
   // The provider is normally set explicitly by the backend (from the strategy
   // name); fall back to the configured default for robustness.
   const provider = request.modelProvider ?? defaultProvider();
-  const maxTemperature = request.maxTemperature ?? DEFAULT_MAX_TEMPERATURE;
+  const maxTemperature =
+    request.maxTemperature ??
+    (provider === "openai"
+      ? DEFAULT_MAX_TEMPERATURE_OPENAI
+      : DEFAULT_MAX_TEMPERATURE_OLLAMA);
   const maxNumResponses = request.maxNumResponses ?? DEFAULT_MAX_NUM_RESPONSES;
   const maxPrompts = request.maxPrompts ?? DEFAULT_MAX_PROMPTS;
   // The per-re-prompt step is derived rather than configured: unless the

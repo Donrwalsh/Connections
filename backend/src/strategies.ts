@@ -61,11 +61,18 @@ export const DEFAULT_LLM_MAX_PROMPTS = 19;
 // Temperature ramp: the sampling temperature starts at LLM_TEMPERATURE_BASE
 // and, on each re-prompt, is nudged up by a computed step (see
 // llmTemperatureStep) sized so that LLM_TEMPERATURE_RAMP_STEPS increments land
-// exactly on LLM_TEMPERATURE_MAX. Defaults suit Mistral via Ollama
-// (0 -> 3.2, step 0.032). The value that produced a usable candidate is echoed
-// back to the backend, which holds onto it for subsequent solve steps.
+// exactly on the provider's ceiling. The two providers use different
+// temperature scales: OpenAI ranges 0 -> DEFAULT_LLM_TEMPERATURE_MAX_OPENAI
+// (step 0.012), while Ollama models like Mistral go up to
+// DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA (0 -> 3.2, step 0.032). The value that
+// produced a usable candidate is echoed back to the backend, which holds onto
+// it for subsequent solve steps.
 export const DEFAULT_LLM_TEMPERATURE_BASE = 0.0;
-export const DEFAULT_LLM_TEMPERATURE_MAX = 3.2;
+export const DEFAULT_LLM_TEMPERATURE_MAX_OPENAI = 1.2;
+export const DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA = 3.2;
+// Back-compat alias: llmTemperatureMax/llmTemperatureStep default to the
+// Ollama ceiling when no provider is given.
+export const DEFAULT_LLM_TEMPERATURE_MAX = DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA;
 export const LLM_TEMPERATURE_RAMP_STEPS = 100;
 
 function positiveTrialCount(raw: string | undefined, fallback: number): number {
@@ -164,6 +171,13 @@ export function llmMaxPrompts(env: NodeJS.ProcessEnv = process.env): number {
 }
 
 /**
+ * The LLM provider to resolve the temperature ceiling for. OpenAI uses a
+ * smaller temperature scale than Ollama, so the ramp ceiling (and therefore
+ * the per-re-prompt step) differs between the two.
+ */
+export type LlmTemperatureProvider = "openai" | "ollama";
+
+/**
  * Base sampling temperature for LLM solve steps, from LLM_TEMPERATURE_BASE.
  * The orchestrator raises it (by llmTemperatureStep per re-prompt) when the
  * model keeps repeating prior guesses; the escalated value is echoed back and
@@ -174,20 +188,36 @@ export function llmTemperatureBase(env: NodeJS.ProcessEnv = process.env): number
 }
 
 /**
- * Ceiling for the sampling temperature, from LLM_TEMPERATURE_MAX. The ramp
- * reaches exactly this value after LLM_TEMPERATURE_RAMP_STEPS increments.
+ * Ceiling for the sampling temperature, from LLM_TEMPERATURE_MAX_OPENAI /
+ * LLM_TEMPERATURE_MAX_OLLAMA. The legacy LLM_TEMPERATURE_MAX still overrides
+ * both providers when the per-provider variable is unset. The ramp reaches
+ * exactly this value after LLM_TEMPERATURE_RAMP_STEPS increments. Defaults
+ * are provider-specific because the two backends use different temperature
+ * scales: OpenAI tops out at 1.2, Ollama at 3.2.
  */
-export function llmTemperatureMax(env: NodeJS.ProcessEnv = process.env): number {
-  return positiveFloat(env.LLM_TEMPERATURE_MAX, DEFAULT_LLM_TEMPERATURE_MAX);
+export function llmTemperatureMax(
+  env: NodeJS.ProcessEnv = process.env,
+  provider: LlmTemperatureProvider = "ollama",
+): number {
+  const override =
+    provider === "openai"
+      ? (env.LLM_TEMPERATURE_MAX_OPENAI ?? env.LLM_TEMPERATURE_MAX)
+      : (env.LLM_TEMPERATURE_MAX_OLLAMA ?? env.LLM_TEMPERATURE_MAX);
+  const fallback =
+    provider === "openai" ? DEFAULT_LLM_TEMPERATURE_MAX_OPENAI : DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA;
+  return positiveFloat(override, fallback);
 }
 
 /**
  * Per-re-prompt temperature increment. Derived from the configured base and
- * ceiling so that LLM_TEMPERATURE_RAMP_STEPS increments take the temperature
- * from the base to the ceiling.
+ * the provider's ceiling so that LLM_TEMPERATURE_RAMP_STEPS increments take
+ * the temperature from the base to the ceiling.
  */
-export function llmTemperatureStep(env: NodeJS.ProcessEnv = process.env): number {
-  return (llmTemperatureMax(env) - llmTemperatureBase(env)) / LLM_TEMPERATURE_RAMP_STEPS;
+export function llmTemperatureStep(
+  env: NodeJS.ProcessEnv = process.env,
+  provider: LlmTemperatureProvider = "ollama",
+): number {
+  return (llmTemperatureMax(env, provider) - llmTemperatureBase(env)) / LLM_TEMPERATURE_RAMP_STEPS;
 }
 
 /**

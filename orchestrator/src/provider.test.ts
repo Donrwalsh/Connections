@@ -54,7 +54,7 @@ describe("getModel", () => {
     getModel("openai");
 
     expect(openaiMock).toHaveBeenCalledTimes(1);
-    expect(openaiMock).toHaveBeenCalledWith("gpt-4o-2024-08-06");
+    expect(openaiMock).toHaveBeenCalledWith("gpt-4.1-nano");
     expect(createOllamaMock).not.toHaveBeenCalled();
   });
 });
@@ -75,7 +75,7 @@ describe("getModelName", () => {
   });
 
   it("falls back to the defaults when unset", () => {
-    expect(getModelName("openai")).toBe("gpt-4o-2024-08-06");
+    expect(getModelName("openai")).toBe("gpt-4.1-nano");
     expect(getModelName("ollama")).toBe("llama3.2");
   });
 });

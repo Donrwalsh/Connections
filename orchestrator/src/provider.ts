@@ -2,7 +2,7 @@ import { openai } from "@ai-sdk/openai";
 import { createOllama } from "ai-sdk-ollama";
 import type { LanguageModel } from "ai";
 
-export const DEFAULT_OPENAI_MODEL = "gpt-4o-2024-08-06";
+export const DEFAULT_OPENAI_MODEL = "gpt-4.1-nano";
 export const DEFAULT_OLLAMA_MODEL = "llama3.2";
 export const DEFAULT_CONTEXT_WINDOW = 8192;
 

@@ -496,8 +496,9 @@ describe("proposeGroup", () => {
     expect(result.temperature).toBe(0.1);
   });
 
-  it("derives the temperature step so 100 increments reach the ceiling", async () => {
+  it("derives the temperature step so 100 increments reach the Ollama ceiling", async () => {
     const request = makeRequest({
+      modelProvider: "ollama",
       temperatureStep: undefined,
       maxTemperature: undefined,
       priorGuesses: [
@@ -515,6 +516,28 @@ describe("proposeGroup", () => {
     expect(generateObjectMock).toHaveBeenCalledTimes(2);
     expect(lastTemperatures()[1]).toBeCloseTo(0.032, 10);
     expect(result.temperature).toBeCloseTo(0.032, 10);
+  });
+
+  it("derives a smaller temperature step for the OpenAI scale", async () => {
+    const request = makeRequest({
+      modelProvider: "openai",
+      temperatureStep: undefined,
+      maxTemperature: undefined,
+      priorGuesses: [
+        { words: ["AAAA", "BBBB", "CCCC", "DDDD"], result: "incorrect" },
+      ],
+    });
+    generateObjectMock
+      .mockResolvedValueOnce(makeOutput([makeGroup()]))
+      .mockResolvedValueOnce(
+        makeOutput([makeGroup({ word_ids: [4, 5, 6, 7] })]),
+      );
+
+    const result = await proposeGroup(request);
+
+    expect(generateObjectMock).toHaveBeenCalledTimes(2);
+    expect(lastTemperatures()[1]).toBeCloseTo(0.012, 10);
+    expect(result.temperature).toBeCloseTo(0.012, 10);
   });
 
   it("does not re-prompt after an unrecoverable model error", async () => {

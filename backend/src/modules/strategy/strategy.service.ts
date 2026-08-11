@@ -440,8 +440,11 @@ export class StrategyService {
     const maxMalformed = llmMaxMalformedResponses();
     const maxModelErrors = llmMaxModelErrors();
     const maxPrompts = llmMaxPrompts();
-    const temperatureStep = llmTemperatureStep();
-    const maxTemperature = llmTemperatureMax();
+    // The temperature ramp ceiling (and per-re-prompt step) is provider-
+    // specific: OpenAI ranges 0 -> 1.2, Ollama 0 -> 3.2.
+    const modelProvider = this.modelProviderForStrategy(strategyName);
+    const temperatureStep = llmTemperatureStep(process.env, modelProvider);
+    const maxTemperature = llmTemperatureMax(process.env, modelProvider);
     let consecutiveModelErrors = 0;
 
     // Sticky sampling temperature. The orchestrator reports the temperature
@@ -470,7 +473,7 @@ export class StrategyService {
           words: guess.words,
           result: this.mapGuessResultToOrchestrator(guess.result),
         })),
-        modelProvider: this.modelProviderForStrategy(strategyName),
+        modelProvider,
         temperature,
         numResponses,
         temperatureStep,

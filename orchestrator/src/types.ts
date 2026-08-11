@@ -67,9 +67,8 @@ export const SolveRequestSchema = z.object({
     .min(0)
     .max(10)
     .optional()
-    .default(3.2)
     .describe(
-      "Ceiling for temperature escalation (default: 3.2, the Mistral max)",
+      "Ceiling for temperature escalation. Defaults are provider-specific: 1.2 for OpenAI, 3.2 for Ollama",
     ),
   maxNumResponses: z
     .number()

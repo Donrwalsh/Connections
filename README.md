@@ -88,7 +88,7 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `INTERNAL_API_KEY` | — | Shared secret for backend↔orchestrator communication (`x-internal-api-key` header) — **required** |
 | `OPENAI_API_KEY` | — | OpenAI API key (orchestrator only) |
 | `MODEL_PROVIDER` | `openai` | Default provider for provider-less requests (e.g. in-game AI Assist): `openai` or `ollama`. Strategy runs pick their provider via strategy name (`llm-openai` / `llm-ollama`), so both are always active |
-| `OPENAI_MODEL` | `gpt-4o-2024-08-06` | OpenAI model id (used by the `llm-openai` strategy and provider-less requests) |
+| `OPENAI_MODEL` | `gpt-4.1-nano` | OpenAI model id (used by the `llm-openai` strategy and provider-less requests) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server base URL (used by the `llm-ollama` strategy) |
 | `OLLAMA_MODEL` | `llama3.2` | Ollama model id (used by the `llm-ollama` strategy) |
 | `MODEL_CONTEXT_WINDOW` | `8192` | Context window (in tokens) used to size the LLM solver prompt for both providers |
@@ -108,8 +108,9 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `LLM_MAX_MODEL_ERRORS` | `5` | Maximum consecutive transient model failures before a run ends with an `error` status |
 | `LLM_MAX_PROMPTS` | `19` | Maximum prompts a single solve step makes before the orchestrator accepts a duplicate |
 | `LLM_NUM_RESPONSES` | `1` | Number of candidate groups the LLM proposes per solve step (clamped to 10) |
-| `LLM_TEMPERATURE_BASE` | `0` | Starting sampling temperature for LLM solve steps |
-| `LLM_TEMPERATURE_MAX` | `3.2` | Ceiling for the LLM temperature ramp (100 increments from base to ceiling) |
+| `LLM_TEMPERATURE_BASE` | `0` | Starting sampling temperature for LLM solve steps (both providers) |
+| `LLM_TEMPERATURE_MAX_OPENAI` | `1.2` | Ceiling for the OpenAI temperature ramp (100 increments from base to ceiling, step 0.012) |
+| `LLM_TEMPERATURE_MAX_OLLAMA` | `3.2` | Ceiling for the Ollama temperature ramp (100 increments from base to ceiling, step 0.032) |
 | `PORT` | `3001` | Orchestrator listen port |
 | `POSTGRES_USER` | `postgres` | Postgres user (compose-level; the backend reads it as `DB_USER`) |
 | `POSTGRES_PASSWORD` | `postgres` | Postgres password (compose-level; the backend reads it as `DB_PASSWORD`) |

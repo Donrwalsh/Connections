@@ -1122,8 +1122,8 @@ describe("StrategyService", () => {
         modelProvider: "openai",
         temperature: 0,
         numResponses: 1,
-        temperatureStep: 0.032,
-        maxTemperature: 3.2,
+        temperatureStep: 0.012,
+        maxTemperature: 1.2,
         maxNumResponses: 10,
         maxPrompts: 19,
       });
@@ -1135,8 +1135,8 @@ describe("StrategyService", () => {
         modelProvider: "openai",
         temperature: 0,
         numResponses: 1,
-        temperatureStep: 0.032,
-        maxTemperature: 3.2,
+        temperatureStep: 0.012,
+        maxTemperature: 1.2,
         maxNumResponses: 10,
         maxPrompts: 19,
       });
@@ -1150,8 +1150,12 @@ describe("StrategyService", () => {
       await service.runLlmStrategy(100, "llm-ollama");
 
       expect(mockOrchestratorService.proposeGroup).toHaveBeenCalledTimes(2);
+      // The Ollama strategy uses its own provider and the wider Ollama
+      // temperature ramp (0 -> 3.2, step 0.032).
       expect(mockOrchestratorService.proposeGroup.mock.calls[0][0]).toMatchObject({
         modelProvider: "ollama",
+        temperatureStep: 0.032,
+        maxTemperature: 3.2,
       });
       expect(mockOrchestratorService.proposeGroup.mock.calls[1][0]).toMatchObject({
         modelProvider: "ollama",
