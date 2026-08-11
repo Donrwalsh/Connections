@@ -9,24 +9,28 @@ export const DEFAULT_CONTEXT_WINDOW = 8192;
 export type ModelProvider = "openai" | "ollama";
 
 /**
- * Resolves which model provider to use from the MODEL_PROVIDER env var.
+ * Resolves the default model provider from the MODEL_PROVIDER env var.
  * Defaults to OpenAI to keep existing behavior unchanged; set it to
  * "ollama" to run models locally against the bundled Ollama service.
+ *
+ * Unlike the strategy runs (which select their provider explicitly by
+ * strategy name), this default is only used for provider-less requests —
+ * e.g. the in-game AI Assist endpoint.
  */
-export function getModelProvider(): ModelProvider {
+export function defaultProvider(): ModelProvider {
   const provider = process.env.MODEL_PROVIDER?.toLowerCase();
   return provider === "ollama" ? "ollama" : "openai";
 }
 
 /**
- * Returns the AI SDK language model for the configured provider.
+ * Returns the AI SDK language model for the given provider.
  * Both providers are exposed through the same LanguageModel interface, so
  * solver.ts (and any future callers) never need to know which backend is
  * active. Config is read on every call so a restart isn't needed to flip
  * providers in development.
  */
-export function getModel(): LanguageModel {
-  if (getModelProvider() === "ollama") {
+export function getModel(provider: ModelProvider): LanguageModel {
+  if (provider === "ollama") {
     const ollama = createOllama({
       baseURL: process.env.OLLAMA_BASE_URL ?? "http://localhost:11434",
     });
@@ -41,13 +45,13 @@ export function getModel(): LanguageModel {
 }
 
 /**
- * Returns the configured model name for the active provider, from
- * OLLAMA_MODEL/OPENAI_MODEL. Unlike `result.response.modelId` this is known
+ * Returns the configured model name for the given provider, from
+ * OPENAI_MODEL/OLLAMA_MODEL. Unlike `result.response.modelId` this is known
  * even for a failed call, so per-prompt telemetry can always name the model
  * the prompt was sent to.
  */
-export function getModelName(): string {
-  if (getModelProvider() === "ollama") {
+export function getModelName(provider: ModelProvider): string {
+  if (provider === "ollama") {
     return process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL;
   }
   return process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL;

@@ -30,7 +30,15 @@ interface StrategyRunListItem {
   id: number;
   strategyName: string;
   trialNumber: number;
-  status: "running" | "completed" | "failed" | "duplicate" | "malformedResponse" | "error";
+  status:
+    | "running"
+    | "completed"
+    | "failed"
+    | "duplicate"
+    | "malformedResponse"
+    | "error";
+  modelName: string | null;
+  contextWindow: number | null;
   startedAt: string | null;
   finishedAt: string | null;
   guessCount: number;
@@ -67,7 +75,9 @@ async function fetchFullRunDetail(
     );
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      throw new Error(body?.message ?? `Request failed with status ${res.status}`);
+      throw new Error(
+        body?.message ?? `Request failed with status ${res.status}`,
+      );
     }
     return res.json();
   };
@@ -92,7 +102,8 @@ const STRATEGIES = [
   { id: "reverse-order", label: "Rev-Order" },
   { id: "shuffle-smart", label: "Shuffle-Smart" },
   { id: "shuffle-foolish", label: "Shuffle-Foolish" },
-  { id: "llm", label: "LLM" },
+  { id: "llm-openai", label: "LLM · OpenAI" },
+  { id: "llm-ollama", label: "LLM · Ollama" },
 ];
 const apiUrl = (path: string) => `${import.meta.env.VITE_API_URL}${path}`;
 
@@ -115,9 +126,9 @@ export function GuessSequencePanel({
   const [activeRunId, setActiveRunId] = useState<number | null>(null);
   // Per-run detail is fetched lazily when a run is selected (full guess arrays
   // are heavy — a deterministic run can hold ~2,400 guesses), then cached.
-  const [runDetails, setRunDetails] = useState<Record<number, StrategyRunDetail>>(
-    {},
-  );
+  const [runDetails, setRunDetails] = useState<
+    Record<number, StrategyRunDetail>
+  >({});
   const [detailLoading, setDetailLoading] = useState<Record<number, boolean>>(
     {},
   );
@@ -305,7 +316,9 @@ export function GuessSequencePanel({
           setGuessDetailErrors((prev) => ({
             ...prev,
             [key]:
-              err instanceof Error ? err.message : "Failed to load guess details",
+              err instanceof Error
+                ? err.message
+                : "Failed to load guess details",
           }));
         }
       } finally {
@@ -414,9 +427,12 @@ export function GuessSequencePanel({
                         setOpenGuess(null);
                       }}
                     >
-                      Trial #{run.trialNumber} · {run.status} ·{" "}
-                      {run.guessCount} guess
+                      Trial #{run.trialNumber} · {run.status} · {run.guessCount}{" "}
+                      guess
                       {run.guessCount === 1 ? "" : "es"}
+                      {formatModelDetail(run)
+                        ? ` · ${formatModelDetail(run)}`
+                        : ""}
                     </button>
                   ))}
                 </div>
@@ -424,6 +440,9 @@ export function GuessSequencePanel({
 
               <p className="guess-sequence__status">
                 Strategy: {formatStrategyName(selectedRun.strategyName)}
+                {formatModelDetail(selectedRun)
+                  ? ` · Model: ${formatModelDetail(selectedRun)}`
+                  : ""}
                 {currentRuns.length > 1
                   ? ` · Trial #${selectedRun.trialNumber}`
                   : ""}{" "}
@@ -452,7 +471,10 @@ export function GuessSequencePanel({
                     const detailError = guessDetailErrors[detailKey];
 
                     return (
-                      <li key={guess.sequenceNumber} className="guess-sequence__guess">
+                      <li
+                        key={guess.sequenceNumber}
+                        className="guess-sequence__guess"
+                      >
                         <button
                           type="button"
                           className={`guess-sequence__item guess-sequence__item--${guess.result} ${
@@ -514,11 +536,21 @@ function formatResult(result: GuessResult): string {
 }
 
 function formatStrategyName(strategyName: string): string {
-  if (strategyName === "llm") return "LLM";
+  if (strategyName === "llm-openai") return "LLM · OpenAI";
+  if (strategyName === "llm-ollama") return "LLM · Ollama";
   return strategyName
     .split("-")
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
+}
+
+// The model that produced a run's guesses (LLM runs only). Includes the
+// context window when it was recorded, e.g. "mistral (2048 ctx)".
+function formatModelDetail(run: StrategyRunListItem): string {
+  if (!run.modelName) return "";
+  return run.contextWindow
+    ? `${run.modelName} (${run.contextWindow.toLocaleString()} ctx)`
+    : run.modelName;
 }
 
 function formatCount(value: number | null): string {
@@ -570,7 +602,10 @@ function GuessDetailFields({ detail }: { detail: GuessDetail }) {
   const llm = detail.llmDetails;
   return (
     <dl className="guess-sequence__details-grid">
-      <DetailField label="Prompt tokens" value={formatCount(detail.promptTokens)} />
+      <DetailField
+        label="Prompt tokens"
+        value={formatCount(detail.promptTokens)}
+      />
       <DetailField
         label="Completion tokens"
         value={formatCount(detail.completionTokens)}
@@ -592,7 +627,10 @@ function GuessDetailFields({ detail }: { detail: GuessDetail }) {
         label="Duplicates rejected"
         value={formatCount(detail.duplicatesRejected)}
       />
-      <DetailField label="Guessed at" value={formatTimestamp(detail.guessedAt)} />
+      <DetailField
+        label="Guessed at"
+        value={formatTimestamp(detail.guessedAt)}
+      />
       <DetailField label="Category" value={llm?.category ?? "—"} />
       <DetailField
         label="Confidence"

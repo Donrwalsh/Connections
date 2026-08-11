@@ -113,6 +113,20 @@ describe("OrchestratorService", () => {
     );
   });
 
+  it("should include the model provider in the request body when provided", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
+
+    const outcome = await service.proposeGroup({ ...request, modelProvider: "ollama" });
+
+    expect(outcome).toEqual({ ok: true, data: successBody });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://orchestrator.test/solve",
+      expect.objectContaining({
+        body: JSON.stringify({ ...request, modelProvider: "ollama" }),
+      }),
+    );
+  });
+
   it("should surface a duplicate_group response as a non-ok outcome", async () => {
     mockFetch.mockResolvedValueOnce(
       mockResponse({

@@ -5,7 +5,7 @@ import { AppModule } from "./app.module";
 import { StrategyService } from "./modules/strategy/strategy.service";
 import { redisConnection } from "./modules/queue/redis.config";
 import { PuzzleIngestionService } from "./modules/game/puzzle-ingestion.service";
-import { LLM, STRATEGY_SET } from "./strategies";
+import { isLlmStrategy, STRATEGY_SET } from "./strategies";
 
 interface RunStrategyJobData {
   puzzleId: number;
@@ -35,10 +35,9 @@ async function bootstrap() {
         `starting job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName} trial=${trialNumber}`,
       );
 
-      const result =
-        strategyName === LLM
-          ? await strategyService.runLlmStrategy(puzzleId, strategyName, trialNumber)
-          : await strategyService.runDeterministicStrategy(puzzleId, strategyName, trialNumber);
+      const result = isLlmStrategy(strategyName)
+        ? await strategyService.runLlmStrategy(puzzleId, strategyName, trialNumber)
+        : await strategyService.runDeterministicStrategy(puzzleId, strategyName, trialNumber);
 
       logger.log(
         `finished job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName} trial=${trialNumber} status=${result.status}`,

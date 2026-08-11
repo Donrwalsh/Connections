@@ -3,6 +3,8 @@ import { loadEnv, orchestratorTimeoutMs } from "../../config/env";
 
 export type SolveErrorCode = "duplicate_group" | "invalid_group" | "model_error";
 
+export type ModelProvider = "openai" | "ollama";
+
 export interface SolveUsage {
   promptTokens: number;
   completionTokens: number;
@@ -66,6 +68,10 @@ export type SolveOutcome = { ok: true; data: SolveSuccess } | { ok: false; error
 export interface OrchestratorSolveRequest {
   puzzleWords: string[];
   priorGuesses: { words: string[]; result: "correct" | "incorrect" | "oneAway" }[];
+  // Which LLM backend the orchestrator should consult for this step, derived
+  // from the strategy name (llm-openai -> openai, llm-ollama -> ollama).
+  // Omitted for provider-less callers (the orchestrator then uses its default).
+  modelProvider?: ModelProvider;
   temperature?: number;
   numResponses?: number;
   temperatureStep?: number;

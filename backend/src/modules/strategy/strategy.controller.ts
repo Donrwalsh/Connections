@@ -12,7 +12,7 @@ import {
 import { ApiParam } from "@nestjs/swagger";
 import { StrategyService } from "./strategy.service";
 import { GameService } from "../game/game.service";
-import { AUTOMATIC_STRATEGIES, LLM, STRATEGY_SET } from "../../strategies";
+import { AUTOMATIC_STRATEGIES, LLM_STRATEGIES, STRATEGY_SET } from "../../strategies";
 
 @Controller("strategy")
 export class StrategyController {
@@ -21,35 +21,12 @@ export class StrategyController {
     @Inject(GameService) private readonly gameService: GameService,
   ) {}
 
-  // Dedicated LLM queue endpoint. Declared before the generic
-  // queue/:strategyName/:date route so the more specific pattern wins.
-  @Post("queue/llm/:date")
-  @ApiParam({
-    name: "date",
-    type: String,
-    description: "Puzzle date in YYYY-MM-DD format",
-    example: "2023-08-01",
-  })
-  async queueLlmStrategy(@Param("date") date: string) {
-    const puzzleId = await this.gameService.resolveDateToPuzzleId(date);
-
-    await this.strategyService.triggerStrategyRuns(puzzleId, LLM, date);
-
-    return {
-      message: `LLM job queued for puzzle date ${date}`,
-      puzzleId,
-      date,
-      strategyName: LLM,
-      trialNumber: 0,
-    };
-  }
-
   @Post("queue/:strategyName/:date")
   @ApiParam({
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or 'all' (excludes 'llm' — use POST /strategy/queue/llm/:date for that)",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', 'llm-ollama', or 'all' (excludes the LLM strategies — queue 'llm-openai'/'llm-ollama' explicitly to spend tokens)",
     example: "all",
   })
   @ApiParam({
@@ -80,11 +57,11 @@ export class StrategyController {
       );
 
       return {
-        message: `Jobs queued for all automatic strategies on puzzle date ${date} (llm is excluded — queue it explicitly)`,
+        message: `Jobs queued for all automatic strategies on puzzle date ${date} (LLM strategies are excluded — queue them explicitly)`,
         puzzleId,
         date,
         strategiesQueued: [...AUTOMATIC_STRATEGIES],
-        excluded: [LLM],
+        excluded: [...LLM_STRATEGIES],
       };
     }
 
@@ -103,7 +80,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or 'llm'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', or 'llm-ollama'",
     example: "alphabetical",
   })
   @ApiParam({
@@ -127,7 +104,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or 'llm'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', or 'llm-ollama'",
     example: "alphabetical",
   })
   @ApiParam({
@@ -139,7 +116,8 @@ export class StrategyController {
   @ApiParam({
     name: "trialNumber",
     type: Number,
-    description: "Run trial number (0 for deterministic strategies, 1..N for shuffle strategies)",
+    description:
+      "Run trial number (0 for deterministic strategies, 1..N for shuffle and LLM strategies)",
     example: 0,
   })
   async getRunDetail(
@@ -163,7 +141,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or 'llm'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', or 'llm-ollama'",
     example: "alphabetical",
   })
   @ApiParam({
@@ -175,7 +153,8 @@ export class StrategyController {
   @ApiParam({
     name: "trialNumber",
     type: Number,
-    description: "Run trial number (0 for deterministic strategies, 1..N for shuffle strategies)",
+    description:
+      "Run trial number (0 for deterministic strategies, 1..N for shuffle and LLM strategies)",
     example: 0,
   })
   @ApiParam({

@@ -30,6 +30,12 @@ export const SolveRequestSchema = z.object({
     .min(4)
     .describe("Words still in play (not yet correctly grouped)"),
   priorGuesses: z.array(PriorGuessSchema).optional().default([]),
+  modelProvider: z
+    .enum(["openai", "ollama"])
+    .optional()
+    .describe(
+      "Which LLM backend to consult for this solve step. When omitted, the orchestrator's configured default (MODEL_PROVIDER) is used",
+    ),
   numResponses: z
     .number()
     .int()

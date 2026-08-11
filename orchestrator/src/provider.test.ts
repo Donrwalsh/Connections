@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getContextWindow, getModel } from "./provider.js";
+import {
+  defaultProvider,
+  getContextWindow,
+  getModel,
+  getModelName,
+} from "./provider.js";
 
 const createOllamaMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 const openaiMock = vi.hoisted(() => vi.fn(() => vi.fn()));
@@ -20,23 +25,22 @@ describe("getModel", () => {
   });
 
   it("passes num_ctx from MODEL_CONTEXT_WINDOW to the Ollama model", () => {
-    vi.stubEnv("MODEL_PROVIDER", "ollama");
     vi.stubEnv("MODEL_CONTEXT_WINDOW", "2048");
 
-    getModel();
+    getModel("ollama");
 
     expect(createOllamaMock).toHaveBeenCalledTimes(1);
     const modelFactory = createOllamaMock.mock.results[0].value;
     expect(modelFactory).toHaveBeenCalledWith("llama3.2", {
       options: { num_ctx: 2048 },
     });
+    expect(openaiMock).not.toHaveBeenCalled();
   });
 
   it("defaults num_ctx to 8192 when MODEL_CONTEXT_WINDOW is unset", () => {
-    vi.stubEnv("MODEL_PROVIDER", "ollama");
     vi.stubEnv("MODEL_CONTEXT_WINDOW", "");
 
-    getModel();
+    getModel("ollama");
 
     const modelFactory = createOllamaMock.mock.results[0].value;
     expect(modelFactory).toHaveBeenCalledWith("llama3.2", {
@@ -44,14 +48,52 @@ describe("getModel", () => {
     });
   });
 
-  it("does not apply num_ctx when using the OpenAI provider", () => {
-    vi.stubEnv("MODEL_PROVIDER", "openai");
+  it("resolves the OpenAI model without num_ctx", () => {
     vi.stubEnv("MODEL_CONTEXT_WINDOW", "2048");
 
-    getModel();
+    getModel("openai");
 
     expect(openaiMock).toHaveBeenCalledTimes(1);
+    expect(openaiMock).toHaveBeenCalledWith("gpt-4o-2024-08-06");
     expect(createOllamaMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("getModelName", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("returns the configured OpenAI model for the openai provider", () => {
+    vi.stubEnv("OPENAI_MODEL", "gpt-4o-mini");
+    expect(getModelName("openai")).toBe("gpt-4o-mini");
+  });
+
+  it("returns the configured Ollama model for the ollama provider", () => {
+    vi.stubEnv("OLLAMA_MODEL", "llama3.3");
+    expect(getModelName("ollama")).toBe("llama3.3");
+  });
+
+  it("falls back to the defaults when unset", () => {
+    expect(getModelName("openai")).toBe("gpt-4o-2024-08-06");
+    expect(getModelName("ollama")).toBe("llama3.2");
+  });
+});
+
+describe("defaultProvider", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("defaults to openai when MODEL_PROVIDER is unset or unknown", () => {
+    expect(defaultProvider()).toBe("openai");
+    vi.stubEnv("MODEL_PROVIDER", "weird");
+    expect(defaultProvider()).toBe("openai");
+  });
+
+  it("returns ollama when MODEL_PROVIDER is set to ollama", () => {
+    vi.stubEnv("MODEL_PROVIDER", "ollama");
+    expect(defaultProvider()).toBe("ollama");
   });
 });
 

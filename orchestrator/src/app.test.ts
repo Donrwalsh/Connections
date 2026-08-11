@@ -192,6 +192,94 @@ describe("orchestrator app", () => {
     );
   });
 
+  it("defaults the model provider when the request omits it", async () => {
+    proposeGroupMock.mockResolvedValueOnce({
+      proposedGroups: [
+        {
+          word_ids: [0, 1, 2, 3],
+          category: "Test",
+          confidence: 0.9,
+          reasoning: "test",
+        },
+      ],
+      prompt: "You are solving...",
+      model: "test-model",
+      contextWindow: 8192,
+      latencyMs: 10,
+      temperature: 0,
+      numResponses: 1,
+      promptAttempts: 1,
+      duplicatesRejected: 0,
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      promptMetadata: [],
+    });
+
+    const res = await solveRequest(SOLVE_BODY);
+    expect(res.status).toBe(200);
+    expect(proposeGroupMock).toHaveBeenCalledWith(
+      expect.objectContaining({ modelProvider: "openai" }),
+    );
+  });
+
+  it("uses the MODEL_PROVIDER default for provider-less requests", async () => {
+    vi.stubEnv("MODEL_PROVIDER", "ollama");
+    proposeGroupMock.mockResolvedValueOnce({
+      proposedGroups: [
+        {
+          word_ids: [0, 1, 2, 3],
+          category: "Test",
+          confidence: 0.9,
+          reasoning: "test",
+        },
+      ],
+      prompt: "You are solving...",
+      model: "test-model",
+      contextWindow: 8192,
+      latencyMs: 10,
+      temperature: 0,
+      numResponses: 1,
+      promptAttempts: 1,
+      duplicatesRejected: 0,
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      promptMetadata: [],
+    });
+
+    const res = await solveRequest(SOLVE_BODY);
+    expect(res.status).toBe(200);
+    expect(proposeGroupMock).toHaveBeenCalledWith(
+      expect.objectContaining({ modelProvider: "ollama" }),
+    );
+  });
+
+  it("passes an explicit model provider through to the solve step", async () => {
+    proposeGroupMock.mockResolvedValueOnce({
+      proposedGroups: [
+        {
+          word_ids: [0, 1, 2, 3],
+          category: "Test",
+          confidence: 0.9,
+          reasoning: "test",
+        },
+      ],
+      prompt: "You are solving...",
+      model: "test-model",
+      contextWindow: 8192,
+      latencyMs: 10,
+      temperature: 0,
+      numResponses: 1,
+      promptAttempts: 1,
+      duplicatesRejected: 0,
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      promptMetadata: [],
+    });
+
+    const res = await solveRequest({ ...SOLVE_BODY, modelProvider: "ollama" });
+    expect(res.status).toBe(200);
+    expect(proposeGroupMock).toHaveBeenCalledWith(
+      expect.objectContaining({ modelProvider: "ollama" }),
+    );
+  });
+
   it("rejects a temperature outside the supported range", async () => {
     const res = await solveRequest({ ...SOLVE_BODY, temperature: 11 });
     expect(res.status).toBe(400);

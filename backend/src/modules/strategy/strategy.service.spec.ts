@@ -293,24 +293,24 @@ describe("StrategyService", () => {
       mockGameService.resolveDateToPuzzleId.mockResolvedValueOnce(5);
       mockStrategyRunRepo.findOne.mockResolvedValueOnce(null);
 
-      await expect(service.getGuessDetail("2024-01-02", "llm", 0, 1)).rejects.toThrow(
+      await expect(service.getGuessDetail("2024-01-02", "llm-openai", 0, 1)).rejects.toThrow(
         NotFoundException,
       );
     });
 
     it("should throw NotFoundException when the guess does not exist", async () => {
       mockGameService.resolveDateToPuzzleId.mockResolvedValueOnce(5);
-      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm" }));
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-openai" }));
       mockGuessRepo.findOne.mockResolvedValueOnce(null);
 
-      await expect(service.getGuessDetail("2024-01-02", "llm", 0, 99)).rejects.toThrow(
+      await expect(service.getGuessDetail("2024-01-02", "llm-openai", 0, 99)).rejects.toThrow(
         NotFoundException,
       );
     });
 
     it("should look up the guess scoped to the run and sequence number", async () => {
       mockGameService.resolveDateToPuzzleId.mockResolvedValueOnce(5);
-      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm" }));
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-openai" }));
       mockGuessRepo.findOne.mockResolvedValueOnce({
         sequenceNumber: 1,
         words: ["APPLE", "BANANA", "CHERRY", "DATE"],
@@ -327,7 +327,7 @@ describe("StrategyService", () => {
         llmDetails: { category: "Fruit", confidence: 0.9 },
       });
 
-      await service.getGuessDetail("2024-01-02", "llm", 0, 1);
+      await service.getGuessDetail("2024-01-02", "llm-openai", 0, 1);
 
       expect(mockGuessRepo.findOne).toHaveBeenCalledWith({
         where: { strategyRunId: 7, sequenceNumber: 1 },
@@ -338,7 +338,7 @@ describe("StrategyService", () => {
       const guessedAt = new Date("2024-01-02T01:01:00Z");
 
       mockGameService.resolveDateToPuzzleId.mockResolvedValueOnce(5);
-      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm" }));
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-openai" }));
       mockGuessRepo.findOne.mockResolvedValueOnce({
         sequenceNumber: 2,
         words: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
@@ -360,7 +360,7 @@ describe("StrategyService", () => {
         },
       });
 
-      const result = await service.getGuessDetail("2024-01-02", "llm", 0, 2);
+      const result = await service.getGuessDetail("2024-01-02", "llm-openai", 0, 2);
 
       expect(result).toEqual({
         sequenceNumber: 2,
@@ -564,6 +564,39 @@ describe("StrategyService", () => {
             trialNumber: 2,
           },
           opts: { jobId: "run-100-shuffle-foolish-2" },
+        },
+      ]);
+    });
+
+    it("should queue one job per llm trial", async () => {
+      process.env.LLM_TRIALS = "2";
+      try {
+        await service.triggerStrategyRuns(100, "llm-openai", "2024-01-02");
+      } finally {
+        delete process.env.LLM_TRIALS;
+      }
+
+      expect(mockQueue.addBulk).toHaveBeenCalledTimes(1);
+      expect(mockQueue.addBulk).toHaveBeenCalledWith([
+        {
+          name: "run-strategy",
+          data: {
+            puzzleId: 100,
+            strategyName: "llm-openai",
+            date: "2024-01-02",
+            trialNumber: 1,
+          },
+          opts: { jobId: "run-100-llm-openai-1" },
+        },
+        {
+          name: "run-strategy",
+          data: {
+            puzzleId: 100,
+            strategyName: "llm-openai",
+            date: "2024-01-02",
+            trialNumber: 2,
+          },
+          opts: { jobId: "run-100-llm-openai-2" },
         },
       ]);
     });
@@ -949,18 +982,18 @@ describe("StrategyService", () => {
     });
 
     beforeEach(() => {
-      mockStrategyRunRepo.findOne.mockResolvedValue(makeRun({ strategyName: "llm" }));
+      mockStrategyRunRepo.findOne.mockResolvedValue(makeRun({ strategyName: "llm-openai" }));
       mockGuessRepo.find.mockResolvedValue([]);
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
     });
 
     it("should short-circuit for a terminal run", async () => {
       mockStrategyRunRepo.findOne.mockResolvedValueOnce(
-        makeRun({ strategyName: "llm", status: StrategyRunStatus.COMPLETED }),
+        makeRun({ strategyName: "llm-openai", status: StrategyRunStatus.COMPLETED }),
       );
       mockGuessRepo.count.mockResolvedValueOnce(5);
 
-      const result = await service.runLlmStrategy(100, "llm");
+      const result = await service.runLlmStrategy(100, "llm-openai");
 
       expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 5 });
       expect(mockOrchestratorService.proposeGroup).not.toHaveBeenCalled();
@@ -972,7 +1005,7 @@ describe("StrategyService", () => {
         .mockResolvedValueOnce(success([0, 1, 2, 3]))
         .mockResolvedValueOnce(success([0, 1, 2, 3]));
 
-      const result = await service.runLlmStrategy(100, "llm");
+      const result = await service.runLlmStrategy(100, "llm-openai");
 
       expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
       expect(mockOrchestratorService.proposeGroup).toHaveBeenCalledTimes(2);
@@ -1027,11 +1060,12 @@ describe("StrategyService", () => {
         .mockResolvedValueOnce(success([0, 1, 2, 3]))
         .mockResolvedValueOnce(success([0, 1, 2, 3]));
 
-      await service.runLlmStrategy(100, "llm");
+      await service.runLlmStrategy(100, "llm-openai");
 
       expect(mockOrchestratorService.proposeGroup.mock.calls[0][0]).toEqual({
         puzzleWords: ["APPLE", "BANANA", "CHERRY", "DATE", "EGGPLANT", "FIG", "GRAPE", "HONEY"],
         priorGuesses: [],
+        modelProvider: "openai",
         temperature: 0,
         numResponses: 1,
         temperatureStep: 0.032,
@@ -1044,12 +1078,29 @@ describe("StrategyService", () => {
       expect(mockOrchestratorService.proposeGroup.mock.calls[1][0]).toEqual({
         puzzleWords: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
         priorGuesses: [{ words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: "correct" }],
+        modelProvider: "openai",
         temperature: 0,
         numResponses: 1,
         temperatureStep: 0.032,
         maxTemperature: 3.2,
         maxNumResponses: 10,
         maxPrompts: 19,
+      });
+    });
+
+    it("should consult the Ollama provider for the llm-ollama strategy", async () => {
+      mockOrchestratorService.proposeGroup
+        .mockResolvedValueOnce(success([0, 1, 2, 3]))
+        .mockResolvedValueOnce(success([0, 1, 2, 3]));
+
+      await service.runLlmStrategy(100, "llm-ollama");
+
+      expect(mockOrchestratorService.proposeGroup).toHaveBeenCalledTimes(2);
+      expect(mockOrchestratorService.proposeGroup.mock.calls[0][0]).toMatchObject({
+        modelProvider: "ollama",
+      });
+      expect(mockOrchestratorService.proposeGroup.mock.calls[1][0]).toMatchObject({
+        modelProvider: "ollama",
       });
     });
 
@@ -1063,7 +1114,7 @@ describe("StrategyService", () => {
         .mockResolvedValueOnce(success([0, 1, 2, 3]))
         .mockResolvedValueOnce(success([0, 1, 2, 3]));
 
-      const result = await service.runLlmStrategy(100, "llm");
+      const result = await service.runLlmStrategy(100, "llm-openai");
 
       expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 3 });
       // The persisted wrong guess is sent to the model as 'incorrect'.
@@ -1102,7 +1153,7 @@ describe("StrategyService", () => {
           }),
         );
 
-      await service.runLlmStrategy(100, "llm");
+      await service.runLlmStrategy(100, "llm-openai");
 
       const calls = mockOrchestratorService.proposeGroup.mock.calls;
       // The run starts at the base parameters.
@@ -1134,7 +1185,7 @@ describe("StrategyService", () => {
         ]);
         mockOrchestratorService.proposeGroup.mockResolvedValue(duplicateFailure([0, 1, 2, 3]));
 
-        const result = await service.runLlmStrategy(100, "llm");
+        const result = await service.runLlmStrategy(100, "llm-openai");
 
         expect(result).toEqual({ status: StrategyRunStatus.DUPLICATE, guessCount: 4 });
         const inserted = mockManager.insert.mock.calls.flatMap(
@@ -1200,7 +1251,7 @@ describe("StrategyService", () => {
           }),
         );
 
-        const result = await service.runLlmStrategy(100, "llm");
+        const result = await service.runLlmStrategy(100, "llm-openai");
 
         expect(result).toEqual({ status: StrategyRunStatus.DUPLICATE, guessCount: 2 });
         const inserted = mockManager.insert.mock.calls.flatMap(
@@ -1222,6 +1273,30 @@ describe("StrategyService", () => {
       }
     });
 
+    it("should record the model from a duplicate_group failure", async () => {
+      process.env.LLM_MAX_DUPLICATE_GUESSES = "1";
+      try {
+        mockGuessRepo.find.mockResolvedValueOnce([]);
+        mockOrchestratorService.proposeGroup.mockResolvedValue(duplicateFailure([0, 1, 2, 3]));
+
+        const result = await service.runLlmStrategy(100, "llm-openai");
+
+        expect(result).toEqual({ status: StrategyRunStatus.DUPLICATE, guessCount: 1 });
+        // A run that never produced a usable candidate still records which
+        // model it ran, so the run list can attribute it.
+        expect(mockManager.save).toHaveBeenCalledWith(
+          StrategyRun,
+          expect.objectContaining({
+            status: StrategyRunStatus.DUPLICATE,
+            modelName: "mistral",
+            contextWindow: 8192,
+          }),
+        );
+      } finally {
+        delete process.env.LLM_MAX_DUPLICATE_GUESSES;
+      }
+    });
+
     it("should use the candidate the orchestrator already selected", async () => {
       mockOrchestratorService.proposeGroup
         .mockResolvedValueOnce(
@@ -1237,7 +1312,7 @@ describe("StrategyService", () => {
         )
         .mockResolvedValueOnce(success([0, 1, 2, 3]));
 
-      const result = await service.runLlmStrategy(100, "llm");
+      const result = await service.runLlmStrategy(100, "llm-openai");
 
       expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
       const inserted = mockManager.insert.mock.calls.flatMap(
@@ -1259,7 +1334,7 @@ describe("StrategyService", () => {
         success([0, 1, 2, 3], { proposedGroups: [] }),
       );
 
-      const result = await service.runLlmStrategy(100, "llm");
+      const result = await service.runLlmStrategy(100, "llm-openai");
 
       expect(result).toEqual({ status: StrategyRunStatus.MALFORMED_RESPONSE, guessCount: 0 });
       expect(mockOrchestratorService.proposeGroup).toHaveBeenCalledTimes(3);
@@ -1277,7 +1352,7 @@ describe("StrategyService", () => {
         .mockResolvedValueOnce(malformed())
         .mockResolvedValueOnce(malformed());
 
-      const result = await service.runLlmStrategy(100, "llm");
+      const result = await service.runLlmStrategy(100, "llm-openai");
 
       expect(result).toEqual({ status: StrategyRunStatus.MALFORMED_RESPONSE, guessCount: 0 });
       expect(mockOrchestratorService.proposeGroup).toHaveBeenCalledTimes(3);
@@ -1301,7 +1376,7 @@ describe("StrategyService", () => {
         .mockResolvedValueOnce(success([0, 1, 2, 3]))
         .mockResolvedValueOnce(success([0, 1, 2, 3]));
 
-      const result = await service.runLlmStrategy(100, "llm");
+      const result = await service.runLlmStrategy(100, "llm-openai");
 
       expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
       // The transient failure did not kill the run — it retried and solved.
@@ -1323,7 +1398,7 @@ describe("StrategyService", () => {
           error: { error: "ollama is down", code: "model_error" },
         });
 
-        const result = await service.runLlmStrategy(100, "llm");
+        const result = await service.runLlmStrategy(100, "llm-openai");
 
         expect(result).toEqual({ status: StrategyRunStatus.ERROR, guessCount: 0 });
         // 2 transient failures, each retried with backoff, then give up.
@@ -1391,7 +1466,8 @@ describe("StrategyService", () => {
       ["order", ["A", "B", "C"]],
       ["shuffle-smart", ["A", "B", "C"]],
       ["shuffle-foolish", ["A", "B", "C"]],
-      ["llm", ["A", "B", "C"]],
+      ["llm-openai", ["A", "B", "C"]],
+      ["llm-ollama", ["A", "B", "C"]],
       ["reverse-order", ["C", "B", "A"]],
       ["reverse-alphabetical", ["C", "B", "A"]],
       ["alphabetical", ["A", "B", "C"]],

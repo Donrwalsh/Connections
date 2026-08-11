@@ -10,7 +10,8 @@ import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { GameService } from "../game/game.service";
 import { StrategyRunDetailDto, StrategyRunListItemDto, GuessDetailDto } from "./dto/strategy.dto";
 import {
-  LLM,
+  LLM_OPENAI,
+  LLM_OLLAMA,
   MAX_LLM_NUM_RESPONSES,
   SHUFFLE_SMART,
   SHUFFLE_FOOLISH,
@@ -26,7 +27,7 @@ import {
   strategyTrialNumbers,
 } from "../../strategies";
 import { runStrategyJobId } from "../queue/strategy.queue";
-import { OrchestratorService } from "./orchestrator.service";
+import { OrchestratorService, type ModelProvider } from "./orchestrator.service";
 
 const GROUP_SIZE = 4;
 const BATCH_SIZE = 50;
@@ -393,13 +394,15 @@ export class StrategyService {
 
   /**
    * Iterative LLM strategy: calls the orchestrator's /solve with the remaining
-   * words plus the full guess history. Each step starts by asking the model
-   * for a single answer; when every candidate repeats a prior guess, the
-   * orchestrator re-prompts with changed parameters — alternating between a
-   * higher sampling temperature and more distinct candidates to choose from —
-   * until a fresh candidate appears or its prompt budget runs out. The
-   * parameters that produced a usable candidate are held onto here and sent
-   * on subsequent steps, so the escalation persists across the run.
+   * words plus the full guess history. The strategy name (llm-openai or
+   * llm-ollama) selects which LLM backend the orchestrator consults for every
+   * solve step. Each step starts by asking the model for a single answer; when
+   * every candidate repeats a prior guess, the orchestrator re-prompts with
+   * changed parameters — alternating between a higher sampling temperature and
+   * more distinct candidates to choose from — until a fresh candidate appears
+   * or its prompt budget runs out. The parameters that produced a usable
+   * candidate are held onto here and sent on subsequent steps, so the
+   * escalation persists across the run.
    *
    * Recoverable model behaviors are bounded by config: the orchestrator
    * exhausting its prompt budget on repeats (LLM_MAX_DUPLICATE_GUESSES) and
@@ -462,6 +465,7 @@ export class StrategyService {
           words: guess.words,
           result: this.mapGuessResultToOrchestrator(guess.result),
         })),
+        modelProvider: this.modelProviderForStrategy(strategyName),
         temperature,
         numResponses,
         temperatureStep,
@@ -553,6 +557,13 @@ export class StrategyService {
           // limit can kick in and the run terminates instead of retrying
           // forever.
           duplicateCount++;
+          // A run can end on repeats without a single usable step, so record
+          // the model metadata from the error details too — otherwise a run
+          // that never produces a candidate would stay anonymous.
+          if (run.modelName === null && details?.model) {
+            run.modelName = details.model;
+            run.contextWindow = details.contextWindow ?? null;
+          }
           const group = details?.proposedGroups?.[0];
           if (group) {
             const words = group.word_ids.map((id) => run.availableWords[id]);
@@ -608,6 +619,15 @@ export class StrategyService {
     }
 
     return { status: run.status, guessCount };
+  }
+
+  /**
+   * Maps an LLM strategy name to the LLM backend it consults. The two names
+   * are the UI-facing distinction; this is the only place the mapping lives so
+   * the rest of the run machinery is provider-agnostic.
+   */
+  private modelProviderForStrategy(strategyName: string): ModelProvider {
+    return strategyName === LLM_OPENAI ? "openai" : "ollama";
   }
 
   /**
@@ -759,7 +779,8 @@ export class StrategyService {
       case "order":
       case SHUFFLE_SMART:
       case SHUFFLE_FOOLISH:
-      case LLM:
+      case LLM_OPENAI:
+      case LLM_OLLAMA:
         allWords = puzzle.answerGroups
           .flatMap((group) => group.members)
           .sort((a, b) => a.position - b.position)

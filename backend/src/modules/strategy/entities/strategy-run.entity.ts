@@ -51,7 +51,8 @@ export class StrategyRun {
   strategyName: string;
 
   // Distinguishes multiple runs of the same strategy on one puzzle. Always 0
-  // for deterministic strategies; 1..N for shuffle-smart/shuffle-foolish trials.
+  // for deterministic strategies; 1..N for shuffle-smart/shuffle-foolish and
+  // llm trials.
   @Column({ type: "int", default: 0 })
   trialNumber: number;
 

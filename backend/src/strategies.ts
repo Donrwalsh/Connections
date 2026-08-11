@@ -5,7 +5,8 @@ export const SUPPORTED_STRATEGIES = [
   "reverse-order",
   "shuffle-smart",
   "shuffle-foolish",
-  "llm",
+  "llm-openai",
+  "llm-ollama",
 ] as const;
 
 export type SupportedStrategy = (typeof SUPPORTED_STRATEGIES)[number];
@@ -14,20 +15,29 @@ export const STRATEGY_SET = new Set<string>(SUPPORTED_STRATEGIES);
 
 export const SHUFFLE_SMART = "shuffle-smart" as const;
 export const SHUFFLE_FOOLISH = "shuffle-foolish" as const;
-export const LLM = "llm" as const;
+export const LLM_OPENAI = "llm-openai" as const;
+export const LLM_OLLAMA = "llm-ollama" as const;
+
+export const LLM_STRATEGIES = [LLM_OPENAI, LLM_OLLAMA] as const;
+
+export function isLlmStrategy(strategyName: string): boolean {
+  return (LLM_STRATEGIES as readonly string[]).includes(strategyName);
+}
 
 /**
  * Strategies queued by the bulk 'all' queue endpoint. Deliberately excludes
- * 'llm' — the bulk endpoint keeps LLM runs (which cost real tokens) behind an
- * explicit /strategy/queue/llm/:date trigger. Puzzle ingestion dispatches the
- * full SUPPORTED_STRATEGIES list, including 'llm'.
+ * the LLM strategies — the bulk endpoint keeps LLM runs (which cost real
+ * tokens) behind an explicit /strategy/queue/:name/:date trigger. Puzzle
+ * ingestion dispatches the full SUPPORTED_STRATEGIES list, including both
+ * LLM strategies.
  */
 export const AUTOMATIC_STRATEGIES: readonly string[] = SUPPORTED_STRATEGIES.filter(
-  (strategyName) => strategyName !== LLM,
+  (strategyName) => !isLlmStrategy(strategyName),
 );
 
 export const DEFAULT_SHUFFLE_SMART_TRIALS = 3;
 export const DEFAULT_SHUFFLE_FOOLISH_TRIALS = 3;
+export const DEFAULT_LLM_TRIALS = 3;
 export const DEFAULT_LLM_MAX_DUPLICATE_GUESSES = 10;
 export const DEFAULT_LLM_MAX_MALFORMED_RESPONSES = 3;
 export const DEFAULT_LLM_MAX_MODEL_ERRORS = 5;
@@ -87,6 +97,16 @@ export function shuffleSmartTrialCount(env: NodeJS.ProcessEnv = process.env): nu
  */
 export function shuffleFoolishTrialCount(env: NodeJS.ProcessEnv = process.env): number {
   return positiveTrialCount(env.SHUFFLE_FOOLISH_TRIALS, DEFAULT_SHUFFLE_FOOLISH_TRIALS);
+}
+
+/**
+ * Number of independent LLM trials to run per puzzle, from LLM_TRIALS. Each
+ * trial is a separate strategy run of the same configured model, so the
+ * runs can be compared against each other (like shuffle-smart/foolish).
+ * Falls back to DEFAULT_LLM_TRIALS for missing/invalid values.
+ */
+export function llmTrialCount(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.LLM_TRIALS, DEFAULT_LLM_TRIALS);
 }
 
 /**
@@ -183,7 +203,8 @@ export function shuffleFoolishDuplicateLimit(env: NodeJS.ProcessEnv = process.en
 
 /**
  * Trial numbers to create for a strategy. Deterministic strategies run a
- * single trial (0); shuffle strategies run their configured trial count (1..N).
+ * single trial (0); shuffle and LLM strategies run their configured trial
+ * count (1..N) so the runs can be compared against each other.
  */
 export function strategyTrialNumbers(
   strategyName: string,
@@ -194,7 +215,9 @@ export function strategyTrialNumbers(
       ? shuffleSmartTrialCount(env)
       : strategyName === SHUFFLE_FOOLISH
         ? shuffleFoolishTrialCount(env)
-        : 0;
+        : isLlmStrategy(strategyName)
+          ? llmTrialCount(env)
+          : 0;
 
   if (count === 0) return [0];
   return Array.from({ length: count }, (_, i) => i + 1);

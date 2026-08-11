@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { SolveRequestSchema, type SolveResponse } from "./types.js";
 import { proposeGroup, SolveError } from "./solver.js";
+import { defaultProvider } from "./provider.js";
 
 export const app = new Hono();
 
@@ -58,7 +59,14 @@ app.post(
     }
 
     try {
-      const solveResult = await proposeGroup(parsed.data);
+      const solveRequest = {
+        // Strategy runs always pick their provider explicitly; provider-less
+        // requests (e.g. the in-game AI Assist) fall back to the configured
+        // default so the solver never has to guess.
+        modelProvider: defaultProvider(),
+        ...parsed.data,
+      };
+      const solveResult = await proposeGroup(solveRequest);
       const response: SolveResponse = solveResult;
       return c.json(response, 200);
     } catch (err) {

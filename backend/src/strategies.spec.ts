@@ -7,9 +7,14 @@ import {
   DEFAULT_LLM_NUM_RESPONSES,
   DEFAULT_LLM_TEMPERATURE_BASE,
   DEFAULT_LLM_TEMPERATURE_MAX,
+  DEFAULT_LLM_TRIALS,
   DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT,
   DEFAULT_SHUFFLE_FOOLISH_TRIALS,
   DEFAULT_SHUFFLE_SMART_TRIALS,
+  isLlmStrategy,
+  LLM_OPENAI,
+  LLM_OLLAMA,
+  LLM_STRATEGIES,
   llmMaxDuplicateGuesses,
   llmMaxMalformedResponses,
   llmMaxModelErrors,
@@ -18,6 +23,7 @@ import {
   llmTemperatureBase,
   llmTemperatureMax,
   llmTemperatureStep,
+  llmTrialCount,
   shuffleFoolishDuplicateLimit,
   shuffleFoolishTrialCount,
   shuffleSmartTrialCount,
@@ -62,6 +68,22 @@ describe("strategies", () => {
 
     it("should read a valid positive integer", () => {
       expect(shuffleFoolishTrialCount({ SHUFFLE_FOOLISH_TRIALS: "4" })).toBe(4);
+    });
+  });
+
+  describe("llmTrialCount", () => {
+    it("should default when the env var is missing", () => {
+      expect(llmTrialCount({})).toBe(DEFAULT_LLM_TRIALS);
+    });
+
+    it("should default when the env var is invalid", () => {
+      expect(llmTrialCount({ LLM_TRIALS: "abc" })).toBe(DEFAULT_LLM_TRIALS);
+      expect(llmTrialCount({ LLM_TRIALS: "0" })).toBe(DEFAULT_LLM_TRIALS);
+      expect(llmTrialCount({ LLM_TRIALS: "-2" })).toBe(DEFAULT_LLM_TRIALS);
+    });
+
+    it("should read a valid positive integer", () => {
+      expect(llmTrialCount({ LLM_TRIALS: "5" })).toBe(5);
     });
   });
 
@@ -185,7 +207,7 @@ describe("strategies", () => {
   describe("strategyTrialNumbers", () => {
     it("should return a single trial 0 for deterministic strategies", () => {
       for (const strategyName of SUPPORTED_STRATEGIES.filter(
-        (s) => s !== "shuffle-smart" && s !== "shuffle-foolish",
+        (s) => s !== "shuffle-smart" && s !== "shuffle-foolish" && !isLlmStrategy(s),
       )) {
         expect(strategyTrialNumbers(strategyName)).toEqual([0]);
       }
@@ -206,12 +228,31 @@ describe("strategies", () => {
       ).toEqual([1, 2]);
       expect(strategyTrialNumbers("shuffle-foolish", {})).toEqual([1, 2, 3]);
     });
+
+    it("should return 1..N for each LLM strategy", () => {
+      for (const strategyName of LLM_STRATEGIES) {
+        expect(strategyTrialNumbers(strategyName, { LLM_TRIALS: "2" })).toEqual([1, 2]);
+        expect(strategyTrialNumbers(strategyName, {})).toEqual([1, 2, 3]);
+      }
+    });
   });
 
   it("should keep STRATEGY_SET in sync with SUPPORTED_STRATEGIES", () => {
     for (const strategyName of SUPPORTED_STRATEGIES) {
       expect(STRATEGY_SET.has(strategyName)).toBe(true);
     }
+  });
+
+  describe("isLlmStrategy", () => {
+    it("should identify both LLM strategies", () => {
+      expect(isLlmStrategy(LLM_OPENAI)).toBe(true);
+      expect(isLlmStrategy(LLM_OLLAMA)).toBe(true);
+    });
+
+    it("should reject non-LLM strategies", () => {
+      expect(isLlmStrategy("alphabetical")).toBe(false);
+      expect(isLlmStrategy("llm")).toBe(false);
+    });
   });
 
   describe("AUTOMATIC_STRATEGIES", () => {
@@ -221,12 +262,14 @@ describe("strategies", () => {
       }
     });
 
-    it("should exclude 'llm' until it is evaluated", () => {
-      expect(AUTOMATIC_STRATEGIES).not.toContain("llm");
+    it("should exclude the LLM strategies until they are evaluated", () => {
+      for (const strategyName of LLM_STRATEGIES) {
+        expect(AUTOMATIC_STRATEGIES).not.toContain(strategyName);
+      }
     });
 
-    it("should include every non-llm strategy", () => {
-      const expected = SUPPORTED_STRATEGIES.filter((s) => s !== "llm");
+    it("should include every non-LLM strategy", () => {
+      const expected = SUPPORTED_STRATEGIES.filter((s) => !isLlmStrategy(s));
       expect([...AUTOMATIC_STRATEGIES].sort()).toEqual([...expected].sort());
     });
   });

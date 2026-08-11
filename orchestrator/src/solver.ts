@@ -13,7 +13,12 @@ import {
   type PromptMetadata,
 } from "./types.js";
 import { buildSolvePrompt, forbiddenIdSets } from "./prompt.js";
-import { getContextWindow, getModel, getModelName } from "./provider.js";
+import {
+  defaultProvider,
+  getContextWindow,
+  getModel,
+  getModelName,
+} from "./provider.js";
 
 const GROUP_SIZE = 4;
 
@@ -94,6 +99,9 @@ export class SolveError extends Error {
 export async function proposeGroup(
   request: SolveRequest,
 ): Promise<SolveResult> {
+  // The provider is normally set explicitly by the backend (from the strategy
+  // name); fall back to the configured default for robustness.
+  const provider = request.modelProvider ?? defaultProvider();
   const maxTemperature = request.maxTemperature ?? DEFAULT_MAX_TEMPERATURE;
   const maxNumResponses = request.maxNumResponses ?? DEFAULT_MAX_NUM_RESPONSES;
   const maxPrompts = request.maxPrompts ?? DEFAULT_MAX_PROMPTS;
@@ -194,7 +202,7 @@ export async function proposeGroup(
     let result;
     try {
       result = await generateObject({
-        model: getModel(),
+        model: getModel(provider),
         schema: solveOutputSchema(numResponses),
         prompt,
         temperature,
@@ -208,7 +216,7 @@ export async function proposeGroup(
         attempt: attempts,
         temperature,
         numResponses,
-        model: getModelName(),
+        model: getModelName(provider),
         contextWindow: getContextWindow(),
         latencyMs,
         outcome: errored ? "error" : "invalid",

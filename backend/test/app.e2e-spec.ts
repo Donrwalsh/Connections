@@ -148,19 +148,20 @@ describe("App (e2e)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("POST /strategy/queue/llm/:date queues a single llm trial-0 job", async () => {
-    const res = await request(app.getHttpServer()).post(`/strategy/queue/llm/${TEST_DATE}`);
+  it("POST /strategy/queue/llm-openai/:date queues one trial job per configured trial", async () => {
+    const res = await request(app.getHttpServer()).post(`/strategy/queue/llm-openai/${TEST_DATE}`);
 
     expect(res.status).toBe(201);
-    expect(res.body).toEqual({
-      message: `LLM job queued for puzzle date ${TEST_DATE}`,
+    expect(res.body).toMatchObject({
+      message: `Jobs queued for strategy 'llm-openai' on puzzle date ${TEST_DATE}`,
       puzzleId: expect.any(Number),
       date: TEST_DATE,
-      strategyName: "llm",
-      trialNumber: 0,
+      strategyName: "llm-openai",
     });
 
-    await strategyQueue.remove(`run-${res.body.puzzleId}-llm-0`);
+    for (const trialNumber of res.body.trialNumbers ?? [1, 2, 3]) {
+      await strategyQueue.remove(`run-${res.body.puzzleId}-llm-openai-${trialNumber}`);
+    }
   });
 
   it("GET /strategy/:strategy/puzzle/:date returns an empty run list", async () => {
@@ -219,7 +220,7 @@ describe("App (e2e)", () => {
     const puzzle = await dataSource.getRepository(Puzzle).findOneByOrFail({ date: TEST_DATE });
     const run = await dataSource.getRepository(StrategyRun).save({
       puzzle,
-      strategyName: "llm",
+      strategyName: "llm-openai",
       trialNumber: 0,
       availableWords: ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"],
       currentCombination: [0, 1, 2, 3],
@@ -248,7 +249,7 @@ describe("App (e2e)", () => {
     });
 
     const res = await request(app.getHttpServer()).get(
-      `/strategy/llm/puzzle/${TEST_DATE}/run/0/guess/1`,
+      `/strategy/llm-openai/puzzle/${TEST_DATE}/run/0/guess/1`,
     );
 
     expect(res.status).toBe(200);
