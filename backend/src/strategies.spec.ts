@@ -1,6 +1,7 @@
 import {
   AUTOMATIC_STRATEGIES,
   DEFAULT_LLM_MAX_DUPLICATE_GUESSES,
+  DEFAULT_LLM_MAX_FAILED_GUESSES,
   DEFAULT_LLM_MAX_MALFORMED_RESPONSES,
   DEFAULT_LLM_MAX_MODEL_ERRORS,
   DEFAULT_LLM_MAX_PROMPTS,
@@ -19,6 +20,7 @@ import {
   LLM_OLLAMA,
   LLM_STRATEGIES,
   llmMaxDuplicateGuesses,
+  llmMaxFailedGuesses,
   llmMaxMalformedResponses,
   llmMaxModelErrors,
   llmMaxPrompts,
@@ -168,6 +170,22 @@ describe("strategies", () => {
 
     it("should read a valid positive integer", () => {
       expect(llmMaxModelErrors({ LLM_MAX_MODEL_ERRORS: "9" })).toBe(9);
+    });
+  });
+
+  describe("llmMaxFailedGuesses", () => {
+    it("should default when the env var is missing or invalid", () => {
+      expect(llmMaxFailedGuesses({})).toBe(DEFAULT_LLM_MAX_FAILED_GUESSES);
+      expect(llmMaxFailedGuesses({ LLM_MAX_FAILED_GUESSES: "0" })).toBe(
+        DEFAULT_LLM_MAX_FAILED_GUESSES,
+      );
+      expect(llmMaxFailedGuesses({ LLM_MAX_FAILED_GUESSES: "abc" })).toBe(
+        DEFAULT_LLM_MAX_FAILED_GUESSES,
+      );
+    });
+
+    it("should read a valid positive integer", () => {
+      expect(llmMaxFailedGuesses({ LLM_MAX_FAILED_GUESSES: "2" })).toBe(2);
     });
   });
 

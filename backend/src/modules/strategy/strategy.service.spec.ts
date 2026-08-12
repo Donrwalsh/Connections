@@ -1203,10 +1203,10 @@ describe("StrategyService", () => {
         puzzleWords: ["APPLE", "BANANA", "CHERRY", "DATE", "EGGPLANT", "FIG", "GRAPE", "HONEY"],
         priorGuesses: [],
         modelProvider: "openai",
-        temperature: 0,
+        temperature: 0.2,
         numResponses: 1,
-        temperatureStep: 0.005,
-        maxTemperature: 0.5,
+        temperatureStep: 0.002,
+        maxTemperature: 0.4,
         maxNumResponses: 10,
         maxPrompts: 19,
       });
@@ -1218,8 +1218,8 @@ describe("StrategyService", () => {
         modelProvider: "openai",
         temperature: 0,
         numResponses: 1,
-        temperatureStep: 0.005,
-        maxTemperature: 0.5,
+        temperatureStep: 0.002,
+        maxTemperature: 0.4,
         maxNumResponses: 10,
         maxPrompts: 19,
       });
@@ -1234,12 +1234,15 @@ describe("StrategyService", () => {
 
       expect(mockOrchestratorService.proposeGroup).toHaveBeenCalledTimes(2);
       // The Ollama strategy uses its own provider and the wider Ollama
-      // temperature ramp (0 -> 1.5, step 0.015).
-      expect(mockOrchestratorService.proposeGroup.mock.calls[0][0]).toMatchObject({
-        modelProvider: "ollama",
-        temperatureStep: 0.015,
-        maxTemperature: 1.5,
-      });
+      // temperature ramp (0.2 -> 0.8, step 0.006).
+      const firstCall = mockOrchestratorService.proposeGroup.mock.calls[0][0] as {
+        modelProvider: string;
+        temperatureStep: number;
+        maxTemperature: number;
+      };
+      expect(firstCall.modelProvider).toBe("ollama");
+      expect(firstCall.temperatureStep).toBeCloseTo(0.006, 10);
+      expect(firstCall.maxTemperature).toBe(0.8);
       expect(mockOrchestratorService.proposeGroup.mock.calls[1][0]).toMatchObject({
         modelProvider: "ollama",
       });
@@ -1267,7 +1270,7 @@ describe("StrategyService", () => {
       expect(firstCall.priorGuesses).toEqual([
         { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: "incorrect" },
       ]);
-      expect(firstCall.temperature).toBe(0);
+      expect(firstCall.temperature).toBe(0.2);
       expect(mockGuessRepo.find).toHaveBeenCalledWith({
         where: { strategyRunId: 7 },
         order: { sequenceNumber: "ASC" },
@@ -1298,7 +1301,9 @@ describe("StrategyService", () => {
 
       const calls = mockOrchestratorService.proposeGroup.mock.calls;
       // The run starts at the base parameters.
-      expect(calls[0][0]).toEqual(expect.objectContaining({ temperature: 0, numResponses: 1 }));
+      expect(calls[0][0]).toEqual(
+        expect.objectContaining({ temperature: 0.2, numResponses: 1 }),
+      );
       // The first response escalated, so the second solve step starts from the
       // raised temperature, but the candidate count resets to base for each
       // fresh guess.
@@ -1369,7 +1374,7 @@ describe("StrategyService", () => {
         const temperatures = mockOrchestratorService.proposeGroup.mock.calls.map(
           (call) => (call[0] as { temperature: number }).temperature,
         );
-        expect(temperatures).toEqual([0, 0, 0]);
+        expect(temperatures).toEqual([0.2, 0.2, 0.2]);
         expect(mockManager.save).toHaveBeenCalledWith(
           StrategyRun,
           expect.objectContaining({ status: StrategyRunStatus.DUPLICATE }),
@@ -1401,6 +1406,72 @@ describe("StrategyService", () => {
         );
       } finally {
         delete process.env.LLM_MAX_DUPLICATE_GUESSES;
+      }
+    });
+
+    it("should terminate with 'failed' once the failed-guess limit is hit", async () => {
+      process.env.LLM_MAX_FAILED_GUESSES = "2";
+      try {
+        // Both guesses cross the two answer groups (2 words each), so neither
+        // is a one-away and each evaluates to FAILURE.
+        mockOrchestratorService.proposeGroup
+          .mockResolvedValueOnce(success([0, 1, 4, 5]))
+          .mockResolvedValueOnce(success([1, 2, 5, 6]));
+
+        const result = await service.runLlmStrategy(100, "llm-openai");
+
+        expect(result).toEqual({ status: StrategyRunStatus.FAILED, guessCount: 2 });
+        const inserted = mockManager.insert.mock.calls
+          .filter((call) => call[0] === "Guess")
+          .flatMap(
+            (call) =>
+              call[1] as Array<{
+                result: GuessResult;
+                words: string[];
+                sequenceNumber: number;
+              }>,
+          );
+        expect(inserted.map((g) => g.result)).toEqual([
+          GuessResult.FAILURE,
+          GuessResult.FAILURE,
+        ]);
+        expect(mockManager.save).toHaveBeenCalledWith(
+          StrategyRun,
+          expect.objectContaining({ status: StrategyRunStatus.FAILED }),
+        );
+      } finally {
+        delete process.env.LLM_MAX_FAILED_GUESSES;
+      }
+    });
+
+    it("should count one-aways toward the failed-guess limit", async () => {
+      process.env.LLM_MAX_FAILED_GUESSES = "2";
+      try {
+        // First guess is 3 words of an answer group -> one-away; the second is
+        // a plain wrong group. Together they hit the limit, so the run fails.
+        mockOrchestratorService.proposeGroup
+          .mockResolvedValueOnce(success([0, 1, 2, 4]))
+          .mockResolvedValueOnce(success([0, 1, 4, 5]));
+
+        const result = await service.runLlmStrategy(100, "llm-openai");
+
+        expect(result).toEqual({ status: StrategyRunStatus.FAILED, guessCount: 2 });
+        const inserted = mockManager.insert.mock.calls
+          .filter((call) => call[0] === "Guess")
+          .flatMap(
+            (call) =>
+              call[1] as Array<{
+                result: GuessResult;
+                words: string[];
+                sequenceNumber: number;
+              }>,
+          );
+        expect(inserted.map((g) => g.result)).toEqual([
+          GuessResult.OFF_BY_ONE,
+          GuessResult.FAILURE,
+        ]);
+      } finally {
+        delete process.env.LLM_MAX_FAILED_GUESSES;
       }
     });
 

@@ -23,16 +23,16 @@ import {
 
 const GROUP_SIZE = 4;
 
-const DEFAULT_TEMPERATURE = 0;
+const DEFAULT_TEMPERATURE = 0.2;
 const DEFAULT_NUM_RESPONSES = 1;
 // The temperature ramp spans exactly this many increments from the default
 // base to the provider's ceiling, so each increment is derived as
 // (ceiling - base) / steps rather than configured directly.
 const LLM_TEMPERATURE_RAMP_STEPS = 100;
-// The two providers use different temperature scales: OpenAI tops out at 0.5
-// (step 0.005), Ollama models like Mistral at 1.5 (step 0.015).
-const DEFAULT_MAX_TEMPERATURE_OPENAI = 0.5;
-const DEFAULT_MAX_TEMPERATURE_OLLAMA = 1.5;
+// The two providers use different temperature scales: OpenAI tops out at 0.4
+// (step 0.002), Ollama models like Mistral at 0.8 (step 0.006).
+const DEFAULT_MAX_TEMPERATURE_OPENAI = 0.4;
+const DEFAULT_MAX_TEMPERATURE_OLLAMA = 0.8;
 const DEFAULT_MAX_NUM_RESPONSES = 10;
 const DEFAULT_MAX_PROMPTS = 19;
 

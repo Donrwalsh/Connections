@@ -41,6 +41,7 @@ export const DEFAULT_LLM_TRIALS = 3;
 export const DEFAULT_LLM_MAX_DUPLICATE_GUESSES = 10;
 export const DEFAULT_LLM_MAX_MALFORMED_RESPONSES = 3;
 export const DEFAULT_LLM_MAX_MODEL_ERRORS = 5;
+export const DEFAULT_LLM_MAX_FAILED_GUESSES = 4;
 export const DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT = 3;
 
 // Starting candidate count per LLM solve step: the model is tasked with
@@ -69,14 +70,14 @@ export const DEFAULT_LLM_MAX_PROMPTS = 19;
 // and, on each re-prompt, is nudged up by a computed step (see
 // llmTemperatureStep) sized so that LLM_TEMPERATURE_RAMP_STEPS increments land
 // exactly on the provider's ceiling. The two providers use different
-// temperature scales: OpenAI ranges 0 -> DEFAULT_LLM_TEMPERATURE_MAX_OPENAI
-// (0.5, step 0.005), while Ollama models like Mistral go up to
-// DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA (1.5, step 0.015). The value that
+// temperature scales: OpenAI ranges 0.2 -> DEFAULT_LLM_TEMPERATURE_MAX_OPENAI
+// (0.4, step 0.002), while Ollama models like Mistral go up to
+// DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA (0.8, step 0.006). The value that
 // produced a usable candidate is echoed back to the backend, which holds onto
 // it for subsequent solve steps.
-export const DEFAULT_LLM_TEMPERATURE_BASE = 0.0;
-export const DEFAULT_LLM_TEMPERATURE_MAX_OPENAI = 0.5;
-export const DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA = 1.5;
+export const DEFAULT_LLM_TEMPERATURE_BASE = 0.2;
+export const DEFAULT_LLM_TEMPERATURE_MAX_OPENAI = 0.4;
+export const DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA = 0.8;
 // Back-compat alias: llmTemperatureMax/llmTemperatureStep default to the
 // Ollama ceiling when no provider is given.
 export const DEFAULT_LLM_TEMPERATURE_MAX = DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA;
@@ -171,6 +172,15 @@ export function llmMaxModelErrors(env: NodeJS.ProcessEnv = process.env): number 
 }
 
 /**
+ * Maximum failed guesses (wrong groups and one-aways) before an LLM run is
+ * terminated with a 'failed' status, from LLM_MAX_FAILED_GUESSES. A one-away
+ * still counts as a mistake, mirroring NYT's four-mistake rule.
+ */
+export function llmMaxFailedGuesses(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.LLM_MAX_FAILED_GUESSES, DEFAULT_LLM_MAX_FAILED_GUESSES);
+}
+
+/**
  * Starting number of candidate groups the model proposes per solve step, from
  * LLM_NUM_RESPONSES (clamped to [1, MAX_LLM_NUM_RESPONSES]). Each step begins
  * by asking the model to produce this many candidates; when they all repeat a
@@ -218,7 +228,7 @@ export function llmTemperatureBase(env: NodeJS.ProcessEnv = process.env): number
  * both providers when the per-provider variable is unset. The ramp reaches
  * exactly this value after LLM_TEMPERATURE_RAMP_STEPS increments. Defaults
  * are provider-specific because the two backends use different temperature
- * scales: OpenAI tops out at 0.5, Ollama at 1.5.
+ * scales: OpenAI tops out at 0.4, Ollama at 0.8.
  */
 export function llmTemperatureMax(
   env: NodeJS.ProcessEnv = process.env,

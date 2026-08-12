@@ -17,6 +17,7 @@ import {
   SHUFFLE_SMART,
   SHUFFLE_FOOLISH,
   llmMaxDuplicateGuesses,
+  llmMaxFailedGuesses,
   llmMaxMalformedResponses,
   llmMaxModelErrors,
   llmMaxPrompts,
@@ -416,7 +417,8 @@ export class StrategyService {
    * candidate are held onto here and sent on subsequent steps, so the
    * escalation persists across the run.
    *
-   * Recoverable model behaviors are bounded by config: the orchestrator
+   * Recoverable model behaviors are bounded by config: too many wrong guesses
+   * (LLM_MAX_FAILED_GUESSES) end the run with 'failed'; the orchestrator
    * exhausting its prompt budget on repeats (LLM_MAX_DUPLICATE_GUESSES) and
    * emitting unusable output (LLM_MAX_MALFORMED_RESPONSES) end the run with
    * 'duplicate' / 'malformedResponse' statuses. Transient model/network
@@ -446,13 +448,18 @@ export class StrategyService {
     let duplicateCount = priorGuesses.filter(
       (guess) => guess.result === GuessResult.DUPLICATE,
     ).length;
+    let failedGuessCount = priorGuesses.filter(
+      (guess) =>
+        guess.result === GuessResult.FAILURE || guess.result === GuessResult.OFF_BY_ONE,
+    ).length;
     let malformedCount = 0;
     const maxDuplicates = llmMaxDuplicateGuesses();
+    const maxFailedGuesses = llmMaxFailedGuesses();
     const maxMalformed = llmMaxMalformedResponses();
     const maxModelErrors = llmMaxModelErrors();
     const maxPrompts = llmMaxPrompts();
     // The temperature ramp ceiling (and per-re-prompt step) is provider-
-    // specific: OpenAI ranges 0 -> 0.5, Ollama 0 -> 1.5.
+    // specific: OpenAI ranges 0.2 -> 0.4, Ollama 0.2 -> 0.8.
     const modelProvider = this.modelProviderForStrategy(strategyName);
     const temperatureStep = llmTemperatureStep(process.env, modelProvider);
     const maxTemperature = llmTemperatureMax(process.env, modelProvider);
@@ -567,6 +574,15 @@ export class StrategyService {
 
             if (run.availableWords.length === 0) {
               run.status = StrategyRunStatus.COMPLETED;
+              run.finishedAt = new Date();
+            }
+          } else {
+            // A wrong group or a one-away both count as a mistake. Mirror the
+            // NYT rule of four mistakes per puzzle: once the run has made
+            // maxFailedGuesses of them it is labeled 'failed'.
+            failedGuessCount++;
+            if (failedGuessCount >= maxFailedGuesses) {
+              run.status = StrategyRunStatus.FAILED;
               run.finishedAt = new Date();
             }
           }

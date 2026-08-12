@@ -120,7 +120,7 @@ describe("proposeGroup", () => {
     expect(result.prompt).toContain("Remaining words");
     expect(result.model).toBe("test-model");
     expect(result.contextWindow).toBe(4096);
-    expect(result.temperature).toBe(0);
+    expect(result.temperature).toBe(0.2);
     expect(result.numResponses).toBe(1);
     expect(result.promptAttempts).toBe(1);
     expect(result.duplicatesRejected).toBe(0);
@@ -137,7 +137,7 @@ describe("proposeGroup", () => {
     expect(result.promptMetadata).toHaveLength(1);
     expect(result.promptMetadata[0]).toMatchObject({
       attempt: 1,
-      temperature: 0,
+      temperature: 0.2,
       numResponses: 1,
       model: "test-model",
       contextWindow: 4096,
@@ -165,11 +165,11 @@ describe("proposeGroup", () => {
     ).toBe(false);
   });
 
-  it("defaults the temperature to 0 and always passes it to the model", async () => {
+  it("defaults the temperature to 0.2 and always passes it to the model", async () => {
     await proposeGroup(makeRequest());
 
     expect(generateObjectMock).toHaveBeenCalledWith(
-      expect.objectContaining({ temperature: 0 }),
+      expect.objectContaining({ temperature: 0.2 }),
     );
   });
 
@@ -202,7 +202,7 @@ describe("proposeGroup", () => {
     const result = await proposeGroup(request);
 
     expect(generateObjectMock).toHaveBeenCalledTimes(2);
-    expect(lastTemperatures()).toEqual([0, 0.1]);
+    expect(lastTemperatures()).toEqual([0.2, 0.3]);
     // The first escalation also asks for an extra distinct candidate.
     expect(schemaAcceptsCount(0, 1)).toBe(true);
     expect(schemaAcceptsCount(0, 2)).toBe(false);
@@ -220,7 +220,7 @@ describe("proposeGroup", () => {
         status: "used",
       },
     ]);
-    expect(result.temperature).toBe(0.1);
+    expect(result.temperature).toBeCloseTo(0.3, 10);
     expect(result.numResponses).toBe(2);
     expect(result.promptAttempts).toBe(2);
     expect(result.duplicatesRejected).toBe(2);
@@ -275,7 +275,7 @@ describe("proposeGroup", () => {
     const result = await proposeGroup(request);
 
     expect(generateObjectMock).toHaveBeenCalledTimes(3);
-    expect(lastTemperatures()).toEqual([0, 0.1, 0.2]);
+    expect(lastTemperatures()).toEqual([0.2, 0.3, 0.4]);
     // Each escalation raises the temperature and requests one more candidate.
     expect(schemaAcceptsCount(0, 1)).toBe(true);
     expect(schemaAcceptsCount(0, 2)).toBe(false);
@@ -283,7 +283,7 @@ describe("proposeGroup", () => {
     expect(schemaAcceptsCount(1, 3)).toBe(false);
     expect(schemaAcceptsCount(2, 3)).toBe(true);
     expect(schemaAcceptsCount(2, 4)).toBe(false);
-    expect(result.temperature).toBeCloseTo(0.2, 10);
+    expect(result.temperature).toBeCloseTo(0.4, 10);
     expect(result.numResponses).toBe(3);
     expect(result.promptAttempts).toBe(3);
   });
@@ -327,18 +327,18 @@ describe("proposeGroup", () => {
     expect(result.promptMetadata).toHaveLength(2);
     expect(result.promptMetadata[0]).toMatchObject({
       attempt: 1,
-      temperature: 0,
       numResponses: 1,
       usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
       outcome: "duplicate_rejected",
     });
+    expect(result.promptMetadata[0].temperature).toBeCloseTo(0.2, 10);
     expect(result.promptMetadata[1]).toMatchObject({
       attempt: 2,
-      temperature: 0.1,
       numResponses: 2,
       usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
       outcome: "accepted",
     });
+    expect(result.promptMetadata[1].temperature).toBeCloseTo(0.3, 10);
     // The metadata reflects the model that responded, even for the retry.
     expect(
       result.promptMetadata.every((entry) => entry.model === "test-model"),
@@ -454,7 +454,7 @@ describe("proposeGroup", () => {
     expect(generateObjectMock).toHaveBeenCalledTimes(3);
     // The escalations ratchet up before giving up: both the temperature and
     // the requested candidate count rise with each re-prompt.
-    expect(lastTemperatures()).toEqual([0, 0.1, 0.2]);
+    expect(lastTemperatures()).toEqual([0.2, 0.3, 0.4]);
     expect(schemaAcceptsCount(2, 3)).toBe(true);
     expect(schemaAcceptsCount(2, 4)).toBe(false);
   });
@@ -493,7 +493,7 @@ describe("proposeGroup", () => {
       makeGroup({ word_ids: [4, 5, 6, 7] }),
     ]);
     expect(result.promptAttempts).toBe(2);
-    expect(result.temperature).toBe(0.1);
+    expect(result.temperature).toBeCloseTo(0.3, 10);
   });
 
   it("derives the temperature step so 100 increments reach the Ollama ceiling", async () => {
@@ -514,8 +514,8 @@ describe("proposeGroup", () => {
     const result = await proposeGroup(request);
 
     expect(generateObjectMock).toHaveBeenCalledTimes(2);
-    expect(lastTemperatures()[1]).toBeCloseTo(0.015, 10);
-    expect(result.temperature).toBeCloseTo(0.015, 10);
+    expect(lastTemperatures()[1]).toBeCloseTo(0.206, 10);
+    expect(result.temperature).toBeCloseTo(0.206, 10);
   });
 
   it("derives a smaller temperature step for the OpenAI scale", async () => {
@@ -536,8 +536,8 @@ describe("proposeGroup", () => {
     const result = await proposeGroup(request);
 
     expect(generateObjectMock).toHaveBeenCalledTimes(2);
-    expect(lastTemperatures()[1]).toBeCloseTo(0.005, 10);
-    expect(result.temperature).toBeCloseTo(0.005, 10);
+    expect(lastTemperatures()[1]).toBeCloseTo(0.202, 10);
+    expect(result.temperature).toBeCloseTo(0.202, 10);
   });
 
   it("does not re-prompt after an unrecoverable model error", async () => {
