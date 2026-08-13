@@ -7,6 +7,8 @@ import { LlmProposal } from "./entities/llm-proposal.entity";
 import { StrategyRun } from "./entities/strategy-run.entity";
 import { StrategyController } from "./strategy.controller";
 import { StrategyService } from "./strategy.service";
+import { LlmStrategyRunner } from "./llm-strategy-runner.service";
+import { StrategyRunStore } from "./strategy-run-store.service";
 import { OrchestratorService } from "./orchestrator.service";
 import { GameModule } from "../game/game.module";
 
@@ -17,7 +19,7 @@ import { GameModule } from "../game/game.module";
     GameModule,
   ],
   controllers: [StrategyController],
-  providers: [StrategyService, OrchestratorService],
-  exports: [StrategyService],
+  providers: [StrategyService, StrategyRunStore, LlmStrategyRunner, OrchestratorService],
+  exports: [StrategyService, LlmStrategyRunner],
 })
 export class StrategyModule {}

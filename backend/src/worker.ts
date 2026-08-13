@@ -3,6 +3,7 @@ import { Logger } from "@nestjs/common";
 import { Worker, Job } from "bullmq";
 import { AppModule } from "./app.module";
 import { StrategyService } from "./modules/strategy/strategy.service";
+import { LlmStrategyRunner } from "./modules/strategy/llm-strategy-runner.service";
 import { redisConnection } from "./modules/queue/redis.config";
 import { PuzzleIngestionService } from "./modules/game/puzzle-ingestion.service";
 import {
@@ -25,6 +26,7 @@ async function bootstrap() {
   const logger = new Logger("Worker");
   const appContext = await NestFactory.createApplicationContext(AppModule);
   const strategyService = appContext.get(StrategyService);
+  const llmStrategyRunner = appContext.get(LlmStrategyRunner);
   const puzzleIngestionService = appContext.get(PuzzleIngestionService);
 
   const worker = new Worker(
@@ -46,7 +48,7 @@ async function bootstrap() {
         ? // Defensive: LLM jobs are normally routed to their per-provider
           // queues, but a stale job left on this queue before a deploy still
           // needs processing rather than failing forever.
-          await strategyService.runLlmStrategy(puzzleId, strategyName, trialNumber)
+          await llmStrategyRunner.runLlmStrategy(puzzleId, strategyName, trialNumber)
         : await strategyService.runDeterministicStrategy(puzzleId, strategyName, trialNumber);
 
       logger.log(
@@ -96,7 +98,7 @@ async function bootstrap() {
           `starting job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName} trial=${trialNumber}`,
         );
 
-        const result = await strategyService.runLlmStrategy(puzzleId, strategyName, trialNumber);
+        const result = await llmStrategyRunner.runLlmStrategy(puzzleId, strategyName, trialNumber);
 
         logger.log(
           `finished job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName} trial=${trialNumber} status=${result.status}`,

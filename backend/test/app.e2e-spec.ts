@@ -18,7 +18,7 @@ import {
   StrategyRun,
   StrategyRunStatus,
 } from "../src/modules/strategy/entities/strategy-run.entity";
-import { StrategyService } from "../src/modules/strategy/strategy.service";
+import { LlmStrategyRunner } from "../src/modules/strategy/llm-strategy-runner.service";
 import { llmOpenAIQueue } from "../src/modules/queue/strategy.queue";
 
 const TEST_DATE = "1999-12-31";
@@ -324,11 +324,11 @@ describe("App (e2e)", () => {
 
   it("persists every proposed LLM candidate as an LlmProposal row", async () => {
     const puzzle = await dataSource.getRepository(Puzzle).findOneByOrFail({ date: TEST_DATE });
-    const strategyService = app.get(StrategyService);
+    const llmStrategyRunner = app.get(LlmStrategyRunner);
 
     // Trial 99: the llm-openai trial-0 run is already created by the telemetry
     // test above, and this needs a fresh run.
-    const result = await strategyService.runLlmStrategy(puzzle.id, "llm-openai", 99);
+    const result = await llmStrategyRunner.runLlmStrategy(puzzle.id, "llm-openai", 99);
 
     // The fake orchestrator always proposes group [0, 1, 2, 3], which resolves
     // to the next unsolved answer group on every step, so the run solves fully.
