@@ -2,8 +2,9 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { DataSource } from "typeorm";
 import { getRepositoryToken } from "@nestjs/typeorm";
-import { STRATEGY_QUEUE } from "../queue/queue.module";
+import { STRATEGY_QUEUE, LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE } from "../queue/queue.module";
 import { StrategyService } from "./strategy.service";
+import { StrategyRunStore } from "./strategy-run-store.service";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
@@ -12,6 +13,8 @@ import { GameService } from "../game/game.service";
 describe("StrategyService", () => {
   let service: StrategyService;
   let mockQueue: { add: jest.Mock; addBulk: jest.Mock };
+  let mockOpenAIQueue: { add: jest.Mock; addBulk: jest.Mock };
+  let mockOllamaQueue: { add: jest.Mock; addBulk: jest.Mock };
   let mockStrategyRunRepo: {
     findOne: jest.Mock;
     find: jest.Mock;
@@ -22,6 +25,7 @@ describe("StrategyService", () => {
   let mockGuessRepo: {
     count: jest.Mock;
     find: jest.Mock;
+    findOne: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
   let mockGameService: {
@@ -38,6 +42,8 @@ describe("StrategyService", () => {
     status: StrategyRunStatus.RUNNING,
     availableWords: ["APPLE", "BANANA", "CHERRY", "DATE", "EGGPLANT", "FIG", "GRAPE", "HONEY"],
     currentCombination: [0, 1, 2, 3],
+    modelName: null,
+    contextWindow: null,
     finishedAt: null,
     ...overrides,
   });
@@ -68,6 +74,14 @@ describe("StrategyService", () => {
       add: jest.fn().mockResolvedValue(undefined),
       addBulk: jest.fn().mockResolvedValue(undefined),
     };
+    mockOpenAIQueue = {
+      add: jest.fn().mockResolvedValue(undefined),
+      addBulk: jest.fn().mockResolvedValue(undefined),
+    };
+    mockOllamaQueue = {
+      add: jest.fn().mockResolvedValue(undefined),
+      addBulk: jest.fn().mockResolvedValue(undefined),
+    };
     mockStrategyRunRepo = {
       findOne: jest.fn(),
       find: jest.fn(),
@@ -81,13 +95,14 @@ describe("StrategyService", () => {
     mockGuessRepo = {
       count: jest.fn().mockResolvedValue(0),
       find: jest.fn(),
+      findOne: jest.fn(),
       createQueryBuilder: jest.fn(),
     };
     mockGameService = {
       resolveDateToPuzzleId: jest.fn(),
     };
     mockManager = {
-      insert: jest.fn().mockResolvedValue(undefined),
+      insert: jest.fn().mockResolvedValue({ identifiers: [{ id: 1 }] }),
       save: jest.fn().mockResolvedValue(undefined),
     };
     mockDataSource = {
@@ -97,8 +112,11 @@ describe("StrategyService", () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         StrategyService,
+        StrategyRunStore,
         { provide: DataSource, useValue: mockDataSource },
         { provide: STRATEGY_QUEUE, useValue: mockQueue },
+        { provide: LLM_OPENAI_QUEUE, useValue: mockOpenAIQueue },
+        { provide: LLM_OLLAMA_QUEUE, useValue: mockOllamaQueue },
         { provide: getRepositoryToken(StrategyRun), useValue: mockStrategyRunRepo },
         { provide: getRepositoryToken(Puzzle), useValue: mockPuzzleRepo },
         { provide: getRepositoryToken(Guess), useValue: mockGuessRepo },
@@ -143,6 +161,40 @@ describe("StrategyService", () => {
         },
         { jobId: "run-100-order-0" },
       );
+    });
+
+    it("should route llm-openai runs to the OpenAI queue", async () => {
+      await service.triggerRun(100, "llm-openai", "2024-01-02");
+
+      expect(mockOpenAIQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
+        {
+          puzzleId: 100,
+          strategyName: "llm-openai",
+          date: "2024-01-02",
+          trialNumber: 0,
+        },
+        { jobId: "run-100-llm-openai-0" },
+      );
+      expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(mockOllamaQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("should route llm-ollama runs to the Ollama queue", async () => {
+      await service.triggerRun(100, "llm-ollama", "2024-01-02");
+
+      expect(mockOllamaQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
+        {
+          puzzleId: 100,
+          strategyName: "llm-ollama",
+          date: "2024-01-02",
+          trialNumber: 0,
+        },
+        { jobId: "run-100-llm-ollama-0" },
+      );
+      expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
     });
   });
 
@@ -273,6 +325,103 @@ describe("StrategyService", () => {
       expect(mockGuessRepo.find).toHaveBeenCalledWith(
         expect.objectContaining({ skip: 0, take: 500 }),
       );
+    });
+  });
+
+  describe("getGuessDetail", () => {
+    it("should throw NotFoundException when the run does not exist", async () => {
+      mockGameService.resolveDateToPuzzleId.mockResolvedValueOnce(5);
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.getGuessDetail("2024-01-02", "llm-openai", 0, 1)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it("should throw NotFoundException when the guess does not exist", async () => {
+      mockGameService.resolveDateToPuzzleId.mockResolvedValueOnce(5);
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-openai" }));
+      mockGuessRepo.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.getGuessDetail("2024-01-02", "llm-openai", 0, 99)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it("should look up the guess scoped to the run and sequence number", async () => {
+      mockGameService.resolveDateToPuzzleId.mockResolvedValueOnce(5);
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-openai" }));
+      mockGuessRepo.findOne.mockResolvedValueOnce({
+        sequenceNumber: 1,
+        words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+        result: GuessResult.SUCCESS,
+        guessedAt: new Date("2024-01-02T01:01:00Z"),
+        promptTokens: 10,
+        completionTokens: 20,
+        totalTokens: 30,
+        latencyMs: 500,
+        temperature: 1,
+        numResponses: 1,
+        promptAttempts: 1,
+        duplicatesRejected: 0,
+        llmDetails: { category: "Fruit", confidence: 0.9 },
+      });
+
+      await service.getGuessDetail("2024-01-02", "llm-openai", 0, 1);
+
+      expect(mockGuessRepo.findOne).toHaveBeenCalledWith({
+        where: { strategyRunId: 7, sequenceNumber: 1 },
+      });
+    });
+
+    it("should map the guess and its LLM telemetry into a detail DTO", async () => {
+      const guessedAt = new Date("2024-01-02T01:01:00Z");
+
+      mockGameService.resolveDateToPuzzleId.mockResolvedValueOnce(5);
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-openai" }));
+      mockGuessRepo.findOne.mockResolvedValueOnce({
+        sequenceNumber: 2,
+        words: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        result: GuessResult.DUPLICATE,
+        guessedAt,
+        promptTokens: 1027,
+        completionTokens: 593,
+        totalTokens: 1620,
+        latencyMs: 5647,
+        temperature: 1.2,
+        numResponses: 3,
+        promptAttempts: 2,
+        duplicatesRejected: 1,
+        llmDetails: {
+          category: "Fruit",
+          confidence: 0.9,
+          reasoning: "test",
+          prompt: "solve step",
+        },
+      });
+
+      const result = await service.getGuessDetail("2024-01-02", "llm-openai", 0, 2);
+
+      expect(result).toEqual({
+        sequenceNumber: 2,
+        words: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        result: GuessResult.DUPLICATE,
+        guessedAt,
+        promptTokens: 1027,
+        completionTokens: 593,
+        totalTokens: 1620,
+        latencyMs: 5647,
+        temperature: 1.2,
+        numResponses: 3,
+        promptAttempts: 2,
+        duplicatesRejected: 1,
+        llmDetails: {
+          category: "Fruit",
+          confidence: 0.9,
+          reasoning: "test",
+          prompt: "solve step",
+        },
+      });
     });
   });
 
@@ -455,6 +604,76 @@ describe("StrategyService", () => {
             trialNumber: 2,
           },
           opts: { jobId: "run-100-shuffle-foolish-2" },
+        },
+      ]);
+    });
+
+    it("should queue one job per llm-openai trial on the OpenAI queue", async () => {
+      process.env.LLM_TRIALS = "2";
+      try {
+        await service.triggerStrategyRuns(100, "llm-openai", "2024-01-02");
+      } finally {
+        delete process.env.LLM_TRIALS;
+      }
+
+      expect(mockOpenAIQueue.addBulk).toHaveBeenCalledTimes(1);
+      expect(mockQueue.addBulk).not.toHaveBeenCalled();
+      expect(mockOllamaQueue.addBulk).not.toHaveBeenCalled();
+      expect(mockOpenAIQueue.addBulk).toHaveBeenCalledWith([
+        {
+          name: "run-strategy",
+          data: {
+            puzzleId: 100,
+            strategyName: "llm-openai",
+            date: "2024-01-02",
+            trialNumber: 1,
+          },
+          opts: { jobId: "run-100-llm-openai-1" },
+        },
+        {
+          name: "run-strategy",
+          data: {
+            puzzleId: 100,
+            strategyName: "llm-openai",
+            date: "2024-01-02",
+            trialNumber: 2,
+          },
+          opts: { jobId: "run-100-llm-openai-2" },
+        },
+      ]);
+    });
+
+    it("should queue one job per llm-ollama trial on the Ollama queue", async () => {
+      process.env.LLM_TRIALS = "2";
+      try {
+        await service.triggerStrategyRuns(100, "llm-ollama", "2024-01-02");
+      } finally {
+        delete process.env.LLM_TRIALS;
+      }
+
+      expect(mockOllamaQueue.addBulk).toHaveBeenCalledTimes(1);
+      expect(mockQueue.addBulk).not.toHaveBeenCalled();
+      expect(mockOpenAIQueue.addBulk).not.toHaveBeenCalled();
+      expect(mockOllamaQueue.addBulk).toHaveBeenCalledWith([
+        {
+          name: "run-strategy",
+          data: {
+            puzzleId: 100,
+            strategyName: "llm-ollama",
+            date: "2024-01-02",
+            trialNumber: 1,
+          },
+          opts: { jobId: "run-100-llm-ollama-1" },
+        },
+        {
+          name: "run-strategy",
+          data: {
+            puzzleId: 100,
+            strategyName: "llm-ollama",
+            date: "2024-01-02",
+            trialNumber: 2,
+          },
+          opts: { jobId: "run-100-llm-ollama-2" },
         },
       ]);
     });
@@ -686,13 +905,18 @@ describe("StrategyService", () => {
           ["FIG", "GRAPE", "HONEY", "APPLE"],
           ["CHERRY", "DATE", "EGGPLANT", "BANANA"],
         ]);
-        // Unlike shuffle-smart, no tried set is loaded from prior guesses.
-        expect(mockGuessRepo.find).not.toHaveBeenCalled();
+        // The tried set is rebuilt from flushed guesses (as for shuffle-smart)
+        // so duplicate detection survives a worker restart.
+        expect(mockGuessRepo.find).toHaveBeenCalledWith({
+          where: { strategyRunId: 7 },
+          select: { words: true },
+        });
       });
 
-      it("should allow the same group to be guessed more than once", async () => {
+      it("should mark repeated groups as duplicates and still solve", async () => {
         // Constant random()=0 keeps sampling [FIG, GRAPE, HONEY, APPLE], which
-        // is not an answer group, so it fails twice in a row. The next draw
+        // is not an answer group. The second draw is a duplicate (recorded as
+        // such, still under the default duplicate limit of 3). The next draw
         // (random()=0.99) samples the pool tail [EGGPLANT, FIG, GRAPE, HONEY],
         // which is an answer group, and the leftover words solve the puzzle.
         const randomValues = [0, 0, 0, 0, 0, 0, 0, 0, 0.99, 0.99, 0.99, 0.99, 0.5, 0.5, 0.5, 0.5];
@@ -712,128 +936,50 @@ describe("StrategyService", () => {
         });
         const inserted = mockManager.insert.mock.calls[0][1] as Array<{
           words: string[];
+          result: GuessResult;
         }>;
-        // The first two guesses are the exact same group.
+        // The first two guesses are the exact same group; the repeat is
+        // recorded as a 'duplicate' instead of a plain failure.
         expect(inserted[0].words).toEqual(inserted[1].words);
         expect(inserted[0].words).toEqual(["FIG", "GRAPE", "HONEY", "APPLE"]);
+        expect(inserted[1].result).toBe(GuessResult.DUPLICATE);
         expect(inserted[2].words).toEqual(["EGGPLANT", "FIG", "GRAPE", "HONEY"]);
         expect(new Set(inserted[3].words)).toEqual(new Set(["APPLE", "BANANA", "CHERRY", "DATE"]));
-        expect(mockGuessRepo.find).not.toHaveBeenCalled();
       });
-    });
-  });
 
-  describe("loadOrCreateRun", () => {
-    const puzzle = {
-      id: 100,
-      answerGroups: [
-        {
-          members: [
-            { word: "C", position: 2 },
-            { word: "A", position: 0 },
-          ],
-        },
-        {
-          members: [{ word: "B", position: 1 }],
-        },
-      ],
-    };
+      it("should terminate with 'duplicate' once the duplicate limit is hit", async () => {
+        // The duplicate limit defaults to 3; constant random()=0 makes every
+        // draw the same non-answer group, so the third repeat ends the run.
+        jest.spyOn(Math, "random").mockReturnValue(0);
+        mockPuzzleRepo.findOne.mockResolvedValueOnce(
+          makePuzzle([
+            ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+            ["APPLE", "BANANA", "CHERRY", "DATE"],
+          ]),
+        );
 
-    it("should return the existing run with the loaded puzzle when one is found", async () => {
-      const existing = makeRun();
-      mockPuzzleRepo.findOne.mockResolvedValueOnce(puzzle);
-      mockStrategyRunRepo.findOne.mockResolvedValueOnce(existing);
+        const result = await service.runDeterministicStrategy(100, "shuffle-foolish");
 
-      const result = await (
-        service as unknown as {
-          loadOrCreateRun(id: number, name: string): Promise<{ run: StrategyRun; puzzle: Puzzle }>;
-        }
-      ).loadOrCreateRun(100, "alphabetical");
-
-      expect(result.run).toBe(existing);
-      expect(result.puzzle).toBe(puzzle);
-      expect(mockPuzzleRepo.findOne).toHaveBeenCalledTimes(1);
-      expect(mockStrategyRunRepo.create).not.toHaveBeenCalled();
-    });
-
-    it("should throw NotFoundException when the puzzle does not exist", async () => {
-      mockPuzzleRepo.findOne.mockResolvedValueOnce(null);
-
-      await expect(
-        (
-          service as unknown as {
-            loadOrCreateRun(
-              id: number,
-              name: string,
-            ): Promise<{ run: StrategyRun; puzzle: Puzzle }>;
-          }
-        ).loadOrCreateRun(999, "alphabetical"),
-      ).rejects.toThrow(new NotFoundException("No puzzle with id: 999"));
-    });
-
-    it.each([
-      ["order", ["A", "B", "C"]],
-      ["shuffle-smart", ["A", "B", "C"]],
-      ["shuffle-foolish", ["A", "B", "C"]],
-      ["reverse-order", ["C", "B", "A"]],
-      ["reverse-alphabetical", ["C", "B", "A"]],
-      ["alphabetical", ["A", "B", "C"]],
-    ])(
-      "should build the word pool in %s order when creating a new run",
-      async (strategyName, expectedWords) => {
-        mockPuzzleRepo.findOne.mockResolvedValueOnce(puzzle);
-        mockStrategyRunRepo.findOne.mockResolvedValueOnce(null);
-        const created = makeRun();
-        mockStrategyRunRepo.create.mockReturnValueOnce(created);
-        mockStrategyRunRepo.save.mockResolvedValueOnce(created);
-
-        const result = await (
-          service as unknown as {
-            loadOrCreateRun(
-              id: number,
-              name: string,
-            ): Promise<{ run: StrategyRun; puzzle: Puzzle }>;
-          }
-        ).loadOrCreateRun(100, strategyName);
-
-        expect(result.run).toBe(created);
-        expect(result.puzzle).toBe(puzzle);
-        expect(mockStrategyRunRepo.create).toHaveBeenCalledWith({
-          puzzle,
-          strategyName,
-          trialNumber: 0,
-          status: StrategyRunStatus.RUNNING,
-          availableWords: expectedWords,
-          currentCombination: [0, 1, 2, 3],
+        expect(result).toEqual({
+          status: StrategyRunStatus.DUPLICATE,
+          guessCount: 4,
         });
-      },
-    );
-  });
-
-  describe("countGuesses", () => {
-    it("should count guesses scoped to the strategy run", async () => {
-      mockGuessRepo.count.mockResolvedValueOnce(12);
-
-      const result = await (
-        service as unknown as { countGuesses(id: number): Promise<number> }
-      ).countGuesses(7);
-
-      expect(result).toBe(12);
-      expect(mockGuessRepo.count).toHaveBeenCalledWith({
-        where: { strategyRunId: 7 },
+        const inserted = mockManager.insert.mock.calls[0][1] as Array<{
+          result: GuessResult;
+        }>;
+        // First draw is a fresh (off-by-one) guess; the next three repeats hit
+        // the default duplicate limit of 3 and terminate the run.
+        expect(inserted.map((g) => g.result)).toEqual([
+          GuessResult.OFF_BY_ONE,
+          GuessResult.DUPLICATE,
+          GuessResult.DUPLICATE,
+          GuessResult.DUPLICATE,
+        ]);
+        expect(mockManager.save).toHaveBeenCalledWith(
+          StrategyRun,
+          expect.objectContaining({ status: StrategyRunStatus.DUPLICATE }),
+        );
       });
-    });
-  });
-
-  describe("flushBatch", () => {
-    it("should be a no-op for an empty batch", async () => {
-      await (
-        service as unknown as {
-          flushBatch(run: Partial<StrategyRun>, guesses: unknown[]): Promise<void>;
-        }
-      ).flushBatch(makeRun(), []);
-
-      expect(mockDataSource.transaction).not.toHaveBeenCalled();
     });
   });
 });

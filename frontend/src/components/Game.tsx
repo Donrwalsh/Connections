@@ -53,9 +53,10 @@ export function Game({ puzzle }: GameProps) {
     if (!state.loading) return;
 
     setAiStatus("loading");
-    // The backend retries the AI call with backoff (worst case ~85s), so we
-    // wait for its final answer. If nothing has resolved after 2s we assume
-    // a retry is in flight and surface that in the status message.
+    // The backend gives the AI solve a single attempt with a generous budget
+    // (ORCHESTRATOR_TIMEOUT_MS, default 120s — a step can run up to 5 model
+    // prompts), so we wait for its final answer. If nothing has resolved after
+    // 2s we assume a retry/step is in flight and surface that in the status.
     const retryNoticeTimer = setTimeout(() => setAiStatus("retrying"), 2000);
 
     const controller = new AbortController();

@@ -1,16 +1,22 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { Queue } from "bullmq";
-import { STRATEGY_QUEUE } from "../queue/queue.module";
-import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
-import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
-import { DataSource, Repository } from "typeorm";
+import { STRATEGY_QUEUE, LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE } from "../queue/queue.module";
+import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/strategy-run.entity";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { combinationToWords, firstCombination, nextCombination } from "./combinatorics";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { GameService } from "../game/game.service";
-import { StrategyRunDetailDto, StrategyRunListItemDto } from "./dto/strategy.dto";
-import { SHUFFLE_SMART, SHUFFLE_FOOLISH, strategyTrialNumbers } from "../../strategies";
-import { runStrategyJobId } from "../queue/strategy.queue";
+import { StrategyRunDetailDto, StrategyRunListItemDto, GuessDetailDto } from "./dto/strategy.dto";
+import {
+  SHUFFLE_SMART,
+  SHUFFLE_FOOLISH,
+  shuffleFoolishDuplicateLimit,
+  strategyTrialNumbers,
+} from "../../strategies";
+import { runStrategyJobId, queueForStrategy } from "../queue/strategy.queue";
+import { StrategyRunStore } from "./strategy-run-store.service";
 
 const GROUP_SIZE = 4;
 const BATCH_SIZE = 50;
@@ -18,17 +24,28 @@ const BATCH_SIZE = 50;
 @Injectable()
 export class StrategyService {
   constructor(
-    @InjectDataSource() private readonly dataSource: DataSource,
     @Inject(STRATEGY_QUEUE) private queue: Queue,
+    @Inject(LLM_OPENAI_QUEUE) private readonly llmOpenAIQueue: Queue,
+    @Inject(LLM_OLLAMA_QUEUE) private readonly llmOllamaQueue: Queue,
     @InjectRepository(StrategyRun)
     private readonly strategyRunRepo: Repository<StrategyRun>,
     @InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>,
     @InjectRepository(Guess) private readonly guessRepo: Repository<Guess>,
     @Inject(GameService) private readonly gameService: GameService,
+    @Inject(StrategyRunStore) private readonly store: StrategyRunStore,
   ) {}
 
+  /**
+   * The queue a strategy's runs are dispatched to: llm-openai and llm-ollama
+   * get their own per-provider queues, everything else the shared
+   * strategy-runs queue.
+   */
+  private queueFor(strategyName: string): Queue {
+    return queueForStrategy(this.queue, this.llmOpenAIQueue, this.llmOllamaQueue, strategyName);
+  }
+
   async triggerRun(puzzleId: number, strategyName: string, date?: string, trialNumber = 0) {
-    await this.queue.add(
+    await this.queueFor(strategyName).add(
       "run-strategy",
       {
         puzzleId,
@@ -50,7 +67,7 @@ export class StrategyService {
    */
   async triggerStrategyRuns(puzzleId: number, strategyName: string, date: string) {
     const trialNumbers = strategyTrialNumbers(strategyName);
-    await this.queue.addBulk(
+    await this.queueFor(strategyName).addBulk(
       trialNumbers.map((trialNumber) => ({
         name: "run-strategy",
         data: { puzzleId, strategyName, date, trialNumber },
@@ -82,7 +99,7 @@ export class StrategyService {
     // Clamp inputs to keep a single response bounded.
     const safePage = Math.max(1, Math.floor(page));
     const safeLimit = Math.min(500, Math.max(1, Math.floor(limit)));
-    const total = await this.countGuesses(run.id);
+    const total = await this.store.countGuesses(run.id);
 
     const guesses = await this.guessRepo.find({
       where: { strategyRunId: run.id },
@@ -103,6 +120,58 @@ export class StrategyService {
     return {
       ...this.mapRunDetail(run, guesses),
       meta: { total, page: safePage, limit: safeLimit },
+    };
+  }
+
+  /**
+   * Full detail for a single guess: everything the run-detail list omits to
+   * stay index-only, most notably the LLM telemetry recorded for strategy
+   * guesses (prompt/completion tokens, latency, sampling parameters and the
+   * free-form llmDetails). Returns nulls for non-LLM guesses. Fetched lazily
+   * per guess from the frontend.
+   */
+  async getGuessDetail(
+    date: string,
+    strategyName: string,
+    trialNumber = 0,
+    sequenceNumber: number,
+  ): Promise<GuessDetailDto> {
+    const puzzleId = await this.gameService.resolveDateToPuzzleId(date);
+
+    const run = await this.strategyRunRepo.findOne({
+      where: { puzzleId, strategyName, trialNumber },
+    });
+
+    if (!run) {
+      throw new NotFoundException(
+        `Strategy '${strategyName}' has not been run for the puzzle on ${date}.`,
+      );
+    }
+
+    const guess = await this.guessRepo.findOne({
+      where: { strategyRunId: run.id, sequenceNumber },
+    });
+
+    if (!guess) {
+      throw new NotFoundException(
+        `Guess #${sequenceNumber} not found for strategy '${strategyName}' on the puzzle dated ${date}.`,
+      );
+    }
+
+    return {
+      sequenceNumber: guess.sequenceNumber,
+      words: guess.words,
+      result: guess.result,
+      guessedAt: guess.guessedAt,
+      promptTokens: guess.promptTokens,
+      completionTokens: guess.completionTokens,
+      totalTokens: guess.totalTokens,
+      latencyMs: guess.latencyMs,
+      temperature: guess.temperature,
+      numResponses: guess.numResponses,
+      promptAttempts: guess.promptAttempts,
+      duplicatesRejected: guess.duplicatesRejected,
+      llmDetails: guess.llmDetails,
     };
   }
 
@@ -147,6 +216,8 @@ export class StrategyService {
       strategyName: run.strategyName,
       trialNumber: run.trialNumber,
       status: run.status,
+      modelName: run.modelName,
+      contextWindow: run.contextWindow,
       startedAt: run.startedAt,
       finishedAt: run.finishedAt,
       guessCount: countByRun.get(run.id) ?? 0,
@@ -159,6 +230,8 @@ export class StrategyService {
       strategyName: run.strategyName,
       trialNumber: run.trialNumber,
       status: run.status,
+      modelName: run.modelName,
+      contextWindow: run.contextWindow,
       startedAt: run.startedAt,
       finishedAt: run.finishedAt,
       guesses: guesses.map((g) => ({
@@ -174,29 +247,33 @@ export class StrategyService {
     // loadOrCreateRun loads the (immutable) puzzle alongside the run so the
     // loop below evaluates guesses in memory without a full DB reload per
     // guess (~2,400 queries per worst-case deterministic run).
-    const { run, puzzle } = await this.loadOrCreateRun(puzzleId, strategyName, trialNumber);
+    const { run, puzzle } = await this.store.loadOrCreateRun(puzzleId, strategyName, trialNumber);
 
-    if (run.status === StrategyRunStatus.COMPLETED) {
+    if (TERMINAL_STATUSES.has(run.status)) {
       return {
         status: run.status,
-        guessCount: await this.countGuesses(run.id),
+        guessCount: await this.store.countGuesses(run.id),
       };
     }
 
     let guessCount: number;
     const triedGroups = new Set<string>();
-    if (strategyName === SHUFFLE_SMART) {
+    let duplicateCount = 0;
+    const tracksDuplicates = strategyName === SHUFFLE_SMART || strategyName === SHUFFLE_FOOLISH;
+    if (tracksDuplicates) {
       // Shuffle-smart re-rolls until it finds a group it hasn't already
-      // proposed, so rebuild the tried set from guesses flushed to the DB
-      // (e.g. after a worker restart mid-run). The single query below doubles
-      // as the guess count. Shuffle-foolish deliberately does not deduplicate.
+      // proposed; shuffle-foolish records repeated groups as 'duplicate'
+      // guesses so the run can be terminated once the duplicate limit is hit.
+      // Both rebuild their tried set from guesses flushed to the DB (e.g.
+      // after a worker restart mid-run). The single query below doubles as
+      // the guess count.
       const priorGuesses = await this.loadGuessesForRun(run.id);
       guessCount = priorGuesses.length;
       for (const guess of priorGuesses) {
         triedGroups.add(this.groupKey(guess.words));
       }
     } else {
-      guessCount = await this.countGuesses(run.id);
+      guessCount = await this.store.countGuesses(run.id);
     }
 
     const pendingGuesses: Partial<Guess>[] = [];
@@ -204,6 +281,7 @@ export class StrategyService {
     while (true) {
       let words: string[] = [];
       let noMoreGroups = false;
+      let isDuplicate = false;
 
       switch (strategyName) {
         case "alphabetical":
@@ -224,48 +302,70 @@ export class StrategyService {
           break;
         }
         case SHUFFLE_FOOLISH:
-          // Pure random picks with no tried-set, so duplicates are allowed.
+          // Pure random picks. Unlike shuffle-smart, repeats are NOT re-rolled
+          // — they are recorded as 'duplicate' guesses, so an unlucky run
+          // terminates once it repeats the same group
+          // SHUFFLE_FOOLISH_DUPLICATE_LIMIT times instead of grinding forever.
           words = this.sampleRandom(run.availableWords, GROUP_SIZE);
+          isDuplicate = triedGroups.has(this.groupKey(words));
           break;
         default:
           throw new BadRequestException(`Unsupported strategy name: '${strategyName}'`);
       }
 
       if (!noMoreGroups) {
-        const evaluation = GameService.evaluateGuessOnPuzzle(puzzle, words);
-
         guessCount++;
-        if (strategyName === SHUFFLE_SMART) {
-          triedGroups.add(this.groupKey(words));
-        }
 
-        // Stage the guess in memory
-        pendingGuesses.push({
-          puzzle: { id: puzzleId } as Puzzle,
-          strategyRun: { id: run.id } as StrategyRun,
-          words,
-          result: evaluation.result,
-          sequenceNumber: guessCount,
-          source: GuessSource.STRATEGY,
-        });
+        if (isDuplicate) {
+          duplicateCount++;
+          pendingGuesses.push({
+            puzzle: { id: puzzleId } as Puzzle,
+            strategyRun: { id: run.id } as StrategyRun,
+            words,
+            result: GuessResult.DUPLICATE,
+            sequenceNumber: guessCount,
+            source: GuessSource.STRATEGY,
+          });
 
-        // Update in-memory state
-        if (evaluation.result === GuessResult.SUCCESS) {
-          run.availableWords = run.availableWords.filter((w) => !words.includes(w));
-          run.currentCombination = firstCombination(GROUP_SIZE);
-
-          if (run.availableWords.length === 0) {
-            run.status = StrategyRunStatus.COMPLETED;
+          if (duplicateCount >= shuffleFoolishDuplicateLimit()) {
+            run.status = StrategyRunStatus.DUPLICATE;
             run.finishedAt = new Date();
           }
-        } else if (strategyName !== SHUFFLE_SMART && strategyName !== SHUFFLE_FOOLISH) {
-          const next = nextCombination(run.currentCombination, run.availableWords.length);
+        } else {
+          const evaluation = GameService.evaluateGuessOnPuzzle(puzzle, words);
 
-          if (next === null) {
-            run.status = StrategyRunStatus.FAILED;
-            run.finishedAt = new Date();
-          } else {
-            run.currentCombination = next;
+          if (strategyName === SHUFFLE_SMART || strategyName === SHUFFLE_FOOLISH) {
+            triedGroups.add(this.groupKey(words));
+          }
+
+          // Stage the guess in memory
+          pendingGuesses.push({
+            puzzle: { id: puzzleId } as Puzzle,
+            strategyRun: { id: run.id } as StrategyRun,
+            words,
+            result: evaluation.result,
+            sequenceNumber: guessCount,
+            source: GuessSource.STRATEGY,
+          });
+
+          // Update in-memory state
+          if (evaluation.result === GuessResult.SUCCESS) {
+            run.availableWords = run.availableWords.filter((w) => !words.includes(w));
+            run.currentCombination = firstCombination(GROUP_SIZE);
+
+            if (run.availableWords.length === 0) {
+              run.status = StrategyRunStatus.COMPLETED;
+              run.finishedAt = new Date();
+            }
+          } else if (strategyName !== SHUFFLE_SMART && strategyName !== SHUFFLE_FOOLISH) {
+            const next = nextCombination(run.currentCombination, run.availableWords.length);
+
+            if (next === null) {
+              run.status = StrategyRunStatus.FAILED;
+              run.finishedAt = new Date();
+            } else {
+              run.currentCombination = next;
+            }
           }
         }
       }
@@ -275,7 +375,7 @@ export class StrategyService {
 
       // Flush to DB if batch size reached or run completed/failed
       if (reachedBatchLimit || isFinished) {
-        await this.flushBatch(run, pendingGuesses);
+        await this.store.flushBatch(run, pendingGuesses);
       }
 
       if (isFinished) {
@@ -334,93 +434,6 @@ export class StrategyService {
     return this.guessRepo.find({
       where: { strategyRunId },
       select: { words: true },
-    });
-  }
-
-  private async flushBatch(run: StrategyRun, pendingGuesses: Partial<Guess>[]): Promise<void> {
-    if (pendingGuesses.length === 0) return;
-
-    // Create a shallow copy to insert and clear the original buffer
-    const guessesToInsert = [...pendingGuesses];
-    pendingGuesses.length = 0;
-
-    await this.dataSource.transaction(async (manager) => {
-      await manager.insert("Guess", guessesToInsert);
-      await manager.save(StrategyRun, run);
-    });
-  }
-
-  private async loadOrCreateRun(
-    puzzleId: number,
-    strategyName: string,
-    trialNumber = 0,
-  ): Promise<{ run: StrategyRun; puzzle: Puzzle }> {
-    const puzzle = await this.puzzleRepo.findOne({
-      where: { id: puzzleId },
-      relations: { answerGroups: { members: true } },
-    });
-
-    if (!puzzle) throw new NotFoundException(`No puzzle with id: ${puzzleId}`);
-
-    const existing = await this.strategyRunRepo.findOne({
-      where: { puzzle: { id: puzzleId }, strategyName, trialNumber },
-    });
-
-    if (existing) {
-      return { run: existing, puzzle };
-    }
-
-    let allWords: string[];
-
-    switch (strategyName) {
-      case "order":
-      case SHUFFLE_SMART:
-      case SHUFFLE_FOOLISH:
-        allWords = puzzle.answerGroups
-          .flatMap((group) => group.members)
-          .sort((a, b) => a.position - b.position)
-          .map((m) => m.word);
-        break;
-
-      case "reverse-order":
-        allWords = puzzle.answerGroups
-          .flatMap((group) => group.members)
-          .sort((a, b) => b.position - a.position)
-          .map((m) => m.word);
-        break;
-
-      case "reverse-alphabetical":
-        allWords = puzzle.answerGroups
-          .flatMap((group) => group.members.map((m) => m.word))
-          .sort((a, b) => b.localeCompare(a));
-        break;
-
-      case "alphabetical":
-      default:
-        allWords = puzzle.answerGroups
-          .flatMap((group) => group.members.map((m) => m.word))
-          .sort((a, b) => a.localeCompare(b));
-        break;
-    }
-
-    const run = this.strategyRunRepo.create({
-      puzzle,
-      strategyName,
-      trialNumber,
-      status: StrategyRunStatus.RUNNING,
-      availableWords: allWords,
-      currentCombination: firstCombination(GROUP_SIZE),
-    });
-
-    const saved = await this.strategyRunRepo.save(run);
-    return { run: saved, puzzle };
-  }
-
-  private async countGuesses(strategyRunId: number): Promise<number> {
-    // Plain indexed-column filter instead of a relation predicate so TypeORM
-    // doesn't emit an unnecessary join/subquery.
-    return this.guessRepo.count({
-      where: { strategyRunId },
     });
   }
 }

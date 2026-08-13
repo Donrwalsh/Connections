@@ -12,7 +12,7 @@ import {
 import { ApiParam } from "@nestjs/swagger";
 import { StrategyService } from "./strategy.service";
 import { GameService } from "../game/game.service";
-import { STRATEGY_SET } from "../../strategies";
+import { AUTOMATIC_STRATEGIES, LLM_STRATEGIES, STRATEGY_SET } from "../../strategies";
 
 @Controller("strategy")
 export class StrategyController {
@@ -26,7 +26,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or 'all'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', 'llm-ollama', or 'all' (excludes the LLM strategies — queue 'llm-openai'/'llm-ollama' explicitly to spend tokens)",
     example: "all",
   })
   @ApiParam({
@@ -51,16 +51,17 @@ export class StrategyController {
 
     if (isAll) {
       await Promise.all(
-        [...STRATEGY_SET].map((strat) =>
+        AUTOMATIC_STRATEGIES.map((strat) =>
           this.strategyService.triggerStrategyRuns(puzzleId, strat, date),
         ),
       );
 
       return {
-        message: `Jobs queued for all strategies on puzzle date ${date}`,
+        message: `Jobs queued for all automatic strategies on puzzle date ${date} (LLM strategies are excluded — queue them explicitly)`,
         puzzleId,
         date,
-        strategiesQueued: [...STRATEGY_SET],
+        strategiesQueued: [...AUTOMATIC_STRATEGIES],
+        excluded: [...LLM_STRATEGIES],
       };
     }
 
@@ -79,7 +80,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', or 'shuffle-foolish'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', or 'llm-ollama'",
     example: "alphabetical",
   })
   @ApiParam({
@@ -103,7 +104,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', or 'shuffle-foolish'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', or 'llm-ollama'",
     example: "alphabetical",
   })
   @ApiParam({
@@ -115,7 +116,8 @@ export class StrategyController {
   @ApiParam({
     name: "trialNumber",
     type: Number,
-    description: "Run trial number (0 for deterministic strategies, 1..N for shuffle strategies)",
+    description:
+      "Run trial number (0 for deterministic strategies, 1..N for shuffle and LLM strategies)",
     example: 0,
   })
   async getRunDetail(
@@ -132,5 +134,47 @@ export class StrategyController {
     }
 
     return this.strategyService.getRunDetail(date, strategyName, trialNumber, page, limit);
+  }
+
+  @Get(":strategyName/puzzle/:date/run/:trialNumber/guess/:sequenceNumber")
+  @ApiParam({
+    name: "strategyName",
+    type: String,
+    description:
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', or 'llm-ollama'",
+    example: "alphabetical",
+  })
+  @ApiParam({
+    name: "date",
+    type: String,
+    description: "Puzzle date in YYYY-MM-DD format",
+    example: "2023-08-01",
+  })
+  @ApiParam({
+    name: "trialNumber",
+    type: Number,
+    description:
+      "Run trial number (0 for deterministic strategies, 1..N for shuffle and LLM strategies)",
+    example: 0,
+  })
+  @ApiParam({
+    name: "sequenceNumber",
+    type: Number,
+    description: "The guess's 1-based sequence number within the run",
+    example: 1,
+  })
+  async getGuessDetail(
+    @Param("strategyName") strategyName: string,
+    @Param("date") date: string,
+    @Param("trialNumber", ParseIntPipe) trialNumber: number,
+    @Param("sequenceNumber", ParseIntPipe) sequenceNumber: number,
+  ) {
+    if (!STRATEGY_SET.has(strategyName)) {
+      throw new BadRequestException(
+        `Invalid strategy: '${strategyName}'. Expected one of: ${[...STRATEGY_SET].join(", ")}.`,
+      );
+    }
+
+    return this.strategyService.getGuessDetail(date, strategyName, trialNumber, sequenceNumber);
   }
 }

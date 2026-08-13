@@ -1,7 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 import { DataSource } from "typeorm";
-import { loadEnv } from "./config/env";
+import { loadEnv, orchestratorTimeoutMs } from "./config/env";
 import { PriorGuessDto, SolveResponseDto } from "./modules/game/dto/game.dto";
 
 export interface FetchRetryOptions {
@@ -14,12 +14,15 @@ const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_INITIAL_DELAY_MS = 1000;
 const DEFAULT_TIMEOUT_MS = 30000;
 
-// The first call in a session is slow because the model is cold-loaded;
-// give it much more room than the warm subsequent attempts.
+// A single solve step makes up to LLM_MAX_PROMPTS (default 19) sequential model
+// calls with escalating candidate counts, so the budget is sized for the whole
+// step (ORCHESTRATOR_TIMEOUT_MS, default 120s) and applied to every attempt.
+// Timeout failures are not retried by fetchWithRetry — the orchestrator keeps
+// working on an aborted request, so retrying just queues behind it.
 const SOLVE_RETRY_OPTIONS: FetchRetryOptions = {
   maxRetries: DEFAULT_MAX_RETRIES,
   initialDelayMs: DEFAULT_INITIAL_DELAY_MS,
-  timeoutMs: [40000, 15000],
+  timeoutMs: orchestratorTimeoutMs(),
 };
 
 @Injectable()
@@ -124,6 +127,16 @@ export class AppService {
         }
       } catch (err) {
         lastError = err;
+        // A timeout means the step exceeded its budget. The orchestrator is
+        // likely still working on the aborted request, so retrying would just
+        // queue behind it and double the wait. Fail fast — a fresh user action
+        // (or the strategy worker's per-step backoff) retries instead.
+        if (err instanceof Error && err.name === "AbortError") {
+          throw new Error(
+            `AI solve request failed after ${attempt + 1} attempt${attempt + 1 === 1 ? "" : "s"}: Request timed out`,
+            { cause: err },
+          );
+        }
       }
 
       if (attempt < maxRetries) {

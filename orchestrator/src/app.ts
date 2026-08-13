@@ -1,13 +1,20 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { SolveRequestSchema, type SolveResponse } from "./types.js";
-import { proposeGroup } from "./solver.js";
+import { proposeGroup, SolveError } from "./solver.js";
+import { defaultProvider } from "./provider.js";
 
 export const app = new Hono();
 
 // A puzzle word list is at most 16 words — a few KB at most. Cap the body so
 // a garbage/oversized request can't tie up memory while we parse it.
 export const SOLVE_BODY_LIMIT = 64 * 1024;
+
+const ERROR_STATUS: Record<SolveError["code"], 409 | 400 | 502> = {
+  duplicate_group: 409,
+  invalid_group: 400,
+  model_error: 502,
+};
 
 // Simple shared-secret check so only the backend container can call this
 // service. Not full auth — this is an internal-only service, not
@@ -52,11 +59,28 @@ app.post(
     }
 
     try {
-      const { proposedGroup, prompt } = await proposeGroup(parsed.data);
-      const response: SolveResponse = { proposedGroup, prompt };
+      const solveRequest = {
+        // Strategy runs always pick their provider explicitly; provider-less
+        // requests (e.g. the in-game AI Assist) fall back to the configured
+        // default so the solver never has to guess.
+        modelProvider: defaultProvider(),
+        ...parsed.data,
+      };
+      const solveResult = await proposeGroup(solveRequest);
+      const response: SolveResponse = solveResult;
       return c.json(response, 200);
     } catch (err) {
       console.error("Solve failed:", err);
+      if (err instanceof SolveError) {
+        return c.json(
+          {
+            error: err.message,
+            code: err.code,
+            details: err.details,
+          },
+          ERROR_STATUS[err.code],
+        );
+      }
       const message = err instanceof Error ? err.message : "Unknown error";
       return c.json({ error: "Solve failed", details: message }, 502);
     }

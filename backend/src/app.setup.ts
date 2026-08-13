@@ -7,7 +7,7 @@ import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import type { RequestHandler } from "express";
 import { loadEnv } from "./config/env";
 import { puzzleQueue } from "./modules/queue/puzzle.queue";
-import { strategyQueue } from "./modules/queue/strategy.queue";
+import { strategyQueue, llmOpenAIQueue, llmOllamaQueue } from "./modules/queue/strategy.queue";
 
 /**
  * Express middleware requiring HTTP Basic auth in front of Bull Board. Fail
@@ -49,17 +49,24 @@ export async function configureApp(app: INestApplication): Promise<INestApplicat
 
   app.enableShutdownHooks();
 
-  // Increase server timeout (in milliseconds)
+  // The socket timeout must stay above the longest backend→orchestrator solve
+  // chain (one full ORCHESTRATOR_TIMEOUT_MS step plus transport-retry slack),
+  // or the server would kill a request the fetch layer would still be handling.
   const httpAdapterHost = app.get(HttpAdapterHost);
   const server = httpAdapterHost.httpAdapter.getHttpServer();
-  server.setTimeout(120000); // 120 seconds
+  server.setTimeout(env.ORCHESTRATOR_TIMEOUT_MS * 2 + 60000);
 
   // Bull Board
   const serverAdapter = new ExpressAdapter();
   serverAdapter.setBasePath("/admin/queues");
 
   createBullBoard({
-    queues: [new BullMQAdapter(strategyQueue), new BullMQAdapter(puzzleQueue)],
+    queues: [
+      new BullMQAdapter(strategyQueue),
+      new BullMQAdapter(llmOpenAIQueue),
+      new BullMQAdapter(llmOllamaQueue),
+      new BullMQAdapter(puzzleQueue),
+    ],
     serverAdapter,
   });
 

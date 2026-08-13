@@ -1,15 +1,15 @@
-import { Injectable, Logger, Inject } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import * as path from "path";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { DataSource } from "typeorm";
+import { Queue } from "bullmq";
 import { Puzzle } from "./entities/puzzle.entity";
 import { AnswerGroup } from "./entities/answer-group.entity";
 import { GroupMember } from "./entities/group-member.entity";
 import { InjectDataSource } from "@nestjs/typeorm";
-import { STRATEGY_QUEUE } from "../queue/queue.module";
-import { runStrategyJobId } from "../queue/strategy.queue";
 import { NYT_CONNECTIONS_ORIGIN_DATE } from "./constants";
-import { Queue } from "bullmq";
+import { STRATEGY_QUEUE, LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE } from "../queue/queue.module";
+import { runStrategyJobId, queueForStrategy } from "../queue/strategy.queue";
 import { SUPPORTED_STRATEGIES, strategyTrialNumbers } from "../../strategies";
 
 interface ConnectionsCard {
@@ -34,8 +34,6 @@ const AWKWARD_DATES = new Set([
   "2026-05-06",
 ]);
 
-const ALL_STRATEGIES = SUPPORTED_STRATEGIES;
-
 @Injectable()
 export class PuzzleIngestionService {
   private readonly logger = new Logger(PuzzleIngestionService.name);
@@ -43,6 +41,8 @@ export class PuzzleIngestionService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @Inject(STRATEGY_QUEUE) private readonly strategyQueue: Queue,
+    @Inject(LLM_OPENAI_QUEUE) private readonly llmOpenAIQueue: Queue,
+    @Inject(LLM_OLLAMA_QUEUE) private readonly llmOllamaQueue: Queue,
   ) {}
 
   /**
@@ -77,28 +77,8 @@ export class PuzzleIngestionService {
       const puzzleId = await this.insertPuzzle(formatted, puzzleData);
 
       if (puzzleId !== null) {
-        // Dispatch all strategy runs right after inserting. Shuffle strategies
-        // get one job per trial (1..N); deterministic strategies get a single
-        // trial (0). addBulk batches all of them into one Redis round-trip.
-        const jobs = [];
-        for (const strategyName of ALL_STRATEGIES) {
-          for (const trialNumber of strategyTrialNumbers(strategyName)) {
-            jobs.push({
-              name: "run-strategy",
-              data: { puzzleId, strategyName, date: formatted, trialNumber },
-              opts: {
-                jobId: runStrategyJobId(puzzleId, strategyName, trialNumber),
-              },
-            });
-          }
-        }
-        await this.strategyQueue.addBulk(jobs);
-
-        this.logger.log(
-          `Queued all strategies (${ALL_STRATEGIES.join(
-            ", ",
-          )}) for puzzle ${puzzleId} (${formatted})`,
-        );
+        await this.dispatchStrategyRuns(puzzleId, formatted);
+        this.logger.log(`Inserted puzzle for ${formatted} (id ${puzzleId})`);
         inserted++;
       }
 
@@ -254,6 +234,56 @@ export class PuzzleIngestionService {
 
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Queues one job per (strategy, trial) for every supported strategy — the
+   * deterministic ones plus shuffle-smart/shuffle-foolish and the two LLM
+   * providers — on the freshly inserted puzzle. Jobs are grouped by the queue
+   * that owns the strategy (strategy-runs, llm-openai-runs, llm-ollama-runs)
+   * so each provider's runs land where their worker can process them. Uses
+   * the same deterministic job ids as the /strategy/queue endpoints, so a
+   * re-run of ingestion collapses onto the existing jobs instead of
+   * duplicating them.
+   *
+   * Best-effort: a transient queue failure must not abort the multi-day
+   * ingestion loop (the loop would be retried by BullMQ, and the already-
+   * inserted puzzle would then be skipped on retry, losing its strategy
+   * runs entirely). Failures are logged so runs can be triggered manually.
+   */
+  private async dispatchStrategyRuns(puzzleId: number, date: string): Promise<void> {
+    const jobsByQueue = new Map<
+      Queue,
+      Array<{ name: string; data: object; opts: { jobId: string } }>
+    >();
+
+    for (const strategyName of SUPPORTED_STRATEGIES) {
+      const queue = queueForStrategy(
+        this.strategyQueue,
+        this.llmOpenAIQueue,
+        this.llmOllamaQueue,
+        strategyName,
+      );
+      const jobs = jobsByQueue.get(queue) ?? [];
+      for (const trialNumber of strategyTrialNumbers(strategyName)) {
+        jobs.push({
+          name: "run-strategy",
+          data: { puzzleId, strategyName, date, trialNumber },
+          opts: { jobId: runStrategyJobId(puzzleId, strategyName, trialNumber) },
+        });
+      }
+      jobsByQueue.set(queue, jobs);
+    }
+
+    try {
+      await Promise.all([...jobsByQueue.entries()].map(([queue, jobs]) => queue.addBulk(jobs)));
+      const jobCount = [...jobsByQueue.values()].reduce((count, jobs) => count + jobs.length, 0);
+      this.logger.log(`Queued ${jobCount} strategy run(s) for puzzle ${date} (id ${puzzleId})`);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to queue strategy runs for puzzle ${date} (id ${puzzleId}): ${(error as Error).message}`,
+      );
+    }
   }
 
   private async insertPuzzle(

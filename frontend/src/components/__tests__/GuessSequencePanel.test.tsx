@@ -121,7 +121,9 @@ afterEach(() => {
 });
 
 // The list endpoint returns slim runs (no guess arrays); the detail endpoint
-// (/run/:trialNumber) returns the full guess list on demand.
+// (/run/:trialNumber) returns the full guess list on demand; the guess-detail
+// endpoint (/run/:trialNumber/guess/:sequenceNumber) returns LLM info for a
+// single guess.
 function setupFetch() {
   vi.stubGlobal(
     "fetch",
@@ -129,16 +131,51 @@ function setupFetch() {
       const urlStr = String(url);
       const strategyId =
         urlStr.match(/\/strategy\/([^/]+)\//)?.[1] ?? "alphabetical";
+      const trialNumber = Number(urlStr.match(/\/run\/(\d+)/)?.[1] ?? 0);
+
+      const runDetail = () =>
+        strategyId === "shuffle-smart"
+          ? (shuffleSmartDetails[trialNumber] as typeof strategyRunDetail)
+          : strategyId === "shuffle-foolish"
+            ? shuffleFoolishDetail
+            : strategyRunDetail;
+
+      const guessDetail = urlStr.match(/\/guess\/(\d+)/);
+      if (guessDetail) {
+        const sequenceNumber = Number(guessDetail[1]);
+        const guess = runDetail().guesses.find(
+          (g) => g.sequenceNumber === sequenceNumber,
+        ) ?? {
+          sequenceNumber,
+          words: [],
+          result: "failure",
+          guessedAt: "2024-01-15T00:00:00Z",
+        };
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            ...guess,
+            promptTokens: 1500,
+            completionTokens: 320,
+            totalTokens: 1820,
+            latencyMs: 2340,
+            temperature: 0.7,
+            numResponses: 5,
+            promptAttempts: 2,
+            duplicatesRejected: 3,
+            llmDetails: {
+              category: "GREETINGS",
+              confidence: 0.9,
+              reasoning: `Reasoning for guess ${sequenceNumber}`,
+              prompt: `Prompt for guess ${sequenceNumber}`,
+            },
+          }),
+        });
+      }
 
       const detail = urlStr.match(/\/run\/(\d+)/);
       if (detail) {
-        const trialNumber = Number(detail[1]);
-        const body =
-          strategyId === "shuffle-smart"
-            ? shuffleSmartDetails[trialNumber]
-            : strategyId === "shuffle-foolish"
-              ? shuffleFoolishDetail
-              : strategyRunDetail;
+        const body = runDetail();
         return Promise.resolve({ ok: true, json: async () => body });
       }
 
@@ -155,10 +192,17 @@ function setupFetch() {
 
 describe("GuessSequencePanel Component", () => {
   it("shows a loading message while strategies are fetching", () => {
-    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise(() => {})),
+    );
 
     render(
-      <GuessSequencePanel date="2024-01-15" isOpen={true} onToggle={() => {}} />,
+      <GuessSequencePanel
+        date="2024-01-15"
+        isOpen={true}
+        onToggle={() => {}}
+      />,
     );
 
     expect(
@@ -170,7 +214,11 @@ describe("GuessSequencePanel Component", () => {
     setupFetch();
 
     render(
-      <GuessSequencePanel date="2024-01-15" isOpen={false} onToggle={() => {}} />,
+      <GuessSequencePanel
+        date="2024-01-15"
+        isOpen={false}
+        onToggle={() => {}}
+      />,
     );
 
     expect(
@@ -185,7 +233,11 @@ describe("GuessSequencePanel Component", () => {
     setupFetch();
 
     render(
-      <GuessSequencePanel date="2024-01-15" isOpen={true} onToggle={() => {}} />,
+      <GuessSequencePanel
+        date="2024-01-15"
+        isOpen={true}
+        onToggle={() => {}}
+      />,
     );
 
     expect(
@@ -204,7 +256,11 @@ describe("GuessSequencePanel Component", () => {
 
     const onToggle = vi.fn();
     render(
-      <GuessSequencePanel date="2024-01-15" isOpen={false} onToggle={onToggle} />,
+      <GuessSequencePanel
+        date="2024-01-15"
+        isOpen={false}
+        onToggle={onToggle}
+      />,
     );
 
     fireEvent.click(
@@ -218,7 +274,11 @@ describe("GuessSequencePanel Component", () => {
 
     const onToggle = vi.fn();
     render(
-      <GuessSequencePanel date="2024-01-15" isOpen={true} onToggle={onToggle} />,
+      <GuessSequencePanel
+        date="2024-01-15"
+        isOpen={true}
+        onToggle={onToggle}
+      />,
     );
 
     fireEvent.click(
@@ -231,7 +291,11 @@ describe("GuessSequencePanel Component", () => {
     setupFetch();
 
     render(
-      <GuessSequencePanel date="2024-01-15" isOpen={true} onToggle={() => {}} />,
+      <GuessSequencePanel
+        date="2024-01-15"
+        isOpen={true}
+        onToggle={() => {}}
+      />,
     );
 
     fireEvent.click(
@@ -252,7 +316,11 @@ describe("GuessSequencePanel Component", () => {
     );
 
     render(
-      <GuessSequencePanel date="2024-01-15" isOpen={true} onToggle={() => {}} />,
+      <GuessSequencePanel
+        date="2024-01-15"
+        isOpen={true}
+        onToggle={() => {}}
+      />,
     );
 
     expect(await screen.findByText(/network down/)).toBeInTheDocument();
@@ -262,7 +330,11 @@ describe("GuessSequencePanel Component", () => {
     setupFetch();
 
     render(
-      <GuessSequencePanel date="2024-01-15" isOpen={true} onToggle={() => {}} />,
+      <GuessSequencePanel
+        date="2024-01-15"
+        isOpen={true}
+        onToggle={() => {}}
+      />,
     );
 
     // Button shows the average guess count across trials ((2 + 1) / 2 = 1.5).
@@ -272,9 +344,7 @@ describe("GuessSequencePanel Component", () => {
       }),
     ).toBeInTheDocument();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /Show Shuffle-Smart/ }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /Show Shuffle-Smart/ }));
 
     // Both trial runs are selectable, first one is shown by default.
     expect(
@@ -333,7 +403,11 @@ describe("GuessSequencePanel Component", () => {
     );
 
     render(
-      <GuessSequencePanel date="2024-01-15" isOpen={true} onToggle={() => {}} />,
+      <GuessSequencePanel
+        date="2024-01-15"
+        isOpen={true}
+        onToggle={() => {}}
+      />,
     );
 
     fireEvent.click(
@@ -347,6 +421,222 @@ describe("GuessSequencePanel Component", () => {
     ).toBeInTheDocument();
     expect(await screen.findAllByText("A, B, C, D")).toHaveLength(2);
     expect(screen.getAllByText("✗ Incorrect")).toHaveLength(1);
+  });
+
+  it("shows LLM runs and renders duplicate + terminal statuses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        const urlStr = String(url);
+        const strategyId =
+          urlStr.match(/\/strategy\/([^/]+)\//)?.[1] ?? "alphabetical";
+        if (urlStr.includes("/run/")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              id: 31,
+              strategyName: "llm-openai",
+              trialNumber: 1,
+              status: "duplicate",
+              modelName: "mistral",
+              contextWindow: 2048,
+              startedAt: "2024-01-15T00:00:00Z",
+              finishedAt: "2024-01-15T00:05:00Z",
+              guessCount: 3,
+              meta: { total: 3, page: 1, limit: 200 },
+              guesses: [
+                {
+                  sequenceNumber: 1,
+                  words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+                  result: "success",
+                  guessedAt: "2024-01-15T00:00:00Z",
+                },
+                {
+                  sequenceNumber: 2,
+                  words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+                  result: "duplicate",
+                  guessedAt: "2024-01-15T00:00:00Z",
+                },
+                {
+                  sequenceNumber: 3,
+                  words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+                  result: "duplicate",
+                  guessedAt: "2024-01-15T00:00:00Z",
+                },
+              ],
+            }),
+          });
+        }
+        if (strategyId !== "llm-openai") {
+          return Promise.resolve({ ok: true, json: async () => [] });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => [
+            {
+              id: 31,
+              strategyName: "llm-openai",
+              trialNumber: 1,
+              status: "duplicate",
+              modelName: "mistral",
+              contextWindow: 2048,
+              guessCount: 3,
+            },
+          ],
+        });
+      }),
+    );
+
+    render(
+      <GuessSequencePanel
+        date="2024-01-15"
+        isOpen={true}
+        onToggle={() => {}}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Show LLM · OpenAI/ }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Strategy: LLM · OpenAI · Model: mistral (2,048 ctx) · Status: duplicate · 3 guesses",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findAllByText("APPLE, BANANA, CHERRY, DATE"),
+    ).toHaveLength(3);
+    expect(screen.getAllByText("Duplicate")).toHaveLength(2);
+    expect(screen.getByText("✓ Correct")).toBeInTheDocument();
+  });
+
+  it("differentiates between LLM trials and switches between them", async () => {
+    const llmRuns = [
+      {
+        id: 41,
+        strategyName: "llm-openai",
+        trialNumber: 1,
+        status: "completed",
+        modelName: "mistral",
+        contextWindow: 2048,
+        startedAt: "2024-01-15T00:00:00Z",
+        finishedAt: "2024-01-15T00:05:00Z",
+        guessCount: 4,
+      },
+      {
+        id: 42,
+        strategyName: "llm-openai",
+        trialNumber: 2,
+        status: "duplicate",
+        modelName: "mistral",
+        contextWindow: 2048,
+        startedAt: "2024-01-15T00:00:00Z",
+        finishedAt: "2024-01-15T00:05:00Z",
+        guessCount: 2,
+      },
+    ];
+    const llmDetails: Record<number, unknown> = {
+      1: {
+        ...llmRuns[0],
+        meta: { total: 4, page: 1, limit: 200 },
+        guesses: [
+          {
+            sequenceNumber: 1,
+            words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+            result: "success",
+            guessedAt: "2024-01-15T00:00:00Z",
+          },
+          {
+            sequenceNumber: 2,
+            words: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+            result: "success",
+            guessedAt: "2024-01-15T00:00:00Z",
+          },
+        ],
+      },
+      2: {
+        ...llmRuns[1],
+        meta: { total: 2, page: 1, limit: 200 },
+        guesses: [
+          {
+            sequenceNumber: 1,
+            words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+            result: "duplicate",
+            guessedAt: "2024-01-15T00:00:00Z",
+          },
+        ],
+      },
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        const urlStr = String(url);
+        const strategyId =
+          urlStr.match(/\/strategy\/([^/]+)\//)?.[1] ?? "alphabetical";
+        if (urlStr.includes("/run/")) {
+          const trialNumber = Number(urlStr.match(/\/run\/(\d+)/)?.[1] ?? 1);
+          return Promise.resolve({
+            ok: true,
+            json: async () => llmDetails[trialNumber],
+          });
+        }
+        if (strategyId !== "llm-openai") {
+          return Promise.resolve({ ok: true, json: async () => [] });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => llmRuns,
+        });
+      }),
+    );
+
+    render(
+      <GuessSequencePanel
+        date="2024-01-15"
+        isOpen={true}
+        onToggle={() => {}}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Show LLM · OpenAI/ }),
+    );
+
+    // Button shows the average guess count across trials ((4 + 2) / 2 = 3).
+    expect(
+      screen.getByRole("button", { name: /Hide LLM · OpenAI \(3\)/ }),
+    ).toBeInTheDocument();
+
+    // Both trial runs are selectable, first one is shown by default, and each
+    // carries its model so the trials are visibly differentiable.
+    expect(
+      await screen.findByRole("button", {
+        name: /Trial #1 · completed · 4 guesses · mistral \(2,048 ctx\)/,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: /Trial #2 · duplicate · 2 guesses · mistral \(2,048 ctx\)/,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Strategy: LLM · OpenAI · Model: mistral (2,048 ctx) · Trial #1 · Status: completed · 4 guesses",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Trial #2 · duplicate/ }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Strategy: LLM · OpenAI · Model: mistral (2,048 ctx) · Trial #2 · Status: duplicate · 2 guesses",
+      ),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Duplicate")).toBeInTheDocument();
   });
 
   it("shows a message when a strategy has no runs yet", async () => {
@@ -365,7 +655,11 @@ describe("GuessSequencePanel Component", () => {
     );
 
     render(
-      <GuessSequencePanel date="2024-01-15" isOpen={true} onToggle={() => {}} />,
+      <GuessSequencePanel
+        date="2024-01-15"
+        isOpen={true}
+        onToggle={() => {}}
+      />,
     );
 
     fireEvent.click(
@@ -375,5 +669,133 @@ describe("GuessSequencePanel Component", () => {
     expect(
       await screen.findByText("No runs yet for Shuffle Smart."),
     ).toBeInTheDocument();
+  });
+
+  it("opens a detail panel with LLM info when a guess is clicked", async () => {
+    setupFetch();
+
+    render(
+      <GuessSequencePanel
+        date="2024-01-15"
+        isOpen={true}
+        onToggle={() => {}}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /A, B, C, D/,
+      }),
+    );
+
+    expect(await screen.findByText("Prompt tokens")).toBeInTheDocument();
+    expect(screen.getByText("1,500")).toBeInTheDocument();
+    expect(screen.getByText("Completion tokens")).toBeInTheDocument();
+    expect(screen.getByText("320")).toBeInTheDocument();
+    expect(screen.getByText("Latency")).toBeInTheDocument();
+    expect(screen.getByText("2,340 ms")).toBeInTheDocument();
+    expect(screen.getByText("0.7")).toBeInTheDocument();
+    expect(screen.getByText("Duplicates rejected")).toBeInTheDocument();
+    expect(screen.getByText("GREETINGS")).toBeInTheDocument();
+    expect(screen.getByText("90%")).toBeInTheDocument();
+    expect(screen.getByText("Reasoning for guess 1")).toBeInTheDocument();
+    expect(screen.getByText("Prompt for guess 1")).toBeInTheDocument();
+  });
+
+  it("closes the detail panel when the open guess is clicked again", async () => {
+    setupFetch();
+
+    render(
+      <GuessSequencePanel
+        date="2024-01-15"
+        isOpen={true}
+        onToggle={() => {}}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /A, B, C, D/,
+      }),
+    );
+    expect(await screen.findByText("Prompt tokens")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /A, B, C, D/ }));
+    expect(screen.queryByText("Prompt tokens")).not.toBeInTheDocument();
+  });
+
+  it("shows only one open guess detail panel at a time (accordion)", async () => {
+    setupFetch();
+
+    render(
+      <GuessSequencePanel
+        date="2024-01-15"
+        isOpen={true}
+        onToggle={() => {}}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /A, B, C, D/,
+      }),
+    );
+    expect(
+      await screen.findByText("Reasoning for guess 1"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /E, F, G, H/ }));
+
+    expect(
+      await screen.findByText("Reasoning for guess 2"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Reasoning for guess 1")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Prompt tokens")).toHaveLength(1);
+  });
+
+  it("shows an error message when the guess detail fetch fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        const urlStr = String(url);
+        const strategyId =
+          urlStr.match(/\/strategy\/([^/]+)\//)?.[1] ?? "alphabetical";
+        if (urlStr.includes("/guess/")) {
+          return Promise.resolve({
+            ok: false,
+            status: 500,
+            json: async () => ({ message: "guess not found" }),
+          });
+        }
+        if (urlStr.includes("/run/")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => strategyRunDetail,
+          });
+        }
+        const runs = strategyId === "shuffle-smart" ? [] : [strategyRun];
+        return Promise.resolve({
+          ok: true,
+          json: async () =>
+            runs.map((run) => ({ ...run, strategyName: strategyId })),
+        });
+      }),
+    );
+
+    render(
+      <GuessSequencePanel
+        date="2024-01-15"
+        isOpen={true}
+        onToggle={() => {}}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /A, B, C, D/,
+      }),
+    );
+
+    expect(await screen.findByText("guess not found")).toBeInTheDocument();
   });
 });

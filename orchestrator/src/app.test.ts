@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app, SOLVE_BODY_LIMIT } from "./app.js";
+import { SolveError } from "./solver.js";
 
 const KEY = "test-internal-key";
 
@@ -14,15 +15,33 @@ function solveRequest(body: unknown) {
   });
 }
 
+const SOLVE_BODY = {
+  puzzleWords: ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"],
+};
+
 vi.mock("./solver.js", () => ({
+  SolveError: class SolveError extends Error {
+    constructor(code: string, message: string, details: unknown) {
+      super(message);
+      this.code = code;
+      this.details = details;
+    }
+    code!: string;
+    details!: unknown;
+  },
   proposeGroup: vi.fn(async () => {
     throw new Error("model call failed");
   }),
 }));
 
+import { proposeGroup } from "./solver.js";
+const proposeGroupMock = vi.mocked(proposeGroup);
+
 describe("orchestrator app", () => {
   beforeEach(() => {
     process.env.INTERNAL_API_KEY = KEY;
+    proposeGroupMock.mockReset();
+    proposeGroupMock.mockRejectedValue(new Error("model call failed"));
   });
 
   afterEach(() => {
@@ -67,12 +86,328 @@ describe("orchestrator app", () => {
   });
 
   it("returns 502 when the model call fails", async () => {
-    const res = await solveRequest({
-      puzzleWords: ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"],
-    });
+    const res = await solveRequest(SOLVE_BODY);
     expect(res.status).toBe(502);
     const body = (await res.json()) as { error: string; details: string };
     expect(body.error).toBe("Solve failed");
     expect(body.details).toContain("model call failed");
+  });
+
+  it("returns the extended success body", async () => {
+    proposeGroupMock.mockResolvedValueOnce({
+      proposedGroups: [
+        {
+          word_ids: [0, 1, 2, 3],
+          category: "Test",
+          confidence: 0.9,
+          reasoning: "test",
+        },
+      ],
+      proposals: [
+        {
+          promptNumber: 1,
+          word_ids: [0, 1, 2, 3],
+          category: "Test",
+          confidence: 0.9,
+          reasoning: "test",
+          status: "used",
+        },
+        {
+          promptNumber: 1,
+          word_ids: [4, 5, 6, 7],
+          category: "Test",
+          confidence: 0.8,
+          reasoning: "test",
+          status: "not_selected",
+        },
+      ],
+      prompt: "You are solving...",
+      model: "test-model",
+      contextWindow: 8192,
+      latencyMs: 1234,
+      temperature: 1.0,
+      numResponses: 1,
+      promptAttempts: 1,
+      duplicatesRejected: 0,
+      usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+      promptMetadata: [
+        {
+          attempt: 1,
+          temperature: 1.0,
+          numResponses: 1,
+          model: "test-model",
+          contextWindow: 8192,
+          latencyMs: 1234,
+          usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+          outcome: "accepted",
+        },
+      ],
+    });
+
+    const res = await solveRequest(SOLVE_BODY);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      proposedGroups: [
+        {
+          word_ids: [0, 1, 2, 3],
+          category: "Test",
+          confidence: 0.9,
+          reasoning: "test",
+        },
+      ],
+      proposals: [
+        {
+          promptNumber: 1,
+          word_ids: [0, 1, 2, 3],
+          category: "Test",
+          confidence: 0.9,
+          reasoning: "test",
+          status: "used",
+        },
+        {
+          promptNumber: 1,
+          word_ids: [4, 5, 6, 7],
+          category: "Test",
+          confidence: 0.8,
+          reasoning: "test",
+          status: "not_selected",
+        },
+      ],
+      prompt: "You are solving...",
+      model: "test-model",
+      contextWindow: 8192,
+      latencyMs: 1234,
+      temperature: 1.0,
+      numResponses: 1,
+      promptAttempts: 1,
+      duplicatesRejected: 0,
+      usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+      promptMetadata: [
+        {
+          attempt: 1,
+          temperature: 1.0,
+          numResponses: 1,
+          model: "test-model",
+          contextWindow: 8192,
+          latencyMs: 1234,
+          usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+          outcome: "accepted",
+        },
+      ],
+    });
+  });
+
+  it("passes an optional temperature through to the solve step", async () => {
+    proposeGroupMock.mockResolvedValueOnce({
+      proposedGroups: [
+        {
+          word_ids: [0, 1, 2, 3],
+          category: "Test",
+          confidence: 0.9,
+          reasoning: "test",
+        },
+      ],
+      proposals: [
+        {
+          promptNumber: 1,
+          word_ids: [0, 1, 2, 3],
+          category: "Test",
+          confidence: 0.9,
+          reasoning: "test",
+          status: "used",
+        },
+      ],
+      prompt: "You are solving...",
+      model: "test-model",
+      contextWindow: 8192,
+      latencyMs: 10,
+      temperature: 1.2,
+      numResponses: 1,
+      promptAttempts: 1,
+      duplicatesRejected: 0,
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      promptMetadata: [],
+    });
+
+    const res = await solveRequest({ ...SOLVE_BODY, temperature: 1.2 });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { temperature: number };
+    expect(body.temperature).toBe(1.2);
+    expect(proposeGroupMock).toHaveBeenCalledWith(
+      expect.objectContaining({ temperature: 1.2 }),
+    );
+  });
+
+  it("defaults the model provider when the request omits it", async () => {
+    proposeGroupMock.mockResolvedValueOnce({
+      proposedGroups: [
+        {
+          word_ids: [0, 1, 2, 3],
+          category: "Test",
+          confidence: 0.9,
+          reasoning: "test",
+        },
+      ],
+      proposals: [
+        {
+          promptNumber: 1,
+          word_ids: [0, 1, 2, 3],
+          category: "Test",
+          confidence: 0.9,
+          reasoning: "test",
+          status: "used",
+        },
+      ],
+      prompt: "You are solving...",
+      model: "test-model",
+      contextWindow: 8192,
+      latencyMs: 10,
+      temperature: 0,
+      numResponses: 1,
+      promptAttempts: 1,
+      duplicatesRejected: 0,
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      promptMetadata: [],
+    });
+
+    const res = await solveRequest(SOLVE_BODY);
+    expect(res.status).toBe(200);
+    expect(proposeGroupMock).toHaveBeenCalledWith(
+      expect.objectContaining({ modelProvider: "openai" }),
+    );
+  });
+
+  it("uses the MODEL_PROVIDER default for provider-less requests", async () => {
+    vi.stubEnv("MODEL_PROVIDER", "ollama");
+    proposeGroupMock.mockResolvedValueOnce({
+      proposedGroups: [
+        {
+          word_ids: [0, 1, 2, 3],
+          category: "Test",
+          confidence: 0.9,
+          reasoning: "test",
+        },
+      ],
+      proposals: [
+        {
+          promptNumber: 1,
+          word_ids: [0, 1, 2, 3],
+          category: "Test",
+          confidence: 0.9,
+          reasoning: "test",
+          status: "used",
+        },
+      ],
+      prompt: "You are solving...",
+      model: "test-model",
+      contextWindow: 8192,
+      latencyMs: 10,
+      temperature: 0,
+      numResponses: 1,
+      promptAttempts: 1,
+      duplicatesRejected: 0,
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      promptMetadata: [],
+    });
+
+    const res = await solveRequest(SOLVE_BODY);
+    expect(res.status).toBe(200);
+    expect(proposeGroupMock).toHaveBeenCalledWith(
+      expect.objectContaining({ modelProvider: "ollama" }),
+    );
+  });
+
+  it("passes an explicit model provider through to the solve step", async () => {
+    proposeGroupMock.mockResolvedValueOnce({
+      proposedGroups: [
+        {
+          word_ids: [0, 1, 2, 3],
+          category: "Test",
+          confidence: 0.9,
+          reasoning: "test",
+        },
+      ],
+      proposals: [
+        {
+          promptNumber: 1,
+          word_ids: [0, 1, 2, 3],
+          category: "Test",
+          confidence: 0.9,
+          reasoning: "test",
+          status: "used",
+        },
+      ],
+      prompt: "You are solving...",
+      model: "test-model",
+      contextWindow: 8192,
+      latencyMs: 10,
+      temperature: 0,
+      numResponses: 1,
+      promptAttempts: 1,
+      duplicatesRejected: 0,
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      promptMetadata: [],
+    });
+
+    const res = await solveRequest({ ...SOLVE_BODY, modelProvider: "ollama" });
+    expect(res.status).toBe(200);
+    expect(proposeGroupMock).toHaveBeenCalledWith(
+      expect.objectContaining({ modelProvider: "ollama" }),
+    );
+  });
+
+  it("rejects a temperature outside the supported range", async () => {
+    const res = await solveRequest({ ...SOLVE_BODY, temperature: 11 });
+    expect(res.status).toBe(400);
+  });
+
+  it("maps duplicate_group to 409", async () => {
+    proposeGroupMock.mockRejectedValueOnce(
+      new SolveError("duplicate_group", "repeated group", {
+        proposedGroups: [
+          {
+            word_ids: [0, 1, 2, 3],
+            category: "Test",
+            confidence: 0.9,
+            reasoning: "test",
+          },
+        ],
+      }),
+    );
+    const res = await solveRequest(SOLVE_BODY);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.code).toBe("duplicate_group");
+    expect(
+      (body.details as { proposedGroups: unknown }).proposedGroups,
+    ).toEqual([
+      {
+        word_ids: [0, 1, 2, 3],
+        category: "Test",
+        confidence: 0.9,
+        reasoning: "test",
+      },
+    ]);
+  });
+
+  it("maps invalid_group to 400", async () => {
+    proposeGroupMock.mockRejectedValueOnce(
+      new SolveError("invalid_group", "malformed output"),
+    );
+    const res = await solveRequest(SOLVE_BODY);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.code).toBe("invalid_group");
+  });
+
+  it("maps model_error to 502", async () => {
+    proposeGroupMock.mockRejectedValueOnce(
+      new SolveError("model_error", "ollama is down"),
+    );
+    const res = await solveRequest(SOLVE_BODY);
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.code).toBe("model_error");
+    expect(body.error).toContain("ollama is down");
   });
 });
