@@ -46,10 +46,10 @@ export const DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT = 3;
 
 // Starting candidate count per LLM solve step: the model is tasked with
 // producing a single answer. When every candidate repeats a previous guess,
-// the orchestrator re-prompts with changed parameters (see LLM_MAX_PROMPTS
-// below), requesting more distinct candidates and a higher temperature on
-// each re-prompt. The count resets to this base value at the start of every
-// step. Cap guards against oversized model outputs.
+// the orchestrator re-prompts requesting one more distinct candidate (see
+// LLM_MAX_PROMPTS below) until a fresh candidate appears. The count resets to
+// this base value at the start of every step. Cap guards against oversized
+// model outputs.
 export const DEFAULT_LLM_NUM_RESPONSES = 1;
 export const MAX_LLM_NUM_RESPONSES = 10;
 
@@ -62,26 +62,14 @@ export const DEFAULT_LLM_OLLAMA_CONCURRENCY = 1;
 
 // How many prompts a single solve step may make before the orchestrator
 // gives up on a fresh candidate and reports a duplicate/invalid failure.
-// Each re-prompt raises the sampling temperature and asks for one more
-// distinct candidate.
+// Each re-prompt asks for one more distinct candidate.
 export const DEFAULT_LLM_MAX_PROMPTS = 19;
 
-// Temperature ramp: the sampling temperature starts at LLM_TEMPERATURE_BASE
-// and, on each re-prompt, is nudged up by a computed step (see
-// llmTemperatureStep) sized so that LLM_TEMPERATURE_RAMP_STEPS increments land
-// exactly on the provider's ceiling. The two providers use different
-// temperature scales: OpenAI ranges 0.2 -> DEFAULT_LLM_TEMPERATURE_MAX_OPENAI
-// (0.4, step 0.002), while Ollama models like Mistral go up to
-// DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA (0.8, step 0.006). The value that
-// produced a usable candidate is echoed back to the backend, which holds onto
-// it for subsequent solve steps.
-export const DEFAULT_LLM_TEMPERATURE_BASE = 0.2;
-export const DEFAULT_LLM_TEMPERATURE_MAX_OPENAI = 0.4;
-export const DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA = 0.8;
-// Back-compat alias: llmTemperatureMax/llmTemperatureStep default to the
-// Ollama ceiling when no provider is given.
-export const DEFAULT_LLM_TEMPERATURE_MAX = DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA;
-export const LLM_TEMPERATURE_RAMP_STEPS = 100;
+// Fixed sampling temperature for LLM solve steps, from LLM_TEMPERATURE_BASE.
+// The temperature never changes while the orchestrator re-prompts — only the
+// requested candidate count escalates — so this single value applies to every
+// model call of every step in a run.
+export const DEFAULT_LLM_TEMPERATURE = 0.2;
 
 function positiveTrialCount(raw: string | undefined, fallback: number): number {
   const parsed = Number(raw);
@@ -91,11 +79,6 @@ function positiveTrialCount(raw: string | undefined, fallback: number): number {
 function nonNegativeFloat(raw: string | undefined, fallback: number): number {
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
-}
-
-function positiveFloat(raw: string | undefined, fallback: number): number {
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 /**
@@ -198,61 +181,21 @@ export function llmNumResponses(env: NodeJS.ProcessEnv = process.env): number {
 /**
  * Maximum number of prompts a single solve step may make before giving up on
  * a fresh candidate, from LLM_MAX_PROMPTS. The orchestrator re-prompts —
- * raising the temperature and requesting more distinct candidates together —
- * until it finds a candidate that does not repeat a prior guess.
+ * requesting one more distinct candidate on each attempt — until it finds a
+ * candidate that does not repeat a prior guess.
  */
 export function llmMaxPrompts(env: NodeJS.ProcessEnv = process.env): number {
   return positiveTrialCount(env.LLM_MAX_PROMPTS, DEFAULT_LLM_MAX_PROMPTS);
 }
 
 /**
- * The LLM provider to resolve the temperature ceiling for. OpenAI uses a
- * smaller temperature scale than Ollama, so the ramp ceiling (and therefore
- * the per-re-prompt step) differs between the two.
+ * Fixed sampling temperature for LLM solve steps, from LLM_TEMPERATURE_BASE.
+ * The orchestrator uses this single value for every model call — escalation
+ * on duplicate re-prompts changes only the requested candidate count, never
+ * the temperature — so the value echoed back is always this one.
  */
-export type LlmTemperatureProvider = "openai" | "ollama";
-
-/**
- * Base sampling temperature for LLM solve steps, from LLM_TEMPERATURE_BASE.
- * The orchestrator raises it (by llmTemperatureStep per re-prompt) when the
- * model keeps repeating prior guesses; the escalated value is echoed back and
- * held onto for subsequent solve steps.
- */
-export function llmTemperatureBase(env: NodeJS.ProcessEnv = process.env): number {
-  return nonNegativeFloat(env.LLM_TEMPERATURE_BASE, DEFAULT_LLM_TEMPERATURE_BASE);
-}
-
-/**
- * Ceiling for the sampling temperature, from LLM_TEMPERATURE_MAX_OPENAI /
- * LLM_TEMPERATURE_MAX_OLLAMA. The legacy LLM_TEMPERATURE_MAX still overrides
- * both providers when the per-provider variable is unset. The ramp reaches
- * exactly this value after LLM_TEMPERATURE_RAMP_STEPS increments. Defaults
- * are provider-specific because the two backends use different temperature
- * scales: OpenAI tops out at 0.4, Ollama at 0.8.
- */
-export function llmTemperatureMax(
-  env: NodeJS.ProcessEnv = process.env,
-  provider: LlmTemperatureProvider = "ollama",
-): number {
-  const override =
-    provider === "openai"
-      ? (env.LLM_TEMPERATURE_MAX_OPENAI ?? env.LLM_TEMPERATURE_MAX)
-      : (env.LLM_TEMPERATURE_MAX_OLLAMA ?? env.LLM_TEMPERATURE_MAX);
-  const fallback =
-    provider === "openai" ? DEFAULT_LLM_TEMPERATURE_MAX_OPENAI : DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA;
-  return positiveFloat(override, fallback);
-}
-
-/**
- * Per-re-prompt temperature increment. Derived from the configured base and
- * the provider's ceiling so that LLM_TEMPERATURE_RAMP_STEPS increments take
- * the temperature from the base to the ceiling.
- */
-export function llmTemperatureStep(
-  env: NodeJS.ProcessEnv = process.env,
-  provider: LlmTemperatureProvider = "ollama",
-): number {
-  return (llmTemperatureMax(env, provider) - llmTemperatureBase(env)) / LLM_TEMPERATURE_RAMP_STEPS;
+export function llmTemperature(env: NodeJS.ProcessEnv = process.env): number {
+  return nonNegativeFloat(env.LLM_TEMPERATURE_BASE, DEFAULT_LLM_TEMPERATURE);
 }
 
 /**

@@ -44,7 +44,7 @@ export const SolveRequestSchema = z.object({
     .optional()
     .default(1)
     .describe(
-      "Starting number of candidate groups the model should propose per prompt. Each solve step begins by asking for this many groups and, when every candidate repeats a prior guess, the orchestrator re-prompts, raising both the requested candidate count and the temperature. The count that eventually produced a usable candidate is echoed back so the caller can record it; each fresh solve step starts back at this base count",
+      "Starting number of candidate groups the model should propose per prompt. Each solve step begins by asking for this many groups and, when every candidate repeats a prior guess, the orchestrator re-prompts asking for one more distinct candidate until a fresh candidate appears. The count that eventually produced a usable candidate is echoed back so the caller can record it; each fresh solve step starts back at this base count",
     ),
   temperature: z
     .number()
@@ -52,23 +52,7 @@ export const SolveRequestSchema = z.object({
     .max(10)
     .optional()
     .describe(
-      "Starting sampling temperature for this solve step. When every candidate repeats a prior guess, the orchestrator re-prompts with a raised temperature and one more requested candidate; the value that produced a usable candidate is echoed back so the caller can hold onto it for subsequent steps",
-    ),
-  temperatureStep: z
-    .number()
-    .min(0)
-    .max(10)
-    .optional()
-    .describe(
-      "How much to raise the temperature on each re-prompt. When omitted, the solver derives it from the starting temperature and maxTemperature so that 100 increments reach the ceiling",
-    ),
-  maxTemperature: z
-    .number()
-    .min(0)
-    .max(10)
-    .optional()
-    .describe(
-      "Ceiling for temperature escalation. Defaults are provider-specific: 0.4 for OpenAI, 0.8 for Ollama",
+      "Fixed sampling temperature for this solve step. The orchestrator never changes it while re-prompting; the value used is echoed back so the caller can record it",
     ),
   maxNumResponses: z
     .number()
@@ -259,9 +243,8 @@ export type PromptMetadata = z.infer<typeof PromptMetadataSchema>;
  * actually asked, e.g. for debugging or transparency.
  * The model metadata/usage fields let the backend record per-guess LLM
  * telemetry without making a second request, including how many times the
- * solve step had to prompt the model (promptAttempts) and the final
- * temperature/numResponses that produced the candidate — the caller holds
- * these onto for subsequent solve steps.
+ * solve step had to prompt the model (promptAttempts) and the fixed
+ * temperature/numResponses of the call that produced the candidate.
  * `promptMetadata` is the per-prompt tracking record (parameters, latency,
  * usage and outcome for every model call the step made) — the prompt text
  * itself is omitted since it is large.

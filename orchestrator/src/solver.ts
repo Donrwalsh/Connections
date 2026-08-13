@@ -25,14 +25,6 @@ const GROUP_SIZE = 4;
 
 const DEFAULT_TEMPERATURE = 0.2;
 const DEFAULT_NUM_RESPONSES = 1;
-// The temperature ramp spans exactly this many increments from the default
-// base to the provider's ceiling, so each increment is derived as
-// (ceiling - base) / steps rather than configured directly.
-const LLM_TEMPERATURE_RAMP_STEPS = 100;
-// The two providers use different temperature scales: OpenAI tops out at 0.4
-// (step 0.002), Ollama models like Mistral at 0.8 (step 0.006).
-const DEFAULT_MAX_TEMPERATURE_OPENAI = 0.4;
-const DEFAULT_MAX_TEMPERATURE_OLLAMA = 0.8;
 const DEFAULT_MAX_NUM_RESPONSES = 10;
 const DEFAULT_MAX_PROMPTS = 19;
 
@@ -88,17 +80,16 @@ export class SolveError extends Error {
  * that is a fresh, well-formed group (no repeats of a prior guess).
  *
  * Deliberately self-contained: if every candidate repeats a previous guess
- * (or the model's output is unusable), the orchestrator re-prompts with
- * changed parameters — raising the sampling temperature and asking for one
- * more distinct candidate on each re-prompt — until a fresh candidate appears
- * or the prompt budget (maxPrompts) is exhausted.
+ * (or the model's output is unusable), the orchestrator re-prompts, asking
+ * for one more distinct candidate on each re-prompt — the sampling
+ * temperature stays fixed for the whole step — until a fresh candidate
+ * appears or the prompt budget (maxPrompts) is exhausted.
  *
- * The temperature and numResponses that eventually produced the winning
- * candidate are returned so the caller (the backend) can record the escalated
- * values on the guess (the temperature is held onto for subsequent steps).
- * `proposals` carries every well-formed candidate proposed across the step's
- * prompts with its disposition, so callers can persist all of them (not just
- * the winner) for analysis.
+ * The temperature and numResponses used by the winning call are returned so
+ * the caller (the backend) can record them on the guess. `proposals` carries
+ * every well-formed candidate proposed across the step's prompts with its
+ * disposition, so callers can persist all of them (not just the winner) for
+ * analysis.
  *
  * Usage and latency are aggregated across every prompt in the step so the
  * caller's per-guess telemetry reflects the true cost of reaching an answer.
@@ -111,21 +102,13 @@ export async function proposeGroup(
   // The provider is normally set explicitly by the backend (from the strategy
   // name); fall back to the configured default for robustness.
   const provider = request.modelProvider ?? defaultProvider();
-  const maxTemperature =
-    request.maxTemperature ??
-    (provider === "openai"
-      ? DEFAULT_MAX_TEMPERATURE_OPENAI
-      : DEFAULT_MAX_TEMPERATURE_OLLAMA);
   const maxNumResponses = request.maxNumResponses ?? DEFAULT_MAX_NUM_RESPONSES;
   const maxPrompts = request.maxPrompts ?? DEFAULT_MAX_PROMPTS;
-  // The per-re-prompt step is derived rather than configured: unless the
-  // caller pins it, size it so 100 increments take the base temperature to
-  // the ceiling.
-  const temperatureStep =
-    request.temperatureStep ??
-    (maxTemperature - DEFAULT_TEMPERATURE) / LLM_TEMPERATURE_RAMP_STEPS;
+  // A single fixed sampling temperature for the whole step (and, in practice,
+  // the whole run): the caller pins it via request.temperature, or we fall
+  // back to the default.
+  const temperature = request.temperature ?? DEFAULT_TEMPERATURE;
 
-  let temperature = request.temperature ?? DEFAULT_TEMPERATURE;
   let numResponses = request.numResponses ?? DEFAULT_NUM_RESPONSES;
 
   // Every prior wrong guess becomes a forbidden ID set, so a candidate is a
@@ -232,25 +215,18 @@ export async function proposeGroup(
   };
 
   /**
-   * Escalates the solve step's parameters by one notch, raising the sampling
-   * temperature and asking for one more distinct candidate together. Returns
-   * false when both levers are already at their cap, signalling the retry
-   * loop to stop. The escalated values stick: they are used for the next
-   * prompt and echoed back to the caller on success.
+   * Escalates the solve step's parameters by one notch, asking for one more
+   * distinct candidate. The temperature is fixed — only the requested
+   * candidate count rises. Returns false when the candidate count is already
+   * at its cap, signalling the retry loop to stop. The escalated count is
+   * used for the next prompt and echoed back to the caller on success.
    */
   const escalate = (): boolean => {
-    let escalated = false;
-
     if (numResponses < maxNumResponses) {
       numResponses++;
-      escalated = true;
+      return true;
     }
-    if (temperature < maxTemperature) {
-      temperature = Math.min(temperature + temperatureStep, maxTemperature);
-      escalated = true;
-    }
-
-    return escalated;
+    return false;
   };
 
   while (attempts < maxPrompts) {

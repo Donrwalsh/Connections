@@ -111,10 +111,8 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `LLM_MAX_MALFORMED_RESPONSES` | `3` | Maximum consecutive malformed LLM responses before a run ends with a `malformedResponse` status |
 | `LLM_MAX_MODEL_ERRORS` | `5` | Maximum consecutive transient model failures before a run ends with an `error` status |
 | `LLM_MAX_PROMPTS` | `19` | Maximum prompts a single solve step makes before the orchestrator accepts a duplicate |
-| `LLM_NUM_RESPONSES` | `1` | Number of candidate groups the LLM proposes per solve step (clamped to 10) |
-| `LLM_TEMPERATURE_BASE` | `0.2` | Starting sampling temperature for LLM solve steps (both providers) |
-| `LLM_TEMPERATURE_MAX_OPENAI` | `0.4` | Ceiling for the OpenAI temperature ramp (100 increments from base to ceiling, step 0.002) |
-| `LLM_TEMPERATURE_MAX_OLLAMA` | `0.8` | Ceiling for the Ollama temperature ramp (100 increments from base to ceiling, step 0.006) |
+| `LLM_NUM_RESPONSES` | `1` | Number of candidate groups the LLM proposes per solve step (clamped to 10); the orchestrator asks for one more on each duplicate re-prompt |
+| `LLM_TEMPERATURE_BASE` | `0.2` | Fixed sampling temperature for every LLM solve step — the temperature never ramps; only the requested candidate count escalates on re-prompts |
 | `LLM_OPENAI_CONCURRENCY` | `1` | Maximum `llm-openai` runs the worker processes at once (own queue, so it never blocks Ollama or the deterministic strategies) |
 | `LLM_OLLAMA_CONCURRENCY` | `1` | Maximum `llm-ollama` runs the worker processes at once (own queue, so it never blocks OpenAI or the deterministic strategies) |
 | `PORT` | `3001` | Orchestrator listen port |

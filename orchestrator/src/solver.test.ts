@@ -13,8 +13,6 @@ function makeRequest(overrides: Partial<SolveRequest> = {}): SolveRequest {
     puzzleWords: WORDS,
     priorGuesses: [],
     numResponses: 1,
-    temperatureStep: 0.1,
-    maxTemperature: 2,
     maxNumResponses: 10,
     maxPrompts: 5,
     ...overrides,
@@ -173,7 +171,7 @@ describe("proposeGroup", () => {
     );
   });
 
-  it("starts retries at the sticky parameters supplied by the caller", async () => {
+  it("starts retries at the parameters supplied by the caller", async () => {
     const result = await proposeGroup(
       makeRequest({ temperature: 1.3, numResponses: 3 }),
     );
@@ -187,7 +185,7 @@ describe("proposeGroup", () => {
     expect(result.numResponses).toBe(3);
   });
 
-  it("raises the temperature and requests more candidates when every candidate repeats a prior guess", async () => {
+  it("requests more candidates when every candidate repeats a prior guess", async () => {
     const request = makeRequest({
       priorGuesses: [
         { words: ["AAAA", "BBBB", "CCCC", "DDDD"], result: "incorrect" },
@@ -202,8 +200,9 @@ describe("proposeGroup", () => {
     const result = await proposeGroup(request);
 
     expect(generateObjectMock).toHaveBeenCalledTimes(2);
-    expect(lastTemperatures()).toEqual([0.2, 0.3]);
-    // The first escalation also asks for an extra distinct candidate.
+    // The temperature stays fixed across re-prompts.
+    expect(lastTemperatures()).toEqual([0.2, 0.2]);
+    // The first escalation asks for an extra distinct candidate.
     expect(schemaAcceptsCount(0, 1)).toBe(true);
     expect(schemaAcceptsCount(0, 2)).toBe(false);
     expect(schemaAcceptsCount(1, 2)).toBe(true);
@@ -220,7 +219,7 @@ describe("proposeGroup", () => {
         status: "used",
       },
     ]);
-    expect(result.temperature).toBeCloseTo(0.3, 10);
+    expect(result.temperature).toBe(0.2);
     expect(result.numResponses).toBe(2);
     expect(result.promptAttempts).toBe(2);
     expect(result.duplicatesRejected).toBe(2);
@@ -259,7 +258,7 @@ describe("proposeGroup", () => {
     ]);
   });
 
-  it("raises temperature and candidate count together on each escalation", async () => {
+  it("requests one more candidate on each escalation", async () => {
     const request = makeRequest({
       priorGuesses: [
         { words: ["AAAA", "BBBB", "CCCC", "DDDD"], result: "incorrect" },
@@ -275,15 +274,16 @@ describe("proposeGroup", () => {
     const result = await proposeGroup(request);
 
     expect(generateObjectMock).toHaveBeenCalledTimes(3);
-    expect(lastTemperatures()).toEqual([0.2, 0.3, 0.4]);
-    // Each escalation raises the temperature and requests one more candidate.
+    // The temperature never moves during escalation.
+    expect(lastTemperatures()).toEqual([0.2, 0.2, 0.2]);
+    // Each escalation requests one more candidate.
     expect(schemaAcceptsCount(0, 1)).toBe(true);
     expect(schemaAcceptsCount(0, 2)).toBe(false);
     expect(schemaAcceptsCount(1, 2)).toBe(true);
     expect(schemaAcceptsCount(1, 3)).toBe(false);
     expect(schemaAcceptsCount(2, 3)).toBe(true);
     expect(schemaAcceptsCount(2, 4)).toBe(false);
-    expect(result.temperature).toBeCloseTo(0.4, 10);
+    expect(result.temperature).toBe(0.2);
     expect(result.numResponses).toBe(3);
     expect(result.promptAttempts).toBe(3);
   });
@@ -331,14 +331,14 @@ describe("proposeGroup", () => {
       usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
       outcome: "duplicate_rejected",
     });
-    expect(result.promptMetadata[0].temperature).toBeCloseTo(0.2, 10);
+    expect(result.promptMetadata[0].temperature).toBe(0.2);
     expect(result.promptMetadata[1]).toMatchObject({
       attempt: 2,
       numResponses: 2,
       usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
       outcome: "accepted",
     });
-    expect(result.promptMetadata[1].temperature).toBeCloseTo(0.3, 10);
+    expect(result.promptMetadata[1].temperature).toBe(0.2);
     // The metadata reflects the model that responded, even for the retry.
     expect(
       result.promptMetadata.every((entry) => entry.model === "test-model"),
@@ -452,9 +452,9 @@ describe("proposeGroup", () => {
       },
     });
     expect(generateObjectMock).toHaveBeenCalledTimes(3);
-    // The escalations ratchet up before giving up: both the temperature and
-    // the requested candidate count rise with each re-prompt.
-    expect(lastTemperatures()).toEqual([0.2, 0.3, 0.4]);
+    // The escalation ratchets the requested candidate count up before giving
+    // up: one more candidate per re-prompt, at a fixed temperature.
+    expect(lastTemperatures()).toEqual([0.2, 0.2, 0.2]);
     expect(schemaAcceptsCount(2, 3)).toBe(true);
     expect(schemaAcceptsCount(2, 4)).toBe(false);
   });
@@ -493,51 +493,58 @@ describe("proposeGroup", () => {
       makeGroup({ word_ids: [4, 5, 6, 7] }),
     ]);
     expect(result.promptAttempts).toBe(2);
-    expect(result.temperature).toBeCloseTo(0.3, 10);
+    expect(result.temperature).toBe(0.2);
   });
 
-  it("derives the temperature step so 100 increments reach the Ollama ceiling", async () => {
-    const request = makeRequest({
-      modelProvider: "ollama",
-      temperatureStep: undefined,
-      maxTemperature: undefined,
-      priorGuesses: [
-        { words: ["AAAA", "BBBB", "CCCC", "DDDD"], result: "incorrect" },
-      ],
-    });
-    generateObjectMock
-      .mockResolvedValueOnce(makeOutput([makeGroup()]))
-      .mockResolvedValueOnce(
-        makeOutput([makeGroup({ word_ids: [4, 5, 6, 7] })]),
-      );
+  it("keeps the temperature fixed across re-prompts for both providers", async () => {
+    for (const modelProvider of ["openai", "ollama"] as const) {
+      generateObjectMock.mockReset();
+      generateObjectMock
+        .mockResolvedValueOnce(makeOutput([makeGroup()]))
+        .mockResolvedValueOnce(
+          makeOutput([makeGroup({ word_ids: [4, 5, 6, 7] })]),
+        );
 
-    const result = await proposeGroup(request);
+      const request = makeRequest({
+        modelProvider,
+        priorGuesses: [
+          { words: ["AAAA", "BBBB", "CCCC", "DDDD"], result: "incorrect" },
+        ],
+      });
 
-    expect(generateObjectMock).toHaveBeenCalledTimes(2);
-    expect(lastTemperatures()[1]).toBeCloseTo(0.206, 10);
-    expect(result.temperature).toBeCloseTo(0.206, 10);
+      const result = await proposeGroup(request);
+
+      expect(generateObjectMock).toHaveBeenCalledTimes(2);
+      expect(lastTemperatures()).toEqual([0.2, 0.2]);
+      expect(result.temperature).toBe(0.2);
+    }
   });
 
-  it("derives a smaller temperature step for the OpenAI scale", async () => {
-    const request = makeRequest({
-      modelProvider: "openai",
-      temperatureStep: undefined,
-      maxTemperature: undefined,
-      priorGuesses: [
-        { words: ["AAAA", "BBBB", "CCCC", "DDDD"], result: "incorrect" },
-      ],
+  it("stops escalating when the candidate count is already at its cap", async () => {
+    generateObjectMock.mockResolvedValue(makeOutput([makeGroup()]));
+
+    await expect(
+      proposeGroup(
+        makeRequest({
+          priorGuesses: [
+            { words: ["AAAA", "BBBB", "CCCC", "DDDD"], result: "incorrect" },
+          ],
+          numResponses: 1,
+          maxNumResponses: 1,
+          maxPrompts: 5,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: "duplicate_group",
+      details: {
+        promptAttempts: 1,
+        numResponses: 1,
+        temperature: 0.2,
+      },
     });
-    generateObjectMock
-      .mockResolvedValueOnce(makeOutput([makeGroup()]))
-      .mockResolvedValueOnce(
-        makeOutput([makeGroup({ word_ids: [4, 5, 6, 7] })]),
-      );
-
-    const result = await proposeGroup(request);
-
-    expect(generateObjectMock).toHaveBeenCalledTimes(2);
-    expect(lastTemperatures()[1]).toBeCloseTo(0.202, 10);
-    expect(result.temperature).toBeCloseTo(0.202, 10);
+    expect(generateObjectMock).toHaveBeenCalledTimes(1);
+    // Nothing was left to escalate: no re-prompt happened.
+    expect(lastTemperatures()).toEqual([0.2]);
   });
 
   it("does not re-prompt after an unrecoverable model error", async () => {

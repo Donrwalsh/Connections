@@ -6,9 +6,7 @@ import {
   DEFAULT_LLM_MAX_MODEL_ERRORS,
   DEFAULT_LLM_MAX_PROMPTS,
   DEFAULT_LLM_NUM_RESPONSES,
-  DEFAULT_LLM_TEMPERATURE_BASE,
-  DEFAULT_LLM_TEMPERATURE_MAX_OPENAI,
-  DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA,
+  DEFAULT_LLM_TEMPERATURE,
   DEFAULT_LLM_TRIALS,
   DEFAULT_LLM_OPENAI_CONCURRENCY,
   DEFAULT_LLM_OLLAMA_CONCURRENCY,
@@ -27,9 +25,7 @@ import {
   llmNumResponses,
   llmOllamaConcurrency,
   llmOpenAIConcurrency,
-  llmTemperatureBase,
-  llmTemperatureMax,
-  llmTemperatureStep,
+  llmTemperature,
   llmTrialCount,
   shuffleFoolishDuplicateLimit,
   shuffleFoolishTrialCount,
@@ -230,68 +226,15 @@ describe("strategies", () => {
     });
   });
 
-  describe("llmTemperatureBase", () => {
+  describe("llmTemperature", () => {
     it("should default when the env var is missing or invalid", () => {
-      expect(llmTemperatureBase({})).toBe(DEFAULT_LLM_TEMPERATURE_BASE);
-      expect(llmTemperatureBase({ LLM_TEMPERATURE_BASE: "-1" })).toBe(DEFAULT_LLM_TEMPERATURE_BASE);
+      expect(llmTemperature({})).toBe(DEFAULT_LLM_TEMPERATURE);
+      expect(llmTemperature({ LLM_TEMPERATURE_BASE: "-1" })).toBe(DEFAULT_LLM_TEMPERATURE);
+      expect(llmTemperature({ LLM_TEMPERATURE_BASE: "abc" })).toBe(DEFAULT_LLM_TEMPERATURE);
     });
 
     it("should read a valid non-negative number", () => {
-      expect(llmTemperatureBase({ LLM_TEMPERATURE_BASE: "0.7" })).toBe(0.7);
-    });
-  });
-
-  describe("llmTemperatureMax", () => {
-    it("should default to the Ollama ceiling when the env vars are missing", () => {
-      expect(llmTemperatureMax({})).toBe(DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA);
-    });
-
-    it("should default to the OpenAI ceiling for the openai provider", () => {
-      expect(llmTemperatureMax({}, "openai")).toBe(DEFAULT_LLM_TEMPERATURE_MAX_OPENAI);
-    });
-
-    it("should default when the env vars are invalid", () => {
-      expect(llmTemperatureMax({ LLM_TEMPERATURE_MAX_OLLAMA: "abc" })).toBe(
-        DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA,
-      );
-      expect(llmTemperatureMax({ LLM_TEMPERATURE_MAX_OLLAMA: "0" })).toBe(
-        DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA,
-      );
-      expect(llmTemperatureMax({ LLM_TEMPERATURE_MAX_OPENAI: "abc" }, "openai")).toBe(
-        DEFAULT_LLM_TEMPERATURE_MAX_OPENAI,
-      );
-    });
-
-    it("should read a valid per-provider ceiling", () => {
-      expect(llmTemperatureMax({ LLM_TEMPERATURE_MAX_OPENAI: "1.5" }, "openai")).toBe(1.5);
-      expect(llmTemperatureMax({ LLM_TEMPERATURE_MAX_OLLAMA: "4.0" })).toBe(4.0);
-    });
-
-    it("should let the legacy LLM_TEMPERATURE_MAX override both providers", () => {
-      expect(llmTemperatureMax({ LLM_TEMPERATURE_MAX: "2.5" }, "openai")).toBe(2.5);
-      expect(llmTemperatureMax({ LLM_TEMPERATURE_MAX: "2.5" })).toBe(2.5);
-    });
-  });
-
-  describe("llmTemperatureStep", () => {
-    it("should derive the step from the default base and the Ollama ceiling", () => {
-      expect(llmTemperatureStep({})).toBeCloseTo(
-        (DEFAULT_LLM_TEMPERATURE_MAX_OLLAMA - DEFAULT_LLM_TEMPERATURE_BASE) / 100,
-        10,
-      );
-    });
-
-    it("should derive a smaller step from the OpenAI ceiling", () => {
-      expect(llmTemperatureStep({}, "openai")).toBeCloseTo(
-        (DEFAULT_LLM_TEMPERATURE_MAX_OPENAI - DEFAULT_LLM_TEMPERATURE_BASE) / 100,
-        10,
-      );
-    });
-
-    it("should derive the step so 100 increments reach the configured ceiling", () => {
-      expect(
-        llmTemperatureStep({ LLM_TEMPERATURE_BASE: "0.5", LLM_TEMPERATURE_MAX_OLLAMA: "3.0" }),
-      ).toBeCloseTo(0.025, 10);
+      expect(llmTemperature({ LLM_TEMPERATURE_BASE: "0.7" })).toBe(0.7);
     });
   });
 

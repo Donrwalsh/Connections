@@ -85,10 +85,11 @@ export class Guess {
   latencyMs: number | null;
 
   // LLM strategy: the sampling parameters that produced this guess.
-  // temperature/numResponses escalate while the orchestrator hunts for a
-  // candidate that doesn't repeat a prior guess; promptAttempts counts the
-  // model calls in that step and duplicatesRejected how many repeats were
-  // discarded before the winner (or before the prompt budget ran out).
+  // numResponses escalates while the orchestrator hunts for a candidate that
+  // doesn't repeat a prior guess (the temperature is fixed for the run);
+  // promptAttempts counts the model calls in that step and duplicatesRejected
+  // how many repeats were discarded before the winner (or before the prompt
+  // budget ran out).
   @Column({ type: "double precision", nullable: true })
   temperature: number | null;
 

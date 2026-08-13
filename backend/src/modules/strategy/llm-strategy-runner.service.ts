@@ -12,9 +12,7 @@ import {
   llmMaxModelErrors,
   llmMaxPrompts,
   llmNumResponses,
-  llmTemperatureBase,
-  llmTemperatureMax,
-  llmTemperatureStep,
+  llmTemperature,
 } from "../../strategies";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { LlmProposal, LlmProposalStatus } from "./entities/llm-proposal.entity";
@@ -35,12 +33,11 @@ const MODEL_ERROR_RETRY_MAX_DELAY_MS = 300000;
  * remaining words plus the full guess history. The strategy name (llm-openai or
  * llm-ollama) selects which LLM backend the orchestrator consults for every
  * solve step. Each step starts by asking the model for a single answer; when
- * every candidate repeats a prior guess, the orchestrator re-prompts with
- * changed parameters — alternating between a higher sampling temperature and
- * more distinct candidates to choose from — until a fresh candidate appears
- * or its prompt budget runs out. The parameters that produced a usable
- * candidate are held onto here and sent on subsequent steps, so the
- * escalation persists across the run.
+ * every candidate repeats a prior guess, the orchestrator re-prompts asking
+ * for one more distinct candidate (at a fixed sampling temperature) until a
+ * fresh candidate appears or its prompt budget runs out. The candidate count
+ * restarts from its base on each step; the temperature is the same for every
+ * call of the run.
  *
  * Recoverable model behaviors are bounded by config: too many wrong guesses
  * (LLM_MAX_FAILED_GUESSES) end the run with 'failed'; the orchestrator
@@ -90,20 +87,13 @@ export class LlmStrategyRunner {
     const maxMalformed = llmMaxMalformedResponses();
     const maxModelErrors = llmMaxModelErrors();
     const maxPrompts = llmMaxPrompts();
-    // The temperature ramp ceiling (and per-re-prompt step) is provider-
-    // specific: OpenAI ranges 0.2 -> 0.4, Ollama 0.2 -> 0.8.
     const modelProvider = this.modelProviderForStrategy(strategyName);
-    const temperatureStep = llmTemperatureStep(process.env, modelProvider);
-    const maxTemperature = llmTemperatureMax(process.env, modelProvider);
+    // A single fixed sampling temperature for the whole run. The orchestrator
+    // never changes it while re-prompting — escalation is numResponses-only —
+    // so this value is sent on every solve step.
+    const temperature = llmTemperature();
     let consecutiveModelErrors = 0;
 
-    // Sticky sampling temperature. The orchestrator reports the temperature
-    // that produced each guess; we hold onto it so later solve steps start
-    // from the escalated value instead of resetting. (A worker restart
-    // mid-run resets it to base — the orchestrator simply re-escalates on
-    // demand.) The candidate count, by contrast, restarts from the base value
-    // on every solve step so each guess gets a fresh shot at a single answer.
-    let temperature = llmTemperatureBase();
     let numResponses: number;
 
     const pendingGuesses: Partial<Guess>[] = [];
@@ -113,8 +103,8 @@ export class LlmStrategyRunner {
     const pendingProposals: Partial<LlmProposal>[] = [];
 
     while (true) {
-      // Each solve step is a fresh guess: start from the base candidate count
-      // (the temperature stays sticky across the run).
+      // Each solve step is a fresh guess: start from the base candidate count.
+      // The temperature is fixed for the run.
       numResponses = llmNumResponses();
 
       const outcome = await this.orchestratorService.proposeGroup({
@@ -126,8 +116,6 @@ export class LlmStrategyRunner {
         modelProvider,
         temperature,
         numResponses,
-        temperatureStep,
-        maxTemperature,
         maxNumResponses: MAX_LLM_NUM_RESPONSES,
         maxPrompts,
       });
@@ -144,10 +132,9 @@ export class LlmStrategyRunner {
 
         // The orchestrator re-prompted until it found a candidate that does
         // not repeat a prior guess, so the winner is the single group in the
-        // response. Hold onto the temperature that produced it so the next
-        // solve step starts from it; the escalated candidate count is only
-        // recorded here (the next step restarts from the base value).
-        temperature = data.temperature;
+        // response. Record the parameters that produced it; the candidate
+        // count is only recorded here (the next step restarts from the base
+        // value) and the temperature is fixed for the run.
         numResponses = data.numResponses;
 
         const group = data.proposedGroups[0];
@@ -234,12 +221,11 @@ export class LlmStrategyRunner {
             run.finishedAt = new Date();
           }
         } else if (code === "duplicate_group") {
-          // Defensive: the orchestrator already re-prompts (raising the
-          // temperature and requesting more distinct candidates) before it
-          // reports a duplicate_group, so this means it exhausted its prompt
-          // budget. The first repeated group is recorded so the duplicate
-          // limit can kick in and the run terminates instead of retrying
-          // forever.
+          // Defensive: the orchestrator already re-prompts (requesting more
+          // distinct candidates, at a fixed temperature) before it reports a
+          // duplicate_group, so this means it exhausted its prompt budget.
+          // The first repeated group is recorded so the duplicate limit can
+          // kick in and the run terminates instead of retrying forever.
           duplicateCount++;
           // A run can end on repeats without a single usable step, so record
           // the model metadata from the error details too — otherwise a run
@@ -343,8 +329,7 @@ export class LlmStrategyRunner {
    * The first candidate that is well-formed (4 unique, in-range IDs) and does
    * not repeat a previously guessed group wins. If every candidate repeats an
    * earlier guess, the first duplicate is returned so the run's duplicate
-   * limit (and temperature ramp) can kick in. Returns null when no candidate
-   * is usable at all.
+   * limit can kick in. Returns null when no candidate is usable at all.
    */
   private mapGuessResultToOrchestrator(result: GuessResult): "correct" | "incorrect" | "oneAway" {
     switch (result) {

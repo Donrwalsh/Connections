@@ -87,8 +87,6 @@ export interface OrchestratorSolveRequest {
   modelProvider?: ModelProvider;
   temperature?: number;
   numResponses?: number;
-  temperatureStep?: number;
-  maxTemperature?: number;
   maxNumResponses?: number;
   maxPrompts?: number;
 }

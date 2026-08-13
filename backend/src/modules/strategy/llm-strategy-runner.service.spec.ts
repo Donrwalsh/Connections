@@ -241,7 +241,7 @@ describe("LlmStrategyRunner", () => {
           completionTokens: 20,
           totalTokens: 30,
           latencyMs: 500,
-          temperature: 0,
+          temperature: 0.2,
           numResponses: 1,
           promptAttempts: 1,
           duplicatesRejected: 0,
@@ -314,8 +314,6 @@ describe("LlmStrategyRunner", () => {
         modelProvider: "openai",
         temperature: 0.2,
         numResponses: 1,
-        temperatureStep: 0.002,
-        maxTemperature: 0.4,
         maxNumResponses: 10,
         maxPrompts: 19,
       });
@@ -325,10 +323,8 @@ describe("LlmStrategyRunner", () => {
         puzzleWords: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
         priorGuesses: [{ words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: "correct" }],
         modelProvider: "openai",
-        temperature: 0,
+        temperature: 0.2,
         numResponses: 1,
-        temperatureStep: 0.002,
-        maxTemperature: 0.4,
         maxNumResponses: 10,
         maxPrompts: 19,
       });
@@ -342,16 +338,14 @@ describe("LlmStrategyRunner", () => {
       await runner.runLlmStrategy(100, "llm-ollama");
 
       expect(mockOrchestratorService.proposeGroup).toHaveBeenCalledTimes(2);
-      // The Ollama strategy uses its own provider and the wider Ollama
-      // temperature ramp (0.2 -> 0.8, step 0.006).
+      // The Ollama strategy uses its own provider and the same fixed
+      // temperature as OpenAI — the temperature never ramps.
       const firstCall = mockOrchestratorService.proposeGroup.mock.calls[0][0] as {
         modelProvider: string;
-        temperatureStep: number;
-        maxTemperature: number;
+        temperature: number;
       };
       expect(firstCall.modelProvider).toBe("ollama");
-      expect(firstCall.temperatureStep).toBeCloseTo(0.006, 10);
-      expect(firstCall.maxTemperature).toBe(0.8);
+      expect(firstCall.temperature).toBe(0.2);
       expect(mockOrchestratorService.proposeGroup.mock.calls[1][0]).toMatchObject({
         modelProvider: "ollama",
       });
@@ -387,7 +381,7 @@ describe("LlmStrategyRunner", () => {
       });
     });
 
-    it("should hold onto the escalated temperature but reset the candidate count per step", async () => {
+    it("should keep the temperature fixed and reset the candidate count per step", async () => {
       mockOrchestratorService.proposeGroup
         .mockResolvedValueOnce(
           success([0, 1, 2, 3], {
@@ -409,20 +403,20 @@ describe("LlmStrategyRunner", () => {
       await runner.runLlmStrategy(100, "llm-openai");
 
       const calls = mockOrchestratorService.proposeGroup.mock.calls;
-      // The run starts at the base parameters.
+      // The run always sends the fixed temperature.
       expect(calls[0][0]).toEqual(expect.objectContaining({ temperature: 0.2, numResponses: 1 }));
-      // The first response escalated, so the second solve step starts from the
-      // raised temperature, but the candidate count resets to base for each
-      // fresh guess.
-      expect(calls[1][0]).toEqual(expect.objectContaining({ temperature: 1.2, numResponses: 1 }));
+      // The candidate count resets to base for each fresh guess, but the
+      // temperature does not follow the (escalated) value the orchestrator
+      // echoed back — it stays at the run's fixed temperature.
+      expect(calls[1][0]).toEqual(expect.objectContaining({ temperature: 0.2, numResponses: 1 }));
       const inserted = mockManager.insert.mock.calls
         .filter((call) => call[0] === "Guess")
         .flatMap((call) => call[1] as Array<Record<string, unknown>>);
-      // The guess record still reports the escalated candidate count that
-      // actually produced the guess.
+      // The guess record reports the fixed temperature and the escalated
+      // candidate count that actually produced the guess.
       expect(inserted[0]).toEqual(
         expect.objectContaining({
-          temperature: 1.2,
+          temperature: 0.2,
           numResponses: 3,
           promptAttempts: 2,
           duplicatesRejected: 1,
@@ -476,8 +470,8 @@ describe("LlmStrategyRunner", () => {
             duplicatesRejected: 3,
           }),
         );
-        // Escalation now lives in the orchestrator, so the backend sends the
-        // same sticky parameters on every step.
+        // The temperature is fixed for the run, so it is the same on every
+        // step regardless of the escalations inside the orchestrator.
         const temperatures = mockOrchestratorService.proposeGroup.mock.calls.map(
           (call) => (call[0] as { temperature: number }).temperature,
         );

@@ -9,8 +9,6 @@ function makeRequest(overrides: Partial<SolveRequest> = {}): SolveRequest {
     puzzleWords: WORDS,
     priorGuesses: [],
     numResponses: 5,
-    temperatureStep: 0.1,
-    maxTemperature: 2,
     maxNumResponses: 10,
     maxPrompts: 5,
     ...overrides,
