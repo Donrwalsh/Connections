@@ -68,10 +68,10 @@ afterEach(() => {
 });
 
 describe("Game Component", () => {
-  it("renders the title and all 16 words", () => {
+  it("renders the date and all 16 words", () => {
     render(<Game puzzle={puzzle} />);
 
-    expect(screen.getByText("Connections")).toBeInTheDocument();
+    expect(screen.getByText("Monday, January 15, 2024")).toBeInTheDocument();
     const words = categories.flatMap((c) => c.words);
     words.forEach((word) => expect(screen.getByText(word)).toBeInTheDocument());
     expect(screen.getByText("0/4 selected")).toBeInTheDocument();

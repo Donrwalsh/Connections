@@ -128,9 +128,14 @@ export function Game({ puzzle }: GameProps) {
 
   const canSubmit = state.selected.length === 4 && state.status === "playing";
 
+  const puzzleDateLabel = new Date(`${puzzle.date}T00:00:00Z`).toLocaleDateString(
+    "en-US",
+    { timeZone: "UTC", weekday: "long", year: "numeric", month: "long", day: "numeric" },
+  );
+
   return (
     <div className="app">
-      <h1>Connections</h1>
+      <h2>{puzzleDateLabel}</h2>
 
       <CategoryReveal solved={state.solved} />
 

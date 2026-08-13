@@ -1,0 +1,116 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { afterEach, describe, expect, it } from "vitest";
+import { Header } from "../Header";
+import { monthLabel, todayUtcString } from "../../data/calendarMock";
+
+function renderHeader(initialEntry = "/leaderboard") {
+  return render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <Header />
+    </MemoryRouter>,
+  );
+}
+
+afterEach(() => {
+  document.body.innerHTML = "";
+});
+
+function LocationDisplay() {
+  const location = useLocation();
+  return <div>{location.pathname}</div>;
+}
+
+describe("Header", () => {
+  it("shows the wordmark and all nav items", () => {
+    renderHeader();
+
+    expect(screen.getByRole("link", { name: "Connections Lab" })).toHaveAttribute(
+      "href",
+      "/leaderboard",
+    );
+    expect(screen.getByRole("link", { name: "Today's puzzle" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "Leaderboard" })).toHaveAttribute(
+      "href",
+      "/leaderboard",
+    );
+    expect(screen.getByRole("button", { name: "Calendar" })).toBeInTheDocument();
+  });
+
+  it("marks Today's puzzle active only on exactly /", () => {
+    renderHeader("/");
+
+    const todayLink = screen.getByRole("link", { name: "Today's puzzle" });
+    const leaderboardLink = screen.getByRole("link", { name: "Leaderboard" });
+
+    expect(todayLink.className).toContain("site-header__link--active");
+    expect(leaderboardLink.className).not.toContain("site-header__link--active");
+  });
+
+  it("marks Leaderboard active anywhere under /leaderboard", () => {
+    renderHeader("/leaderboard/alphabetical");
+
+    const todayLink = screen.getByRole("link", { name: "Today's puzzle" });
+    const leaderboardLink = screen.getByRole("link", { name: "Leaderboard" });
+
+    expect(leaderboardLink.className).toContain("site-header__link--active");
+    expect(todayLink.className).not.toContain("site-header__link--active");
+  });
+
+  it("opens and closes the calendar popover from the icon button", async () => {
+    const user = userEvent.setup();
+    renderHeader();
+
+    const button = screen.getByRole("button", { name: "Calendar" });
+    expect(screen.queryByRole("dialog", { name: "Calendar" })).not.toBeInTheDocument();
+
+    await user.click(button);
+    const today = todayUtcString();
+    const month = Number(today.slice(5, 7)) - 1;
+    const year = Number(today.slice(0, 4));
+    expect(screen.getByRole("dialog", { name: "Calendar" })).toBeInTheDocument();
+    expect(screen.getByText(monthLabel(year, month))).toBeInTheDocument();
+
+    await user.click(button);
+    expect(screen.queryByRole("dialog", { name: "Calendar" })).not.toBeInTheDocument();
+  });
+
+  it("closes the popover on Escape", async () => {
+    const user = userEvent.setup();
+    renderHeader();
+
+    await user.click(screen.getByRole("button", { name: "Calendar" }));
+    expect(screen.getByRole("dialog", { name: "Calendar" })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Calendar" })).not.toBeInTheDocument();
+  });
+
+  it("closes the popover when clicking outside it", async () => {
+    const user = userEvent.setup();
+    renderHeader();
+
+    await user.click(screen.getByRole("button", { name: "Calendar" }));
+    expect(screen.getByRole("dialog", { name: "Calendar" })).toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("dialog", { name: "Calendar" })).not.toBeInTheDocument();
+  });
+
+  it("navigates to a random puzzle from the shuffle icon", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={["/leaderboard"]}>
+        <Header />
+        <Routes>
+          <Route path="/puzzle/:date" element={<LocationDisplay />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Random puzzle" }));
+
+    expect(await screen.findByText(/^\/puzzle\/\d{4}-\d{2}-\d{2}$/)).toBeInTheDocument();
+  });
+});

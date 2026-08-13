@@ -1,0 +1,238 @@
+/* Shared site header + calendar popover. See DESIGN.md "Navigation". */
+
+.site-layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  text-align: left;
+}
+
+.site-layout__main {
+  flex: 1;
+}
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 4rem;
+  padding: 0 1rem;
+  background-color: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.site-header__wordmark {
+  font-family: Georgia, "Times New Roman", Times, serif;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text-h);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.site-header__nav {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.site-header__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem;
+  border-bottom: 2px solid transparent;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.95rem;
+  white-space: nowrap;
+}
+
+.site-header__link svg {
+  fill: currentColor;
+}
+
+.site-header__link:hover {
+  color: var(--text-h);
+}
+
+/* Active nav item = 2px accent bottom border (DESIGN.md "Navigation"). */
+.site-header__link--active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.site-header__calendar {
+  position: relative;
+  display: inline-flex;
+}
+
+.site-header__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  margin-inline: 0.25rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.site-header__icon-btn:hover {
+  color: var(--text-h);
+}
+
+.site-header__icon-btn[aria-expanded="true"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.site-header__icon-btn svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+/* Calendar popover */
+.calendar-popover {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 30;
+  width: 18.5rem;
+  padding: 0.75rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background-color: var(--bg);
+  box-shadow: var(--shadow);
+}
+
+.calendar-popover__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.calendar-popover__label {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-h);
+}
+
+.calendar-popover__arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.calendar-popover__arrow:hover {
+  background-color: var(--code-bg);
+  color: var(--text-h);
+}
+
+.calendar-popover__arrow:disabled {
+  color: var(--border);
+  cursor: default;
+}
+
+.calendar-popover__arrow:disabled:hover {
+  background-color: transparent;
+  color: var(--border);
+}
+
+.calendar-popover__weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.calendar-popover__weekday {
+  font-size: 0.7rem;
+  text-align: center;
+  color: var(--text);
+}
+
+.calendar-popover__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.25rem;
+}
+
+.calendar-popover__cell {
+  aspect-ratio: 1 / 1;
+  border: none;
+  border-radius: 5px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.calendar-popover__cell--blank {
+  background-color: transparent;
+  cursor: default;
+}
+
+.calendar-popover__cell--date {
+  background-color: var(--code-bg);
+  color: var(--text-h);
+}
+
+.calendar-popover__cell--date:hover {
+  background-color: var(--border);
+}
+
+.calendar-popover__cell--outside {
+  color: var(--text);
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Today keeps an accent outline (DESIGN.md "Calendar"). */
+.calendar-popover__cell--today {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+  color: var(--accent);
+}
+
+/* Mobile: compact the wordmark and text links; calendar icon unchanged. */
+@media (max-width: 640px) {
+  .site-header {
+    padding: 0 0.5rem;
+  }
+
+  .site-header__wordmark {
+    font-size: 1rem;
+  }
+
+  .site-header__link {
+    padding: 0.6rem 0.4rem;
+    font-size: 0.85rem;
+  }
+
+  .site-header__calendar {
+    order: 2;
+  }
+}

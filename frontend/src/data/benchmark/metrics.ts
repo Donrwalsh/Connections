@@ -1,0 +1,108 @@
+// Configurable-metric logic for the benchmark UI: which metrics the
+// leaderboard can sort by, how to read a value off a strategy row, and how to
+// format/sort the results. Kept framework-free so it is unit-testable without
+// rendering.
+
+import type { PuzzleBreakdown, PuzzleRunStatus, StrategyAggregate } from "./types";
+
+export type LeaderboardMetricKey = "avgGuesses" | "successRate" | "speed";
+
+export interface MetricDefinition {
+  key: LeaderboardMetricKey;
+  label: string;
+  description: string;
+  higherIsBetter: boolean;
+  format: (value: number) => string;
+}
+
+export const LEADERBOARD_METRICS: MetricDefinition[] = [
+  {
+    key: "avgGuesses",
+    label: "Avg guesses",
+    description: "Mean guesses to solve across completed runs — fewer is better",
+    higherIsBetter: false,
+    format: (value) => (Number.isInteger(value) ? String(value) : value.toFixed(1)),
+  },
+  {
+    key: "successRate",
+    label: "Success rate",
+    description: "Share of finished runs that solved the puzzle",
+    higherIsBetter: true,
+    format: (value) => `${Math.round(value)}%`,
+  },
+  {
+    key: "speed",
+    label: "Speed",
+    description: "Solves per hour, derived from average solve duration",
+    higherIsBetter: true,
+    format: (value) => `${Math.round(value).toLocaleString()}/hr`,
+  },
+];
+
+export function getMetricDefinition(key: LeaderboardMetricKey): MetricDefinition {
+  return LEADERBOARD_METRICS.find((metric) => metric.key === key) ?? LEADERBOARD_METRICS[0]!;
+}
+
+export function metricValue(strategy: StrategyAggregate, key: LeaderboardMetricKey): number | null {
+  switch (key) {
+    case "avgGuesses":
+      return strategy.avgGuessesToSolve;
+    case "successRate":
+      return strategy.successRate;
+    case "speed":
+      return strategy.avgDurationMs === null ? null : 3_600_000 / strategy.avgDurationMs;
+  }
+}
+
+/** Sorts leaderboard rows by metric; best first, nulls last. */
+export function sortStrategiesByMetric(
+  strategies: StrategyAggregate[],
+  key: LeaderboardMetricKey,
+): StrategyAggregate[] {
+  const metric = getMetricDefinition(key);
+  return [...strategies].sort((a, b) => {
+    const aValue = metricValue(a, key);
+    const bValue = metricValue(b, key);
+    if (aValue === null && bValue === null) return 0;
+    if (aValue === null) return 1;
+    if (bValue === null) return -1;
+    const diff = aValue - bValue;
+    return metric.higherIsBetter ? -diff : diff;
+  });
+}
+
+export type GuessSortDirection = "asc" | "desc";
+
+/** Sorts puzzle rows by average guesses; nulls (nothing solved) sort last. */
+export function sortPuzzleBreakdowns(
+  puzzles: PuzzleBreakdown[],
+  direction: GuessSortDirection,
+): PuzzleBreakdown[] {
+  return [...puzzles].sort((a, b) => {
+    const aValue = a.avgGuessesToSolve;
+    const bValue = b.avgGuessesToSolve;
+    if (aValue === null && bValue === null) return 0;
+    if (aValue === null) return 1;
+    if (bValue === null) return -1;
+    return direction === "asc" ? aValue - bValue : bValue - aValue;
+  });
+}
+
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  return `${minutes}m ${seconds}s`;
+}
+
+export type PuzzleStatusFilter = "all" | PuzzleRunStatus;
+
+/** Filters puzzle rows by run status; "all" returns the input unchanged. */
+export function filterPuzzleBreakdowns(
+  puzzles: PuzzleBreakdown[],
+  filter: PuzzleStatusFilter,
+): PuzzleBreakdown[] {
+  if (filter === "all") return puzzles;
+  return puzzles.filter((puzzle) => puzzle.status === filter);
+}

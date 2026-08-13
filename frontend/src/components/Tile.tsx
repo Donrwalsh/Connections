@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useLayoutEffect, useRef } from "react";
 import { motion } from "framer-motion";
 
 interface TileProps {
@@ -9,6 +9,13 @@ interface TileProps {
   onToggle: (word: string) => void;
 }
 
+// Fallbacks in case computed styles aren't available (jsdom).
+const BASE_FONT_FALLBACK = 15;
+const MIN_FONT_SIZE = 8;
+// Minimum gap left between the fitted text and the tile's left/right edges,
+// so words never sit flush against the sides of the cell.
+const H_PAD = 12;
+
 function TileBase({
   word,
   isSelected,
@@ -16,6 +23,43 @@ function TileBase({
   shouldShake,
   onToggle,
 }: TileProps) {
+  const tileRef = useRef<HTMLButtonElement>(null);
+
+  // Fit the text to the cell. Phrases may wrap onto multiple lines at spaces
+  // ("Baseball Glove" → two lines); the font only shrinks when a single
+  // unbreakable word or the wrapped block would overflow the tile. Keeping the
+  // text within the fixed-size cell means a long word can't widen its grid
+  // column and knock the board off-center.
+  useLayoutEffect(() => {
+    const tile = tileRef.current;
+    if (!tile) return;
+
+    const fit = () => {
+      tile.style.fontSize = "";
+      const base = parseFloat(getComputedStyle(tile).fontSize) || BASE_FONT_FALLBACK;
+      const available = tile.clientWidth - 2 * H_PAD;
+      if (available <= 0) return;
+      const availableHeight = tile.clientHeight;
+
+      const textWidth = tile.scrollWidth;
+      const textHeight = tile.scrollHeight;
+      if (textWidth <= available && textHeight <= availableHeight) return;
+
+      const scale = Math.min(
+        textWidth > available ? available / textWidth : 1,
+        textHeight > availableHeight ? availableHeight / textHeight : 1,
+      );
+      const fitted = Math.max(MIN_FONT_SIZE, base * scale);
+      tile.style.fontSize = `${fitted}px`;
+    };
+
+    fit();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(fit);
+    observer.observe(tile);
+    return () => observer.disconnect();
+  }, [word]);
+
   const className = [
     "tile",
     isSelected && "tile--selected",
@@ -26,6 +70,7 @@ function TileBase({
 
   return (
     <motion.button
+      ref={tileRef}
       layout
       layoutId={word}
       className={className}

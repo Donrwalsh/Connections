@@ -92,7 +92,7 @@ describe("PuzzlePage Component", () => {
 
     render(<PuzzlePage />);
 
-    expect(await screen.findByText("Connections")).toBeInTheDocument();
+    expect(await screen.findByText("Monday, January 15, 2024")).toBeInTheDocument();
     expect(await screen.findByText("HAIL")).toBeInTheDocument();
     expect(
       await screen.findByText("Show Alphabetical (1)"),

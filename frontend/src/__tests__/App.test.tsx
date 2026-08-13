@@ -79,7 +79,7 @@ describe("App Component", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("Connections")).toBeInTheDocument();
+    expect(await screen.findByText("Monday, January 15, 2024")).toBeInTheDocument();
   });
 
   it("renders the puzzle for a specific date route", async () => {
@@ -91,7 +91,39 @@ describe("App Component", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("Connections")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("2024-01-15")).toBeInTheDocument();
+    expect(await screen.findByText("Monday, January 15, 2024")).toBeInTheDocument();
+  });
+});
+
+describe("App leaderboard routes", () => {
+  it("renders the leaderboard homepage at /leaderboard", async () => {
+    render(
+      <MemoryRouter initialEntries={["/leaderboard"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect((await screen.findAllByText("Connections Lab")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: "Leaderboard" })).toBeInTheDocument();
+  });
+
+  it("renders a strategy's puzzle list at /leaderboard/:strategyId", () => {
+    render(
+      <MemoryRouter initialEntries={["/leaderboard/alphabetical"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("heading", { name: "Alphabetical" })).toBeInTheDocument();
+  });
+
+  it("renders the single-run visualizer at /leaderboard/:strategyId/:puzzleId", () => {
+    render(
+      <MemoryRouter initialEntries={["/leaderboard/alphabetical/1"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("heading", { name: "Guess chain" })).toBeInTheDocument();
   });
 });
