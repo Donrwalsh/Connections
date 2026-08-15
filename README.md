@@ -103,6 +103,7 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `PUZZLE_POPULATION_CRON` | `0 6 * * *` | Cron pattern for daily puzzle fetch (UTC by default) |
 | `PUZZLE_POPULATION_TZ` | `UTC` | Timezone for the puzzle population cron |
 | `PUZZLE_CACHE_DIR` | `/app/.puzzle-cache` | Directory used as a local cache of raw NYT puzzle payloads (bound to `./.puzzle-cache` on the host) |
+| `PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS` | `true` | Whether puzzle ingestion enqueues strategy-run jobs for each puzzle it inserts. Set to `false` to insert puzzles without dispatching any solution runs (e.g. backfills that shouldn't burn LLM tokens, or when runs are triggered separately via `/strategy/queue`) |
 | `SHUFFLE_SMART_TRIALS` | `3` | Number of shuffle-smart trials run per puzzle |
 | `SHUFFLE_FOOLISH_TRIALS` | `3` | Number of shuffle-foolish trials run per puzzle |
 | `SHUFFLE_FOOLISH_DUPLICATE_LIMIT` | `3` | Maximum repeated groups a shuffle-foolish run may propose before it ends with a `duplicate` status |
@@ -189,7 +190,7 @@ The backend E2E suite (`backend/test/app.e2e-spec.ts`) boots the real NestJS app
 │   └── src/
 │       ├── components/        # Board, Tiles, GameOverModal, ShareResult, etc.
 │       ├── pages/             # PuzzlePage (the only route)
-│       ├── lib/               # gameReducer, renderProposedGroup, shareResult
+│       ├── lib/               # gameReducer, renderDiagnoseGroups, shareResult
 │       └── hooks/             # useConnectionsGame
 ├── orchestrator/              # Hono + AI SDK
 │   └── src/

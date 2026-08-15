@@ -233,12 +233,13 @@ describe("gameReducer", () => {
       const mockPayload = {
         orchestrator: "healthy" as const,
         data: {
-          proposedGroup: {
-            word_ids: [0, 1, 2, 3],
-            category: "FRUITS",
-            confidence: 0.95,
-            reasoning: "All are fruits",
-          },
+          groups: [
+            {
+              category: "FRUITS",
+              items: ["APPLE", "BANANA", "CHERRY", "DATE"],
+              confidence: 0.95,
+            },
+          ],
           prompt: "sample prompt",
         },
       };

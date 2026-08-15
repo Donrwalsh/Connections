@@ -369,9 +369,10 @@ function idSetKey(ids: number[]): string {
  * Classifies an AI SDK failure from generateObject into a typed SolveError.
  * Malformed-but-present output (no/undecodable object) is recoverable — the
  * retry loop re-prompts with changed parameters. Provider/network failures
- * are not.
+ * are not. Exported so the diagnostic flow (diagnose.ts) can reuse the same
+ * classification without a retry loop.
  */
-function classifyModelCallError(
+export function classifyModelCallError(
   err: unknown,
   details: SolveErrorDetails,
 ): SolveError {

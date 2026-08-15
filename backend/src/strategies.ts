@@ -230,3 +230,16 @@ export function strategyTrialNumbers(
   if (count === 0) return [0];
   return Array.from({ length: count }, (_, i) => i + 1);
 }
+
+/**
+ * Whether puzzle ingestion enqueues strategy-run jobs for each puzzle it
+ * inserts, from PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS (default: true).
+ * Set to "false" (or "0"/"off"/"no", case-insensitive) to insert puzzles into
+ * the database without dispatching any solution runs — e.g. for a bulk
+ * backfill where the LLM strategies should not burn tokens, or when runs are
+ * triggered separately via the /strategy/queue endpoints.
+ */
+export function dispatchStrategyJobsOnIngestion(env: NodeJS.ProcessEnv = process.env): boolean {
+  const value = (env.PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS ?? "").trim().toLowerCase();
+  return !["false", "0", "off", "no"].includes(value);
+}

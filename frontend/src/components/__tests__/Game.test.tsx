@@ -183,12 +183,18 @@ describe("Game Component", () => {
         json: async () => ({
           orchestrator: "healthy",
           data: {
-            proposedGroup: {
-              word_ids: [0, 1, 2, 3],
-              category: "WET WEATHER",
-              confidence: 0.95,
-              reasoning: "All forms of precipitation",
-            },
+            groups: [
+              {
+                category: "WET WEATHER",
+                items: ["HAIL", "RAIN", "SLEET", "SNOW"],
+                confidence: 0.95,
+              },
+              {
+                category: "NBA TEAMS",
+                items: ["BUCKS", "HEAT", "JAZZ", "NETS"],
+                confidence: 0.8,
+              },
+            ],
             prompt: "Find the four connected words.",
           },
         }),
@@ -199,8 +205,9 @@ describe("Game Component", () => {
     fireEvent.click(screen.getByText("AI Assist"));
 
     expect(await screen.findByText(/WET WEATHER/)).toBeInTheDocument();
-    // Comments resolve each word index back to a word on the board.
-    expect(screen.getByText(/\/\/ [A-Z]+/)).toBeInTheDocument();
+    // The diagnostic echoes the board words themselves, not word indices.
+    expect(screen.getByText(/HAIL.*RAIN.*SLEET.*SNOW/)).toBeInTheDocument();
+    expect(screen.getByText(/BUCKS.*HEAT.*JAZZ.*NETS/)).toBeInTheDocument();
     expect(screen.getByText("View prompt sent to the model")).toBeInTheDocument();
   });
 
@@ -273,12 +280,13 @@ describe("Game Component", () => {
         json: async () => ({
           orchestrator: "healthy",
           data: {
-            proposedGroup: {
-              word_ids: [0, 1, 2, 3],
-              category: "WET WEATHER",
-              confidence: 0.95,
-              reasoning: "All forms of precipitation",
-            },
+            groups: [
+              {
+                category: "WET WEATHER",
+                items: ["HAIL", "RAIN", "SLEET", "SNOW"],
+                confidence: 0.95,
+              },
+            ],
             prompt: "Find the four connected words.",
           },
         }),

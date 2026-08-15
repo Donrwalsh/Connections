@@ -74,6 +74,26 @@ describe("App (e2e)", () => {
         } else if (req.url === "/health") {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ status: "ok" }));
+        } else if (req.url === "/diagnose" && req.method === "POST") {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              groups: [
+                {
+                  category: "Test category",
+                  items: ["AAAA", "BBBB", "CCCC", "DDDD"],
+                  confidence: 0.99,
+                },
+                {
+                  category: "Test category",
+                  items: ["EEEE", "FFFF", "GGGG", "HHHH"],
+                  confidence: 0.9,
+                },
+              ],
+              prompt: `echo: ${body}`,
+              model: "e2e-fake-model",
+            }),
+          );
         } else {
           res.writeHead(404);
           res.end();
@@ -364,6 +384,45 @@ describe("App (e2e)", () => {
     const res = await request(app.getHttpServer())
       .post("/api/solve")
       .send({ puzzleWords: ["too", "few"] });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /api/diagnose proxies to the orchestrator without persisting", async () => {
+    const before = await dataSource.getRepository(LlmProposal).count();
+    const res = await request(app.getHttpServer())
+      .post("/api/diagnose")
+      .send({ words: ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"] });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({
+      orchestrator: "healthy",
+      data: {
+        groups: [
+          {
+            category: "Test category",
+            items: ["AAAA", "BBBB", "CCCC", "DDDD"],
+            confidence: 0.99,
+          },
+          {
+            category: "Test category",
+            items: ["EEEE", "FFFF", "GGGG", "HHHH"],
+            confidence: 0.9,
+          },
+        ],
+        prompt: expect.any(String),
+        model: "e2e-fake-model",
+      },
+    });
+    // The diagnostic is display-only: nothing was written to the database.
+    const after = await dataSource.getRepository(LlmProposal).count();
+    expect(after).toBe(before);
+  });
+
+  it("POST /api/diagnose rejects an invalid body", async () => {
+    const res = await request(app.getHttpServer())
+      .post("/api/diagnose")
+      .send({ words: ["too", "few"] });
 
     expect(res.status).toBe(400);
   });

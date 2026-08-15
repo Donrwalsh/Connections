@@ -27,6 +27,7 @@ import {
   llmOpenAIConcurrency,
   llmTemperature,
   llmTrialCount,
+  dispatchStrategyJobsOnIngestion,
   shuffleFoolishDuplicateLimit,
   shuffleFoolishTrialCount,
   shuffleSmartTrialCount,
@@ -235,6 +236,48 @@ describe("strategies", () => {
 
     it("should read a valid non-negative number", () => {
       expect(llmTemperature({ LLM_TEMPERATURE_BASE: "0.7" })).toBe(0.7);
+    });
+  });
+
+  describe("dispatchStrategyJobsOnIngestion", () => {
+    it("should default to enabled when the env var is missing", () => {
+      expect(dispatchStrategyJobsOnIngestion({})).toBe(true);
+    });
+
+    it("should disable on falsey values", () => {
+      expect(
+        dispatchStrategyJobsOnIngestion({ PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: "false" }),
+      ).toBe(false);
+      expect(
+        dispatchStrategyJobsOnIngestion({ PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: "0" }),
+      ).toBe(false);
+      expect(
+        dispatchStrategyJobsOnIngestion({ PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: "off" }),
+      ).toBe(false);
+      expect(
+        dispatchStrategyJobsOnIngestion({ PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: "no" }),
+      ).toBe(false);
+    });
+
+    it("should ignore case and surrounding whitespace", () => {
+      expect(
+        dispatchStrategyJobsOnIngestion({ PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: "FALSE" }),
+      ).toBe(false);
+      expect(
+        dispatchStrategyJobsOnIngestion({ PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: " false " }),
+      ).toBe(false);
+    });
+
+    it("should stay enabled for any other value", () => {
+      expect(
+        dispatchStrategyJobsOnIngestion({ PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: "true" }),
+      ).toBe(true);
+      expect(
+        dispatchStrategyJobsOnIngestion({ PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: "1" }),
+      ).toBe(true);
+      expect(
+        dispatchStrategyJobsOnIngestion({ PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: "garbage" }),
+      ).toBe(true);
     });
   });
 

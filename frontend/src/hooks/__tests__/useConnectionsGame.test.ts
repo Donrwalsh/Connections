@@ -126,12 +126,13 @@ describe("useConnectionsGame", () => {
       result.current.aiSolveSuccess({
         orchestrator: "healthy",
         data: {
-          proposedGroup: {
-            word_ids: [0, 1, 2, 3],
-            category: "WET WEATHER",
-            confidence: 0.9,
-            reasoning: "Precipitation",
-          },
+          groups: [
+            {
+              category: "WET WEATHER",
+              items: ["HAIL", "RAIN", "SLEET", "SNOW"],
+              confidence: 0.9,
+            },
+          ],
           prompt: "Find the group",
         },
       }),

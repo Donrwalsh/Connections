@@ -34,14 +34,35 @@ vi.mock("./solver.js", () => ({
   }),
 }));
 
+vi.mock("./diagnose.js", () => ({
+  diagnosePartition: vi.fn(async () => {
+    throw new Error("model call failed");
+  }),
+}));
+
 import { proposeGroup } from "./solver.js";
+import { diagnosePartition } from "./diagnose.js";
 const proposeGroupMock = vi.mocked(proposeGroup);
+const diagnosePartitionMock = vi.mocked(diagnosePartition);
+
+function diagnoseRequest(body: unknown) {
+  return app.request("/diagnose", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-internal-api-key": KEY,
+    },
+    body: JSON.stringify(body),
+  });
+}
 
 describe("orchestrator app", () => {
   beforeEach(() => {
     process.env.INTERNAL_API_KEY = KEY;
     proposeGroupMock.mockReset();
     proposeGroupMock.mockRejectedValue(new Error("model call failed"));
+    diagnosePartitionMock.mockReset();
+    diagnosePartitionMock.mockRejectedValue(new Error("model call failed"));
   });
 
   afterEach(() => {
@@ -409,5 +430,83 @@ describe("orchestrator app", () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.code).toBe("model_error");
     expect(body.error).toContain("ollama is down");
+  });
+
+  describe("POST /diagnose", () => {
+    const DIAGNOSE_BODY = {
+      words: ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"],
+    };
+
+    it("rejects an invalid diagnose body", async () => {
+      const res = await diagnoseRequest({ words: ["too", "few"] });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        error: "Invalid request body",
+      });
+    });
+
+    it("returns 502 when the model call fails", async () => {
+      const res = await diagnoseRequest(DIAGNOSE_BODY);
+      expect(res.status).toBe(502);
+      const body = (await res.json()) as { error: string; details: string };
+      expect(body.error).toBe("Diagnose failed");
+      expect(body.details).toContain("model call failed");
+    });
+
+    it("returns the model's full partition and prompt", async () => {
+      diagnosePartitionMock.mockResolvedValueOnce({
+        groups: [
+          {
+            category: "Test",
+            items: ["AAAA", "BBBB", "CCCC", "DDDD"],
+            confidence: 0.9,
+          },
+          {
+            category: "Test",
+            items: ["EEEE", "FFFF", "GGGG", "HHHH"],
+            confidence: 0.8,
+          },
+        ],
+        prompt: "Find groups of four items that share something in common.",
+        model: "test-model",
+      });
+
+      const res = await diagnoseRequest(DIAGNOSE_BODY);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        groups: [
+          {
+            category: "Test",
+            items: ["AAAA", "BBBB", "CCCC", "DDDD"],
+            confidence: 0.9,
+          },
+          {
+            category: "Test",
+            items: ["EEEE", "FFFF", "GGGG", "HHHH"],
+            confidence: 0.8,
+          },
+        ],
+        prompt: "Find groups of four items that share something in common.",
+        model: "test-model",
+      });
+      expect(diagnosePartitionMock).toHaveBeenCalledWith(DIAGNOSE_BODY.words);
+    });
+
+    it("maps an invalid partition to 400", async () => {
+      diagnosePartitionMock.mockRejectedValueOnce(
+        new SolveError("invalid_group", "Item duplicated across groups"),
+      );
+      const res = await diagnoseRequest(DIAGNOSE_BODY);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.code).toBe("invalid_group");
+    });
+
+    it("rejects a body over the size limit", async () => {
+      const res = await diagnoseRequest({
+        words: ["x".repeat(SOLVE_BODY_LIMIT + 1)],
+      });
+      expect(res.status).toBe(413);
+    });
   });
 });

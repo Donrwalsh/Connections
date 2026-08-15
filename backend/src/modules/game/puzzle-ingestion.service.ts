@@ -10,7 +10,11 @@ import { InjectDataSource } from "@nestjs/typeorm";
 import { NYT_CONNECTIONS_ORIGIN_DATE } from "./constants";
 import { STRATEGY_QUEUE, LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE } from "../queue/queue.module";
 import { runStrategyJobId, queueForStrategy } from "../queue/strategy.queue";
-import { SUPPORTED_STRATEGIES, strategyTrialNumbers } from "../../strategies";
+import {
+  SUPPORTED_STRATEGIES,
+  dispatchStrategyJobsOnIngestion,
+  strategyTrialNumbers,
+} from "../../strategies";
 
 interface ConnectionsCard {
   content: string;
@@ -246,12 +250,23 @@ export class PuzzleIngestionService {
    * re-run of ingestion collapses onto the existing jobs instead of
    * duplicating them.
    *
+   * Skips entirely when PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS is disabled —
+   * the puzzle is still inserted, just no solution runs are enqueued for it.
+   *
    * Best-effort: a transient queue failure must not abort the multi-day
    * ingestion loop (the loop would be retried by BullMQ, and the already-
    * inserted puzzle would then be skipped on retry, losing its strategy
    * runs entirely). Failures are logged so runs can be triggered manually.
    */
   private async dispatchStrategyRuns(puzzleId: number, date: string): Promise<void> {
+    if (!dispatchStrategyJobsOnIngestion()) {
+      this.logger.log(
+        `Skipping strategy run dispatch for puzzle ${date} (id ${puzzleId}) — ` +
+          "PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS is disabled",
+      );
+      return;
+    }
+
     const jobsByQueue = new Map<
       Queue,
       Array<{ name: string; data: object; opts: { jobId: string } }>

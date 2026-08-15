@@ -1,7 +1,12 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { SolveRequestSchema, type SolveResponse } from "./types.js";
+import {
+  DiagnoseRequestSchema,
+  SolveRequestSchema,
+  type SolveResponse,
+} from "./types.js";
 import { proposeGroup, SolveError } from "./solver.js";
+import { diagnosePartition } from "./diagnose.js";
 import { defaultProvider } from "./provider.js";
 
 export const app = new Hono();
@@ -83,6 +88,46 @@ app.post(
       }
       const message = err instanceof Error ? err.message : "Unknown error";
       return c.json({ error: "Solve failed", details: message }, 502);
+    }
+  },
+);
+
+app.post(
+  "/diagnose",
+  bodyLimit({
+    maxSize: SOLVE_BODY_LIMIT,
+    onError: (c) => c.json({ error: "Request body too large" }, 413),
+  }),
+  async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const parsed = DiagnoseRequestSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return c.json(
+        { error: "Invalid request body", details: parsed.error.flatten() },
+        400,
+      );
+    }
+
+    try {
+      // Display-only diagnostic: returns the model's full partition and the
+      // prompt that produced it. Nothing is persisted by this service.
+      const diagnoseResult = await diagnosePartition(parsed.data.words);
+      return c.json(diagnoseResult, 200);
+    } catch (err) {
+      console.error("Diagnose failed:", err);
+      if (err instanceof SolveError) {
+        return c.json(
+          {
+            error: err.message,
+            code: err.code,
+            details: err.details,
+          },
+          ERROR_STATUS[err.code],
+        );
+      }
+      const message = err instanceof Error ? err.message : "Unknown error";
+      return c.json({ error: "Diagnose failed", details: message }, 502);
     }
   },
 );

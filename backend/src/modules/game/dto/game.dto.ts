@@ -71,3 +71,23 @@ export interface SolveResponseDto {
   usage?: SolveUsageDto;
   promptMetadata?: PromptMetadataDto[];
 }
+
+export class DiagnoseDto {
+  @IsArray()
+  @ArrayMinSize(4)
+  @ArrayMaxSize(16)
+  @IsString({ each: true })
+  words!: string[];
+}
+
+export interface DiagnoseGroupDto {
+  category: string;
+  items: string[];
+  confidence: number;
+}
+
+export interface DiagnoseResponseDto {
+  groups: DiagnoseGroupDto[];
+  prompt: string;
+  model: string;
+}

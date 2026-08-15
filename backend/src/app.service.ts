@@ -1,8 +1,15 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 import { DataSource } from "typeorm";
-import { loadEnv, orchestratorTimeoutMs } from "./config/env";
-import { PriorGuessDto, SolveResponseDto } from "./modules/game/dto/game.dto";
+import {
+  loadEnv,
+  orchestratorTimeoutMs,
+} from "./config/env";
+import {
+  DiagnoseResponseDto,
+  PriorGuessDto,
+  SolveResponseDto,
+} from "./modules/game/dto/game.dto";
 
 export interface FetchRetryOptions {
   maxRetries?: number;
@@ -91,6 +98,67 @@ export class AppService {
         orchestrator: "unhealthy",
         error: "Unknown error",
       };
+    }
+  }
+
+  /**
+   * Proxies the AI Assist diagnostic to the orchestrator's POST /diagnose.
+   * This is a display-only read: the orchestrator's full-puzzle partition is
+   * returned to the frontend and nothing is persisted. Unlike solve, a single
+   * attempt is made — a non-2xx already reflects a failed model call or
+   * unusable output, so retrying would just re-burn tokens.
+   */
+  async diagnose(
+    words: string[],
+  ): Promise<
+    | { orchestrator: "healthy"; data: DiagnoseResponseDto }
+    | { orchestrator: "unhealthy"; error: string }
+  > {
+    const url = `${this.orchestratorUrl}/diagnose`;
+    const init: RequestInit = {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-api-key": this.internalApiKey,
+      },
+      body: JSON.stringify({ words }),
+    };
+
+    try {
+      const res = await this.fetchOnceWithTimeout(url, init);
+      const body = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        // Surface the orchestrator's own error message (e.g. an invalid
+        // partition) so the frontend can explain why the diagnostic failed.
+        const message =
+          body && typeof (body as { error?: unknown }).error === "string"
+            ? (body as { error: string }).error
+            : `HTTP ${res.status} ${res.statusText}`;
+        return { orchestrator: "unhealthy", error: message };
+      }
+
+      return { orchestrator: "healthy", data: body as DiagnoseResponseDto };
+    } catch (err) {
+      if (err instanceof Error) {
+        this.logger.error(err);
+        return { orchestrator: "unhealthy", error: err.message };
+      }
+
+      return { orchestrator: "unhealthy", error: "Unknown error" };
+    }
+  }
+
+  private async fetchOnceWithTimeout(
+    url: string,
+    init: RequestInit,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), orchestratorTimeoutMs());
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
     }
   }
 

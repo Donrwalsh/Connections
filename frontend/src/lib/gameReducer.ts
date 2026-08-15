@@ -30,34 +30,30 @@ export interface GameState {
   //AI solve stuff:
   loading: boolean;
   error: string | null;
-  ai_solution: AiSolveData | null;
+  ai_solution: AiDiagnoseData | null;
 }
 
-// 1. Define the nested proposed group shape
-export interface ProposedGroup {
-  word_ids: number[];
+// 1. Define the nested group shape of the AI Assist diagnostic
+export interface DiagnoseGroup {
   category: string;
+  items: string[];
   confidence: number;
-  reasoning: string;
 }
 
 // 2. Define the inner 'data' payload
-export interface AiSolveData {
-  proposedGroup: ProposedGroup;
+export interface AiDiagnoseData {
+  groups: DiagnoseGroup[];
   prompt: string;
-  // Snapshot of the remaining words that were sent as `puzzleWords` in the
-  // solve request, injected by the frontend so the UI can resolve word_ids
-  // back to words even after the board is shuffled or further solved.
-  words?: string[];
+  model?: string;
 }
 
 // 3. Define the full API Response payload — mirrors what the backend's
-// /api/solve endpoint actually returns (backend/src/app.service.ts).
-// `data` is only present when `orchestrator` is "healthy"; on failure or
-// timeout the backend still responds 200 with an `error` string instead.
-export interface AiSolveResponse {
+// /api/diagnose endpoint actually returns (backend/src/app.service.ts).
+// `data` is only present when `orchestrator` is "healthy"; on failure the
+// backend responds with an `error` string instead.
+export interface AiDiagnoseResponse {
   orchestrator: "healthy" | "unhealthy";
-  data?: AiSolveData;
+  data?: AiDiagnoseData;
   error?: string;
 }
 
@@ -67,7 +63,7 @@ export type GameAction =
   | { type: "DESELECT_ALL" }
   | { type: "CLEAR_FEEDBACK" }
   | { type: "AI_SOLVE_START" }
-  | { type: "AI_SOLVE_SUCCESS"; payload: AiSolveResponse }
+  | { type: "AI_SOLVE_SUCCESS"; payload: AiDiagnoseResponse }
   | { type: "AI_SOLVE_FAILURE"; payload: string }
   | { type: "SHUFFLE"; words: string[] }
   | { type: "CONFIRM_SOLVE" };

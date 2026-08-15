@@ -232,6 +232,29 @@ describe("PuzzleIngestionService", () => {
       expect(mockStrategyQueue.addBulk).not.toHaveBeenCalled();
     });
 
+    it("should not dispatch strategy runs when PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS is disabled", async () => {
+      process.env.PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS = "false";
+      mockLatestDate(2024, 0, 1);
+      jest
+        .spyOn(service as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(global, "fetch")
+        .mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA))
+        .mockResolvedValueOnce(fetchResponse(404));
+
+      const result = await service.populateUntilCaughtUp();
+      delete process.env.PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS;
+
+      // The puzzle is still inserted...
+      expect(result).toEqual({ inserted: 1, upToDate: "2024-01-02" });
+      expect(mockDataSource.transaction).toHaveBeenCalledTimes(1);
+      // ...but no solution jobs are enqueued on any queue.
+      expect(mockStrategyQueue.addBulk).not.toHaveBeenCalled();
+      expect(mockOpenAIQueue.addBulk).not.toHaveBeenCalled();
+      expect(mockOllamaQueue.addBulk).not.toHaveBeenCalled();
+    });
+
     it("should not fail the ingestion run when dispatching strategy runs fails", async () => {
       mockLatestDate(2024, 0, 1);
       mockStrategyQueue.addBulk.mockRejectedValueOnce(new Error("redis down"));

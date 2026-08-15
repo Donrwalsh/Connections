@@ -302,6 +302,71 @@ export const SolveResponseSchema = z.object({
 export type SolveResponse = z.infer<typeof SolveResponseSchema>;
 
 /**
+ * A single group in the AI Assist's full-puzzle partition diagnostic. Unlike
+ * the solve flow (which references words by index), the diagnostic is a
+ * display-only read — nothing is persisted — so the model answers with the
+ * items themselves rather than word_ids.
+ */
+export const DiagnoseGroupSchema = z.object({
+  category: z
+    .string()
+    .describe("Short string naming the shared theme/category"),
+  items: z
+    .array(z.string())
+    .length(4)
+    .describe("Exactly 4 items from the puzzle that share the category"),
+  confidence: z
+    .number()
+    .min(0)
+    .max(1)
+    .describe(
+      "Model's self-assessed confidence (0-1) that this exact grouping is correct",
+    ),
+});
+export type DiagnoseGroup = z.infer<typeof DiagnoseGroupSchema>;
+
+/**
+ * The full partition the model is asked to produce for a diagnostic: a JSON
+ * object wrapping an array of exactly 4 groups of 4 items covering the whole
+ * word list. The top level must be an object (not a bare array) because
+ * providers' structured-output response_format requires a JSON Schema of
+ * type "object". Content-level checks (is every item used exactly once?)
+ * happen in the diagnose function.
+ */
+export const DiagnoseOutputSchema = z.object({
+  groups: z
+    .array(DiagnoseGroupSchema)
+    .length(4)
+    .describe("The final partition: exactly 4 groups of 4 items"),
+});
+
+/**
+ * Request body for POST /diagnose. The backend sends the words currently in
+ * play (always a multiple of 4); the orchestrator returns the model's full
+ * partition without consulting prior guesses or persisting anything.
+ */
+export const DiagnoseRequestSchema = z.object({
+  words: z
+    .array(z.string())
+    .min(4)
+    .max(16)
+    .describe("Words to partition into groups of 4"),
+});
+export type DiagnoseRequest = z.infer<typeof DiagnoseRequestSchema>;
+
+/**
+ * Response body for POST /diagnose. `prompt` is the exact text sent to the
+ * model so the frontend can show what was asked. No usage/telemetry is
+ * returned because the diagnostic is display-only and never persisted.
+ */
+export const DiagnoseResponseSchema = z.object({
+  groups: z.array(DiagnoseGroupSchema).length(4),
+  prompt: z.string(),
+  model: z.string(),
+});
+export type DiagnoseResponse = z.infer<typeof DiagnoseResponseSchema>;
+
+/**
  * Why a solve step failed. Distinct codes let the backend decide whether
  * the model simply repeated a forbidden group (recoverable by re-prompting
  * until a limit), emitted malformed output (same), or hit a real

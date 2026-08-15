@@ -366,4 +366,84 @@ describe("AppService", () => {
       });
     });
   });
+
+  describe("diagnose", () => {
+    const words = ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"];
+
+    it("should return healthy with the partition data on a 2xx response", async () => {
+      const body = {
+        groups: [
+          {
+            category: "Test",
+            items: ["AAAA", "BBBB", "CCCC", "DDDD"],
+            confidence: 0.9,
+          },
+          {
+            category: "Test",
+            items: ["EEEE", "FFFF", "GGGG", "HHHH"],
+            confidence: 0.8,
+          },
+        ],
+        prompt: "Find groups of four items that share something in common.",
+        model: "test-model",
+      };
+      fetchSpy = jest.spyOn(global, "fetch").mockResolvedValue(mockResponse(200, "OK", body));
+
+      const result = await service.diagnose(words);
+
+      expect(result).toEqual({ orchestrator: "healthy", data: body });
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "http://ai_orchestrator:3001/diagnose",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            "Content-Type": "application/json",
+            "x-internal-api-key": "test-key",
+          }),
+          body: JSON.stringify({ words }),
+        }),
+      );
+    });
+
+    it("should surface the orchestrator's error message on a non-2xx response", async () => {
+      fetchSpy = jest
+        .spyOn(global, "fetch")
+        .mockResolvedValue(
+          mockResponse(400, "Bad Request", { error: "Item duplicated across groups" }),
+        );
+
+      const result = await service.diagnose(words);
+
+      expect(result).toEqual({
+        orchestrator: "unhealthy",
+        error: "Item duplicated across groups",
+      });
+    });
+
+    it("should fall back to the HTTP status when the error body has no message", async () => {
+      fetchSpy = jest
+        .spyOn(global, "fetch")
+        .mockResolvedValue(mockResponse(502, "Bad Gateway", {}));
+
+      const result = await service.diagnose(words);
+
+      expect(result).toEqual({
+        orchestrator: "unhealthy",
+        error: "HTTP 502 Bad Gateway",
+      });
+    });
+
+    it("should report the failure message on a network error", async () => {
+      const logSpy = jest.spyOn(Logger.prototype, "error").mockImplementation(() => {});
+      fetchSpy = jest.spyOn(global, "fetch").mockRejectedValue(new Error("ECONNREFUSED"));
+
+      const result = await service.diagnose(words);
+
+      expect(result).toEqual({
+        orchestrator: "unhealthy",
+        error: "ECONNREFUSED",
+      });
+      expect(logSpy).toHaveBeenCalledTimes(1);
+    });
+  });
 });

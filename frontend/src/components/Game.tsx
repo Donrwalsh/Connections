@@ -5,7 +5,7 @@ import { GameOverModal } from "./GameOverModal";
 import { MistakeTracker } from "./MistakeTracker";
 import { shuffleWords, type Puzzle } from "../data/types";
 import { useConnectionsGame } from "../hooks/useConnectionsGame";
-import { renderProposedGroup } from "../lib/renderProposedGroup";
+import { renderDiagnoseGroups } from "../lib/renderDiagnoseGroups";
 
 const MAX_MISTAKES = 4;
 
@@ -53,10 +53,10 @@ export function Game({ puzzle }: GameProps) {
     if (!state.loading) return;
 
     setAiStatus("loading");
-    // The backend gives the AI solve a single attempt with a generous budget
-    // (ORCHESTRATOR_TIMEOUT_MS, default 120s — a step can run up to 5 model
-    // prompts), so we wait for its final answer. If nothing has resolved after
-    // 2s we assume a retry/step is in flight and surface that in the status.
+    // The backend gives the AI Assist diagnostic a single attempt with a
+    // generous budget (ORCHESTRATOR_TIMEOUT_MS, default 120s), so we wait for
+    // its final answer. If nothing has resolved after 2s we assume the model
+    // call is still in flight and surface that in the status.
     const retryNoticeTimer = setTimeout(() => setAiStatus("retrying"), 2000);
 
     const controller = new AbortController();
@@ -64,13 +64,12 @@ export function Game({ puzzle }: GameProps) {
     async function fetchAiSolve() {
       try {
         const response = await fetch(
-          `${import.meta.env.VITE_API_URL}/api/solve`,
+          `${import.meta.env.VITE_API_URL}/api/diagnose`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              puzzleWords: state.remainingWords,
-              priorGuesses: state.priorGuesses,
+              words: state.remainingWords,
             }),
             signal: controller.signal,
           },
@@ -93,12 +92,7 @@ export function Game({ puzzle }: GameProps) {
           );
         }
 
-        // Snapshot the words sent with the request so the UI can resolve
-        // the returned word_ids even if the board changes afterwards.
-        aiSolveSuccess({
-          ...result,
-          data: { ...result.data, words: state.remainingWords },
-        });
+        aiSolveSuccess(result);
       } catch (err) {
         const error = err as Error;
         if (error.name === "AbortError") {
@@ -121,7 +115,6 @@ export function Game({ puzzle }: GameProps) {
   }, [
     state.loading,
     state.remainingWords,
-    state.priorGuesses,
     aiSolveSuccess,
     aiSolveError,
   ]);
@@ -185,7 +178,7 @@ export function Game({ puzzle }: GameProps) {
 
       {state.loading && aiStatus === "retrying" && (
         <p className="ai-status" role="status">
-          Taking longer than expected — retrying...
+          Taking longer than expected...
         </p>
       )}
 
@@ -227,10 +220,7 @@ export function Game({ puzzle }: GameProps) {
               overflowWrap: "anywhere",
             }}
           >
-            {renderProposedGroup(
-              state.ai_solution.proposedGroup,
-              state.ai_solution.words ?? [],
-            )}
+            {renderDiagnoseGroups(state.ai_solution.groups)}
           </pre>
 
           {state.ai_solution.prompt && (
