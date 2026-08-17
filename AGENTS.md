@@ -10,7 +10,7 @@ Multi-service app for solving NYT Connections puzzles. All services orchestrated
 | frontend | `frontend/` | Vite + React 19 | 5173 | SPA (proxies to backend) |
 | orchestrator | `orchestrator/` | Hono + AI SDK | 3001 | AI puzzle solving |
 | worker | `backend/src/worker.ts` | BullMQ (standalone) | — | Processes strategy + puzzle queues |
-| db | `database/` | Postgres 15 | 5432 | Schema + seeds |
+| db | — | Postgres 15 | 5432 | Schema via TypeORM migrations |
 | redis | — | Redis 7 | 6379 | BullMQ broker |
 
 The worker runs as a separate process from the NestJS server (`npx tsx --watch src/worker.ts`). It is NOT inside the NestJS app.
@@ -67,7 +67,7 @@ cd orchestrator && npm run typecheck
 - **Test files use `.spec.ts` suffix** and live next to the source files (not in a separate test directory).
 - **Jest config is inline** in `backend/package.json` (not a separate `jest.config.ts`).
 - **Env vars** for the worker/orchestrator: `INTERNAL_API_KEY`, `OPENAI_API_KEY`. These are loaded from the root `.env` file via docker-compose.
-- **Database schema** lives in `database/01-schema.sql`, which the TypeORM baseline migration (`backend/src/migrations/1754400000000-initial-schema.ts`) mirrors idempotently. The app runs with `synchronize: false`, `migrationsRun: true`, so an empty database is bootstrapped by migrations (CI, fresh local Postgres). Generate new migrations with `npm run migration:generate` (typeorm CLI) and run them with `npm run migration:run`.
+- **Database schema is managed entirely by TypeORM migrations** in `backend/src/migrations/` (baseline: `1754400000000-initial-schema.ts`). The app runs with `synchronize: false`, `migrationsRun: true`, so an empty database (CI, fresh local Postgres, `docker-compose down -v`) is bootstrapped automatically by migrations on backend/worker startup — there is no separate SQL init script. Generate new migrations with `npm run migration:generate` (typeorm CLI) and run them with `npm run migration:run`.
 - **Orchestrator routes live in `src/app.ts`** (pure Hono app, unit-testable via `app.request()`) while `src/index.ts` only bootstraps the server — keep it that way so tests don't bind a port.
 - **Backend has both unit (`*.spec.ts`) and e2e (`test/app.e2e-spec.ts`, jest-e2e.json) suites.** The E2E suite uses `backend/test/setup-env.ts` defaults (localhost Postgres/Redis, `connections_test` DB) and can be overridden with real env vars.
 

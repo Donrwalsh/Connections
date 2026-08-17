@@ -25,7 +25,7 @@ A multi-service application for playing and solving [NYT Connections](https://ww
 | **Frontend** | `frontend/` | Vite + React 19 | 5173 | Single-page app |
 | **Orchestrator** | `orchestrator/` | Hono + AI SDK | 3001 | AI puzzle solving (OpenAI + Ollama) |
 | **Worker** | `backend/src/worker.ts` | BullMQ | — | Processes strategy, per-provider LLM, and puzzle queues |
-| **Database** | `database/` | Postgres 15 | 5432 | Schema + seeds |
+| **Database** | — | Postgres 15 | 5432 | Schema via TypeORM migrations |
 | **Redis** | — | Redis 7 | 6379 | BullMQ message broker |
 | **Ollama** | — | — | 11434 | Local LLM provider (default: `llama3.2`) |
 
@@ -199,13 +199,11 @@ The backend E2E suite (`backend/test/app.e2e-spec.ts`) boots the real NestJS app
 │       ├── solver.ts          # generateObject call to the selected model
 │       ├── prompt.ts          # Prompt builder
 │       └── types.ts           # Zod schemas (request/response/model output)
-├── database/
-│   └── 01-schema.sql          # Tables + enums (Postgres 15) — baseline for migrations
 └── docker-compose.yml         # Orchestrates all services + Redis/Postgres
 ```
 
 ## Notes
 
 - The frontend `package.json` proxy setting (`"proxy": "http://nest_backend:4000"`) is for Docker networking only — local dev uses `VITE_API_URL` instead.
-- Database schema is managed by `database/01-schema.sql`, which TypeORM migrations treat as the baseline. The app runs with `synchronize: false` and `migrationsRun: true`; the baseline migration in `backend/src/migrations/` is idempotent so it also bootstraps empty databases (CI, fresh local Postgres).
+- Database schema is managed entirely by TypeORM migrations in `backend/src/migrations/` (baseline: `1754400000000-initial-schema.ts`). The app runs with `synchronize: false` and `migrationsRun: true`, so an empty database (CI, fresh local Postgres, `docker-compose down -v`) is bootstrapped automatically on backend/worker startup — there's no separate SQL init script.
 - For a production frontend image, build with the multi-stage `frontend/Dockerfile` (Vite build served by nginx). Pass the API base at build time: `docker build --build-arg VITE_API_URL=https://api.example.com -f frontend/Dockerfile frontend/`.
