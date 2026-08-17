@@ -160,9 +160,8 @@ export class InitialSchema1754400000000 implements MigrationInterface {
         "guessId" INT NULL REFERENCES "Guess"("id") ON DELETE SET NULL,
         "promptNumber" INT NULL,
         "words" JSONB NOT NULL,
-        "reasoning" TEXT NOT NULL,
+        "category" TEXT NOT NULL,
         "status" llm_proposal_status_enum NOT NULL,
-        "llmDetails" JSONB NULL,
         "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);

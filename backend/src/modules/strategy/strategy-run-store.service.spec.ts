@@ -201,7 +201,7 @@ describe("StrategyRunStore", () => {
           strategyRun: { id: 7 },
           promptNumber: 2,
           words: ["A", "B", "C", "D"],
-          reasoning: "test",
+          category: "test",
           status: LlmProposalStatus.USED,
         },
       ];
@@ -228,7 +228,7 @@ describe("StrategyRunStore", () => {
       expect(insertedProposals[0]).toEqual({
         strategyRun: { id: 7 },
         words: ["A", "B", "C", "D"],
-        reasoning: "test",
+        category: "test",
         status: LlmProposalStatus.USED,
         solvePromptId: 11,
         guessId: 20,

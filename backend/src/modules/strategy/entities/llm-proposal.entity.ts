@@ -59,7 +59,7 @@ export class LlmProposal {
   words: string[];
 
   @Column({ type: "text" })
-  reasoning: string;
+  category: string;
 
   @Column({
     type: "enum",
@@ -67,9 +67,6 @@ export class LlmProposal {
     enumName: "llm_proposal_status_enum",
   })
   status: LlmProposalStatus;
-
-  @Column({ type: "jsonb", nullable: true })
-  llmDetails: Record<string, unknown> | null;
 
   @CreateDateColumn({
     type: "timestamptz",

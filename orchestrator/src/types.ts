@@ -334,8 +334,19 @@ export const SolveAssistRequestSchema = AssistRequestSchema;
 export type SolveAssistRequest = z.infer<typeof SolveAssistRequestSchema>;
 
 /**
- * Response body for POST /solve-assist. Identical shape to AssistResponse —
- * the raw model text, the parsed ANSWER: groups, and the model identifier.
+ * Response body for POST /solve-assist. Same base shape as AssistResponse
+ * (raw model text, parsed ANSWER: groups, model identifier), plus per-call
+ * telemetry (latency and token usage) that the backend persists onto its
+ * SolvePrompt row.
  */
-export const SolveAssistResponseSchema = AssistResponseSchema;
+export const SolveAssistResponseSchema = AssistResponseSchema.extend({
+  latencyMs: z.number(),
+  usage: z
+    .object({
+      promptTokens: z.number().optional(),
+      completionTokens: z.number().optional(),
+      totalTokens: z.number().optional(),
+    })
+    .optional(),
+});
 export type SolveAssistResponse = z.infer<typeof SolveAssistResponseSchema>;

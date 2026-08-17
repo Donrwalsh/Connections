@@ -87,6 +87,7 @@ export interface SolveAssistSuccess {
   groups: string[][];
   model: string;
   latencyMs: number;
+  usage?: SolveUsage;
 }
 
 export interface SolveAssistFailure {
@@ -191,7 +192,8 @@ export class OrchestratorService {
               response: body.response,
               groups: body.groups,
               model: body.model,
-              latencyMs: 0, // orchestrator doesn't report latency for this endpoint
+              latencyMs: body.latencyMs ?? 0,
+              usage: body.usage,
             },
           };
         }

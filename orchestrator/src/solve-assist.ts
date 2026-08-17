@@ -13,6 +13,7 @@ export interface SolveAssistResult {
   groups: string[][];
   proposals: ParsedGroupProposal[];
   model: string;
+  latencyMs: number;
   usage?: {
     promptTokens?: number;
     completionTokens?: number;
@@ -88,6 +89,8 @@ export async function solveAssist(
   let text: string;
   let modelId: string;
   let usage: SolveAssistResult["usage"];
+  const startTime = Date.now();
+  let latencyMs: number;
 
   try {
     const result = await generateText({
@@ -95,6 +98,7 @@ export async function solveAssist(
       messages,
       temperature: SOLVE_ASSIST_TEMPERATURE,
     });
+    latencyMs = Date.now() - startTime;
     text = result.text;
     modelId = result.response.modelId;
 
@@ -136,6 +140,7 @@ export async function solveAssist(
     groups,
     proposals,
     model: modelId,
+    latencyMs,
     usage,
   };
 }

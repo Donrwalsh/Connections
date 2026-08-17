@@ -41,14 +41,13 @@ function buildInitialPrompt(items: string[], N: number): string {
     `2. Do NOT add new words, alter spellings, or substitute items.`,
     `3. Every group MUST contain EXACTLY 4 items.`,
     ``,
-    `Format Requirements:`,
-    `You MUST output your response in EXACTLY two sections (GROUPS and ANSWER), following this schema:`,
+    `Then produce your final answer using EXACTLY the format below. Output nothing before ### GROUPS and nothing after the last line of ### ANSWER.`,
     ``,
     `### GROUPS`,
     ...Array.from(
       { length: N },
       (_, i) =>
-        `Group ${i + 1}\nReasoning: <1-2 sentences explaining the category connection>\nWords: <ITEM1>, <ITEM2>, <ITEM3>, <ITEM4>\n`,
+        `#### Group ${i + 1}\nCategory: <short category name>\nWords: <ITEM1>, <ITEM2>, <ITEM3>, <ITEM4>\n`,
     ),
     `### ANSWER`,
     ...Array.from({ length: N }, () => `<ITEM1>, <ITEM2>, <ITEM3>, <ITEM4>`),
@@ -99,14 +98,13 @@ function buildRetryPrompt(
     `3. Do NOT use items from the already solved groups.`,
     `4. Every group MUST contain EXACTLY 4 items.`,
     ``,
-    `Format Requirements:`,
-    `You MUST output your response in EXACTLY two sections (GROUPS and ANSWER), following this schema:`,
+    `Then produce your final answer using EXACTLY the format below. Output nothing before ### GROUPS and nothing after the last line of ### ANSWER.`,
     ``,
     `### GROUPS`,
     ...Array.from(
       { length: N },
       (_, i) =>
-        `Group ${i + 1}\nReasoning: <1-2 sentences explaining the category connection>\nWords: <ITEM1>, <ITEM2>, <ITEM3>, <ITEM4>\n`,
+        `#### Group ${i + 1}\nCategory: <short category name>\nWords: <ITEM1>, <ITEM2>, <ITEM3>, <ITEM4>\n`,
     ),
     `### ANSWER`,
     ...Array.from({ length: N }, () => `<ITEM1>, <ITEM2>, <ITEM3>, <ITEM4>`),
@@ -214,6 +212,10 @@ export class LlmStrategyRunner {
           status: SolvePromptStatus.PARSED,
           rawResponseText: data.response,
           temperature,
+          promptTokens: data.usage?.promptTokens ?? null,
+          completionTokens: data.usage?.completionTokens ?? null,
+          totalTokens: data.usage?.totalTokens ?? null,
+          latencyMs: data.latencyMs,
         };
         pendingPrompts.push(currentPrompt);
 
@@ -226,23 +228,29 @@ export class LlmStrategyRunner {
           }
         } else {
           const responseText = data.response ?? "";
-          const explanationMap = new Map<number, string>();
+          const categoryMap = new Map<number, string>();
           const parsedGroupWords: string[][] = [];
 
-          // Parse structured "Group N" blocks: Reasoning + Words
+          // Scope parsing to the ### GROUPS section so scratchpad content
+          // (which may itself mention "Group" or contain stray colons) can't
+          // produce false matches.
+          const groupsSectionMatch = responseText.match(/### GROUPS([\s\S]*?)### ANSWER/i);
+          const groupsSectionText = groupsSectionMatch ? groupsSectionMatch[1] : responseText;
+
+          // Parse structured "Group N" blocks: Category + Words
           const groupBlockRegex =
-            /Group\s+(\d+)[\s\S]*?Reasoning:\s*([^\n]+)[\s\S]*?Words:\s*([^\n]+)/gi;
+            /Group\s+(\d+)[\s\S]*?Category:\s*([^\n]+)[\s\S]*?Words:\s*([^\n]+)/gi;
           let match: RegExpExecArray | null;
 
-          while ((match = groupBlockRegex.exec(responseText)) !== null) {
+          while ((match = groupBlockRegex.exec(groupsSectionText)) !== null) {
             const groupNum = parseInt(match[1], 10);
-            const reasoningText = match[2].trim();
+            const categoryText = match[2].trim();
             const wordsLine = match[3]
               .split(",")
               .map((w) => w.replace(/[`*]/g, "").trim())
               .filter(Boolean);
 
-            explanationMap.set(groupNum, reasoningText);
+            categoryMap.set(groupNum, categoryText);
             if (wordsLine.length === GROUP_SIZE) {
               parsedGroupWords[groupNum - 1] = wordsLine;
             }
@@ -257,14 +265,14 @@ export class LlmStrategyRunner {
             const words = proposalWords[i];
             if (!words || words.length !== GROUP_SIZE) continue;
 
-            const extractedReasoning = explanationMap.get(i + 1);
-            const reasoning = extractedReasoning ?? `Group ${i + 1} from AI Assist response`;
+            const extractedCategory = categoryMap.get(i + 1);
+            const category = extractedCategory ?? `Category unavailable for group ${i + 1}`;
 
             const proposalObj: Partial<LlmProposal> = {
               strategyRun: { id: run.id } as StrategyRun,
               solvePrompt: currentPrompt as SolvePrompt,
               words,
-              reasoning,
+              category,
               status: LlmProposalStatus.NOT_SELECTED,
               guess: undefined,
             };

@@ -123,11 +123,23 @@ export class StrategyRunStore {
     pendingPrompts.length = 0;
 
     await this.dataSource.transaction(async (manager) => {
-      // 1. Insert SolvePrompt rows first and capture the generated ID.
+      // 1. Insert SolvePrompt rows first and capture the generated IDs. Most
+      // recently inserted ID is the default link target; when a batch holds
+      // more than one prompt, proposals resolve to their specific prompt via
+      // promptNumber instead.
       let insertedSolvePromptId: number | undefined;
+      const solvePromptIdByPromptNumber = new Map<number, number>();
       if (promptsToInsert.length > 0) {
         const result = await manager.insert("SolvePrompt", promptsToInsert);
-        insertedSolvePromptId = result?.identifiers?.[0]?.id;
+        const identifiers = result?.identifiers ?? [];
+        promptsToInsert.forEach((prompt, i) => {
+          const id = identifiers[i]?.id;
+          if (id === undefined) return;
+          if (prompt.promptNumber !== undefined) {
+            solvePromptIdByPromptNumber.set(prompt.promptNumber, id);
+          }
+          insertedSolvePromptId = id;
+        });
       }
 
       // 2. Insert Guess rows and capture the generated ID for linking.
@@ -145,11 +157,18 @@ export class StrategyRunStore {
             const resolved: Record<string, unknown> = { ...proposal };
 
             // Strip away transient properties if present on the partial entity
+            const promptNumber = resolved.promptNumber as number | undefined;
             delete resolved.promptNumber;
 
             // Link to the newly inserted SolvePrompt if not set
-            if (!resolved.solvePromptId && insertedSolvePromptId !== undefined) {
-              resolved.solvePromptId = insertedSolvePromptId;
+            if (!resolved.solvePromptId) {
+              const resolvedSolvePromptId =
+                (promptNumber !== undefined
+                  ? solvePromptIdByPromptNumber.get(promptNumber)
+                  : undefined) ?? insertedSolvePromptId;
+              if (resolvedSolvePromptId !== undefined) {
+                resolved.solvePromptId = resolvedSolvePromptId;
+              }
             }
 
             // Link the 'used' proposal to the guess it became
