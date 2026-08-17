@@ -371,15 +371,13 @@ describe("AppService", () => {
     const messages = [
       {
         role: "user" as const,
-        content:
-          "You are playing NYT Connections. The items below form 2 groups of four...",
+        content: "You are playing NYT Connections. The items below form 2 groups of four...",
       },
     ];
 
     it("should return healthy with the model answer on a 2xx response", async () => {
       const body = {
-        response:
-          "Reasoning.\nANSWER:\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
+        response: "Reasoning.\nANSWER:\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
         groups: [
           ["AAAA", "BBBB", "CCCC", "DDDD"],
           ["EEEE", "FFFF", "GGGG", "HHHH"],
@@ -405,13 +403,11 @@ describe("AppService", () => {
     });
 
     it("should surface the orchestrator's error message on a non-2xx response", async () => {
-      fetchSpy = jest
-        .spyOn(global, "fetch")
-        .mockResolvedValue(
-          mockResponse(400, "Bad Request", {
-            error: 'Model response contained no "ANSWER:" section with group lines',
-          }),
-        );
+      fetchSpy = jest.spyOn(global, "fetch").mockResolvedValue(
+        mockResponse(400, "Bad Request", {
+          error: 'Model response contained no "ANSWER:" section with group lines',
+        }),
+      );
 
       const result = await service.diagnose(messages);
 

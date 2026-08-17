@@ -69,11 +69,6 @@ CREATE TABLE "Guess" (
   "result" guess_result_enum NOT NULL,
   "sequenceNumber" INT NOT NULL,
   "source" guess_source_enum NOT NULL,
-  "promptTokens" INT NULL,
-  "completionTokens" INT NULL,
-  "totalTokens" INT NULL,
-  "latencyMs" INT NULL,
-  "temperature" DOUBLE PRECISION NULL,
   "numResponses" INT NULL,
   "promptAttempts" INT NULL,
   "duplicatesRejected" INT NULL,
@@ -88,19 +83,59 @@ CREATE INDEX "IDX_Guess_strategyRun_sequenceNumber"
 CREATE TYPE llm_proposal_status_enum AS ENUM (
   'used',
   'rejected_duplicate',
-  'not_selected'
+  'not_selected',
+  'supersededByRetry',
+  'invalidItems'
 );
+
+CREATE TYPE solve_prompt_type_enum AS ENUM (
+  'initialSolve',
+  'retry'
+);
+
+CREATE TYPE solve_prompt_status_enum AS ENUM (
+  'parsed',
+  'malformedNoAnswerBlock',
+  'malformedGroupCount',
+  'malformedOther'
+);
+
+-- Per-prompt record for multi-guess LLM solving. Each AI Assist button press
+-- (initial or retry) creates one row; prompt-level telemetry (tokens, latency,
+-- temperature) lives here instead of on Guess.
+CREATE TABLE "SolvePrompt" (
+  "id" INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  "strategyRunId" INT NOT NULL REFERENCES "StrategyRun"("id") ON DELETE CASCADE,
+  "promptNumber" INT NOT NULL,
+  "promptType" solve_prompt_type_enum NOT NULL,
+  "status" solve_prompt_status_enum NOT NULL DEFAULT 'parsed',
+  "triggeredByGuessId" INT NULL REFERENCES "Guess"("id") ON DELETE SET NULL,
+  "rawResponseText" TEXT NULL,
+  "promptTokens" INT NULL,
+  "completionTokens" INT NULL,
+  "totalTokens" INT NULL,
+  "latencyMs" INT NULL,
+  "temperature" DOUBLE PRECISION NULL,
+  "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+  CONSTRAINT "UQ_SolvePrompt_run_promptNumber" UNIQUE ("strategyRunId", "promptNumber")
+);
+
+CREATE INDEX "IDX_SolvePrompt_strategyRunId" ON "SolvePrompt" ("strategyRunId");
 
 -- One row per LLM candidate group proposed by the orchestrator across every
 -- prompt of a solve step, including the ones that were rejected or never
 -- used. 'used' rows link to the Guess record they produced; 'rejected_duplicate'
 -- rows repeated a prior guess; 'not_selected' rows were fresh and well-formed
--- but a higher-confidence proposal in the same batch won instead.
+-- but a higher-confidence proposal in the same batch won.
+-- 'supersededByRetry' groups were valid but never submitted because an earlier
+-- group in the same batch halted submission.
+-- 'invalidItems' groups used items not in the current remaining set.
 CREATE TABLE "LlmProposal" (
   "id" INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   "strategyRunId" INT NOT NULL REFERENCES "StrategyRun"("id") ON DELETE CASCADE,
+  "solvePromptId" INT NOT NULL REFERENCES "SolvePrompt"("id") ON DELETE CASCADE,
   "guessId" INT NULL REFERENCES "Guess"("id") ON DELETE SET NULL,
-  "promptNumber" INT NOT NULL,
   "guessNumber" INT NULL,
   "words" JSONB NOT NULL,
   "category" TEXT NOT NULL,
@@ -112,3 +147,4 @@ CREATE TABLE "LlmProposal" (
 
 CREATE INDEX "IDX_LlmProposal_strategyRunId" ON "LlmProposal" ("strategyRunId");
 CREATE INDEX "IDX_LlmProposal_guessId" ON "LlmProposal" ("guessId");
+CREATE INDEX "IDX_LlmProposal_solvePromptId" ON "LlmProposal" ("solvePromptId");

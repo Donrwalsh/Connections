@@ -1,10 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 import { DataSource } from "typeorm";
-import {
-  loadEnv,
-  orchestratorTimeoutMs,
-} from "./config/env";
+import { loadEnv, orchestratorTimeoutMs } from "./config/env";
 import {
   AssistResponseDto,
   ChatMessageDto,
@@ -154,10 +151,7 @@ export class AppService {
     }
   }
 
-  private async fetchOnceWithTimeout(
-    url: string,
-    init: RequestInit,
-  ): Promise<Response> {
+  private async fetchOnceWithTimeout(url: string, init: RequestInit): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), orchestratorTimeoutMs());
     try {

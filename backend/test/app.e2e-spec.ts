@@ -78,8 +78,7 @@ describe("App (e2e)", () => {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
-              response:
-                "Reasoning.\nANSWER:\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
+              response: "Reasoning.\nANSWER:\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
               groups: [
                 ["AAAA", "BBBB", "CCCC", "DDDD"],
                 ["EEEE", "FFFF", "GGGG", "HHHH"],
@@ -266,11 +265,6 @@ describe("App (e2e)", () => {
       result: GuessResult.SUCCESS,
       sequenceNumber: 1,
       source: GuessSource.STRATEGY,
-      promptTokens: 1027,
-      completionTokens: 593,
-      totalTokens: 1620,
-      latencyMs: 5647,
-      temperature: 1.2,
       numResponses: 3,
       promptAttempts: 2,
       duplicatesRejected: 1,
@@ -292,11 +286,6 @@ describe("App (e2e)", () => {
       words: ["AAAA", "BBBB", "CCCC", "DDDD"],
       result: "success",
       guessedAt: expect.any(String),
-      promptTokens: 1027,
-      completionTokens: 593,
-      totalTokens: 1620,
-      latencyMs: 5647,
-      temperature: 1.2,
       numResponses: 3,
       promptAttempts: 2,
       duplicatesRejected: 1,
@@ -389,8 +378,7 @@ describe("App (e2e)", () => {
         messages: [
           {
             role: "user",
-            content:
-              "You are playing NYT Connections. The items below form 2 groups of four...",
+            content: "You are playing NYT Connections. The items below form 2 groups of four...",
           },
         ],
       });
@@ -414,9 +402,7 @@ describe("App (e2e)", () => {
   });
 
   it("POST /api/diagnose rejects an invalid body", async () => {
-    const res = await request(app.getHttpServer())
-      .post("/api/diagnose")
-      .send({ messages: [] });
+    const res = await request(app.getHttpServer()).post("/api/diagnose").send({ messages: [] });
 
     expect(res.status).toBe(400);
   });

@@ -11,12 +11,9 @@ export interface GuessDto {
 // Full detail for a single guess, including the LLM telemetry recorded for
 // strategy guesses (null for non-LLM strategies and user guesses). Fetched
 // on demand per guess so the run-detail list stays index-only and slim.
+// NOTE: per-prompt telemetry (tokens, latency, temperature) now lives on
+// SolvePrompt; only step-level aggregates remain here.
 export interface GuessDetailDto extends GuessDto {
-  promptTokens: number | null;
-  completionTokens: number | null;
-  totalTokens: number | null;
-  latencyMs: number | null;
-  temperature: number | null;
   numResponses: number | null;
   promptAttempts: number | null;
   duplicatesRejected: number | null;

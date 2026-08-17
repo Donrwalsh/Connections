@@ -237,11 +237,6 @@ describe("LlmStrategyRunner", () => {
         expect.objectContaining({
           words: ["APPLE", "BANANA", "CHERRY", "DATE"],
           result: GuessResult.SUCCESS,
-          promptTokens: 10,
-          completionTokens: 20,
-          totalTokens: 30,
-          latencyMs: 500,
-          temperature: 0.2,
           numResponses: 1,
           promptAttempts: 1,
           duplicatesRejected: 0,
@@ -282,7 +277,7 @@ describe("LlmStrategyRunner", () => {
       expect(proposalRows).toHaveLength(2);
       expect(proposalRows[0]).toEqual({
         strategyRun: { id: 7 },
-        promptNumber: 1,
+        solvePromptId: 0,
         guessNumber: 1,
         words: ["APPLE", "BANANA", "CHERRY", "DATE"],
         category: "Fruit",
@@ -412,11 +407,10 @@ describe("LlmStrategyRunner", () => {
       const inserted = mockManager.insert.mock.calls
         .filter((call) => call[0] === "Guess")
         .flatMap((call) => call[1] as Array<Record<string, unknown>>);
-      // The guess record reports the fixed temperature and the escalated
-      // candidate count that actually produced the guess.
+      // The guess record reports the escalated candidate count that
+      // actually produced the guess.
       expect(inserted[0]).toEqual(
         expect.objectContaining({
-          temperature: 0.2,
           numResponses: 3,
           promptAttempts: 2,
           duplicatesRejected: 1,
@@ -442,7 +436,6 @@ describe("LlmStrategyRunner", () => {
               call[1] as Array<{
                 result: GuessResult;
                 llmDetails: Record<string, unknown> | null;
-                promptTokens: number | null;
               }>,
           );
         // The orchestrator exhausted its prompt budget on repeats three times,
@@ -460,11 +453,6 @@ describe("LlmStrategyRunner", () => {
         });
         expect(inserted[0]).toEqual(
           expect.objectContaining({
-            promptTokens: 30,
-            completionTokens: 60,
-            totalTokens: 90,
-            latencyMs: 1500,
-            temperature: 0,
             numResponses: 1,
             promptAttempts: 3,
             duplicatesRejected: 3,
@@ -489,7 +477,7 @@ describe("LlmStrategyRunner", () => {
         expect(proposalRows).toHaveLength(3);
         expect(proposalRows[0]).toEqual({
           strategyRun: { id: 7 },
-          promptNumber: 3,
+          solvePromptId: 0,
           guessNumber: 2,
           words: ["APPLE", "BANANA", "CHERRY", "DATE"],
           category: "Fruit",
@@ -704,7 +692,7 @@ describe("LlmStrategyRunner", () => {
       );
       expect(proposalRows[1]).toEqual({
         strategyRun: { id: 7 },
-        promptNumber: 1,
+        solvePromptId: 0,
         guessNumber: 1,
         words: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
         category: "Veg",

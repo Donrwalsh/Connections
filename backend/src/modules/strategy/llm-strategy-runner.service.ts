@@ -158,11 +158,6 @@ export class LlmStrategyRunner {
             result: evaluation.result,
             sequenceNumber: guessCount,
             source: GuessSource.STRATEGY,
-            promptTokens: data.usage.promptTokens,
-            completionTokens: data.usage.completionTokens,
-            totalTokens: data.usage.totalTokens,
-            latencyMs: data.latencyMs,
-            temperature,
             numResponses,
             promptAttempts: data.promptAttempts,
             duplicatesRejected: data.duplicatesRejected,
@@ -177,7 +172,7 @@ export class LlmStrategyRunner {
           for (const proposal of data.proposals) {
             pendingProposals.push({
               strategyRun: { id: run.id } as StrategyRun,
-              promptNumber: proposal.promptNumber,
+              solvePromptId: 0, // TODO: wire to SolvePrompt.id in follow-up
               guessNumber: guessCount,
               words: proposal.word_ids.map((id) => run.availableWords[id]),
               category: proposal.category,
@@ -245,11 +240,6 @@ export class LlmStrategyRunner {
               result: GuessResult.DUPLICATE,
               sequenceNumber: guessCount,
               source: GuessSource.STRATEGY,
-              promptTokens: details?.usage?.promptTokens ?? null,
-              completionTokens: details?.usage?.completionTokens ?? null,
-              totalTokens: details?.usage?.totalTokens ?? null,
-              latencyMs: details?.latencyMs ?? null,
-              temperature: details?.temperature ?? temperature,
               numResponses: details?.numResponses ?? numResponses,
               promptAttempts: details?.promptAttempts ?? 1,
               duplicatesRejected: details?.duplicatesRejected ?? 0,
@@ -268,7 +258,7 @@ export class LlmStrategyRunner {
             for (const proposal of proposals) {
               pendingProposals.push({
                 strategyRun: { id: run.id } as StrategyRun,
-                promptNumber: proposal.promptNumber,
+                solvePromptId: 0, // TODO: wire to SolvePrompt.id in follow-up
                 guessNumber: guessCount,
                 words: proposal.word_ids.map((id) => run.availableWords[id]),
                 category: proposal.category,
