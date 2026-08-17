@@ -39,19 +39,33 @@ describe("App (e2e)", () => {
     // Stand-in for the real orchestrator service so /api/diagnose is testable
     // without an OpenAI key.
     orchestrator = http.createServer((req, res) => {
-      // Drain the request body so "end" fires — none of the canned responses
-      // below need its contents.
-      req.on("data", () => {});
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
       req.on("end", () => {
         if (req.url === "/solve-assist" && req.method === "POST") {
+          // Reply with whichever TEST_GROUPS group is still fully present in
+          // the latest prompt's remaining-items list, so each call makes
+          // real progress instead of re-proposing an already-solved group
+          // (which the runner correctly skips, stalling the run forever).
+          const parsed = JSON.parse(body || "{}") as {
+            messages?: { role: string; content: string }[];
+          };
+          const lastUserMessage = [...(parsed.messages ?? [])]
+            .reverse()
+            .find((m) => m.role === "user");
+          const promptText = lastUserMessage?.content ?? "";
+          const nextGroup =
+            TEST_GROUPS.find((g) => g.words.every((w) => promptText.includes(w))) ??
+            TEST_GROUPS[0];
+          const words = nextGroup.words;
+
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
-              response: "ANSWER:\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
-              groups: [
-                ["AAAA", "BBBB", "CCCC", "DDDD"],
-                ["EEEE", "FFFF", "GGGG", "HHHH"],
-              ],
+              response:
+                `### GROUPS\n#### Group 1\nCategory: E2E fake\nWords: ${words.join(", ")}\n\n` +
+                `### ANSWER\n${words.join(", ")}`,
+              groups: [words],
               model: "e2e-fake-model",
             }),
           );
@@ -273,8 +287,8 @@ describe("App (e2e)", () => {
     // test above, and this needs a fresh run.
     const result = await llmStrategyRunner.runLlmStrategy(puzzle.id, "llm-openai", 99);
 
-    // The fake orchestrator always proposes group [0, 1, 2, 3], which resolves
-    // to the next unsolved answer group on every step, so the run solves fully.
+    // The fake orchestrator always proposes the next unsolved answer group
+    // (see the /solve-assist handler above), so the run solves fully.
     expect(result.status).toBe(StrategyRunStatus.COMPLETED);
 
     const run = await dataSource.getRepository(StrategyRun).findOneByOrFail({
@@ -289,7 +303,7 @@ describe("App (e2e)", () => {
 
     expect(proposals).toHaveLength(4);
     expect(proposals[0]).toMatchObject({
-      reasoning: "E2E fake",
+      category: "E2E fake",
       status: LlmProposalStatus.USED,
     });
     expect(proposals[0].words).toEqual(["AAAA", "BBBB", "CCCC", "DDDD"]);
