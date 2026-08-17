@@ -55,9 +55,6 @@ export class LlmProposal {
   @JoinColumn({ name: "solvePromptId" })
   solvePrompt: SolvePrompt;
 
-  @Column({ type: "int", nullable: true })
-  promptNumber: number | null;
-
   @Column({ type: "jsonb" })
   words: string[];
 

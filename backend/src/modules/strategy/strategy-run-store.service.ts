@@ -123,40 +123,37 @@ export class StrategyRunStore {
     pendingPrompts.length = 0;
 
     await this.dataSource.transaction(async (manager) => {
-      // Insert SolvePrompt rows first so their IDs are available for proposals.
-      let promptIdByNumber: Map<number, number> | undefined;
+      // 1. Insert SolvePrompt rows first and capture the generated ID.
+      let insertedSolvePromptId: number | undefined;
       if (promptsToInsert.length > 0) {
         const result = await manager.insert("SolvePrompt", promptsToInsert);
-        promptIdByNumber = new Map(
-          promptsToInsert.map((p, i) => [p.promptNumber!, result.identifiers[i].id]),
-        );
+        insertedSolvePromptId = result?.identifiers?.[0]?.id;
       }
 
-      // Insert Guess rows and capture the inserted ID for linking proposals.
+      // 2. Insert Guess rows and capture the generated ID for linking.
       let insertedGuessId: number | undefined;
       if (guessesToInsert.length > 0) {
         const result = await manager.insert("Guess", guessesToInsert);
         insertedGuessId = result?.identifiers?.[0]?.id;
       }
 
+      // 3. Insert LlmProposal rows using the captured foreign keys.
       if (proposalsToInsert.length > 0) {
         await manager.insert(
           "LlmProposal",
           proposalsToInsert.map((proposal) => {
             const resolved: Record<string, unknown> = { ...proposal };
 
-            // Resolve promptNumber to solvePromptId if the runner sent
-            // promptNumber instead of solvePromptId directly.
-            if (promptIdByNumber && typeof resolved.promptNumber === "number") {
-              resolved.solvePromptId = promptIdByNumber.get(resolved.promptNumber as number);
-              delete resolved.promptNumber;
+            // Strip away transient properties if present on the partial entity
+            delete resolved.promptNumber;
+
+            // Link to the newly inserted SolvePrompt if not set
+            if (!resolved.solvePromptId && insertedSolvePromptId !== undefined) {
+              resolved.solvePromptId = insertedSolvePromptId;
             }
 
-            // Link the 'used' proposal to the guess it became.
-            if (
-              resolved.status === LlmProposalStatus.USED &&
-              insertedGuessId !== undefined
-            ) {
+            // Link the 'used' proposal to the guess it became
+            if (resolved.status === LlmProposalStatus.USED && insertedGuessId !== undefined) {
               resolved.guessId = insertedGuessId;
             }
 
@@ -164,6 +161,7 @@ export class StrategyRunStore {
           }),
         );
       }
+
       await manager.save(StrategyRun, run);
     });
   }

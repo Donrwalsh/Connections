@@ -17,6 +17,7 @@ import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/st
 import { OrchestratorService, type ChatMessage } from "./orchestrator.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { firstCombination } from "./combinatorics";
+import { delay, async } from "rxjs";
 
 const GROUP_SIZE = 4;
 
@@ -24,14 +25,33 @@ const MODEL_ERROR_RETRY_BASE_DELAY_MS = 1000;
 const MODEL_ERROR_RETRY_MAX_DELAY_MS = 300000;
 
 function buildInitialPrompt(items: string[], N: number): string {
+  const totalItems = N * 4;
+
   return [
-    `You are playing NYT Connections. The items below form ${N} groups of four, where each group shares something in common. Propose your best guess for all ${N} groups.`,
-    "",
-    `Items: ${items.join(", ")}`,
-    "",
-    `For each of your ${N} proposed groups, briefly explain (1-2 sentences) why you believe those four items belong together. Then output a line containing only "ANSWER:", followed by exactly ${N} lines, each with four comma-separated items — one line per group. Output nothing after those lines.`,
-    "",
-    "Use each item exactly once. Only use items from the list above — do not introduce new words.",
+    `You are an expert solver for the NYT Connections puzzle.`,
+    ``,
+    `Task:`,
+    `Analyze the ${totalItems} provided items and group them into exactly ${N} distinct sets of 4 items each, where every set shares a clear, logical category or connection.`,
+    ``,
+    `Items:`,
+    items.join(", "),
+    ``,
+    `Rules:`,
+    `1. Use EVERY item from the list above EXACTLY ONCE.`,
+    `2. Do NOT add new words, alter spellings, or substitute items.`,
+    `3. Every group MUST contain EXACTLY 4 items.`,
+    ``,
+    `Format Requirements:`,
+    `You MUST output your response in EXACTLY two sections (GROUPS and ANSWER), following this schema:`,
+    ``,
+    `### GROUPS`,
+    ...Array.from(
+      { length: N },
+      (_, i) =>
+        `Group ${i + 1}\nReasoning: <1-2 sentences explaining the category connection>\nWords: <ITEM1>, <ITEM2>, <ITEM3>, <ITEM4>\n`,
+    ),
+    `### ANSWER`,
+    ...Array.from({ length: N }, () => `<ITEM1>, <ITEM2>, <ITEM3>, <ITEM4>`),
   ].join("\n");
 }
 
@@ -41,29 +61,55 @@ function buildRetryPrompt(
   lastFailedGuess: { items: string[]; result: string },
   N: number,
 ): string {
+  const totalRemainingItems = N * 4;
+
   const parts = [
-    `Feedback on your last guess: the group ${lastFailedGuess.items.join(", ")} was ${lastFailedGuess.result}.`,
-    "",
-    '- If the result is "incorrect": these four items are not all part of the same group.',
-    '- If the result is "one away": three of these four items belong together in a group, but one of them does not.',
+    `You are an expert solver for the NYT Connections puzzle.`,
+    ``,
+    `Feedback on Previous Guess:`,
+    `- Guess submitted: ${lastFailedGuess.items.join(", ")}`,
+    `- Result: ${lastFailedGuess.result}`,
+    `- Guidance: ${
+      lastFailedGuess.result.toLowerCase() === "one away" ||
+      lastFailedGuess.result.toLowerCase() === "offby1"
+        ? "Exactly 3 of these 4 items belong together in a category, but 1 item does not belong."
+        : "These 4 items do NOT all belong to the same category."
+    }`,
   ];
 
   if (lockedInGroups.length > 0) {
     parts.push(
-      "",
-      `The following group(s) are already confirmed correct and should not be changed: ${lockedInGroups
-        .map((group) => `[${group.join(", ")}]`)
-        .join(", ")}.`,
+      ``,
+      `Already Solved Groups (Do NOT include these items in your proposals):`,
+      ...lockedInGroups.map((group, idx) => `- Solved Group ${idx + 1}: ${group.join(", ")}`),
     );
   }
 
   parts.push(
-    "",
-    `The remaining items still to be grouped are: ${remainingItems.join(", ")}, forming ${N} group(s) of four.`,
-    "",
-    `Considering this feedback, propose your best guess for all ${N} remaining groups. As before, briefly explain your reasoning for each, then output "ANSWER:" followed by ${N} lines of four comma-separated items.`,
-    "",
-    "Use each item exactly once. Only use items from the list above — do not introduce new words.",
+    ``,
+    `Task:`,
+    `Analyze the remaining ${totalRemainingItems} items and group them into exactly ${N} distinct sets of 4 items each.`,
+    ``,
+    `Remaining Items:`,
+    remainingItems.join(", "),
+    ``,
+    `Rules:`,
+    `1. Use EVERY item from the remaining list above EXACTLY ONCE.`,
+    `2. Do NOT re-submit the failed guess (${lastFailedGuess.items.join(", ")}).`,
+    `3. Do NOT use items from the already solved groups.`,
+    `4. Every group MUST contain EXACTLY 4 items.`,
+    ``,
+    `Format Requirements:`,
+    `You MUST output your response in EXACTLY two sections (GROUPS and ANSWER), following this schema:`,
+    ``,
+    `### GROUPS`,
+    ...Array.from(
+      { length: N },
+      (_, i) =>
+        `Group ${i + 1}\nReasoning: <1-2 sentences explaining the category connection>\nWords: <ITEM1>, <ITEM2>, <ITEM3>, <ITEM4>\n`,
+    ),
+    `### ANSWER`,
+    ...Array.from({ length: N }, () => `<ITEM1>, <ITEM2>, <ITEM3>, <ITEM4>`),
   );
 
   return parts.join("\n");
@@ -136,12 +182,7 @@ export class LlmStrategyRunner {
       // Build the prompt for this step.
       let prompt: string;
       if (lastFailedGuess) {
-        prompt = buildRetryPrompt(
-          run.availableWords,
-          lockedInGroups,
-          lastFailedGuess,
-          N,
-        );
+        prompt = buildRetryPrompt(run.availableWords, lockedInGroups, lastFailedGuess, N);
       } else {
         prompt = buildInitialPrompt(run.availableWords, N);
       }
@@ -165,17 +206,16 @@ export class LlmStrategyRunner {
 
         // Create a SolvePrompt row for this LLM call.
         globalPromptNumber++;
-        const promptType = lastFailedGuess
-          ? SolvePromptType.RETRY
-          : SolvePromptType.INITIAL_SOLVE;
-        pendingPrompts.push({
+        const promptType = lastFailedGuess ? SolvePromptType.RETRY : SolvePromptType.INITIAL_SOLVE;
+        const currentPrompt: Partial<SolvePrompt> = {
           strategyRunId: run.id,
           promptNumber: globalPromptNumber,
           promptType,
           status: SolvePromptStatus.PARSED,
           rawResponseText: data.response,
           temperature,
-        });
+        };
+        pendingPrompts.push(currentPrompt);
 
         const groups = data.groups;
         if (groups.length === 0) {
@@ -185,51 +225,87 @@ export class LlmStrategyRunner {
             run.finishedAt = new Date();
           }
         } else {
-          // Create an LlmProposal for each parsed group.
-          const proposalWords = groups.map((group) =>
-            group.map((item) => item.trim()),
-          );
+          const responseText = data.response ?? "";
+          const explanationMap = new Map<number, string>();
+          const parsedGroupWords: string[][] = [];
 
-          for (let i = 0; i < proposalWords.length; i++) {
-            const words = proposalWords[i];
-            if (words.length !== GROUP_SIZE) continue;
+          // Parse structured "Group N" blocks: Reasoning + Words
+          const groupBlockRegex =
+            /Group\s+(\d+)[\s\S]*?Reasoning:\s*([^\n]+)[\s\S]*?Words:\s*([^\n]+)/gi;
+          let match: RegExpExecArray | null;
 
-            pendingProposals.push({
-              strategyRun: { id: run.id } as StrategyRun,
-              solvePromptId: undefined, // resolved by flushBatch via promptNumber
-              words,
-              reasoning: `Group ${i + 1} from AI Assist response`,
-              status: LlmProposalStatus.NOT_SELECTED,
-            });
+          while ((match = groupBlockRegex.exec(responseText)) !== null) {
+            const groupNum = parseInt(match[1], 10);
+            const reasoningText = match[2].trim();
+            const wordsLine = match[3]
+              .split(",")
+              .map((w) => w.replace(/[`*]/g, "").trim())
+              .filter(Boolean);
+
+            explanationMap.set(groupNum, reasoningText);
+            if (wordsLine.length === GROUP_SIZE) {
+              parsedGroupWords[groupNum - 1] = wordsLine;
+            }
           }
 
-          // Submit the first well-formed group as the guess.
-          const guessWords = proposalWords[0];
-          if (guessWords && guessWords.length === GROUP_SIZE) {
+          // Use parsed words from the GROUPS block if available; fall back to incoming `groups` array
+          const sourceGroups = parsedGroupWords.length > 0 ? parsedGroupWords : groups;
+          const proposalWords = sourceGroups.map((group) => group.map((item) => item.trim()));
+
+          const proposalEntries: Partial<LlmProposal>[] = [];
+          for (let i = 0; i < proposalWords.length; i++) {
+            const words = proposalWords[i];
+            if (!words || words.length !== GROUP_SIZE) continue;
+
+            const extractedReasoning = explanationMap.get(i + 1);
+            const reasoning = extractedReasoning ?? `Group ${i + 1} from AI Assist response`;
+
+            const proposalObj: Partial<LlmProposal> = {
+              strategyRun: { id: run.id } as StrategyRun,
+              solvePrompt: currentPrompt as SolvePrompt,
+              words,
+              reasoning,
+              status: LlmProposalStatus.NOT_SELECTED,
+              guess: undefined,
+            };
+
+            pendingProposals.push(proposalObj);
+            proposalEntries.push(proposalObj);
+          }
+
+          // Evaluate parsed proposals sequentially as long as submitted guesses succeed.
+          for (let i = 0; i < proposalEntries.length; i++) {
+            const currentProposal = proposalEntries[i];
+            const guessWords = currentProposal.words!;
+
+            // Skip proposals containing words that were already solved by an earlier guess in this loop.
+            const isWordAlreadySolved = guessWords.some((w) => !run.availableWords.includes(w));
+            if (isWordAlreadySolved) {
+              continue;
+            }
+
             guessCount++;
             const evaluation = GameService.evaluateGuessOnPuzzle(puzzle, guessWords);
 
-            pendingGuesses.push({
+            const newGuess: Partial<Guess> = {
               puzzle: { id: puzzleId } as Puzzle,
               strategyRun: { id: run.id } as StrategyRun,
               words: guessWords,
               result: evaluation.result,
               sequenceNumber: guessCount,
               source: GuessSource.STRATEGY,
-            });
+            };
 
-            // Mark the first proposal as 'used'.
-            if (pendingProposals.length > 0) {
-              pendingProposals[pendingProposals.length - proposalWords.length].status =
-                LlmProposalStatus.USED;
-            }
+            pendingGuesses.push(newGuess);
+
+            // Mark the proposal as 'used' and bind it specifically to this new sequential guess.
+            currentProposal.status = LlmProposalStatus.USED;
+            currentProposal.guess = newGuess as Guess;
 
             priorGuesses.push({ words: guessWords, result: evaluation.result });
 
             if (evaluation.result === GuessResult.SUCCESS) {
-              run.availableWords = run.availableWords.filter(
-                (w) => !guessWords.includes(w),
-              );
+              run.availableWords = run.availableWords.filter((w) => !guessWords.includes(w));
               lockedInGroups.push(guessWords);
               lastFailedGuess = null;
               run.currentCombination = firstCombination(GROUP_SIZE);
@@ -237,6 +313,7 @@ export class LlmStrategyRunner {
               if (run.availableWords.length === 0) {
                 run.status = StrategyRunStatus.COMPLETED;
                 run.finishedAt = new Date();
+                break;
               }
             } else {
               failedGuessCount++;
@@ -255,6 +332,9 @@ export class LlmStrategyRunner {
                 run.status = StrategyRunStatus.FAILED;
                 run.finishedAt = new Date();
               }
+
+              // Stop evaluating subsequent proposals from this batch if a guess fails.
+              break;
             }
           }
         }

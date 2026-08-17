@@ -1,32 +1,94 @@
-import { generateText } from "ai";
+import { generateText, type LanguageModelUsage } from "ai";
 import { type ChatMessage } from "./types.js";
 import { defaultProvider, getModel, getModelName } from "./provider.js";
 import { SolveError, classifyModelCallError } from "./solver.js";
-import { parseAnswerGroups } from "./assist.js";
+
+export interface ParsedGroupProposal {
+  words: string[];
+  reasoning: string;
+}
 
 export interface SolveAssistResult {
   response: string;
   groups: string[][];
+  proposals: ParsedGroupProposal[];
   model: string;
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  };
 }
 
 const SOLVE_ASSIST_TEMPERATURE = 0.7;
+const GROUP_SIZE = 4;
+
+/**
+ * Extracts structured group proposals (reasoning + word list) from the ### GROUPS section.
+ */
+function parseGroupProposals(responseText: string): ParsedGroupProposal[] {
+  const proposals: ParsedGroupProposal[] = [];
+  const groupBlockRegex =
+    /Group\s+(\d+)[\s\S]*?Reasoning:\s*([^\n]+)[\s\S]*?Words:\s*([^\n]+)/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = groupBlockRegex.exec(responseText)) !== null) {
+    const reasoning = match[2].trim();
+    const words = match[3]
+      .split(",")
+      .map((w) => w.replace(/[`*#-]/g, "").trim())
+      .filter(Boolean);
+
+    if (words.length === GROUP_SIZE) {
+      proposals.push({ reasoning, words });
+    }
+  }
+
+  return proposals;
+}
+
+/**
+ * Extracts final grid lines from the ### ANSWER section, stripping markdown elements.
+ */
+export function parseAnswerGroups(responseText: string): string[][] {
+  const parts = responseText.split(/###?\s*ANSWER:?/i);
+  if (parts.length < 2) return [];
+
+  const answerBlock = parts[1].trim();
+  const lines = answerBlock
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const groups: string[][] = [];
+  for (const line of lines) {
+    const words = line
+      .split(",")
+      .map((w) => w.replace(/[`*#-]/g, "").trim())
+      .filter(Boolean);
+
+    if (words.length === GROUP_SIZE) {
+      groups.push(words);
+    }
+  }
+
+  return groups;
+}
 
 /**
  * Runs a single solve-assist step: feeds the full conversation history to the
- * model and returns its raw answer plus the parsed group lines. This mirrors
- * the AI Assist flow (POST /diagnose) but is used by the backend strategy
- * runner for automated solving.
- *
- * The backend owns the session: it builds the prompts (INITIAL on a fresh
- * step, RETRY after a failed guess), accumulates the model's responses, and
- * submits the full history on every call. The orchestrator stays stateless.
+ * model and returns its raw answer, extracted group proposals, final answer grid,
+ * and token usage telemetry.
  */
-export async function solveAssist(messages: ChatMessage[]): Promise<SolveAssistResult> {
+export async function solveAssist(
+  messages: ChatMessage[],
+): Promise<SolveAssistResult> {
   const provider = defaultProvider();
 
   let text: string;
   let modelId: string;
+  let usage: SolveAssistResult["usage"];
+
   try {
     const result = await generateText({
       model: getModel(provider),
@@ -35,18 +97,45 @@ export async function solveAssist(messages: ChatMessage[]): Promise<SolveAssistR
     });
     text = result.text;
     modelId = result.response.modelId;
+
+    if (result.usage) {
+      const u: LanguageModelUsage = result.usage;
+      usage = {
+        promptTokens: u.inputTokens,
+        completionTokens: u.outputTokens,
+        totalTokens: u.totalTokens,
+      };
+    }
   } catch (err) {
     throw classifyModelCallError(err, { model: getModelName(provider) });
   }
 
-  const groups = parseAnswerGroups(text);
+  // 1. Extract proposals (Reasoning + Words) from the ### GROUPS section
+  const proposals = parseGroupProposals(text);
+
+  // 2. Parse final ANSWER section lines
+  let groups = parseAnswerGroups(text);
+
+  // 3. Fallback: If parseAnswerGroups failed due to markdown formatting in ### ANSWER,
+  //    use the valid word lists extracted from the ### GROUPS block instead
+  if (groups.length === 0 && proposals.length > 0) {
+    groups = proposals.map((p) => p.words);
+  }
+
+  // 4. Reject only if BOTH extraction strategies failed to produce valid 4-word groups
   if (groups.length === 0) {
     throw new SolveError(
       "invalid_group",
-      'Model response contained no "ANSWER:" section with group lines',
+      'Model response contained no parseable group proposals or "ANSWER:" section',
       { model: modelId },
     );
   }
 
-  return { response: text, groups, model: modelId };
+  return {
+    response: text,
+    groups,
+    proposals,
+    model: modelId,
+    usage,
+  };
 }
