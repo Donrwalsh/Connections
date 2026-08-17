@@ -25,7 +25,7 @@ A multi-service application for playing and solving [NYT Connections](https://ww
 | **Frontend** | `frontend/` | Vite + React 19 | 5173 | Single-page app |
 | **Orchestrator** | `orchestrator/` | Hono + AI SDK | 3001 | AI puzzle solving (OpenAI + Ollama) |
 | **Worker** | `backend/src/worker.ts` | BullMQ | — | Processes strategy, per-provider LLM, and puzzle queues |
-| **Database** | `database/` | Postgres 15 | 5432 | Schema + seeds |
+| **Database** | — | Postgres 15 | 5432 | Schema via TypeORM migrations |
 | **Redis** | — | Redis 7 | 6379 | BullMQ message broker |
 | **Ollama** | — | — | 11434 | Local LLM provider (default: `llama3.2`) |
 
@@ -44,10 +44,10 @@ Daily cron (06:00 UTC)
             (LLM_TRIALS llm-ollama trials; LLM_OLLAMA_CONCURRENCY at once)
 
 Frontend "AI Assist" button
-  └─ POST /api/solve ──► backend ──► POST /solve ──► orchestrator ──► default provider (openai)
+  └─ POST /api/diagnose ──► backend ──► POST /diagnose ──► orchestrator ──► default provider (openai)
 
 Frontend strategy panel (llm-openai / llm-ollama buttons)
-  └─ POST /strategy/queue/:strategy/:date ──► worker ──► POST /solve (modelProvider) ──► orchestrator ──► OpenAI or Ollama
+  └─ POST /strategy/queue/:strategy/:date ──► worker ──► POST /solve-assist ──► orchestrator ──► OpenAI or Ollama
 ```
 
 ## Getting Started
@@ -103,6 +103,7 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `PUZZLE_POPULATION_CRON` | `0 6 * * *` | Cron pattern for daily puzzle fetch (UTC by default) |
 | `PUZZLE_POPULATION_TZ` | `UTC` | Timezone for the puzzle population cron |
 | `PUZZLE_CACHE_DIR` | `/app/.puzzle-cache` | Directory used as a local cache of raw NYT puzzle payloads (bound to `./.puzzle-cache` on the host) |
+| `PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS` | `true` | Whether puzzle ingestion enqueues strategy-run jobs for each puzzle it inserts. Set to `false` to insert puzzles without dispatching any solution runs (e.g. backfills that shouldn't burn LLM tokens, or when runs are triggered separately via `/strategy/queue`) |
 | `SHUFFLE_SMART_TRIALS` | `3` | Number of shuffle-smart trials run per puzzle |
 | `SHUFFLE_FOOLISH_TRIALS` | `3` | Number of shuffle-foolish trials run per puzzle |
 | `SHUFFLE_FOOLISH_DUPLICATE_LIMIT` | `3` | Maximum repeated groups a shuffle-foolish run may propose before it ends with a `duplicate` status |
@@ -131,7 +132,7 @@ Postgres and Redis connection settings (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PAS
 | `GET` | `/game/data/latest_date` | Most recent puzzle date |
 | `POST` | `/strategy/queue/:strategyName/:date` | Enqueue a strategy run (or `all`; `all` excludes the LLM strategies) |
 | `GET` | `/strategy/:strategyName/puzzle/:date` | All runs for a strategy — ordered guesses per trial |
-| `POST` | `/api/solve` | AI Assist — proxy to orchestrator (throttled to 5/min/IP) |
+| `POST` | `/api/diagnose` | AI Assist — proxy to orchestrator (throttled to 5/min/IP) |
 | `GET` | `/health` | Liveness/readiness probe (503 when the DB is down) |
 
 ## Development & Testing
@@ -171,8 +172,8 @@ The backend E2E suite (`backend/test/app.e2e-spec.ts`) boots the real NestJS app
 │   ├── src/
 │   │   ├── main.ts            # Bootstrap (loads env, starts server)
 │   │   ├── app.setup.ts       # Shared HTTP pipeline (CORS, validation, Bull Board, Swagger)
-│   │   ├── app.controller.ts  # /health, /api/solve
-│   │   ├── app.service.ts     # Orchestrator proxy (retry/backoff), health checks
+│   │   ├── app.controller.ts  # /health, /api/diagnose
+│   │   ├── app.service.ts     # Orchestrator proxy, health checks
 │   │   ├── config/env.ts      # Typed env loading — fails fast on missing secrets
 │   │   ├── migrations/        # TypeORM migrations (initial schema baseline)
 │   │   ├── worker.ts          # Standalone BullMQ worker process
@@ -189,7 +190,7 @@ The backend E2E suite (`backend/test/app.e2e-spec.ts`) boots the real NestJS app
 │   └── src/
 │       ├── components/        # Board, Tiles, GameOverModal, ShareResult, etc.
 │       ├── pages/             # PuzzlePage (the only route)
-│       ├── lib/               # gameReducer, renderProposedGroup, shareResult
+│       ├── lib/               # gameReducer, aiAssistPrompts, shareResult
 │       └── hooks/             # useConnectionsGame
 ├── orchestrator/              # Hono + AI SDK
 │   └── src/
@@ -198,13 +199,11 @@ The backend E2E suite (`backend/test/app.e2e-spec.ts`) boots the real NestJS app
 │       ├── solver.ts          # generateObject call to the selected model
 │       ├── prompt.ts          # Prompt builder
 │       └── types.ts           # Zod schemas (request/response/model output)
-├── database/
-│   └── 01-schema.sql          # Tables + enums (Postgres 15) — baseline for migrations
 └── docker-compose.yml         # Orchestrates all services + Redis/Postgres
 ```
 
 ## Notes
 
 - The frontend `package.json` proxy setting (`"proxy": "http://nest_backend:4000"`) is for Docker networking only — local dev uses `VITE_API_URL` instead.
-- Database schema is managed by `database/01-schema.sql`, which TypeORM migrations treat as the baseline. The app runs with `synchronize: false` and `migrationsRun: true`; the baseline migration in `backend/src/migrations/` is idempotent so it also bootstraps empty databases (CI, fresh local Postgres).
+- Database schema is managed entirely by TypeORM migrations in `backend/src/migrations/` (baseline: `1754400000000-initial-schema.ts`). The app runs with `synchronize: false` and `migrationsRun: true`, so an empty database (CI, fresh local Postgres, `docker-compose down -v`) is bootstrapped automatically on backend/worker startup — there's no separate SQL init script.
 - For a production frontend image, build with the multi-stage `frontend/Dockerfile` (Vite build served by nginx). Pass the API base at build time: `docker build --build-arg VITE_API_URL=https://api.example.com -f frontend/Dockerfile frontend/`.

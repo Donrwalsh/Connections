@@ -10,15 +10,12 @@ interface Guess {
 }
 
 interface GuessDetail extends Guess {
-  promptTokens: number | null;
-  completionTokens: number | null;
-  totalTokens: number | null;
-  latencyMs: number | null;
-  temperature: number | null;
-  numResponses: number | null;
-  promptAttempts: number | null;
-  duplicatesRejected: number | null;
-  llmDetails: {
+  // The backend's GuessDetailDto no longer includes these keys, so they're
+  // absent (undefined) on the actual response rather than sent as null.
+  numResponses?: number | null;
+  promptAttempts?: number | null;
+  duplicatesRejected?: number | null;
+  llmDetails?: {
     category?: string;
     confidence?: number;
     reasoning?: string;
@@ -553,16 +550,8 @@ function formatModelDetail(run: StrategyRunListItem): string {
     : run.modelName;
 }
 
-function formatCount(value: number | null): string {
-  return value === null ? "—" : value.toLocaleString();
-}
-
-function formatLatency(ms: number | null): string {
-  return ms === null ? "—" : `${ms.toLocaleString()} ms`;
-}
-
-function formatTemperature(value: number | null): string {
-  return value === null ? "—" : String(value);
+function formatCount(value: number | null | undefined): string {
+  return value === null || value === undefined ? "—" : value.toLocaleString();
 }
 
 function formatConfidence(value: number | null | undefined): string {
@@ -602,19 +591,6 @@ function GuessDetailFields({ detail }: { detail: GuessDetail }) {
   const llm = detail.llmDetails;
   return (
     <dl className="guess-sequence__details-grid">
-      <DetailField
-        label="Prompt tokens"
-        value={formatCount(detail.promptTokens)}
-      />
-      <DetailField
-        label="Completion tokens"
-        value={formatCount(detail.completionTokens)}
-      />
-      <DetailField label="Latency" value={formatLatency(detail.latencyMs)} />
-      <DetailField
-        label="Temperature"
-        value={formatTemperature(detail.temperature)}
-      />
       <DetailField
         label="Number of responses"
         value={formatCount(detail.numResponses)}

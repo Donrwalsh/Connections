@@ -4,55 +4,129 @@ import { Repository } from "typeorm";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { GameService } from "../game/game.service";
 import {
-  LLM_OPENAI,
-  MAX_LLM_NUM_RESPONSES,
   llmMaxDuplicateGuesses,
   llmMaxFailedGuesses,
   llmMaxMalformedResponses,
   llmMaxModelErrors,
-  llmMaxPrompts,
-  llmNumResponses,
   llmTemperature,
 } from "../../strategies";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { LlmProposal, LlmProposalStatus } from "./entities/llm-proposal.entity";
+import { SolvePrompt, SolvePromptType, SolvePromptStatus } from "./entities/solve-prompt.entity";
 import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/strategy-run.entity";
-import { OrchestratorService, type ModelProvider } from "./orchestrator.service";
+import { OrchestratorService, type ChatMessage } from "./orchestrator.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { firstCombination } from "./combinatorics";
 
 const GROUP_SIZE = 4;
 
-// Backoff between retries of a transient model failure (e.g. the Ollama model
-// still loading after a cold start). Exponential from 1s, capped at 5min.
 const MODEL_ERROR_RETRY_BASE_DELAY_MS = 1000;
 const MODEL_ERROR_RETRY_MAX_DELAY_MS = 300000;
 
+function buildInitialPrompt(items: string[], N: number): string {
+  const totalItems = N * 4;
+
+  return [
+    `You are an expert solver for the NYT Connections puzzle.`,
+    ``,
+    `Task:`,
+    `Analyze the ${totalItems} provided items and group them into exactly ${N} distinct sets of 4 items each, where every set shares a clear, logical category or connection.`,
+    ``,
+    `Items:`,
+    items.join(", "),
+    ``,
+    `Rules:`,
+    `1. Use EVERY item from the list above EXACTLY ONCE.`,
+    `2. Do NOT add new words, alter spellings, or substitute items.`,
+    `3. Every group MUST contain EXACTLY 4 items.`,
+    ``,
+    `Then produce your final answer using EXACTLY the format below. Output nothing before ### GROUPS and nothing after the last line of ### ANSWER.`,
+    ``,
+    `### GROUPS`,
+    ...Array.from(
+      { length: N },
+      (_, i) =>
+        `#### Group ${i + 1}\nCategory: <short category name>\nWords: <ITEM1>, <ITEM2>, <ITEM3>, <ITEM4>\n`,
+    ),
+    `### ANSWER`,
+    ...Array.from({ length: N }, () => `<ITEM1>, <ITEM2>, <ITEM3>, <ITEM4>`),
+  ].join("\n");
+}
+
+function buildRetryPrompt(
+  remainingItems: string[],
+  lockedInGroups: string[][],
+  lastFailedGuess: { items: string[]; result: string },
+  N: number,
+): string {
+  const totalRemainingItems = N * 4;
+
+  const parts = [
+    `You are an expert solver for the NYT Connections puzzle.`,
+    ``,
+    `Feedback on Previous Guess:`,
+    `- Guess submitted: ${lastFailedGuess.items.join(", ")}`,
+    `- Result: ${lastFailedGuess.result}`,
+    `- Guidance: ${
+      lastFailedGuess.result.toLowerCase() === "one away" ||
+      lastFailedGuess.result.toLowerCase() === "offby1"
+        ? "Exactly 3 of these 4 items belong together in a category, but 1 item does not belong."
+        : "These 4 items do NOT all belong to the same category."
+    }`,
+  ];
+
+  if (lockedInGroups.length > 0) {
+    parts.push(
+      ``,
+      `Already Solved Groups (Do NOT include these items in your proposals):`,
+      ...lockedInGroups.map((group, idx) => `- Solved Group ${idx + 1}: ${group.join(", ")}`),
+    );
+  }
+
+  parts.push(
+    ``,
+    `Task:`,
+    `Analyze the remaining ${totalRemainingItems} items and group them into exactly ${N} distinct sets of 4 items each.`,
+    ``,
+    `Remaining Items:`,
+    remainingItems.join(", "),
+    ``,
+    `Rules:`,
+    `1. Use EVERY item from the remaining list above EXACTLY ONCE.`,
+    `2. Do NOT re-submit the failed guess (${lastFailedGuess.items.join(", ")}).`,
+    `3. Do NOT use items from the already solved groups.`,
+    `4. Every group MUST contain EXACTLY 4 items.`,
+    ``,
+    `Then produce your final answer using EXACTLY the format below. Output nothing before ### GROUPS and nothing after the last line of ### ANSWER.`,
+    ``,
+    `### GROUPS`,
+    ...Array.from(
+      { length: N },
+      (_, i) =>
+        `#### Group ${i + 1}\nCategory: <short category name>\nWords: <ITEM1>, <ITEM2>, <ITEM3>, <ITEM4>\n`,
+    ),
+    `### ANSWER`,
+    ...Array.from({ length: N }, () => `<ITEM1>, <ITEM2>, <ITEM3>, <ITEM4>`),
+  );
+
+  return parts.join("\n");
+}
+
 /**
- * Iterative LLM strategy runner: calls the orchestrator's /solve with the
- * remaining words plus the full guess history. The strategy name (llm-openai or
- * llm-ollama) selects which LLM backend the orchestrator consults for every
- * solve step. Each step starts by asking the model for a single answer; when
- * every candidate repeats a prior guess, the orchestrator re-prompts asking
- * for one more distinct candidate (at a fixed sampling temperature) until a
- * fresh candidate appears or its prompt budget runs out. The candidate count
- * restarts from its base on each step; the temperature is the same for every
- * call of the run.
- *
- * Recoverable model behaviors are bounded by config: too many wrong guesses
- * (LLM_MAX_FAILED_GUESSES) end the run with 'failed'; the orchestrator
- * exhausting its prompt budget on repeats (LLM_MAX_DUPLICATE_GUESSES) and
- * emitting unusable output (LLM_MAX_MALFORMED_RESPONSES) end the run with
- * 'duplicate' / 'malformedResponse' statuses. Transient model/network
- * failures (LLM_MAX_MODEL_ERRORS consecutive) are retried with backoff —
- * e.g. while the Ollama model is still loading — before the run aborts
- * with 'error'.
+ * Iterative LLM strategy runner using the unified AI Assist prompt flow.
+ * Each step sends the full conversation history to the orchestrator's
+ * /solve-assist endpoint, which calls generateText and parses the ANSWER:
+ * section. The runner creates 4 LlmProposal entries per prompt (one per
+ * parsed group), submits the first as a guess, and builds the next prompt
+ * (INITIAL or RETRY) based on the guess outcome.
  */
 @Injectable()
 export class LlmStrategyRunner {
   constructor(
     @Inject(StrategyRunStore) private readonly store: StrategyRunStore,
     @InjectRepository(Guess) private readonly guessRepo: Repository<Guess>,
+    @InjectRepository(SolvePrompt)
+    private readonly solvePromptRepo: Repository<SolvePrompt>,
     @Inject(OrchestratorService) private readonly orchestratorService: OrchestratorService,
   ) {}
 
@@ -66,10 +140,8 @@ export class LlmStrategyRunner {
       };
     }
 
-    // Rebuild guess history from flushed guesses so a worker restart mid-run
-    // resumes with the same forbidden-set context the model saw before. The
-    // duplicate count (and thus the run's duplicate limit) also resumes from
-    // the persisted history.
+    // Rebuild state from flushed guesses so a worker restart mid-run resumes
+    // with the same conversation context.
     const priorGuesses = (await this.loadLlmGuessesForRun(run.id)).map((guess) => ({
       words: guess.words,
       result: guess.result,
@@ -86,39 +158,36 @@ export class LlmStrategyRunner {
     const maxFailedGuesses = llmMaxFailedGuesses();
     const maxMalformed = llmMaxMalformedResponses();
     const maxModelErrors = llmMaxModelErrors();
-    const maxPrompts = llmMaxPrompts();
-    const modelProvider = this.modelProviderForStrategy(strategyName);
-    // A single fixed sampling temperature for the whole run. The orchestrator
-    // never changes it while re-prompting — escalation is numResponses-only —
-    // so this value is sent on every solve step.
     const temperature = llmTemperature();
     let consecutiveModelErrors = 0;
 
-    let numResponses: number;
+    // Conversation history for the AI Assist prompt flow.
+    const messages: ChatMessage[] = [];
+    // Groups confirmed correct — used to build RETRY prompts.
+    const lockedInGroups: string[][] = [];
+    // The last failed guess — used to build RETRY prompts.
+    let lastFailedGuess: { items: string[]; result: string } | null = null;
 
     const pendingGuesses: Partial<Guess>[] = [];
-    // Every candidate proposal emitted by the orchestrator for the current
-    // solve step, held until the guess it belongs to is flushed so the 'used'
-    // proposal can be linked to the inserted guess row.
     const pendingProposals: Partial<LlmProposal>[] = [];
+    const pendingPrompts: Partial<SolvePrompt>[] = [];
+    let globalPromptNumber = await this.store.countPrompts(run.id);
 
     while (true) {
-      // Each solve step is a fresh guess: start from the base candidate count.
-      // The temperature is fixed for the run.
-      numResponses = llmNumResponses();
+      const N = run.availableWords.length / GROUP_SIZE;
 
-      const outcome = await this.orchestratorService.proposeGroup({
-        puzzleWords: run.availableWords,
-        priorGuesses: priorGuesses.map((guess) => ({
-          words: guess.words,
-          result: this.mapGuessResultToOrchestrator(guess.result),
-        })),
-        modelProvider,
-        temperature,
-        numResponses,
-        maxNumResponses: MAX_LLM_NUM_RESPONSES,
-        maxPrompts,
-      });
+      // Build the prompt for this step.
+      let prompt: string;
+      if (lastFailedGuess) {
+        prompt = buildRetryPrompt(run.availableWords, lockedInGroups, lastFailedGuess, N);
+      } else {
+        prompt = buildInitialPrompt(run.availableWords, N);
+      }
+
+      // Append the user message to conversation history.
+      messages.push({ role: "user", content: prompt });
+
+      const outcome = await this.orchestratorService.solveAssist(messages);
 
       if (outcome.ok) {
         const data = outcome.data;
@@ -127,167 +196,196 @@ export class LlmStrategyRunner {
         // Set run-level model metadata from the first successful call.
         if (run.modelName === null) {
           run.modelName = data.model;
-          run.contextWindow = data.contextWindow;
         }
 
-        // The orchestrator re-prompted until it found a candidate that does
-        // not repeat a prior guess, so the winner is the single group in the
-        // response. Record the parameters that produced it; the candidate
-        // count is only recorded here (the next step restarts from the base
-        // value) and the temperature is fixed for the run.
-        numResponses = data.numResponses;
+        // Append the assistant response to conversation history.
+        messages.push({ role: "assistant", content: data.response });
 
-        const group = data.proposedGroups[0];
-        if (!group) {
-          // Defensive: the orchestrator is not expected to return a success
-          // with no candidate. Same as malformed.
+        // Create a SolvePrompt row for this LLM call.
+        globalPromptNumber++;
+        const promptType = lastFailedGuess ? SolvePromptType.RETRY : SolvePromptType.INITIAL_SOLVE;
+        const currentPrompt: Partial<SolvePrompt> = {
+          strategyRunId: run.id,
+          promptNumber: globalPromptNumber,
+          promptType,
+          status: SolvePromptStatus.PARSED,
+          rawResponseText: data.response,
+          temperature,
+          promptTokens: data.usage?.promptTokens ?? null,
+          completionTokens: data.usage?.completionTokens ?? null,
+          totalTokens: data.usage?.totalTokens ?? null,
+          latencyMs: data.latencyMs,
+        };
+        pendingPrompts.push(currentPrompt);
+
+        const groups = data.groups;
+        if (groups.length === 0) {
+          // currentPrompt is the same object already queued in pendingPrompts,
+          // so mutating it here still reflects at flush time.
+          currentPrompt.status = SolvePromptStatus.MALFORMED_NO_ANSWER_BLOCK;
           malformedCount++;
           if (malformedCount >= maxMalformed) {
             run.status = StrategyRunStatus.MALFORMED_RESPONSE;
             run.finishedAt = new Date();
           }
         } else {
-          const words = group.word_ids.map((id) => run.availableWords[id]);
-          const evaluation = GameService.evaluateGuessOnPuzzle(puzzle, words);
+          const responseText = data.response ?? "";
+          const categoryMap = new Map<number, string>();
+          const parsedGroupWords: string[][] = [];
 
-          guessCount++;
-          pendingGuesses.push({
-            puzzle: { id: puzzleId } as Puzzle,
-            strategyRun: { id: run.id } as StrategyRun,
-            words,
-            result: evaluation.result,
-            sequenceNumber: guessCount,
-            source: GuessSource.STRATEGY,
-            promptTokens: data.usage.promptTokens,
-            completionTokens: data.usage.completionTokens,
-            totalTokens: data.usage.totalTokens,
-            latencyMs: data.latencyMs,
-            temperature,
-            numResponses,
-            promptAttempts: data.promptAttempts,
-            duplicatesRejected: data.duplicatesRejected,
-            llmDetails: this.llmDetailsFor(group, data.prompt, data.promptMetadata),
-          });
-          priorGuesses.push({ words, result: evaluation.result });
+          // Scope parsing to the ### GROUPS section so scratchpad content
+          // (which may itself mention "Group" or contain stray colons) can't
+          // produce false matches.
+          const groupsSectionMatch = responseText.match(/### GROUPS([\s\S]*?)### ANSWER/i);
+          const groupsSectionText = groupsSectionMatch ? groupsSectionMatch[1] : responseText;
 
-          // Persist every candidate the orchestrator proposed across this
-          // step's prompts, not just the winner. word_ids index into the
-          // run's pool before the solved words are removed below, so resolve
-          // them here.
-          for (const proposal of data.proposals) {
-            pendingProposals.push({
-              strategyRun: { id: run.id } as StrategyRun,
-              promptNumber: proposal.promptNumber,
-              guessNumber: guessCount,
-              words: proposal.word_ids.map((id) => run.availableWords[id]),
-              category: proposal.category,
-              confidence: proposal.confidence,
-              reasoning: proposal.reasoning,
-              status: proposal.status as LlmProposalStatus,
-            });
+          // Parse structured "Group N" blocks: Category + Words. Split into
+          // per-group chunks first (on each "Group N" heading) so a missing
+          // field in one group can't bleed into the next group's match.
+          const groupChunks = groupsSectionText.split(/(?=Group\s+\d+)/i);
+
+          for (const chunk of groupChunks) {
+            const headingMatch = chunk.match(/Group\s+(\d+)/i);
+            if (!headingMatch) continue;
+
+            const groupNum = parseInt(headingMatch[1], 10);
+            const categoryMatch = chunk.match(/Category:\s*([^\n]+)/i);
+            const wordsMatch = chunk.match(/Words:\s*([^\n]+)/i);
+
+            if (categoryMatch) {
+              categoryMap.set(groupNum, categoryMatch[1].trim());
+            }
+
+            if (wordsMatch) {
+              const wordsLine = wordsMatch[1]
+                .split(",")
+                .map((w) => w.replace(/[`*]/g, "").trim())
+                .filter(Boolean);
+
+              if (wordsLine.length === GROUP_SIZE) {
+                parsedGroupWords[groupNum - 1] = wordsLine;
+              }
+            }
           }
 
-          if (evaluation.result === GuessResult.SUCCESS) {
-            run.availableWords = run.availableWords.filter((w) => !words.includes(w));
-            run.currentCombination = firstCombination(GROUP_SIZE);
+          // Use parsed words from the GROUPS block if available; fall back to incoming `groups` array
+          const sourceGroups = parsedGroupWords.length > 0 ? parsedGroupWords : groups;
+          const proposalWords = sourceGroups.map((group) => group.map((item) => item.trim()));
 
-            if (run.availableWords.length === 0) {
-              run.status = StrategyRunStatus.COMPLETED;
-              run.finishedAt = new Date();
+          const proposalEntries: Partial<LlmProposal>[] = [];
+          for (let i = 0; i < proposalWords.length; i++) {
+            const words = proposalWords[i];
+            if (!words || words.length !== GROUP_SIZE) continue;
+
+            const extractedCategory = categoryMap.get(i + 1);
+            const category = extractedCategory ?? `Category unavailable for group ${i + 1}`;
+
+            const proposalObj: Partial<LlmProposal> = {
+              strategyRun: { id: run.id } as StrategyRun,
+              solvePrompt: currentPrompt as SolvePrompt,
+              words,
+              category,
+              status: LlmProposalStatus.NOT_SELECTED,
+              guess: undefined,
+            };
+
+            pendingProposals.push(proposalObj);
+            proposalEntries.push(proposalObj);
+          }
+
+          // Evaluate parsed proposals sequentially as long as submitted guesses succeed.
+          for (let i = 0; i < proposalEntries.length; i++) {
+            const currentProposal = proposalEntries[i];
+            const guessWords = currentProposal.words!;
+
+            // Skip proposals containing words that were already solved by an earlier guess in this loop.
+            const isWordAlreadySolved = guessWords.some((w) => !run.availableWords.includes(w));
+            if (isWordAlreadySolved) {
+              continue;
             }
-          } else {
-            // A wrong group or a one-away both count as a mistake. Mirror the
-            // NYT rule of four mistakes per puzzle: once the run has made
-            // maxFailedGuesses of them it is labeled 'failed'.
-            failedGuessCount++;
-            if (failedGuessCount >= maxFailedGuesses) {
-              run.status = StrategyRunStatus.FAILED;
-              run.finishedAt = new Date();
+
+            guessCount++;
+            const isDuplicate = priorGuesses.some(
+              (g) =>
+                g.words.length === guessWords.length &&
+                g.words.every((w) => guessWords.includes(w)),
+            );
+            const evaluation: { result: GuessResult } = isDuplicate
+              ? { result: GuessResult.DUPLICATE }
+              : GameService.evaluateGuessOnPuzzle(puzzle, guessWords);
+
+            const newGuess: Partial<Guess> = {
+              puzzle: { id: puzzleId } as Puzzle,
+              strategyRun: { id: run.id } as StrategyRun,
+              words: guessWords,
+              result: evaluation.result,
+              sequenceNumber: guessCount,
+              source: GuessSource.STRATEGY,
+            };
+
+            pendingGuesses.push(newGuess);
+
+            // Mark the proposal as 'used' and bind it specifically to this new sequential guess.
+            currentProposal.status = LlmProposalStatus.USED;
+            currentProposal.guess = newGuess as Guess;
+
+            priorGuesses.push({ words: guessWords, result: evaluation.result });
+
+            if (evaluation.result === GuessResult.SUCCESS) {
+              run.availableWords = run.availableWords.filter((w) => !guessWords.includes(w));
+              lockedInGroups.push(guessWords);
+              lastFailedGuess = null;
+              run.currentCombination = firstCombination(GROUP_SIZE);
+
+              if (run.availableWords.length === 0) {
+                run.status = StrategyRunStatus.COMPLETED;
+                run.finishedAt = new Date();
+                break;
+              }
+            } else {
+              failedGuessCount++;
+              const resultStr =
+                evaluation.result === GuessResult.OFF_BY_ONE ? "one away" : "incorrect";
+              lastFailedGuess = { items: guessWords, result: resultStr };
+
+              if (evaluation.result === GuessResult.DUPLICATE) {
+                duplicateCount++;
+                if (duplicateCount >= maxDuplicates) {
+                  run.status = StrategyRunStatus.DUPLICATE;
+                  run.finishedAt = new Date();
+                }
+              }
+              if (failedGuessCount >= maxFailedGuesses) {
+                run.status = StrategyRunStatus.FAILED;
+                run.finishedAt = new Date();
+              }
+
+              // Stop evaluating subsequent proposals from this batch if a guess fails.
+              break;
             }
           }
         }
-      } else {
-        const { code, details } = outcome.error;
+      } else if (!outcome.ok) {
+        // The prompt was already pushed as a user turn before this call; the
+        // call failed with no assistant reply, so drop it rather than let
+        // the next retry stack a second consecutive user turn on top of it.
+        messages.pop();
+
+        const { code } = outcome.error;
 
         if (code === "model_error") {
-          // A model failure is usually transient — the Ollama model is still
-          // loading or the orchestrator just warmed up. Keep the run alive and
-          // retry with backoff instead of killing it, so a cold-started model
-          // gets time to load. Only give up after maxModelErrors consecutive
-          // failures so a genuinely broken provider still ends the run.
           consecutiveModelErrors++;
           if (consecutiveModelErrors >= maxModelErrors) {
             run.status = StrategyRunStatus.ERROR;
             run.finishedAt = new Date();
           }
         } else if (code === "duplicate_group") {
-          // Defensive: the orchestrator already re-prompts (requesting more
-          // distinct candidates, at a fixed temperature) before it reports a
-          // duplicate_group, so this means it exhausted its prompt budget.
-          // The first repeated group is recorded so the duplicate limit can
-          // kick in and the run terminates instead of retrying forever.
           duplicateCount++;
-          // A run can end on repeats without a single usable step, so record
-          // the model metadata from the error details too — otherwise a run
-          // that never produces a candidate would stay anonymous.
-          if (run.modelName === null && details?.model) {
-            run.modelName = details.model;
-            run.contextWindow = details.contextWindow ?? null;
-          }
-          const group = details?.proposedGroups?.[0];
-          if (group) {
-            const words = group.word_ids.map((id) => run.availableWords[id]);
-            guessCount++;
-            pendingGuesses.push({
-              puzzle: { id: puzzleId } as Puzzle,
-              strategyRun: { id: run.id } as StrategyRun,
-              words,
-              result: GuessResult.DUPLICATE,
-              sequenceNumber: guessCount,
-              source: GuessSource.STRATEGY,
-              promptTokens: details?.usage?.promptTokens ?? null,
-              completionTokens: details?.usage?.completionTokens ?? null,
-              totalTokens: details?.usage?.totalTokens ?? null,
-              latencyMs: details?.latencyMs ?? null,
-              temperature: details?.temperature ?? temperature,
-              numResponses: details?.numResponses ?? numResponses,
-              promptAttempts: details?.promptAttempts ?? 1,
-              duplicatesRejected: details?.duplicatesRejected ?? 0,
-              llmDetails: this.llmDetailsFor(group, details?.prompt, details?.promptMetadata),
-            });
-            priorGuesses.push({ words, result: GuessResult.DUPLICATE });
-            // The guess recorded here is the first repeated group of the last
-            // prompt, so that proposal flips from rejected_duplicate to used
-            // to mark which candidate actually became the recorded guess. The
-            // rest stay as the orchestrator classified them.
-            const proposals = details?.proposals ?? [];
-            const lastPromptNumber = Math.max(0, ...proposals.map((p) => p.promptNumber));
-            const usedProposal = proposals.find(
-              (p) => p.status === "rejected_duplicate" && p.promptNumber === lastPromptNumber,
-            );
-            for (const proposal of proposals) {
-              pendingProposals.push({
-                strategyRun: { id: run.id } as StrategyRun,
-                promptNumber: proposal.promptNumber,
-                guessNumber: guessCount,
-                words: proposal.word_ids.map((id) => run.availableWords[id]),
-                category: proposal.category,
-                confidence: proposal.confidence,
-                reasoning: proposal.reasoning,
-                status:
-                  proposal === usedProposal
-                    ? LlmProposalStatus.USED
-                    : (proposal.status as LlmProposalStatus),
-              });
-            }
-          }
-
           if (duplicateCount >= maxDuplicates) {
             run.status = StrategyRunStatus.DUPLICATE;
             run.finishedAt = new Date();
           }
         } else {
-          // invalid_group — the model produced output we couldn't use.
           malformedCount++;
           if (malformedCount >= maxMalformed) {
             run.status = StrategyRunStatus.MALFORMED_RESPONSE;
@@ -296,13 +394,10 @@ export class LlmStrategyRunner {
         }
       }
 
-      // Flush every iteration: LLM runs are short (tens of guesses, not
-      // thousands), so batching buys nothing, and flushing each step means a
-      // worker crash loses at most one step of progress.
-      await this.store.flushBatch(run, pendingGuesses, pendingProposals);
+      // Flush every iteration.
+      await this.store.flushBatch(run, pendingGuesses, pendingProposals, pendingPrompts);
 
-      // After a transient model failure, pause before re-prompting so the
-      // model has time to finish loading.
+      // After a transient model failure, pause before re-prompting.
       if (run.status === StrategyRunStatus.RUNNING && consecutiveModelErrors > 0) {
         await this.delay(this.modelErrorBackoff(consecutiveModelErrors));
       }
@@ -315,52 +410,6 @@ export class LlmStrategyRunner {
     return { status: run.status, guessCount };
   }
 
-  /**
-   * Maps an LLM strategy name to the LLM backend it consults. The two names
-   * are the UI-facing distinction; this is the only place the mapping lives so
-   * the rest of the run machinery is provider-agnostic.
-   */
-  private modelProviderForStrategy(strategyName: string): ModelProvider {
-    return strategyName === LLM_OPENAI ? "openai" : "ollama";
-  }
-
-  /**
-   * Picks which of the model's candidate groups becomes the submitted guess.
-   * The first candidate that is well-formed (4 unique, in-range IDs) and does
-   * not repeat a previously guessed group wins. If every candidate repeats an
-   * earlier guess, the first duplicate is returned so the run's duplicate
-   * limit can kick in. Returns null when no candidate is usable at all.
-   */
-  private mapGuessResultToOrchestrator(result: GuessResult): "correct" | "incorrect" | "oneAway" {
-    switch (result) {
-      case GuessResult.SUCCESS:
-        return "correct";
-      case GuessResult.OFF_BY_ONE:
-        return "oneAway";
-      default:
-        // FAILURE and DUPLICATE are both wrong groups.
-        return "incorrect";
-    }
-  }
-
-  private llmDetailsFor(
-    group: { category: string; confidence: number; reasoning: string },
-    prompt: string | undefined,
-    promptMetadata: unknown[] | undefined,
-  ): Record<string, unknown> {
-    return {
-      category: group.category,
-      confidence: group.confidence,
-      reasoning: group.reasoning,
-      ...(prompt !== undefined ? { prompt } : {}),
-      ...(promptMetadata !== undefined ? { promptMetadata } : {}),
-    };
-  }
-
-  /**
-   * Exponential backoff (1s, 2s, 4s, ... capped at 5min) before retrying a
-   * solve step after a transient model failure.
-   */
   private modelErrorBackoff(consecutiveErrors: number): number {
     return Math.min(
       MODEL_ERROR_RETRY_MAX_DELAY_MS,

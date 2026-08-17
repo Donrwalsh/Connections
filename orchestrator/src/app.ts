@@ -1,8 +1,13 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { SolveRequestSchema, type SolveResponse } from "./types.js";
-import { proposeGroup, SolveError } from "./solver.js";
-import { defaultProvider } from "./provider.js";
+import {
+  AssistRequestSchema,
+  SolveAssistRequestSchema,
+  type SolveAssistResponse,
+} from "./types.js";
+import { SolveError } from "./solver.js";
+import { runAssistStep } from "./assist.js";
+import { solveAssist } from "./solve-assist.js";
 
 export const app = new Hono();
 
@@ -42,14 +47,14 @@ app.use("*", async (c, next) => {
 app.get("/health", (c) => c.json({ status: "ok" }));
 
 app.post(
-  "/solve",
+  "/diagnose",
   bodyLimit({
     maxSize: SOLVE_BODY_LIMIT,
     onError: (c) => c.json({ error: "Request body too large" }, 413),
   }),
   async (c) => {
     const body = await c.req.json().catch(() => null);
-    const parsed = SolveRequestSchema.safeParse(body);
+    const parsed = AssistRequestSchema.safeParse(body);
 
     if (!parsed.success) {
       return c.json(
@@ -59,18 +64,13 @@ app.post(
     }
 
     try {
-      const solveRequest = {
-        // Strategy runs always pick their provider explicitly; provider-less
-        // requests (e.g. the in-game AI Assist) fall back to the configured
-        // default so the solver never has to guess.
-        modelProvider: defaultProvider(),
-        ...parsed.data,
-      };
-      const solveResult = await proposeGroup(solveRequest);
-      const response: SolveResponse = solveResult;
-      return c.json(response, 200);
+      // Conversational AI Assist: the frontend owns the session (prompt
+      // building, history, guess submission) and sends the full message
+      // history here. Nothing is persisted by this service.
+      const assistResult = await runAssistStep(parsed.data.messages);
+      return c.json(assistResult, 200);
     } catch (err) {
-      console.error("Solve failed:", err);
+      console.error("Diagnose failed:", err);
       if (err instanceof SolveError) {
         return c.json(
           {
@@ -82,7 +82,46 @@ app.post(
         );
       }
       const message = err instanceof Error ? err.message : "Unknown error";
-      return c.json({ error: "Solve failed", details: message }, 502);
+      return c.json({ error: "Diagnose failed", details: message }, 502);
+    }
+  },
+);
+
+app.post(
+  "/solve-assist",
+  bodyLimit({
+    maxSize: SOLVE_BODY_LIMIT,
+    onError: (c) => c.json({ error: "Request body too large" }, 413),
+  }),
+  async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const parsed = SolveAssistRequestSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return c.json(
+        { error: "Invalid request body", details: parsed.error.flatten() },
+        400,
+      );
+    }
+
+    try {
+      const result = await solveAssist(parsed.data.messages);
+      const response: SolveAssistResponse = result;
+      return c.json(response, 200);
+    } catch (err) {
+      console.error("Solve-assist failed:", err);
+      if (err instanceof SolveError) {
+        return c.json(
+          {
+            error: err.message,
+            code: err.code,
+            details: err.details,
+          },
+          ERROR_STATUS[err.code],
+        );
+      }
+      const message = err instanceof Error ? err.message : "Unknown error";
+      return c.json({ error: "Solve-assist failed", details: message }, 502);
     }
   },
 );

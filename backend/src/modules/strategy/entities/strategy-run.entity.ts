@@ -11,6 +11,7 @@ import {
 } from "typeorm";
 import { Puzzle } from "../../game/entities/puzzle.entity";
 import { Guess } from "./guess.entity";
+import { SolvePrompt } from "./solve-prompt.entity";
 
 export enum StrategyRunStatus {
   RUNNING = "running",
@@ -82,6 +83,9 @@ export class StrategyRun {
 
   @OneToMany(() => Guess, (guess) => guess.strategyRun)
   guesses: Guess[];
+
+  @OneToMany(() => SolvePrompt, (prompt) => prompt.strategyRun)
+  solvePrompts: SolvePrompt[];
 
   @CreateDateColumn({
     type: "timestamptz",

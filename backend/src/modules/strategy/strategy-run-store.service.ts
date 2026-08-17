@@ -4,6 +4,7 @@ import { DataSource, Repository } from "typeorm";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { Guess } from "./entities/guess.entity";
 import { LlmProposal, LlmProposalStatus } from "./entities/llm-proposal.entity";
+import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { firstCombination } from "./combinatorics";
 import { SHUFFLE_SMART, SHUFFLE_FOOLISH, LLM_OPENAI, LLM_OLLAMA } from "../../strategies";
@@ -24,6 +25,8 @@ export class StrategyRunStore {
     private readonly strategyRunRepo: Repository<StrategyRun>,
     @InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>,
     @InjectRepository(Guess) private readonly guessRepo: Repository<Guess>,
+    @InjectRepository(SolvePrompt)
+    private readonly solvePromptRepo: Repository<SolvePrompt>,
   ) {}
 
   async loadOrCreateRun(
@@ -95,9 +98,13 @@ export class StrategyRunStore {
   }
 
   async countGuesses(strategyRunId: number): Promise<number> {
-    // Plain indexed-column filter instead of a relation predicate so TypeORM
-    // doesn't emit an unnecessary join/subquery.
     return this.guessRepo.count({
+      where: { strategyRunId },
+    });
+  }
+
+  async countPrompts(strategyRunId: number): Promise<number> {
+    return this.solvePromptRepo.count({
       where: { strategyRunId },
     });
   }
@@ -106,35 +113,87 @@ export class StrategyRunStore {
     run: StrategyRun,
     pendingGuesses: Partial<Guess>[],
     pendingProposals: Partial<LlmProposal>[] = [],
+    pendingPrompts: Partial<SolvePrompt>[] = [],
   ): Promise<void> {
-    // Create a shallow copy to insert and clear the original buffer. The run is
-    // always saved — even with no new guesses — so terminal states reached
-    // without a recorded guess (e.g. LLM malformed/error limits) persist.
     const guessesToInsert = [...pendingGuesses];
     pendingGuesses.length = 0;
     const proposalsToInsert = [...pendingProposals];
     pendingProposals.length = 0;
+    const promptsToInsert = [...pendingPrompts];
+    pendingPrompts.length = 0;
 
     await this.dataSource.transaction(async (manager) => {
-      // Proposals are flushed together with the guess they belong to (one solve
-      // step per flush), so a single inserted guess id links the 'used'
-      // proposal to the guess that realized it.
-      let insertedGuessId: number | undefined;
-      if (guessesToInsert.length > 0) {
-        const result = await manager.insert("Guess", guessesToInsert);
-        insertedGuessId = result?.identifiers?.[0]?.id;
+      // 1. Insert SolvePrompt rows first and capture the generated IDs. Most
+      // recently inserted ID is the default link target; when a batch holds
+      // more than one prompt, proposals resolve to their specific prompt via
+      // promptNumber instead.
+      let insertedSolvePromptId: number | undefined;
+      const solvePromptIdByPromptNumber = new Map<number, number>();
+      if (promptsToInsert.length > 0) {
+        const result = await manager.insert("SolvePrompt", promptsToInsert);
+        const identifiers = result?.identifiers ?? [];
+        promptsToInsert.forEach((prompt, i) => {
+          const id = identifiers[i]?.id;
+          if (id === undefined) return;
+          if (prompt.promptNumber !== undefined) {
+            solvePromptIdByPromptNumber.set(prompt.promptNumber, id);
+          }
+          insertedSolvePromptId = id;
+        });
       }
 
+      // 2. Insert Guess rows and capture each row's own generated ID for
+      // linking — a single flush can carry more than one guess (the LLM can
+      // get several groups right in one response), so proposals must be
+      // paired with their own guess, not just the first one inserted.
+      const guessIdByGuess = new Map<object, number>();
+      if (guessesToInsert.length > 0) {
+        const result = await manager.insert("Guess", guessesToInsert);
+        const identifiers = result?.identifiers ?? [];
+        guessesToInsert.forEach((guess, i) => {
+          const id = identifiers[i]?.id;
+          if (id !== undefined) {
+            guessIdByGuess.set(guess, id);
+          }
+        });
+      }
+
+      // 3. Insert LlmProposal rows using the captured foreign keys.
       if (proposalsToInsert.length > 0) {
         await manager.insert(
           "LlmProposal",
-          proposalsToInsert.map((proposal) =>
-            proposal.status === LlmProposalStatus.USED && insertedGuessId !== undefined
-              ? { ...proposal, guess: { id: insertedGuessId } as Guess }
-              : proposal,
-          ),
+          proposalsToInsert.map((proposal) => {
+            const resolved: Record<string, unknown> = { ...proposal };
+
+            // Strip away transient properties if present on the partial entity
+            const promptNumber = resolved.promptNumber as number | undefined;
+            delete resolved.promptNumber;
+
+            // Link to the newly inserted SolvePrompt if not set
+            if (!resolved.solvePromptId) {
+              const resolvedSolvePromptId =
+                (promptNumber !== undefined
+                  ? solvePromptIdByPromptNumber.get(promptNumber)
+                  : undefined) ?? insertedSolvePromptId;
+              if (resolvedSolvePromptId !== undefined) {
+                resolved.solvePromptId = resolvedSolvePromptId;
+              }
+            }
+
+            // Link the 'used' proposal to the guess it became — matched by
+            // object identity against the guess it was paired with in memory.
+            if (resolved.status === LlmProposalStatus.USED && proposal.guess) {
+              const guessId = guessIdByGuess.get(proposal.guess);
+              if (guessId !== undefined) {
+                resolved.guessId = guessId;
+              }
+            }
+
+            return resolved;
+          }),
         );
       }
+
       await manager.save(StrategyRun, run);
     });
   }

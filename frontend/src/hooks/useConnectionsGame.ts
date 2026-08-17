@@ -3,7 +3,7 @@ import type { Category } from "../data/types";
 import {
   gameReducer,
   initGameState,
-  type AiSolveResponse,
+  type AiAssistSuccessPayload,
 } from "../lib/gameReducer";
 
 function shuffle<T>(items: T[]): T[] {
@@ -45,8 +45,8 @@ export function useConnectionsGame(
   );
   const aiSolve = useCallback(() => dispatch({ type: "AI_SOLVE_START" }), []);
   const aiSolveSuccess = useCallback(
-    (solution: AiSolveResponse) =>
-      dispatch({ type: "AI_SOLVE_SUCCESS", payload: solution }),
+    (payload: AiAssistSuccessPayload) =>
+      dispatch({ type: "AI_SOLVE_SUCCESS", payload }),
     [],
   );
   const aiSolveError = useCallback(

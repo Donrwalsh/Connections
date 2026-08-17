@@ -36,44 +36,54 @@ describe("App (e2e)", () => {
   let orchestrator: Server;
 
   beforeAll(async () => {
-    // Stand-in for the real orchestrator service so /api/solve is testable
+    // Stand-in for the real orchestrator service so /api/diagnose is testable
     // without an OpenAI key.
     orchestrator = http.createServer((req, res) => {
       let body = "";
       req.on("data", (chunk) => (body += chunk));
       req.on("end", () => {
-        if (req.url === "/solve" && req.method === "POST") {
+        if (req.url === "/solve-assist" && req.method === "POST") {
+          // Reply with whichever TEST_GROUPS group is still fully present in
+          // the latest prompt's remaining-items list, so each call makes
+          // real progress instead of re-proposing an already-solved group
+          // (which the runner correctly skips, stalling the run forever).
+          const parsed = JSON.parse(body || "{}") as {
+            messages?: { role: string; content: string }[];
+          };
+          const lastUserMessage = [...(parsed.messages ?? [])]
+            .reverse()
+            .find((m) => m.role === "user");
+          const promptText = lastUserMessage?.content ?? "";
+          const nextGroup =
+            TEST_GROUPS.find((g) => g.words.every((w) => promptText.includes(w))) ??
+            TEST_GROUPS[0];
+          const words = nextGroup.words;
+
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
-              proposedGroups: [
-                {
-                  word_ids: [0, 1, 2, 3],
-                  category: "Test category",
-                  confidence: 0.99,
-                  reasoning: "E2E fake",
-                },
-              ],
-              proposals: [
-                {
-                  promptNumber: 1,
-                  word_ids: [0, 1, 2, 3],
-                  category: "Test category",
-                  confidence: 0.99,
-                  reasoning: "E2E fake",
-                  status: "used",
-                },
-              ],
-              prompt: `echo: ${body}`,
+              response:
+                `### GROUPS\n#### Group 1\nCategory: E2E fake\nWords: ${words.join(", ")}\n\n` +
+                `### ANSWER\n${words.join(", ")}`,
+              groups: [words],
               model: "e2e-fake-model",
-              contextWindow: 8192,
-              latencyMs: 42,
-              usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
             }),
           );
         } else if (req.url === "/health") {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ status: "ok" }));
+        } else if (req.url === "/diagnose" && req.method === "POST") {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              response: "Reasoning.\nANSWER:\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
+              groups: [
+                ["AAAA", "BBBB", "CCCC", "DDDD"],
+                ["EEEE", "FFFF", "GGGG", "HHHH"],
+              ],
+              model: "e2e-fake-model",
+            }),
+          );
         } else {
           res.writeHead(404);
           res.end();
@@ -253,20 +263,6 @@ describe("App (e2e)", () => {
       result: GuessResult.SUCCESS,
       sequenceNumber: 1,
       source: GuessSource.STRATEGY,
-      promptTokens: 1027,
-      completionTokens: 593,
-      totalTokens: 1620,
-      latencyMs: 5647,
-      temperature: 1.2,
-      numResponses: 3,
-      promptAttempts: 2,
-      duplicatesRejected: 1,
-      llmDetails: {
-        category: "Test category",
-        confidence: 0.99,
-        reasoning: "E2E fake",
-        prompt: "solve step",
-      },
     });
 
     const res = await request(app.getHttpServer()).get(
@@ -279,47 +275,8 @@ describe("App (e2e)", () => {
       words: ["AAAA", "BBBB", "CCCC", "DDDD"],
       result: "success",
       guessedAt: expect.any(String),
-      promptTokens: 1027,
-      completionTokens: 593,
-      totalTokens: 1620,
-      latencyMs: 5647,
-      temperature: 1.2,
-      numResponses: 3,
-      promptAttempts: 2,
-      duplicatesRejected: 1,
-      llmDetails: {
-        category: "Test category",
-        confidence: 0.99,
-        reasoning: "E2E fake",
-        prompt: "solve step",
-      },
     });
     expect(guess.id).toBeTruthy();
-  });
-
-  it("POST /api/solve proxies to the orchestrator", async () => {
-    const res = await request(app.getHttpServer())
-      .post("/api/solve")
-      .send({ puzzleWords: ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"] });
-
-    expect(res.status).toBe(201);
-    expect(res.body).toEqual({
-      orchestrator: "healthy",
-      data: {
-        proposedGroups: [expect.objectContaining({ word_ids: [0, 1, 2, 3] })],
-        proposals: [
-          expect.objectContaining({
-            word_ids: [0, 1, 2, 3],
-            status: "used",
-          }),
-        ],
-        prompt: expect.any(String),
-        model: "e2e-fake-model",
-        contextWindow: 8192,
-        latencyMs: 42,
-        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
-      },
-    });
   });
 
   it("persists every proposed LLM candidate as an LlmProposal row", async () => {
@@ -330,8 +287,8 @@ describe("App (e2e)", () => {
     // test above, and this needs a fresh run.
     const result = await llmStrategyRunner.runLlmStrategy(puzzle.id, "llm-openai", 99);
 
-    // The fake orchestrator always proposes group [0, 1, 2, 3], which resolves
-    // to the next unsolved answer group on every step, so the run solves fully.
+    // The fake orchestrator always proposes the next unsolved answer group
+    // (see the /solve-assist handler above), so the run solves fully.
     expect(result.status).toBe(StrategyRunStatus.COMPLETED);
 
     const run = await dataSource.getRepository(StrategyRun).findOneByOrFail({
@@ -341,38 +298,61 @@ describe("App (e2e)", () => {
     });
     const proposals = await dataSource.getRepository(LlmProposal).find({
       where: { strategyRunId: run.id },
-      order: { guessNumber: "ASC" },
+      order: { id: "ASC" },
     });
 
     expect(proposals).toHaveLength(4);
     expect(proposals[0]).toMatchObject({
-      promptNumber: 1,
-      guessNumber: 1,
-      category: "Test category",
-      confidence: 0.99,
-      reasoning: "E2E fake",
+      category: "E2E fake",
       status: LlmProposalStatus.USED,
     });
     expect(proposals[0].words).toEqual(["AAAA", "BBBB", "CCCC", "DDDD"]);
     // The 'used' proposal links to the guess that realized it.
     expect(proposals[0].guessId).not.toBeNull();
-    // Each solved step leaves its own proposal row.
-    expect(proposals.map((p) => p.guessNumber)).toEqual([1, 2, 3, 4]);
   }, 30000);
 
-  it("POST /api/solve rejects an invalid body", async () => {
+  it("POST /api/diagnose proxies the message history to the orchestrator without persisting", async () => {
+    const before = await dataSource.getRepository(LlmProposal).count();
     const res = await request(app.getHttpServer())
-      .post("/api/solve")
-      .send({ puzzleWords: ["too", "few"] });
+      .post("/api/diagnose")
+      .send({
+        messages: [
+          {
+            role: "user",
+            content: "You are playing NYT Connections. The items below form 2 groups of four...",
+          },
+        ],
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({
+      orchestrator: "healthy",
+      data: {
+        response: "Reasoning.\nANSWER:\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
+        groups: [
+          ["AAAA", "BBBB", "CCCC", "DDDD"],
+          ["EEEE", "FFFF", "GGGG", "HHHH"],
+        ],
+        model: "e2e-fake-model",
+      },
+    });
+    // The AI Assist flow never persists anything — guesses are only submitted
+    // through the game itself in the frontend.
+    const after = await dataSource.getRepository(LlmProposal).count();
+    expect(after).toBe(before);
+  });
+
+  it("POST /api/diagnose rejects an invalid body", async () => {
+    const res = await request(app.getHttpServer()).post("/api/diagnose").send({ messages: [] });
 
     expect(res.status).toBe(400);
   });
 
   it("rejects non-whitelisted body fields", async () => {
     const res = await request(app.getHttpServer())
-      .post("/api/solve")
+      .post("/api/diagnose")
       .send({
-        puzzleWords: ["AAAA", "BBBB", "CCCC", "DDDD"],
+        messages: [{ role: "user", content: "hi" }],
         sneaky: "extra",
       });
 

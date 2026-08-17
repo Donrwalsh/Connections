@@ -27,38 +27,53 @@ export interface GameState {
   // the orchestrator alongside remainingWords so it doesn't repeat a wrong
   // guess or ignore an already-solved group.
   priorGuesses: PriorGuess[];
-  //AI solve stuff:
+  // AI Assist session state. `aiSession` carries the parts of the diagnostic
+  // session the game state can't express: the message history fed to the LLM
+  // (each press either starts a fresh INITIAL prompt or appends a RETRY prompt
+  // onto it) and the last AI-proposed group that came back incorrect/one-away.
+  // The session's locked-in groups and remaining items are the game state
+  // itself (solved / remainingWords), since each AI guess is submitted through
+  // the same validation the player uses.
   loading: boolean;
   error: string | null;
-  ai_solution: AiSolveData | null;
+  ai_solution: AiAssistData | null;
+  aiSession: AiSessionState;
 }
 
-// 1. Define the nested proposed group shape
-export interface ProposedGroup {
-  word_ids: number[];
-  category: string;
-  confidence: number;
-  reasoning: string;
+// A single message in the AI Assist conversation history. The frontend builds
+// the prompts from its session state, accumulates the model's raw responses,
+// and submits the full history to the orchestrator on every button press.
+export interface AiChatMessage {
+  role: "user" | "assistant";
+  content: string;
 }
 
-// 2. Define the inner 'data' payload
-export interface AiSolveData {
-  proposedGroup: ProposedGroup;
+// The most recent AI-proposed group that came back "incorrect" or "oneAway".
+// When set, the next button press appends a RETRY prompt to the history;
+// otherwise it starts a fresh INITIAL prompt.
+export interface AiLastFailedGuess {
+  items: string[];
+  result: GuessResult;
+}
+
+export interface AiSessionState {
+  history: AiChatMessage[];
+  lastFailedGuess: AiLastFailedGuess | null;
+}
+
+// 1. The inner 'data' payload returned by the backend's /api/diagnose proxy
+// plus the echo the frontend adds (the exact prompt sent and the updated
+// message history). Mirrors the orchestrator's assist response
+// (orchestrator/src/types.ts).
+export interface AiAssistData {
+  response: string;
+  groups: string[][];
   prompt: string;
-  // Snapshot of the remaining words that were sent as `puzzleWords` in the
-  // solve request, injected by the frontend so the UI can resolve word_ids
-  // back to words even after the board is shuffled or further solved.
-  words?: string[];
+  model?: string;
 }
 
-// 3. Define the full API Response payload — mirrors what the backend's
-// /api/solve endpoint actually returns (backend/src/app.service.ts).
-// `data` is only present when `orchestrator` is "healthy"; on failure or
-// timeout the backend still responds 200 with an `error` string instead.
-export interface AiSolveResponse {
-  orchestrator: "healthy" | "unhealthy";
-  data?: AiSolveData;
-  error?: string;
+export interface AiAssistSuccessPayload extends AiAssistData {
+  history: AiChatMessage[];
 }
 
 export type GameAction =
@@ -67,7 +82,7 @@ export type GameAction =
   | { type: "DESELECT_ALL" }
   | { type: "CLEAR_FEEDBACK" }
   | { type: "AI_SOLVE_START" }
-  | { type: "AI_SOLVE_SUCCESS"; payload: AiSolveResponse }
+  | { type: "AI_SOLVE_SUCCESS"; payload: AiAssistSuccessPayload }
   | { type: "AI_SOLVE_FAILURE"; payload: string }
   | { type: "SHUFFLE"; words: string[] }
   | { type: "CONFIRM_SOLVE" };
@@ -94,6 +109,7 @@ export function initGameState(
     loading: false,
     error: null,
     ai_solution: null,
+    aiSession: { history: [], lastFailedGuess: null },
   };
 }
 
@@ -120,6 +136,22 @@ function largestCategoryOverlap(
     const overlap = cat.words.filter((w) => selected.includes(w)).length;
     return Math.max(max, overlap);
   }, 0);
+}
+
+// Runs a proposed group through the game's guess validation: does it exactly
+// match a category, or is it a wrong guess (and if so, was it "one away")?
+// Shared by the player's Submit button and the AI Assist flow so both get
+// identical results.
+function evaluateGuess(
+  categories: Category[],
+  words: string[],
+): { kind: "correct"; category: Category } | { kind: "wrong"; result: GuessResult } {
+  const match = findMatchingCategory(categories, words);
+  if (match) {
+    return { kind: "correct", category: match };
+  }
+  const overlap = largestCategoryOverlap(categories, words);
+  return { kind: "wrong", result: overlap === 3 ? "oneAway" : "incorrect" };
 }
 
 // Maps each selected word to the difficulty of the category it belongs to.
@@ -163,12 +195,12 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         return state;
       }
 
-      const match = findMatchingCategory(state.categories, state.selected);
+      const outcome = evaluateGuess(state.categories, state.selected);
 
-      if (match) {
+      if (outcome.kind === "correct") {
         return {
           ...state,
-          pendingSolve: match,
+          pendingSolve: outcome.category,
           feedback: null,
           shakeWords: [],
           guessHistory: [
@@ -185,8 +217,6 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       // Wrong guess — capture which words to shake before clearing
       // selection, since selected is about to become [].
       const mistakes = state.mistakes + 1;
-      const overlap = largestCategoryOverlap(state.categories, state.selected);
-      const guessResult: GuessResult = overlap === 3 ? "oneAway" : "incorrect";
 
       return {
         ...state,
@@ -194,27 +224,98 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         shakeWords: state.selected,
         selected: [],
         status: mistakes >= MAX_MISTAKES ? "lost" : "playing",
-        feedback: overlap === 3 ? "one-away" : "incorrect",
+        feedback: outcome.result === "oneAway" ? "one-away" : "incorrect",
         guessHistory: [
           ...state.guessHistory,
           difficultiesForGuess(state.categories, state.selected),
         ],
         priorGuesses: [
           ...state.priorGuesses,
-          { words: state.selected, result: guessResult },
+          { words: state.selected, result: outcome.result },
         ],
       };
     }
 
     case "AI_SOLVE_START":
       return { ...state, loading: true, error: null };
-    case "AI_SOLVE_SUCCESS":
+
+    // The LLM answered with a full set of proposed groups. Submit each group
+    // through the same validation the player's Submit button uses, one at a
+    // time in the order the model listed them:
+    //   - correct: lock it in (solved / remainingWords), clear the last failed
+    //     guess, and keep submitting the rest of the batch.
+    //   - incorrect/one-away: record it as the last failed guess and stop —
+    //     the remaining proposed groups are re-requested via the next RETRY
+    //     prompt instead.
+    // When every remaining group has been locked in the puzzle is solved and
+    // the session state is cleared.
+    case "AI_SOLVE_SUCCESS": {
+      const { response, groups, prompt, model, history } = action.payload;
+
+      const solved = [...state.solved];
+      let remainingWords = [...state.remainingWords];
+      let mistakes = state.mistakes;
+      const guessHistory = [...state.guessHistory];
+      const priorGuesses = [...state.priorGuesses];
+      let lastFailedGuess: AiLastFailedGuess | null = null;
+      let status = state.status;
+      let feedback: Feedback = null;
+      let shakeWords: string[] = [];
+
+      for (const items of groups) {
+        if (status !== "playing") break;
+
+        const outcome = evaluateGuess(state.categories, items);
+
+        if (outcome.kind === "correct") {
+          const { category } = outcome;
+          if (!solved.some((cat) => cat.id === category.id)) {
+            solved.push(category);
+            remainingWords = remainingWords.filter(
+              (word) => !category.words.includes(word),
+            );
+          }
+          lastFailedGuess = null;
+          guessHistory.push(difficultiesForGuess(state.categories, items));
+          priorGuesses.push({ words: items, result: "correct" });
+          if (remainingWords.length === 0) {
+            status = "won";
+          }
+          continue;
+        }
+
+        // Wrong guess — record it and stop submitting this batch.
+        mistakes += 1;
+        lastFailedGuess = { items, result: outcome.result };
+        status = mistakes >= MAX_MISTAKES ? "lost" : "playing";
+        feedback = outcome.result === "oneAway" ? "one-away" : "incorrect";
+        shakeWords = items;
+        guessHistory.push(difficultiesForGuess(state.categories, items));
+        priorGuesses.push({ words: items, result: outcome.result });
+        break;
+      }
+
+      const puzzleSolved = status === "won" || remainingWords.length === 0;
+
       return {
         ...state,
         loading: false,
-        ai_solution: action.payload.data ?? null,
+        ai_solution: { response, groups, prompt, model },
         error: null,
+        solved,
+        remainingWords,
+        mistakes,
+        status,
+        feedback,
+        shakeWords,
+        guessHistory,
+        priorGuesses,
+        aiSession: puzzleSolved
+          ? { history: [], lastFailedGuess: null }
+          : { history, lastFailedGuess },
       };
+    }
+
     case "AI_SOLVE_FAILURE":
       return {
         ...state,

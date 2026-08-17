@@ -124,20 +124,19 @@ describe("useConnectionsGame", () => {
 
     act(() =>
       result.current.aiSolveSuccess({
-        orchestrator: "healthy",
-        data: {
-          proposedGroup: {
-            word_ids: [0, 1, 2, 3],
-            category: "WET WEATHER",
-            confidence: 0.9,
-            reasoning: "Precipitation",
-          },
-          prompt: "Find the group",
-        },
+        response: "Reasoning.\nANSWER:\nHAIL, RAIN, SLEET, SNOW",
+        groups: [["HAIL", "RAIN", "SLEET", "SNOW"]],
+        prompt: "You are playing NYT Connections...",
+        history: [
+          { role: "user", content: "You are playing NYT Connections..." },
+          { role: "assistant", content: "Reasoning.\nANSWER:\nHAIL, RAIN, SLEET, SNOW" },
+        ],
       }),
     );
     expect(result.current.state.loading).toBe(false);
     expect(result.current.state.ai_solution).toBeTruthy();
+    expect(result.current.state.solved).toHaveLength(1);
+    expect(result.current.state.remainingWords).not.toContain("HAIL");
 
     act(() => result.current.aiSolveError("orchestrator down"));
     expect(result.current.state.error).toBe("orchestrator down");

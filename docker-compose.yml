@@ -11,7 +11,6 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./database:/docker-entrypoint-initdb.d
     healthcheck:
       test:
         [
@@ -117,6 +116,7 @@ services:
       LLM_OLLAMA_CONCURRENCY: ${LLM_OLLAMA_CONCURRENCY:-1}
       SHUFFLE_FOOLISH_DUPLICATE_LIMIT: ${SHUFFLE_FOOLISH_DUPLICATE_LIMIT:-3}
       PUZZLE_CACHE_DIR: ${PUZZLE_CACHE_DIR:-/app/.puzzle-cache}
+      PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: ${PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS:-true}
     ports:
       - "4000:4000"
     depends_on:
@@ -190,6 +190,7 @@ services:
       LLM_OLLAMA_CONCURRENCY: ${LLM_OLLAMA_CONCURRENCY:-1}
       SHUFFLE_FOOLISH_DUPLICATE_LIMIT: ${SHUFFLE_FOOLISH_DUPLICATE_LIMIT:-3}
       PUZZLE_CACHE_DIR: ${PUZZLE_CACHE_DIR:-/app/.puzzle-cache}
+      PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: ${PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS:-true}
       CHOKIDAR_USEPOLLING: "true"
     depends_on:
       db:

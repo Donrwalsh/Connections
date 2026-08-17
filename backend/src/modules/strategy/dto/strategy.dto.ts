@@ -8,20 +8,9 @@ export interface GuessDto {
   guessedAt: Date;
 }
 
-// Full detail for a single guess, including the LLM telemetry recorded for
-// strategy guesses (null for non-LLM strategies and user guesses). Fetched
-// on demand per guess so the run-detail list stays index-only and slim.
-export interface GuessDetailDto extends GuessDto {
-  promptTokens: number | null;
-  completionTokens: number | null;
-  totalTokens: number | null;
-  latencyMs: number | null;
-  temperature: number | null;
-  numResponses: number | null;
-  promptAttempts: number | null;
-  duplicatesRejected: number | null;
-  llmDetails: Record<string, unknown> | null;
-}
+// Full detail for a single guess. Currently identical to the index DTO;
+// kept as a distinct type so the controller's return types stay explicit.
+export type GuessDetailDto = GuessDto;
 
 export interface StrategyRunDetailMeta {
   total: number;

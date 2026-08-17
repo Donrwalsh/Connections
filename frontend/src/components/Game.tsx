@@ -5,7 +5,7 @@ import { GameOverModal } from "./GameOverModal";
 import { MistakeTracker } from "./MistakeTracker";
 import { shuffleWords, type Puzzle } from "../data/types";
 import { useConnectionsGame } from "../hooks/useConnectionsGame";
-import { renderProposedGroup } from "../lib/renderProposedGroup";
+import { buildAiAssistTurn } from "../lib/aiAssistPrompts";
 
 const MAX_MISTAKES = 4;
 
@@ -48,30 +48,38 @@ export function Game({ puzzle }: GameProps) {
     return () => clearTimeout(timeoutId);
   }, [state.pendingSolve, confirmSolve]);
 
-  // Effect: Triggers when AI_SOLVE_START sets state.isAiSolving to true
+  // Effect: Triggers when AI_SOLVE_START sets state.loading to true.
+  // Two-mode diagnostic flow: each press proposes a full set of remaining
+  // groups and the reducer submits them as individual guesses. The prompt is
+  // the INITIAL prompt (fresh history) when the last AI guess didn't fail,
+  // or a RETRY prompt appended to the accumulated history when it did.
   useEffect(() => {
     if (!state.loading) return;
 
     setAiStatus("loading");
-    // The backend gives the AI solve a single attempt with a generous budget
-    // (ORCHESTRATOR_TIMEOUT_MS, default 120s — a step can run up to 5 model
-    // prompts), so we wait for its final answer. If nothing has resolved after
-    // 2s we assume a retry/step is in flight and surface that in the status.
+    // The backend gives the AI Assist step a single attempt with a generous
+    // budget (ORCHESTRATOR_TIMEOUT_MS, default 120s), so we wait for its final
+    // answer. If nothing has resolved after 2s we assume the model call is
+    // still in flight and surface that in the status.
     const retryNoticeTimer = setTimeout(() => setAiStatus("retrying"), 2000);
 
     const controller = new AbortController();
 
     async function fetchAiSolve() {
       try {
+        const { prompt, messages } = buildAiAssistTurn({
+          remainingItems: state.remainingWords,
+          lockedInGroups: state.solved.map((cat) => cat.words),
+          lastFailedGuess: state.aiSession.lastFailedGuess,
+          history: state.aiSession.history,
+        });
+
         const response = await fetch(
-          `${import.meta.env.VITE_API_URL}/api/solve`,
+          `${import.meta.env.VITE_API_URL}/api/diagnose`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              puzzleWords: state.remainingWords,
-              priorGuesses: state.priorGuesses,
-            }),
+            body: JSON.stringify({ messages }),
             signal: controller.signal,
           },
         );
@@ -93,11 +101,16 @@ export function Game({ puzzle }: GameProps) {
           );
         }
 
-        // Snapshot the words sent with the request so the UI can resolve
-        // the returned word_ids even if the board changes afterwards.
+        const { response: assistantResponse, groups, model } = result.data;
         aiSolveSuccess({
-          ...result,
-          data: { ...result.data, words: state.remainingWords },
+          response: assistantResponse,
+          groups,
+          model,
+          prompt,
+          history: [
+            ...messages,
+            { role: "assistant", content: assistantResponse },
+          ],
         });
       } catch (err) {
         const error = err as Error;
@@ -121,7 +134,8 @@ export function Game({ puzzle }: GameProps) {
   }, [
     state.loading,
     state.remainingWords,
-    state.priorGuesses,
+    state.solved,
+    state.aiSession,
     aiSolveSuccess,
     aiSolveError,
   ]);
@@ -185,7 +199,7 @@ export function Game({ puzzle }: GameProps) {
 
       {state.loading && aiStatus === "retrying" && (
         <p className="ai-status" role="status">
-          Taking longer than expected — retrying...
+          Taking longer than expected...
         </p>
       )}
 
@@ -227,13 +241,10 @@ export function Game({ puzzle }: GameProps) {
               overflowWrap: "anywhere",
             }}
           >
-            {renderProposedGroup(
-              state.ai_solution.proposedGroup,
-              state.ai_solution.words ?? [],
-            )}
+            {state.ai_solution.response}
           </pre>
 
-          {state.ai_solution.prompt && (
+          {state.aiSession.history.length > 0 && (
             <details className="ai-prompt-details">
               <summary style={{ cursor: "pointer" }}>
                 View prompt sent to the model
@@ -254,7 +265,13 @@ export function Game({ puzzle }: GameProps) {
                   overflowWrap: "anywhere",
                 }}
               >
-                {state.ai_solution.prompt}
+                {state.aiSession.history
+                  .map((msg) => {
+                    const label =
+                      msg.role === "user" ? "User" : "Assistant";
+                    return `[${label}]\n${msg.content}`;
+                  })
+                  .join("\n\n")}
               </pre>
             </details>
           )}

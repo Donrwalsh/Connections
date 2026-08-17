@@ -1,40 +1,17 @@
-import { OrchestratorService, type OrchestratorSolveRequest } from "./orchestrator.service";
+import { OrchestratorService, type ChatMessage } from "./orchestrator.service";
 
 describe("OrchestratorService", () => {
   let service: OrchestratorService;
   let mockFetch: jest.Mock;
 
-  const request: OrchestratorSolveRequest = {
-    puzzleWords: ["AAAA", "BBBB", "CCCC", "DDDD"],
-    priorGuesses: [],
-  };
+  const messages: ChatMessage[] = [{ role: "user", content: "solve this puzzle" }];
 
   const successBody = {
-    proposedGroups: [
-      {
-        word_ids: [0, 1, 2, 3],
-        category: "Fruit",
-        confidence: 0.9,
-        reasoning: "test",
-      },
-    ],
-    prompt: "solve step",
+    response: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
+    groups: [["AAAA", "BBBB", "CCCC", "DDDD"]],
     model: "mistral",
-    contextWindow: 8192,
     latencyMs: 5,
     usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
-    promptMetadata: [
-      {
-        attempt: 1,
-        temperature: 0,
-        numResponses: 1,
-        model: "mistral",
-        contextWindow: 8192,
-        latencyMs: 5,
-        usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
-        outcome: "accepted",
-      },
-    ],
   };
 
   const mockResponse = (init: {
@@ -66,92 +43,40 @@ describe("OrchestratorService", () => {
     jest.restoreAllMocks();
   });
 
-  it("should return the solve data on a 200", async () => {
+  it("should return the solve-assist data on a 200", async () => {
     mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
 
-    const outcome = await service.proposeGroup(request);
+    const outcome = await service.solveAssist(messages);
 
     expect(outcome).toEqual({ ok: true, data: successBody });
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://orchestrator.test/solve",
+      "http://orchestrator.test/solve-assist",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
           "Content-Type": "application/json",
           "x-internal-api-key": "test-key",
         }),
-        body: JSON.stringify(request),
+        body: JSON.stringify({ messages }),
       }),
     );
   });
 
-  it("should include the temperature in the request body when provided", async () => {
-    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
-
-    const outcome = await service.proposeGroup({ ...request, temperature: 1.4 });
-
-    expect(outcome).toEqual({ ok: true, data: successBody });
-    expect(mockFetch).toHaveBeenCalledWith(
-      "http://orchestrator.test/solve",
-      expect.objectContaining({
-        body: JSON.stringify({ ...request, temperature: 1.4 }),
-      }),
-    );
-  });
-
-  it("should include the number of responses in the request body when provided", async () => {
-    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
-
-    const outcome = await service.proposeGroup({ ...request, numResponses: 5 });
-
-    expect(outcome).toEqual({ ok: true, data: successBody });
-    expect(mockFetch).toHaveBeenCalledWith(
-      "http://orchestrator.test/solve",
-      expect.objectContaining({
-        body: JSON.stringify({ ...request, numResponses: 5 }),
-      }),
-    );
-  });
-
-  it("should include the model provider in the request body when provided", async () => {
-    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
-
-    const outcome = await service.proposeGroup({ ...request, modelProvider: "ollama" });
-
-    expect(outcome).toEqual({ ok: true, data: successBody });
-    expect(mockFetch).toHaveBeenCalledWith(
-      "http://orchestrator.test/solve",
-      expect.objectContaining({
-        body: JSON.stringify({ ...request, modelProvider: "ollama" }),
-      }),
-    );
-  });
-
-  it("should surface a duplicate_group response as a non-ok outcome", async () => {
+  it("should default latencyMs to 0 when the orchestrator omits it", async () => {
     mockFetch.mockResolvedValueOnce(
       mockResponse({
-        ok: false,
-        status: 409,
-        statusText: "Conflict",
-        body: {
-          error: "repeated group",
-          code: "duplicate_group",
-          details: { proposedGroup: { word_ids: [0, 1, 2, 3] } },
-        },
+        ok: true,
+        status: 200,
+        body: { response: "text", groups: [], model: "mistral" },
       }),
     );
 
-    const outcome = await service.proposeGroup(request);
+    const outcome = await service.solveAssist(messages);
 
     expect(outcome).toEqual({
-      ok: false,
-      error: {
-        error: "repeated group",
-        code: "duplicate_group",
-        details: { proposedGroup: { word_ids: [0, 1, 2, 3] } },
-      },
+      ok: true,
+      data: { response: "text", groups: [], model: "mistral", latencyMs: 0, usage: undefined },
     });
-    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it("should surface an invalid_group response as a non-ok outcome", async () => {
@@ -164,11 +89,11 @@ describe("OrchestratorService", () => {
       }),
     );
 
-    const outcome = await service.proposeGroup(request);
+    const outcome = await service.solveAssist(messages);
 
     expect(outcome).toEqual({
       ok: false,
-      error: { error: "malformed", code: "invalid_group", details: undefined },
+      error: { error: "malformed", code: "invalid_group" },
     });
   });
 
@@ -184,7 +109,7 @@ describe("OrchestratorService", () => {
       )
       .mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
 
-    const outcome = await service.proposeGroup(request);
+    const outcome = await service.solveAssist(messages);
 
     expect(outcome).toEqual({ ok: true, data: successBody });
     expect(mockFetch).toHaveBeenCalledTimes(2);
@@ -200,7 +125,7 @@ describe("OrchestratorService", () => {
       }),
     );
 
-    const outcome = await service.proposeGroup(request);
+    const outcome = await service.solveAssist(messages);
 
     expect(mockFetch).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
     expect(outcome).toMatchObject({
@@ -212,7 +137,7 @@ describe("OrchestratorService", () => {
   it("should give up with model_error after network failures", async () => {
     mockFetch.mockRejectedValue(new Error("ECONNREFUSED"));
 
-    const outcome = await service.proposeGroup(request);
+    const outcome = await service.solveAssist(messages);
 
     expect(mockFetch).toHaveBeenCalledTimes(4);
     expect(outcome).toMatchObject({
@@ -229,24 +154,15 @@ describe("OrchestratorService", () => {
     abortError.name = "AbortError";
     mockFetch.mockRejectedValue(abortError);
 
-    const outcome = await service.proposeGroup(request);
+    const outcome = await service.solveAssist(messages);
 
-    // A timeout means the whole multi-prompt step exceeded its budget; the
-    // orchestrator is likely still working on the aborted request, so retrying
-    // would just queue behind it. The strategy worker re-runs the guess step
-    // on its own backoff schedule instead.
+    // A timeout means the orchestrator is likely still working on the
+    // aborted request, so retrying would just queue behind it. The strategy
+    // worker re-runs the step on its own backoff schedule instead.
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(outcome).toEqual({
       ok: false,
       error: { error: "Request timed out", code: "model_error" },
     });
-  });
-
-  it("should surface the per-prompt metadata from a successful solve", async () => {
-    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
-
-    const outcome = await service.proposeGroup(request);
-
-    expect(outcome).toEqual({ ok: true, data: successBody });
   });
 });

@@ -9,22 +9,26 @@ import {
 } from "typeorm";
 import { StrategyRun } from "./strategy-run.entity";
 import { Guess } from "./guess.entity";
+import { SolvePrompt } from "./solve-prompt.entity";
 
 export enum LlmProposalStatus {
   USED = "used",
   REJECTED_DUPLICATE = "rejected_duplicate",
   NOT_SELECTED = "not_selected",
+  SUPERSEDED_BY_RETRY = "supersededByRetry",
+  INVALID_ITEMS = "invalidItems",
 }
 
 // Records every candidate group the LLM proposed across a solve step, not just
-// the winner. promptNumber identifies which prompt within the solve step
-// produced this group (1-based); guessNumber is the sequenceNumber of the guess
-// the step produced (NULL when the step ended without a guess). A 'used' row is
-// the proposal that became the guess and links to it via guessId; the guess's
+// the winner. solvePromptId identifies which prompt within the solve step
+// produced this group; guessNumber is the sequenceNumber of the guess the step
+// produced (NULL when the step ended without a guess). A 'used' row is the
+// proposal that became the guess and links to it via guessId; the guess's
 // outcome (success/failure/offBy1/duplicate) lives on the linked record.
 @Entity("LlmProposal")
 @Index("IDX_LlmProposal_strategyRunId", ["strategyRunId"])
 @Index("IDX_LlmProposal_guessId", ["guessId"])
+@Index("IDX_LlmProposal_solvePromptId", ["solvePromptId"])
 export class LlmProposal {
   @PrimaryGeneratedColumn()
   id: number;
@@ -45,22 +49,17 @@ export class LlmProposal {
   guess: Guess | null;
 
   @Column({ type: "int" })
-  promptNumber: number;
+  solvePromptId: number;
 
-  @Column({ type: "int", nullable: true })
-  guessNumber: number | null;
+  @ManyToOne(() => SolvePrompt, { nullable: false, onDelete: "CASCADE" })
+  @JoinColumn({ name: "solvePromptId" })
+  solvePrompt: SolvePrompt;
 
   @Column({ type: "jsonb" })
   words: string[];
 
   @Column({ type: "text" })
   category: string;
-
-  @Column({ type: "double precision" })
-  confidence: number;
-
-  @Column({ type: "text" })
-  reasoning: string;
 
   @Column({
     type: "enum",

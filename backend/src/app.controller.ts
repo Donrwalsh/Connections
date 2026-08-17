@@ -2,7 +2,7 @@ import { Body, Controller, Get, Inject, Post, Res } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import type { Response } from "express";
 import { AppService } from "./app.service";
-import { SolveDto } from "./modules/game/dto/game.dto";
+import { DiagnoseDto } from "./modules/game/dto/game.dto";
 
 @Controller()
 export class AppController {
@@ -17,11 +17,12 @@ export class AppController {
     return health;
   }
 
-  // /api/solve costs OpenAI tokens on every call, so it gets a much tighter
-  // per-IP budget than the global default.
+  // /api/diagnose (AI Assist) costs OpenAI tokens on every call, so it gets a
+  // much tighter per-IP budget than the global default. It never writes to
+  // the database.
   @Throttle({ default: { limit: 5, ttl: 60000 } })
-  @Post("api/solve")
-  async solve(@Body() body: SolveDto) {
-    return this.appService.solve(body.puzzleWords, body.priorGuesses ?? []);
+  @Post("api/diagnose")
+  async diagnose(@Body() body: DiagnoseDto) {
+    return this.appService.diagnose(body.messages);
   }
 }

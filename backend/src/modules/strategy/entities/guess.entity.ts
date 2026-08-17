@@ -70,43 +70,6 @@ export class Guess {
   })
   source: GuessSource;
 
-  // LLM telemetry (strategy guesses): token counts and round-trip latency
-  // of the model call that produced this guess.
-  @Column({ type: "int", nullable: true })
-  promptTokens: number | null;
-
-  @Column({ type: "int", nullable: true })
-  completionTokens: number | null;
-
-  @Column({ type: "int", nullable: true })
-  totalTokens: number | null;
-
-  @Column({ type: "int", nullable: true })
-  latencyMs: number | null;
-
-  // LLM strategy: the sampling parameters that produced this guess.
-  // numResponses escalates while the orchestrator hunts for a candidate that
-  // doesn't repeat a prior guess (the temperature is fixed for the run);
-  // promptAttempts counts the model calls in that step and duplicatesRejected
-  // how many repeats were discarded before the winner (or before the prompt
-  // budget ran out).
-  @Column({ type: "double precision", nullable: true })
-  temperature: number | null;
-
-  @Column({ type: "int", nullable: true })
-  numResponses: number | null;
-
-  @Column({ type: "int", nullable: true })
-  promptAttempts: number | null;
-
-  @Column({ type: "int", nullable: true })
-  duplicatesRejected: number | null;
-
-  // LLM strategy: free-form metadata (category, confidence, reasoning, and
-  // the exact prompt sent to the model for this step).
-  @Column({ type: "jsonb", nullable: true })
-  llmDetails: Record<string, unknown> | null;
-
   @CreateDateColumn({
     type: "timestamptz",
     default: () => "CURRENT_TIMESTAMP",

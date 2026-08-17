@@ -13,6 +13,7 @@ import { Puzzle } from "./modules/game/entities/puzzle.entity";
 import { StrategyModule } from "./modules/strategy/strategy.module";
 import { Guess } from "./modules/strategy/entities/guess.entity";
 import { LlmProposal } from "./modules/strategy/entities/llm-proposal.entity";
+import { SolvePrompt } from "./modules/strategy/entities/solve-prompt.entity";
 import { StrategyRun } from "./modules/strategy/entities/strategy-run.entity";
 
 @Module({
@@ -30,13 +31,13 @@ import { StrategyRun } from "./modules/strategy/entities/strategy-run.entity";
       username: process.env.DB_USER,
       password: process.env.DB_PASSWORD,
       database: process.env.DB_NAME,
-      entities: [Puzzle, AnswerGroup, GroupMember, StrategyRun, Guess, LlmProposal],
+      entities: [Puzzle, AnswerGroup, GroupMember, StrategyRun, Guess, LlmProposal, SolvePrompt],
       synchronize: false,
       migrations: [__dirname + "/migrations/*{.ts,.js}"],
       migrationsRun: true,
     }),
 
-    // Sensible global default; the OpenAI-backed /api/solve route is
+    // Sensible global default; the OpenAI-backed /api/diagnose route is
     // throttled much more aggressively in AppController.
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
 
