@@ -25,11 +25,11 @@ export class AppController {
     return this.appService.solve(body.puzzleWords, body.priorGuesses ?? []);
   }
 
-  // /api/diagnose (AI Assist) is the same display-only LLM read as /api/solve
-  // and gets the same per-IP budget. It never writes to the database.
+  // /api/diagnose (AI Assist) is the same LLM read as /api/solve and gets the
+  // same per-IP budget. It never writes to the database.
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post("api/diagnose")
   async diagnose(@Body() body: DiagnoseDto) {
-    return this.appService.diagnose(body.words);
+    return this.appService.diagnose(body.messages);
   }
 }

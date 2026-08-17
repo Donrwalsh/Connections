@@ -1,12 +1,12 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
-  DiagnoseRequestSchema,
+  AssistRequestSchema,
   SolveRequestSchema,
   type SolveResponse,
 } from "./types.js";
 import { proposeGroup, SolveError } from "./solver.js";
-import { diagnosePartition } from "./diagnose.js";
+import { runAssistStep } from "./assist.js";
 import { defaultProvider } from "./provider.js";
 
 export const app = new Hono();
@@ -100,7 +100,7 @@ app.post(
   }),
   async (c) => {
     const body = await c.req.json().catch(() => null);
-    const parsed = DiagnoseRequestSchema.safeParse(body);
+    const parsed = AssistRequestSchema.safeParse(body);
 
     if (!parsed.success) {
       return c.json(
@@ -110,10 +110,11 @@ app.post(
     }
 
     try {
-      // Display-only diagnostic: returns the model's full partition and the
-      // prompt that produced it. Nothing is persisted by this service.
-      const diagnoseResult = await diagnosePartition(parsed.data.words);
-      return c.json(diagnoseResult, 200);
+      // Conversational AI Assist: the frontend owns the session (prompt
+      // building, history, guess submission) and sends the full message
+      // history here. Nothing is persisted by this service.
+      const assistResult = await runAssistStep(parsed.data.messages);
+      return c.json(assistResult, 200);
     } catch (err) {
       console.error("Diagnose failed:", err);
       if (err instanceof SolveError) {

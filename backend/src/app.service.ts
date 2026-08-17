@@ -6,7 +6,8 @@ import {
   orchestratorTimeoutMs,
 } from "./config/env";
 import {
-  DiagnoseResponseDto,
+  AssistResponseDto,
+  ChatMessageDto,
   PriorGuessDto,
   SolveResponseDto,
 } from "./modules/game/dto/game.dto";
@@ -102,16 +103,19 @@ export class AppService {
   }
 
   /**
-   * Proxies the AI Assist diagnostic to the orchestrator's POST /diagnose.
-   * This is a display-only read: the orchestrator's full-puzzle partition is
-   * returned to the frontend and nothing is persisted. Unlike solve, a single
+   * Proxies the AI Assist step to the orchestrator's POST /diagnose.
+   * The AI Assist flow is conversational: the frontend owns the session and
+   * sends the full message history (the INITIAL prompt, or the RETRY prompt
+   * appended after a failed guess, plus the model's prior responses) on every
+   * press. The backend just forwards it and relays the model's raw answer
+   * back to the frontend; nothing is persisted. Unlike solve, a single
    * attempt is made — a non-2xx already reflects a failed model call or
    * unusable output, so retrying would just re-burn tokens.
    */
   async diagnose(
-    words: string[],
+    messages: ChatMessageDto[],
   ): Promise<
-    | { orchestrator: "healthy"; data: DiagnoseResponseDto }
+    | { orchestrator: "healthy"; data: AssistResponseDto }
     | { orchestrator: "unhealthy"; error: string }
   > {
     const url = `${this.orchestratorUrl}/diagnose`;
@@ -121,7 +125,7 @@ export class AppService {
         "Content-Type": "application/json",
         "x-internal-api-key": this.internalApiKey,
       },
-      body: JSON.stringify({ words }),
+      body: JSON.stringify({ messages }),
     };
 
     try {
@@ -129,8 +133,9 @@ export class AppService {
       const body = await res.json().catch(() => null);
 
       if (!res.ok) {
-        // Surface the orchestrator's own error message (e.g. an invalid
-        // partition) so the frontend can explain why the diagnostic failed.
+        // Surface the orchestrator's own error message (e.g. an unusable
+        // response with no ANSWER: section) so the frontend can explain why
+        // the AI Assist step failed.
         const message =
           body && typeof (body as { error?: unknown }).error === "string"
             ? (body as { error: string }).error
@@ -138,7 +143,7 @@ export class AppService {
         return { orchestrator: "unhealthy", error: message };
       }
 
-      return { orchestrator: "healthy", data: body as DiagnoseResponseDto };
+      return { orchestrator: "healthy", data: body as AssistResponseDto };
     } catch (err) {
       if (err instanceof Error) {
         this.logger.error(err);

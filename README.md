@@ -190,7 +190,7 @@ The backend E2E suite (`backend/test/app.e2e-spec.ts`) boots the real NestJS app
 │   └── src/
 │       ├── components/        # Board, Tiles, GameOverModal, ShareResult, etc.
 │       ├── pages/             # PuzzlePage (the only route)
-│       ├── lib/               # gameReducer, renderDiagnoseGroups, shareResult
+│       ├── lib/               # gameReducer, aiAssistPrompts, shareResult
 │       └── hooks/             # useConnectionsGame
 ├── orchestrator/              # Hono + AI SDK
 │   └── src/

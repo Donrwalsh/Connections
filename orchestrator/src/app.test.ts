@@ -34,16 +34,16 @@ vi.mock("./solver.js", () => ({
   }),
 }));
 
-vi.mock("./diagnose.js", () => ({
-  diagnosePartition: vi.fn(async () => {
+vi.mock("./assist.js", () => ({
+  runAssistStep: vi.fn(async () => {
     throw new Error("model call failed");
   }),
 }));
 
 import { proposeGroup } from "./solver.js";
-import { diagnosePartition } from "./diagnose.js";
+import { runAssistStep } from "./assist.js";
 const proposeGroupMock = vi.mocked(proposeGroup);
-const diagnosePartitionMock = vi.mocked(diagnosePartition);
+const runAssistStepMock = vi.mocked(runAssistStep);
 
 function diagnoseRequest(body: unknown) {
   return app.request("/diagnose", {
@@ -61,8 +61,8 @@ describe("orchestrator app", () => {
     process.env.INTERNAL_API_KEY = KEY;
     proposeGroupMock.mockReset();
     proposeGroupMock.mockRejectedValue(new Error("model call failed"));
-    diagnosePartitionMock.mockReset();
-    diagnosePartitionMock.mockRejectedValue(new Error("model call failed"));
+    runAssistStepMock.mockReset();
+    runAssistStepMock.mockRejectedValue(new Error("model call failed"));
   });
 
   afterEach(() => {
@@ -434,11 +434,17 @@ describe("orchestrator app", () => {
 
   describe("POST /diagnose", () => {
     const DIAGNOSE_BODY = {
-      words: ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"],
+      messages: [
+        {
+          role: "user",
+          content:
+            "You are playing NYT Connections. The items below form 2 groups of four...",
+        },
+      ],
     };
 
     it("rejects an invalid diagnose body", async () => {
-      const res = await diagnoseRequest({ words: ["too", "few"] });
+      const res = await diagnoseRequest({ messages: [] });
       expect(res.status).toBe(400);
       expect(await res.json()).toMatchObject({
         error: "Invalid request body",
@@ -453,48 +459,35 @@ describe("orchestrator app", () => {
       expect(body.details).toContain("model call failed");
     });
 
-    it("returns the model's full partition and prompt", async () => {
-      diagnosePartitionMock.mockResolvedValueOnce({
+    it("returns the model's raw answer and parsed groups", async () => {
+      runAssistStepMock.mockResolvedValueOnce({
+        response: "Reasoning.\nANSWER:\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
         groups: [
-          {
-            category: "Test",
-            items: ["AAAA", "BBBB", "CCCC", "DDDD"],
-            confidence: 0.9,
-          },
-          {
-            category: "Test",
-            items: ["EEEE", "FFFF", "GGGG", "HHHH"],
-            confidence: 0.8,
-          },
+          ["AAAA", "BBBB", "CCCC", "DDDD"],
+          ["EEEE", "FFFF", "GGGG", "HHHH"],
         ],
-        prompt: "Find groups of four items that share something in common.",
         model: "test-model",
       });
 
       const res = await diagnoseRequest(DIAGNOSE_BODY);
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({
+        response: "Reasoning.\nANSWER:\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
         groups: [
-          {
-            category: "Test",
-            items: ["AAAA", "BBBB", "CCCC", "DDDD"],
-            confidence: 0.9,
-          },
-          {
-            category: "Test",
-            items: ["EEEE", "FFFF", "GGGG", "HHHH"],
-            confidence: 0.8,
-          },
+          ["AAAA", "BBBB", "CCCC", "DDDD"],
+          ["EEEE", "FFFF", "GGGG", "HHHH"],
         ],
-        prompt: "Find groups of four items that share something in common.",
         model: "test-model",
       });
-      expect(diagnosePartitionMock).toHaveBeenCalledWith(DIAGNOSE_BODY.words);
+      expect(runAssistStepMock).toHaveBeenCalledWith(DIAGNOSE_BODY.messages);
     });
 
-    it("maps an invalid partition to 400", async () => {
-      diagnosePartitionMock.mockRejectedValueOnce(
-        new SolveError("invalid_group", "Item duplicated across groups"),
+    it("maps an unusable response to 400", async () => {
+      runAssistStepMock.mockRejectedValueOnce(
+        new SolveError(
+          "invalid_group",
+          'Model response contained no "ANSWER:" section with group lines',
+        ),
       );
       const res = await diagnoseRequest(DIAGNOSE_BODY);
       expect(res.status).toBe(400);
@@ -504,7 +497,7 @@ describe("orchestrator app", () => {
 
     it("rejects a body over the size limit", async () => {
       const res = await diagnoseRequest({
-        words: ["x".repeat(SOLVE_BODY_LIMIT + 1)],
+        messages: [{ role: "user", content: "x".repeat(SOLVE_BODY_LIMIT + 1) }],
       });
       expect(res.status).toBe(413);
     });

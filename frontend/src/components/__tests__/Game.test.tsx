@@ -3,6 +3,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Category, Puzzle } from "../../data/types";
@@ -175,40 +176,51 @@ describe("Game Component", () => {
     expect(screen.getByText(/KAYAK, LEVEL, MOM, RACECAR/)).toBeInTheDocument();
   });
 
-  it("displays an AI recommendation when AI assist succeeds", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          orchestrator: "healthy",
-          data: {
-            groups: [
-              {
-                category: "WET WEATHER",
-                items: ["HAIL", "RAIN", "SLEET", "SNOW"],
-                confidence: 0.95,
-              },
-              {
-                category: "NBA TEAMS",
-                items: ["BUCKS", "HEAT", "JAZZ", "NETS"],
-                confidence: 0.8,
-              },
-            ],
-            prompt: "Find the four connected words.",
-          },
-        }),
+  it("submits the AI's groups as guesses and shows the response when AI assist succeeds", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        orchestrator: "healthy",
+        data: {
+          response:
+            "Reasoning.\nANSWER:\nHAIL, RAIN, SLEET, SNOW\nBUCKS, HEAT, JAZZ, NETS",
+          groups: [
+            ["HAIL", "RAIN", "SLEET", "SNOW"],
+            ["BUCKS", "HEAT", "JAZZ", "NETS"],
+          ],
+          model: "test-model",
+        },
       }),
-    );
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     render(<Game puzzle={puzzle} />);
     fireEvent.click(screen.getByText("AI Assist"));
 
-    expect(await screen.findByText(/WET WEATHER/)).toBeInTheDocument();
-    // The diagnostic echoes the board words themselves, not word indices.
-    expect(screen.getByText(/HAIL.*RAIN.*SLEET.*SNOW/)).toBeInTheDocument();
-    expect(screen.getByText(/BUCKS.*HEAT.*JAZZ.*NETS/)).toBeInTheDocument();
+    // Both proposed groups were submitted as guesses and locked in.
+    expect(await screen.findByText("WET WEATHER")).toBeInTheDocument();
+    expect(screen.getByText("NBA TEAMS")).toBeInTheDocument();
+    // The locked-in words animate out of the board.
+    await waitFor(() => {
+      expect(screen.queryByText("HAIL")).not.toBeInTheDocument();
+      expect(screen.queryByText("BUCKS")).not.toBeInTheDocument();
+    });
+    // The raw model response is shown in the recommendation pane.
+    expect(screen.getAllByText(/Reasoning\./).length).toBeGreaterThan(0);
     expect(screen.getByText("View prompt sent to the model")).toBeInTheDocument();
+
+    // The INITIAL prompt was sent as a fresh single-message history.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/diagnose");
+    const body = JSON.parse(init.body as string) as {
+      messages: { role: string; content: string }[];
+    };
+    expect(body.messages).toHaveLength(1);
+    expect(body.messages[0].role).toBe("user");
+    expect(body.messages[0].content).toContain(
+      "You are playing NYT Connections",
+    );
   });
 
   it("shows an error when the AI orchestrator is unhealthy", async () => {
@@ -280,14 +292,9 @@ describe("Game Component", () => {
         json: async () => ({
           orchestrator: "healthy",
           data: {
-            groups: [
-              {
-                category: "WET WEATHER",
-                items: ["HAIL", "RAIN", "SLEET", "SNOW"],
-                confidence: 0.95,
-              },
-            ],
-            prompt: "Find the four connected words.",
+            response: "ANSWER:\nHAIL, RAIN, SLEET, SNOW",
+            groups: [["HAIL", "RAIN", "SLEET", "SNOW"]],
+            model: "test-model",
           },
         }),
       });

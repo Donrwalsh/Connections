@@ -302,69 +302,53 @@ export const SolveResponseSchema = z.object({
 export type SolveResponse = z.infer<typeof SolveResponseSchema>;
 
 /**
- * A single group in the AI Assist's full-puzzle partition diagnostic. Unlike
- * the solve flow (which references words by index), the diagnostic is a
- * display-only read — nothing is persisted — so the model answers with the
- * items themselves rather than word_ids.
+ * A single message in the AI Assist conversation history. The frontend owns
+ * the session: it builds the prompts (INITIAL or RETRY, per its game state),
+ * accumulates the model's free-form responses, and submits the full history
+ * on every press. The orchestrator stays stateless — it just feeds the
+ * history to the LLM and returns the raw assistant text.
  */
-export const DiagnoseGroupSchema = z.object({
-  category: z
+export const ChatMessageSchema = z.object({
+  role: z.enum(["user", "assistant"]).describe("Author of the message"),
+  content: z
     .string()
-    .describe("Short string naming the shared theme/category"),
-  items: z
-    .array(z.string())
-    .length(4)
-    .describe("Exactly 4 items from the puzzle that share the category"),
-  confidence: z
-    .number()
-    .min(0)
-    .max(1)
+    .min(1)
+    .describe("Plain-text message body, exactly as displayed"),
+});
+export type ChatMessage = z.infer<typeof ChatMessageSchema>;
+
+/**
+ * Request body for POST /diagnose. The AI Assist flow is conversational:
+ * each button press appends a new user prompt (INITIAL on a fresh session,
+ * RETRY after a failed guess) and re-sends the whole message history so the
+ * model sees its prior proposals and the feedback on them.
+ */
+export const AssistRequestSchema = z.object({
+  messages: z
+    .array(ChatMessageSchema)
+    .min(1)
     .describe(
-      "Model's self-assessed confidence (0-1) that this exact grouping is correct",
+      "Full conversation history to submit to the model, oldest first",
     ),
 });
-export type DiagnoseGroup = z.infer<typeof DiagnoseGroupSchema>;
+export type AssistRequest = z.infer<typeof AssistRequestSchema>;
 
 /**
- * The full partition the model is asked to produce for a diagnostic: a JSON
- * object wrapping an array of exactly 4 groups of 4 items covering the whole
- * word list. The top level must be an object (not a bare array) because
- * providers' structured-output response_format requires a JSON Schema of
- * type "object". Content-level checks (is every item used exactly once?)
- * happen in the diagnose function.
+ * Response body for POST /diagnose. `response` is the model's raw answer
+ * (reasoning plus the "ANSWER:" block); `groups` is the parsed ANSWER block —
+ * one array of items per group line, in the order the model listed them. The
+ * frontend submits each group as an individual guess through the game's own
+ * validation. `prompt` is omitted here because the orchestrator never builds
+ * it — the frontend echoes the exact prompt it sent for display.
  */
-export const DiagnoseOutputSchema = z.object({
+export const AssistResponseSchema = z.object({
+  response: z.string().describe("Raw assistant text returned by the model"),
   groups: z
-    .array(DiagnoseGroupSchema)
-    .length(4)
-    .describe("The final partition: exactly 4 groups of 4 items"),
-});
-
-/**
- * Request body for POST /diagnose. The backend sends the words currently in
- * play (always a multiple of 4); the orchestrator returns the model's full
- * partition without consulting prior guesses or persisting anything.
- */
-export const DiagnoseRequestSchema = z.object({
-  words: z
-    .array(z.string())
-    .min(4)
-    .max(16)
-    .describe("Words to partition into groups of 4"),
-});
-export type DiagnoseRequest = z.infer<typeof DiagnoseRequestSchema>;
-
-/**
- * Response body for POST /diagnose. `prompt` is the exact text sent to the
- * model so the frontend can show what was asked. No usage/telemetry is
- * returned because the diagnostic is display-only and never persisted.
- */
-export const DiagnoseResponseSchema = z.object({
-  groups: z.array(DiagnoseGroupSchema).length(4),
-  prompt: z.string(),
+    .array(z.array(z.string()))
+    .describe("Parsed group lines from the ANSWER: section, in listed order"),
   model: z.string(),
 });
-export type DiagnoseResponse = z.infer<typeof DiagnoseResponseSchema>;
+export type AssistResponse = z.infer<typeof AssistResponseSchema>;
 
 /**
  * Why a solve step failed. Distinct codes let the backend decide whether

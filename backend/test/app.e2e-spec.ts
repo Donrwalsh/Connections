@@ -78,19 +78,12 @@ describe("App (e2e)", () => {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
+              response:
+                "Reasoning.\nANSWER:\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
               groups: [
-                {
-                  category: "Test category",
-                  items: ["AAAA", "BBBB", "CCCC", "DDDD"],
-                  confidence: 0.99,
-                },
-                {
-                  category: "Test category",
-                  items: ["EEEE", "FFFF", "GGGG", "HHHH"],
-                  confidence: 0.9,
-                },
+                ["AAAA", "BBBB", "CCCC", "DDDD"],
+                ["EEEE", "FFFF", "GGGG", "HHHH"],
               ],
-              prompt: `echo: ${body}`,
               model: "e2e-fake-model",
             }),
           );
@@ -388,33 +381,34 @@ describe("App (e2e)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("POST /api/diagnose proxies to the orchestrator without persisting", async () => {
+  it("POST /api/diagnose proxies the message history to the orchestrator without persisting", async () => {
     const before = await dataSource.getRepository(LlmProposal).count();
     const res = await request(app.getHttpServer())
       .post("/api/diagnose")
-      .send({ words: ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"] });
+      .send({
+        messages: [
+          {
+            role: "user",
+            content:
+              "You are playing NYT Connections. The items below form 2 groups of four...",
+          },
+        ],
+      });
 
     expect(res.status).toBe(201);
     expect(res.body).toEqual({
       orchestrator: "healthy",
       data: {
+        response: "Reasoning.\nANSWER:\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
         groups: [
-          {
-            category: "Test category",
-            items: ["AAAA", "BBBB", "CCCC", "DDDD"],
-            confidence: 0.99,
-          },
-          {
-            category: "Test category",
-            items: ["EEEE", "FFFF", "GGGG", "HHHH"],
-            confidence: 0.9,
-          },
+          ["AAAA", "BBBB", "CCCC", "DDDD"],
+          ["EEEE", "FFFF", "GGGG", "HHHH"],
         ],
-        prompt: expect.any(String),
         model: "e2e-fake-model",
       },
     });
-    // The diagnostic is display-only: nothing was written to the database.
+    // The AI Assist flow never persists anything — guesses are only submitted
+    // through the game itself in the frontend.
     const after = await dataSource.getRepository(LlmProposal).count();
     expect(after).toBe(before);
   });
@@ -422,7 +416,7 @@ describe("App (e2e)", () => {
   it("POST /api/diagnose rejects an invalid body", async () => {
     const res = await request(app.getHttpServer())
       .post("/api/diagnose")
-      .send({ words: ["too", "few"] });
+      .send({ messages: [] });
 
     expect(res.status).toBe(400);
   });

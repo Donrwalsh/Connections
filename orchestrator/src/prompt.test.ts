@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildDiagnosePrompt,
-  buildSolvePrompt,
-  forbiddenIdSets,
-  oneAwayIdSets,
-} from "./prompt.js";
+import { buildSolvePrompt, forbiddenIdSets, oneAwayIdSets } from "./prompt.js";
 import type { SolveRequest } from "./types.js";
 
 const WORDS = ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"];
@@ -198,40 +193,6 @@ describe("buildSolvePrompt", () => {
     expect(prompt).not.toContain("forbidden");
     expect(prompt).toContain(
       '"reasoning": "Explain the category step-by-step."',
-    );
-  });
-});
-
-describe("buildDiagnosePrompt", () => {
-  it("lists the words to partition", () => {
-    const prompt = buildDiagnosePrompt(["AAAA", "BBBB", "CCCC", "DDDD"]);
-
-    expect(prompt).toContain("Words: AAAA, BBBB, CCCC, DDDD");
-  });
-
-  it("asks for a JSON object of four groups with category, items and confidence", () => {
-    const prompt = buildDiagnosePrompt(WORDS);
-
-    expect(prompt).toContain(
-      'Output your answer as a JSON object with a single key "groups" holding',
-    );
-    expect(prompt).toContain('- "category": a short string naming the shared theme');
-    expect(prompt).toContain(
-      '- "items": an array of exactly four strings, the items in this group',
-    );
-    expect(prompt).toContain(
-      '- "confidence": a number between 0 and 1 (inclusive)',
-    );
-    expect(prompt).toContain("Output ONLY the JSON object.");
-    expect(prompt).toContain("markdown code fences before or after it");
-  });
-
-  it("includes an illustrative example shape", () => {
-    const prompt = buildDiagnosePrompt(WORDS);
-
-    expect(prompt).toContain("Example shape (do not reuse this content");
-    expect(prompt).toContain(
-      '"category": "Types of bread", "items": ["RYE", "SOURDOUGH", "PITA", "NAAN"]',
     );
   });
 });

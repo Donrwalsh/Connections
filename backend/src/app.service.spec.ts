@@ -368,28 +368,27 @@ describe("AppService", () => {
   });
 
   describe("diagnose", () => {
-    const words = ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"];
+    const messages = [
+      {
+        role: "user" as const,
+        content:
+          "You are playing NYT Connections. The items below form 2 groups of four...",
+      },
+    ];
 
-    it("should return healthy with the partition data on a 2xx response", async () => {
+    it("should return healthy with the model answer on a 2xx response", async () => {
       const body = {
+        response:
+          "Reasoning.\nANSWER:\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
         groups: [
-          {
-            category: "Test",
-            items: ["AAAA", "BBBB", "CCCC", "DDDD"],
-            confidence: 0.9,
-          },
-          {
-            category: "Test",
-            items: ["EEEE", "FFFF", "GGGG", "HHHH"],
-            confidence: 0.8,
-          },
+          ["AAAA", "BBBB", "CCCC", "DDDD"],
+          ["EEEE", "FFFF", "GGGG", "HHHH"],
         ],
-        prompt: "Find groups of four items that share something in common.",
         model: "test-model",
       };
       fetchSpy = jest.spyOn(global, "fetch").mockResolvedValue(mockResponse(200, "OK", body));
 
-      const result = await service.diagnose(words);
+      const result = await service.diagnose(messages);
 
       expect(result).toEqual({ orchestrator: "healthy", data: body });
       expect(fetchSpy).toHaveBeenCalledWith(
@@ -400,7 +399,7 @@ describe("AppService", () => {
             "Content-Type": "application/json",
             "x-internal-api-key": "test-key",
           }),
-          body: JSON.stringify({ words }),
+          body: JSON.stringify({ messages }),
         }),
       );
     });
@@ -409,14 +408,16 @@ describe("AppService", () => {
       fetchSpy = jest
         .spyOn(global, "fetch")
         .mockResolvedValue(
-          mockResponse(400, "Bad Request", { error: "Item duplicated across groups" }),
+          mockResponse(400, "Bad Request", {
+            error: 'Model response contained no "ANSWER:" section with group lines',
+          }),
         );
 
-      const result = await service.diagnose(words);
+      const result = await service.diagnose(messages);
 
       expect(result).toEqual({
         orchestrator: "unhealthy",
-        error: "Item duplicated across groups",
+        error: 'Model response contained no "ANSWER:" section with group lines',
       });
     });
 
@@ -425,7 +426,7 @@ describe("AppService", () => {
         .spyOn(global, "fetch")
         .mockResolvedValue(mockResponse(502, "Bad Gateway", {}));
 
-      const result = await service.diagnose(words);
+      const result = await service.diagnose(messages);
 
       expect(result).toEqual({
         orchestrator: "unhealthy",
@@ -437,7 +438,7 @@ describe("AppService", () => {
       const logSpy = jest.spyOn(Logger.prototype, "error").mockImplementation(() => {});
       fetchSpy = jest.spyOn(global, "fetch").mockRejectedValue(new Error("ECONNREFUSED"));
 
-      const result = await service.diagnose(words);
+      const result = await service.diagnose(messages);
 
       expect(result).toEqual({
         orchestrator: "unhealthy",

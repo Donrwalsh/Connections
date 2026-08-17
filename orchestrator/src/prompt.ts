@@ -215,38 +215,3 @@ export function buildSolvePrompt(request: SolveRequest): string {
 
   return sections.join("\n\n");
 }
-
-/**
- * Builds the prompt for the AI Assist diagnostic: hand the model the word
- * list and ask for a full 4-group partition. This is a display-only read
- * (nothing is persisted), so the model answers with the items themselves
- * rather than word_ids, and no prior-guess context is included.
- */
-export function buildDiagnosePrompt(words: string[]): string {
-  return [
-    `Words: ${words.join(", ")}`,
-    "",
-    "Find groups of four items that share something in common.",
-    "",
-    "Output your answer as a JSON object with a single key \"groups\" holding",
-    "an array of exactly four objects, one per group. Each group object must",
-    "have exactly these fields:",
-    '- "category": a short string naming the shared theme',
-    '- "items": an array of exactly four strings, the items in this group',
-    '- "confidence": a number between 0 and 1 (inclusive) representing how',
-    "  confident you are that this group is correct",
-    "",
-    "Output ONLY the JSON object. No additional text, explanation, headers,",
-    "or markdown code fences before or after it.",
-    "",
-    "Example shape (do not reuse this content, it's illustrative only):",
-    '{',
-    '  "groups": [',
-    '    {"category": "Types of bread", "items": ["RYE", "SOURDOUGH", "PITA", "NAAN"], "confidence": 0.9},',
-    '    {"category": "___ ball", "items": ["BASKET", "FOOT", "BASE", "FIRE"], "confidence": 0.75},',
-    '    {"category": "Colors", "items": ["RED", "BLUE", "GREEN", "TEAL"], "confidence": 0.6},',
-    '    {"category": "Currencies", "items": ["YEN", "EURO", "PESO", "RAND"], "confidence": 0.4}',
-    '  ]',
-    '}',
-  ].join("\n");
-}

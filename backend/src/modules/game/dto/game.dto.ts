@@ -4,6 +4,8 @@ import {
   ArrayMinSize,
   IsArray,
   IsEnum,
+  IsIn,
+  IsNotEmpty,
   IsOptional,
   IsString,
   ValidateNested,
@@ -72,22 +74,25 @@ export interface SolveResponseDto {
   promptMetadata?: PromptMetadataDto[];
 }
 
+export class ChatMessageDto {
+  @IsIn(["user", "assistant"] as const)
+  role!: "user" | "assistant";
+
+  @IsString()
+  @IsNotEmpty()
+  content!: string;
+}
+
 export class DiagnoseDto {
   @IsArray()
-  @ArrayMinSize(4)
-  @ArrayMaxSize(16)
-  @IsString({ each: true })
-  words!: string[];
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => ChatMessageDto)
+  messages!: ChatMessageDto[];
 }
 
-export interface DiagnoseGroupDto {
-  category: string;
-  items: string[];
-  confidence: number;
-}
-
-export interface DiagnoseResponseDto {
-  groups: DiagnoseGroupDto[];
-  prompt: string;
+export interface AssistResponseDto {
+  response: string;
+  groups: string[][];
   model: string;
 }

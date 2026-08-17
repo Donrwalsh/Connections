@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { gameReducer, initGameState } from "../gameReducer";
+import {
+  gameReducer,
+  initGameState,
+  type AiAssistSuccessPayload,
+} from "../gameReducer";
 import type { Category } from "../../data/types";
 
 // Sample test puzzle categories matching your Category type
@@ -216,6 +220,19 @@ describe("gameReducer", () => {
   });
 
   describe("AI_SOLVE actions", () => {
+    const basePayload = {
+      response: "Reasoning.\nANSWER:\n...",
+      groups: [["APPLE", "BANANA", "CHERRY", "DATE"]],
+      prompt: "You are playing NYT Connections...",
+      history: [
+        { role: "user" as const, content: "You are playing NYT Connections..." },
+        { role: "assistant" as const, content: "Reasoning.\nANSWER:\n..." },
+      ],
+    };
+    const makeSuccessPayload = (
+      overrides: Partial<typeof basePayload> = {},
+    ): AiAssistSuccessPayload => ({ ...basePayload, ...overrides });
+
     it("sets loading to true on AI_SOLVE_START", () => {
       const initialState = initGameState(mockCategories, allWords);
       const nextState = gameReducer(initialState, { type: "AI_SOLVE_START" });
@@ -224,33 +241,179 @@ describe("gameReducer", () => {
       expect(nextState.error).toBeNull();
     });
 
-    it("updates ai_solution on AI_SOLVE_SUCCESS", () => {
+    it("locks in a correct group and removes its items from the board", () => {
       const initialState = {
         ...initGameState(mockCategories, allWords),
         loading: true,
       };
 
-      const mockPayload = {
-        orchestrator: "healthy" as const,
-        data: {
+      const nextState = gameReducer(initialState, {
+        type: "AI_SOLVE_SUCCESS",
+        payload: makeSuccessPayload(),
+      });
+
+      expect(nextState.loading).toBe(false);
+      expect(nextState.ai_solution).toMatchObject({
+        response: "Reasoning.\nANSWER:\n...",
+        groups: [["APPLE", "BANANA", "CHERRY", "DATE"]],
+        prompt: "You are playing NYT Connections...",
+      });
+      expect(nextState.solved).toEqual([mockCategories[0]]);
+      expect(nextState.remainingWords).toEqual(
+        allWords.filter((w) => !mockCategories[0].words.includes(w)),
+      );
+      expect(nextState.priorGuesses).toContainEqual({
+        words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+        result: "correct",
+      });
+      expect(nextState.aiSession.lastFailedGuess).toBeNull();
+      expect(nextState.aiSession.history).toHaveLength(2);
+    });
+
+    it("submits each group in order and stops at the first failed guess", () => {
+      const initialState = {
+        ...initGameState(mockCategories, allWords),
+        loading: true,
+      };
+
+      const nextState = gameReducer(initialState, {
+        type: "AI_SOLVE_SUCCESS",
+        payload: makeSuccessPayload({
           groups: [
-            {
-              category: "FRUITS",
-              items: ["APPLE", "BANANA", "CHERRY", "DATE"],
-              confidence: 0.95,
-            },
+            ["APPLE", "BANANA", "CHERRY", "DATE"],
+            ["RED", "BLUE", "GREEN", "PARIS"],
+            ["DOG", "CAT", "BIRD", "FISH"],
           ],
-          prompt: "sample prompt",
+        }),
+      });
+
+      // First group correct and locked in.
+      expect(nextState.solved).toEqual([mockCategories[0]]);
+      // Second group (3-of-4 overlap) is one-away: recorded and the batch stops.
+      expect(nextState.aiSession.lastFailedGuess).toEqual({
+        items: ["RED", "BLUE", "GREEN", "PARIS"],
+        result: "oneAway",
+      });
+      expect(nextState.solved).toHaveLength(1);
+      expect(nextState.mistakes).toBe(1);
+      expect(nextState.feedback).toBe("one-away");
+      expect(nextState.priorGuesses).toEqual([
+        { words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: "correct" },
+        { words: ["RED", "BLUE", "GREEN", "PARIS"], result: "oneAway" },
+      ]);
+    });
+
+    it("records an incorrect guess and stops submitting the batch", () => {
+      const initialState = {
+        ...initGameState(mockCategories, allWords),
+        loading: true,
+      };
+
+      const nextState = gameReducer(initialState, {
+        type: "AI_SOLVE_SUCCESS",
+        payload: makeSuccessPayload({
+          groups: [
+            ["RED", "BLUE", "PARIS", "TOKYO"],
+            ["APPLE", "BANANA", "CHERRY", "DATE"],
+          ],
+        }),
+      });
+
+      // First group overlaps no category by more than 2 → incorrect, and the
+      // correct second group is never submitted.
+      expect(nextState.aiSession.lastFailedGuess).toEqual({
+        items: ["RED", "BLUE", "PARIS", "TOKYO"],
+        result: "incorrect",
+      });
+      expect(nextState.feedback).toBe("incorrect");
+      expect(nextState.mistakes).toBe(1);
+      expect(nextState.solved).toEqual([]);
+      expect(nextState.priorGuesses).toEqual([
+        { words: ["RED", "BLUE", "PARIS", "TOKYO"], result: "incorrect" },
+      ]);
+    });
+
+    it("clears a previous failed guess once a correct group is locked in", () => {
+      const initialState = {
+        ...initGameState(mockCategories, allWords),
+        loading: true,
+        aiSession: {
+          history: [{ role: "user" as const, content: "previous" }],
+          lastFailedGuess: {
+            items: ["RED", "BLUE", "GREEN", "PARIS"],
+            result: "oneAway" as const,
+          },
         },
       };
 
       const nextState = gameReducer(initialState, {
         type: "AI_SOLVE_SUCCESS",
-        payload: mockPayload,
+        payload: makeSuccessPayload(),
+      });
+
+      expect(nextState.aiSession.lastFailedGuess).toBeNull();
+    });
+
+    it("marks the game won and clears the session when all groups are locked in", () => {
+      const initialState = {
+        ...initGameState(mockCategories, allWords),
+        loading: true,
+        solved: mockCategories.slice(0, 3),
+        remainingWords: mockCategories[3].words,
+      };
+
+      const nextState = gameReducer(initialState, {
+        type: "AI_SOLVE_SUCCESS",
+        payload: makeSuccessPayload({
+          groups: [["PARIS", "TOKYO", "LONDON", "ROME"]],
+        }),
+      });
+
+      expect(nextState.status).toBe("won");
+      expect(nextState.remainingWords).toEqual([]);
+      expect(nextState.aiSession).toEqual({
+        history: [],
+        lastFailedGuess: null,
+      });
+    });
+
+    it("keeps the session state when the batch leaves groups ungrouped", () => {
+      const initialState = {
+        ...initGameState(mockCategories, allWords),
+        loading: true,
+      };
+
+      const nextState = gameReducer(initialState, {
+        type: "AI_SOLVE_SUCCESS",
+        payload: makeSuccessPayload({
+          groups: [["APPLE", "BANANA", "CHERRY", "DATE"]],
+        }),
+      });
+
+      expect(nextState.status).toBe("playing");
+      expect(nextState.aiSession.history).toHaveLength(2);
+      expect(nextState.aiSession.lastFailedGuess).toBeNull();
+    });
+
+    it("clears ai_solution on AI_SOLVE_FAILURE", () => {
+      const initialState = {
+        ...initGameState(mockCategories, allWords),
+        loading: true,
+        ai_solution: {
+          response: "old",
+          groups: [],
+          prompt: "old",
+        },
+      };
+
+      const nextState = gameReducer(initialState, {
+        type: "AI_SOLVE_FAILURE",
+        payload: "orchestrator down",
       });
 
       expect(nextState.loading).toBe(false);
-      expect(nextState.ai_solution).toEqual(mockPayload.data);
+      expect(nextState.ai_solution).toBeNull();
+      expect(nextState.error).toBe("orchestrator down");
     });
   });
 });
