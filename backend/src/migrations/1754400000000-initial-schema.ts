@@ -2,6 +2,20 @@ import { MigrationInterface, QueryRunner } from "typeorm";
 
 /**
  * Consolidated baseline schema representing the full target database layout.
+ *
+ * This migration's body has been squashed forward more than once as the
+ * schema evolved (most recently absorbing what were separate llm-strategy /
+ * llm-solve-params / llm-proposal migrations). TypeORM tracks applied
+ * migrations by name in its `migrations` table, not by content — so on a
+ * fresh database (a new environment, or one that's always recreated, e.g.
+ * via `docker-compose down -v`) this file is the only source of truth and
+ * runs correctly. But any environment that already ran the pre-squash
+ * migration history (an un-wiped local DB, a shared staging DB, a persistent
+ * CI database) has this migration's name already marked as applied and will
+ * NOT re-run it — so its schema stays on the old, pre-squash shape while the
+ * application code expects the shape below. Before squashing further,
+ * confirm no long-lived database still needs the individual migrations this
+ * one has absorbed.
  */
 export class InitialSchema1754400000000 implements MigrationInterface {
   name = "InitialSchema1754400000000";

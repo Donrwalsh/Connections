@@ -44,10 +44,10 @@ Daily cron (06:00 UTC)
             (LLM_TRIALS llm-ollama trials; LLM_OLLAMA_CONCURRENCY at once)
 
 Frontend "AI Assist" button
-  └─ POST /api/solve ──► backend ──► POST /solve ──► orchestrator ──► default provider (openai)
+  └─ POST /api/diagnose ──► backend ──► POST /diagnose ──► orchestrator ──► default provider (openai)
 
 Frontend strategy panel (llm-openai / llm-ollama buttons)
-  └─ POST /strategy/queue/:strategy/:date ──► worker ──► POST /solve (modelProvider) ──► orchestrator ──► OpenAI or Ollama
+  └─ POST /strategy/queue/:strategy/:date ──► worker ──► POST /solve-assist ──► orchestrator ──► OpenAI or Ollama
 ```
 
 ## Getting Started
@@ -132,7 +132,7 @@ Postgres and Redis connection settings (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PAS
 | `GET` | `/game/data/latest_date` | Most recent puzzle date |
 | `POST` | `/strategy/queue/:strategyName/:date` | Enqueue a strategy run (or `all`; `all` excludes the LLM strategies) |
 | `GET` | `/strategy/:strategyName/puzzle/:date` | All runs for a strategy — ordered guesses per trial |
-| `POST` | `/api/solve` | AI Assist — proxy to orchestrator (throttled to 5/min/IP) |
+| `POST` | `/api/diagnose` | AI Assist — proxy to orchestrator (throttled to 5/min/IP) |
 | `GET` | `/health` | Liveness/readiness probe (503 when the DB is down) |
 
 ## Development & Testing
@@ -172,8 +172,8 @@ The backend E2E suite (`backend/test/app.e2e-spec.ts`) boots the real NestJS app
 │   ├── src/
 │   │   ├── main.ts            # Bootstrap (loads env, starts server)
 │   │   ├── app.setup.ts       # Shared HTTP pipeline (CORS, validation, Bull Board, Swagger)
-│   │   ├── app.controller.ts  # /health, /api/solve
-│   │   ├── app.service.ts     # Orchestrator proxy (retry/backoff), health checks
+│   │   ├── app.controller.ts  # /health, /api/diagnose
+│   │   ├── app.service.ts     # Orchestrator proxy, health checks
 │   │   ├── config/env.ts      # Typed env loading — fails fast on missing secrets
 │   │   ├── migrations/        # TypeORM migrations (initial schema baseline)
 │   │   ├── worker.ts          # Standalone BullMQ worker process

@@ -2,15 +2,12 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
   AssistRequestSchema,
-  SolveRequestSchema,
   SolveAssistRequestSchema,
-  type SolveResponse,
   type SolveAssistResponse,
 } from "./types.js";
-import { proposeGroup, SolveError } from "./solver.js";
+import { SolveError } from "./solver.js";
 import { runAssistStep } from "./assist.js";
 import { solveAssist } from "./solve-assist.js";
-import { defaultProvider } from "./provider.js";
 
 export const app = new Hono();
 
@@ -48,52 +45,6 @@ app.use("*", async (c, next) => {
 });
 
 app.get("/health", (c) => c.json({ status: "ok" }));
-
-app.post(
-  "/solve",
-  bodyLimit({
-    maxSize: SOLVE_BODY_LIMIT,
-    onError: (c) => c.json({ error: "Request body too large" }, 413),
-  }),
-  async (c) => {
-    const body = await c.req.json().catch(() => null);
-    const parsed = SolveRequestSchema.safeParse(body);
-
-    if (!parsed.success) {
-      return c.json(
-        { error: "Invalid request body", details: parsed.error.flatten() },
-        400,
-      );
-    }
-
-    try {
-      const solveRequest = {
-        // Strategy runs always pick their provider explicitly; provider-less
-        // requests (e.g. the in-game AI Assist) fall back to the configured
-        // default so the solver never has to guess.
-        modelProvider: defaultProvider(),
-        ...parsed.data,
-      };
-      const solveResult = await proposeGroup(solveRequest);
-      const response: SolveResponse = solveResult;
-      return c.json(response, 200);
-    } catch (err) {
-      console.error("Solve failed:", err);
-      if (err instanceof SolveError) {
-        return c.json(
-          {
-            error: err.message,
-            code: err.code,
-            details: err.details,
-          },
-          ERROR_STATUS[err.code],
-        );
-      }
-      const message = err instanceof Error ? err.message : "Unknown error";
-      return c.json({ error: "Solve failed", details: message }, 502);
-    }
-  },
-);
 
 app.post(
   "/diagnose",

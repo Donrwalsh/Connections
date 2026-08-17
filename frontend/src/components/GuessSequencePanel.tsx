@@ -10,10 +10,12 @@ interface Guess {
 }
 
 interface GuessDetail extends Guess {
-  numResponses: number | null;
-  promptAttempts: number | null;
-  duplicatesRejected: number | null;
-  llmDetails: {
+  // The backend's GuessDetailDto no longer includes these keys, so they're
+  // absent (undefined) on the actual response rather than sent as null.
+  numResponses?: number | null;
+  promptAttempts?: number | null;
+  duplicatesRejected?: number | null;
+  llmDetails?: {
     category?: string;
     confidence?: number;
     reasoning?: string;
@@ -548,8 +550,8 @@ function formatModelDetail(run: StrategyRunListItem): string {
     : run.modelName;
 }
 
-function formatCount(value: number | null): string {
-  return value === null ? "—" : value.toLocaleString();
+function formatCount(value: number | null | undefined): string {
+  return value === null || value === undefined ? "—" : value.toLocaleString();
 }
 
 function formatConfidence(value: number | null | undefined): string {

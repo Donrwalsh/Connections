@@ -142,11 +142,20 @@ export class StrategyRunStore {
         });
       }
 
-      // 2. Insert Guess rows and capture the generated ID for linking.
-      let insertedGuessId: number | undefined;
+      // 2. Insert Guess rows and capture each row's own generated ID for
+      // linking — a single flush can carry more than one guess (the LLM can
+      // get several groups right in one response), so proposals must be
+      // paired with their own guess, not just the first one inserted.
+      const guessIdByGuess = new Map<object, number>();
       if (guessesToInsert.length > 0) {
         const result = await manager.insert("Guess", guessesToInsert);
-        insertedGuessId = result?.identifiers?.[0]?.id;
+        const identifiers = result?.identifiers ?? [];
+        guessesToInsert.forEach((guess, i) => {
+          const id = identifiers[i]?.id;
+          if (id !== undefined) {
+            guessIdByGuess.set(guess, id);
+          }
+        });
       }
 
       // 3. Insert LlmProposal rows using the captured foreign keys.
@@ -171,9 +180,13 @@ export class StrategyRunStore {
               }
             }
 
-            // Link the 'used' proposal to the guess it became
-            if (resolved.status === LlmProposalStatus.USED && insertedGuessId !== undefined) {
-              resolved.guessId = insertedGuessId;
+            // Link the 'used' proposal to the guess it became — matched by
+            // object identity against the guess it was paired with in memory.
+            if (resolved.status === LlmProposalStatus.USED && proposal.guess) {
+              const guessId = guessIdByGuess.get(proposal.guess);
+              if (guessId !== undefined) {
+                resolved.guessId = guessId;
+              }
             }
 
             return resolved;

@@ -193,9 +193,11 @@ describe("StrategyRunStore", () => {
         { strategyRunId: 7, promptNumber: 1, promptType: SolvePromptType.INITIAL_SOLVE },
         { strategyRunId: 7, promptNumber: 2, promptType: SolvePromptType.RETRY },
       ];
-      const guesses = [
-        { words: ["A", "B", "C", "D"], result: "success", sequenceNumber: 1 },
-      ];
+      // flushBatch clears the pendingGuesses array it's given (length = 0),
+      // so keep a separate reference for the post-flush assertion below
+      // rather than re-reading guesses[0] after it's been emptied.
+      const guess1 = { words: ["A", "B", "C", "D"], result: "success", sequenceNumber: 1 };
+      const guesses = [guess1];
       const proposals = [
         {
           strategyRun: { id: 7 },
@@ -203,6 +205,9 @@ describe("StrategyRunStore", () => {
           words: ["A", "B", "C", "D"],
           category: "test",
           status: LlmProposalStatus.USED,
+          // Paired with its own guess by object identity, mirroring how the
+          // LLM runner sets currentProposal.guess = newGuess.
+          guess: guess1,
         },
       ];
 
@@ -230,6 +235,7 @@ describe("StrategyRunStore", () => {
         words: ["A", "B", "C", "D"],
         category: "test",
         status: LlmProposalStatus.USED,
+        guess: guess1,
         solvePromptId: 11,
         guessId: 20,
       });

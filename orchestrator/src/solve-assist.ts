@@ -5,7 +5,7 @@ import { SolveError, classifyModelCallError } from "./solver.js";
 
 export interface ParsedGroupProposal {
   words: string[];
-  reasoning: string;
+  category: string;
 }
 
 export interface SolveAssistResult {
@@ -25,23 +25,23 @@ const SOLVE_ASSIST_TEMPERATURE = 0.7;
 const GROUP_SIZE = 4;
 
 /**
- * Extracts structured group proposals (reasoning + word list) from the ### GROUPS section.
+ * Extracts structured group proposals (category + word list) from the ### GROUPS section.
  */
 function parseGroupProposals(responseText: string): ParsedGroupProposal[] {
   const proposals: ParsedGroupProposal[] = [];
   const groupBlockRegex =
-    /Group\s+(\d+)[\s\S]*?Reasoning:\s*([^\n]+)[\s\S]*?Words:\s*([^\n]+)/gi;
+    /Group\s+(\d+)[\s\S]*?Category:\s*([^\n]+)[\s\S]*?Words:\s*([^\n]+)/gi;
   let match: RegExpExecArray | null;
 
   while ((match = groupBlockRegex.exec(responseText)) !== null) {
-    const reasoning = match[2].trim();
+    const category = match[2].trim();
     const words = match[3]
       .split(",")
       .map((w) => w.replace(/[`*#-]/g, "").trim())
       .filter(Boolean);
 
     if (words.length === GROUP_SIZE) {
-      proposals.push({ reasoning, words });
+      proposals.push({ category, words });
     }
   }
 

@@ -37,7 +37,7 @@ import { StrategyRun } from "./modules/strategy/entities/strategy-run.entity";
       migrationsRun: true,
     }),
 
-    // Sensible global default; the OpenAI-backed /api/solve route is
+    // Sensible global default; the OpenAI-backed /api/diagnose route is
     // throttled much more aggressively in AppController.
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
 

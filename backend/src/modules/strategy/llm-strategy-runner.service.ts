@@ -17,7 +17,6 @@ import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/st
 import { OrchestratorService, type ChatMessage } from "./orchestrator.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { firstCombination } from "./combinatorics";
-import { delay, async } from "rxjs";
 
 const GROUP_SIZE = 4;
 
@@ -221,6 +220,9 @@ export class LlmStrategyRunner {
 
         const groups = data.groups;
         if (groups.length === 0) {
+          // currentPrompt is the same object already queued in pendingPrompts,
+          // so mutating it here still reflects at flush time.
+          currentPrompt.status = SolvePromptStatus.MALFORMED_NO_ANSWER_BLOCK;
           malformedCount++;
           if (malformedCount >= maxMalformed) {
             run.status = StrategyRunStatus.MALFORMED_RESPONSE;
@@ -237,22 +239,32 @@ export class LlmStrategyRunner {
           const groupsSectionMatch = responseText.match(/### GROUPS([\s\S]*?)### ANSWER/i);
           const groupsSectionText = groupsSectionMatch ? groupsSectionMatch[1] : responseText;
 
-          // Parse structured "Group N" blocks: Category + Words
-          const groupBlockRegex =
-            /Group\s+(\d+)[\s\S]*?Category:\s*([^\n]+)[\s\S]*?Words:\s*([^\n]+)/gi;
-          let match: RegExpExecArray | null;
+          // Parse structured "Group N" blocks: Category + Words. Split into
+          // per-group chunks first (on each "Group N" heading) so a missing
+          // field in one group can't bleed into the next group's match.
+          const groupChunks = groupsSectionText.split(/(?=Group\s+\d+)/i);
 
-          while ((match = groupBlockRegex.exec(groupsSectionText)) !== null) {
-            const groupNum = parseInt(match[1], 10);
-            const categoryText = match[2].trim();
-            const wordsLine = match[3]
-              .split(",")
-              .map((w) => w.replace(/[`*]/g, "").trim())
-              .filter(Boolean);
+          for (const chunk of groupChunks) {
+            const headingMatch = chunk.match(/Group\s+(\d+)/i);
+            if (!headingMatch) continue;
 
-            categoryMap.set(groupNum, categoryText);
-            if (wordsLine.length === GROUP_SIZE) {
-              parsedGroupWords[groupNum - 1] = wordsLine;
+            const groupNum = parseInt(headingMatch[1], 10);
+            const categoryMatch = chunk.match(/Category:\s*([^\n]+)/i);
+            const wordsMatch = chunk.match(/Words:\s*([^\n]+)/i);
+
+            if (categoryMatch) {
+              categoryMap.set(groupNum, categoryMatch[1].trim());
+            }
+
+            if (wordsMatch) {
+              const wordsLine = wordsMatch[1]
+                .split(",")
+                .map((w) => w.replace(/[`*]/g, "").trim())
+                .filter(Boolean);
+
+              if (wordsLine.length === GROUP_SIZE) {
+                parsedGroupWords[groupNum - 1] = wordsLine;
+              }
             }
           }
 
@@ -293,7 +305,14 @@ export class LlmStrategyRunner {
             }
 
             guessCount++;
-            const evaluation = GameService.evaluateGuessOnPuzzle(puzzle, guessWords);
+            const isDuplicate = priorGuesses.some(
+              (g) =>
+                g.words.length === guessWords.length &&
+                g.words.every((w) => guessWords.includes(w)),
+            );
+            const evaluation: { result: GuessResult } = isDuplicate
+              ? { result: GuessResult.DUPLICATE }
+              : GameService.evaluateGuessOnPuzzle(puzzle, guessWords);
 
             const newGuess: Partial<Guess> = {
               puzzle: { id: puzzleId } as Puzzle,
@@ -347,6 +366,11 @@ export class LlmStrategyRunner {
           }
         }
       } else if (!outcome.ok) {
+        // The prompt was already pushed as a user turn before this call; the
+        // call failed with no assistant reply, so drop it rather than let
+        // the next retry stack a second consecutive user turn on top of it.
+        messages.pop();
+
         const { code } = outcome.error;
 
         if (code === "model_error") {
