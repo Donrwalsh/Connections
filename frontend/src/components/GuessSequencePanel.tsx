@@ -10,11 +10,6 @@ interface Guess {
 }
 
 interface GuessDetail extends Guess {
-  promptTokens: number | null;
-  completionTokens: number | null;
-  totalTokens: number | null;
-  latencyMs: number | null;
-  temperature: number | null;
   numResponses: number | null;
   promptAttempts: number | null;
   duplicatesRejected: number | null;
@@ -557,14 +552,6 @@ function formatCount(value: number | null): string {
   return value === null ? "—" : value.toLocaleString();
 }
 
-function formatLatency(ms: number | null): string {
-  return ms === null ? "—" : `${ms.toLocaleString()} ms`;
-}
-
-function formatTemperature(value: number | null): string {
-  return value === null ? "—" : String(value);
-}
-
 function formatConfidence(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
   return `${Math.round(value * 100)}%`;
@@ -602,19 +589,6 @@ function GuessDetailFields({ detail }: { detail: GuessDetail }) {
   const llm = detail.llmDetails;
   return (
     <dl className="guess-sequence__details-grid">
-      <DetailField
-        label="Prompt tokens"
-        value={formatCount(detail.promptTokens)}
-      />
-      <DetailField
-        label="Completion tokens"
-        value={formatCount(detail.completionTokens)}
-      />
-      <DetailField label="Latency" value={formatLatency(detail.latencyMs)} />
-      <DetailField
-        label="Temperature"
-        value={formatTemperature(detail.temperature)}
-      />
       <DetailField
         label="Number of responses"
         value={formatCount(detail.numResponses)}

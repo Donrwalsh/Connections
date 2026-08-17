@@ -124,11 +124,9 @@ export class StrategyService {
   }
 
   /**
-   * Full detail for a single guess: everything the run-detail list omits to
-   * stay index-only, most notably the LLM telemetry recorded for strategy
-   * guesses (prompt/completion tokens, latency, sampling parameters and the
-   * free-form llmDetails). Returns nulls for non-LLM guesses. Fetched lazily
-   * per guess from the frontend.
+   * Full detail for a single guess. Fetched lazily per guess from the frontend.
+   * Returns the guess record directly — no LLM-specific telemetry remains on
+   * Guess (it now lives on SolvePrompt and LlmProposal).
    */
   async getGuessDetail(
     date: string,
@@ -163,10 +161,6 @@ export class StrategyService {
       words: guess.words,
       result: guess.result,
       guessedAt: guess.guessedAt,
-      numResponses: guess.numResponses,
-      promptAttempts: guess.promptAttempts,
-      duplicatesRejected: guess.duplicatesRejected,
-      llmDetails: guess.llmDetails,
     };
   }
 

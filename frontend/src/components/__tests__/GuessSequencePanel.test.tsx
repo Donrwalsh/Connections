@@ -155,11 +155,6 @@ function setupFetch() {
           ok: true,
           json: async () => ({
             ...guess,
-            promptTokens: 1500,
-            completionTokens: 320,
-            totalTokens: 1820,
-            latencyMs: 2340,
-            temperature: 0.7,
             numResponses: 5,
             promptAttempts: 2,
             duplicatesRejected: 3,
@@ -688,13 +683,10 @@ describe("GuessSequencePanel Component", () => {
       }),
     );
 
-    expect(await screen.findByText("Prompt tokens")).toBeInTheDocument();
-    expect(screen.getByText("1,500")).toBeInTheDocument();
-    expect(screen.getByText("Completion tokens")).toBeInTheDocument();
-    expect(screen.getByText("320")).toBeInTheDocument();
-    expect(screen.getByText("Latency")).toBeInTheDocument();
-    expect(screen.getByText("2,340 ms")).toBeInTheDocument();
-    expect(screen.getByText("0.7")).toBeInTheDocument();
+    expect(await screen.findByText("Number of responses")).toBeInTheDocument();
+    expect(screen.getByText("5")).toBeInTheDocument();
+    expect(screen.getByText("Prompt attempts")).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
     expect(screen.getByText("Duplicates rejected")).toBeInTheDocument();
     expect(screen.getByText("GREETINGS")).toBeInTheDocument();
     expect(screen.getByText("90%")).toBeInTheDocument();
@@ -718,10 +710,10 @@ describe("GuessSequencePanel Component", () => {
         name: /A, B, C, D/,
       }),
     );
-    expect(await screen.findByText("Prompt tokens")).toBeInTheDocument();
+    expect(await screen.findByText("Number of responses")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /A, B, C, D/ }));
-    expect(screen.queryByText("Prompt tokens")).not.toBeInTheDocument();
+    expect(screen.queryByText("Number of responses")).not.toBeInTheDocument();
   });
 
   it("shows only one open guess detail panel at a time (accordion)", async () => {
@@ -750,7 +742,7 @@ describe("GuessSequencePanel Component", () => {
       await screen.findByText("Reasoning for guess 2"),
     ).toBeInTheDocument();
     expect(screen.queryByText("Reasoning for guess 1")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Prompt tokens")).toHaveLength(1);
+    expect(screen.getAllByText("Number of responses")).toHaveLength(1);
   });
 
   it("shows an error message when the guess detail fetch fails", async () => {

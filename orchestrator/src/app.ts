@@ -3,10 +3,13 @@ import { bodyLimit } from "hono/body-limit";
 import {
   AssistRequestSchema,
   SolveRequestSchema,
+  SolveAssistRequestSchema,
   type SolveResponse,
+  type SolveAssistResponse,
 } from "./types.js";
 import { proposeGroup, SolveError } from "./solver.js";
 import { runAssistStep } from "./assist.js";
+import { solveAssist } from "./solve-assist.js";
 import { defaultProvider } from "./provider.js";
 
 export const app = new Hono();
@@ -129,6 +132,45 @@ app.post(
       }
       const message = err instanceof Error ? err.message : "Unknown error";
       return c.json({ error: "Diagnose failed", details: message }, 502);
+    }
+  },
+);
+
+app.post(
+  "/solve-assist",
+  bodyLimit({
+    maxSize: SOLVE_BODY_LIMIT,
+    onError: (c) => c.json({ error: "Request body too large" }, 413),
+  }),
+  async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const parsed = SolveAssistRequestSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return c.json(
+        { error: "Invalid request body", details: parsed.error.flatten() },
+        400,
+      );
+    }
+
+    try {
+      const result = await solveAssist(parsed.data.messages);
+      const response: SolveAssistResponse = result;
+      return c.json(response, 200);
+    } catch (err) {
+      console.error("Solve-assist failed:", err);
+      if (err instanceof SolveError) {
+        return c.json(
+          {
+            error: err.message,
+            code: err.code,
+            details: err.details,
+          },
+          ERROR_STATUS[err.code],
+        );
+      }
+      const message = err instanceof Error ? err.message : "Unknown error";
+      return c.json({ error: "Solve-assist failed", details: message }, 502);
     }
   },
 );

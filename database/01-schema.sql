@@ -69,10 +69,6 @@ CREATE TABLE "Guess" (
   "result" guess_result_enum NOT NULL,
   "sequenceNumber" INT NOT NULL,
   "source" guess_source_enum NOT NULL,
-  "numResponses" INT NULL,
-  "promptAttempts" INT NULL,
-  "duplicatesRejected" INT NULL,
-  "llmDetails" JSONB NULL,
   "guessedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -109,7 +105,6 @@ CREATE TABLE "SolvePrompt" (
   "promptNumber" INT NOT NULL,
   "promptType" solve_prompt_type_enum NOT NULL,
   "status" solve_prompt_status_enum NOT NULL DEFAULT 'parsed',
-  "triggeredByGuessId" INT NULL REFERENCES "Guess"("id") ON DELETE SET NULL,
   "rawResponseText" TEXT NULL,
   "promptTokens" INT NULL,
   "completionTokens" INT NULL,
@@ -136,12 +131,11 @@ CREATE TABLE "LlmProposal" (
   "strategyRunId" INT NOT NULL REFERENCES "StrategyRun"("id") ON DELETE CASCADE,
   "solvePromptId" INT NOT NULL REFERENCES "SolvePrompt"("id") ON DELETE CASCADE,
   "guessId" INT NULL REFERENCES "Guess"("id") ON DELETE SET NULL,
-  "guessNumber" INT NULL,
+  "promptNumber" INT NULL,
   "words" JSONB NOT NULL,
-  "category" TEXT NOT NULL,
-  "confidence" DOUBLE PRECISION NOT NULL,
   "reasoning" TEXT NOT NULL,
   "status" llm_proposal_status_enum NOT NULL,
+  "llmDetails" JSONB NULL,
   "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

@@ -92,18 +92,6 @@ export const ProposedGroupSchema = z.object({
     .describe(
       "Exactly 4 indices (0-15) into the puzzle's remaining word list that the model believes share a category",
     ),
-  category: z
-    .string()
-    .describe(
-      "A short label describing the shared theme/category, e.g. 'Types of ___'",
-    ),
-  confidence: z
-    .number()
-    .min(0)
-    .max(1)
-    .describe(
-      "Model's self-assessed confidence that this exact grouping is correct",
-    ),
   reasoning: z
     .string()
     .describe("Brief explanation of why these 4 words were grouped together"),
@@ -141,12 +129,6 @@ export const ProposalSchema = z.object({
     .array(z.number().int().min(0).max(15))
     .length(4)
     .describe("Indices into the puzzle's remaining word list"),
-  category: z.string().describe("Shared theme/category label chosen by the model"),
-  confidence: z
-    .number()
-    .min(0)
-    .max(1)
-    .describe("Model's self-assessed confidence in this exact grouping"),
   reasoning: z.string().describe("Brief explanation of why these 4 words were grouped together"),
   status: ProposalStatusSchema.describe(
     "Whether this group was used as the guess, rejected as a repeat of a prior guess, or passed over for a higher-confidence proposal in the same batch",
@@ -204,12 +186,6 @@ export const PromptMetadataSchema = z.object({
     .min(0)
     .max(10)
     .describe("Sampling temperature this prompt was submitted with"),
-  numResponses: z
-    .number()
-    .int()
-    .min(1)
-    .max(10)
-    .describe("Number of candidate groups requested from this prompt"),
   model: z
     .string()
     .describe(
@@ -270,28 +246,6 @@ export const SolveResponseSchema = z.object({
     .min(0)
     .max(10)
     .describe("Temperature of the model call that produced the candidate"),
-  numResponses: z
-    .number()
-    .int()
-    .min(1)
-    .max(10)
-    .describe(
-      "Number of candidates requested in the model call that produced the candidate",
-    ),
-  promptAttempts: z
-    .number()
-    .int()
-    .min(1)
-    .describe(
-      "How many times the model was prompted before a usable candidate was found (1 when no re-prompt was needed)",
-    ),
-  duplicatesRejected: z
-    .number()
-    .int()
-    .nonnegative()
-    .describe(
-      "How many candidate groups that repeated a prior guess were rejected across this solve step's prompts",
-    ),
   usage: UsageSchema,
   promptMetadata: z
     .array(PromptMetadataSchema)
@@ -369,3 +323,19 @@ export const SolveErrorResponseSchema = z.object({
   details: z.unknown().optional(),
 });
 export type SolveErrorResponse = z.infer<typeof SolveErrorResponseSchema>;
+
+/**
+ * Request body for POST /solve-assist. The backend strategy runner owns the
+ * session: it builds the prompts (INITIAL on a fresh step, RETRY after a
+ * failed guess), accumulates the model's responses, and submits the full
+ * message history on every call. The orchestrator stays stateless.
+ */
+export const SolveAssistRequestSchema = AssistRequestSchema;
+export type SolveAssistRequest = z.infer<typeof SolveAssistRequestSchema>;
+
+/**
+ * Response body for POST /solve-assist. Identical shape to AssistResponse —
+ * the raw model text, the parsed ANSWER: groups, and the model identifier.
+ */
+export const SolveAssistResponseSchema = AssistResponseSchema;
+export type SolveAssistResponse = z.infer<typeof SolveAssistResponseSchema>;

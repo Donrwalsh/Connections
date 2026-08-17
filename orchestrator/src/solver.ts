@@ -36,9 +36,6 @@ export interface SolveResult {
   contextWindow: number;
   latencyMs: number;
   temperature: number;
-  numResponses: number;
-  promptAttempts: number;
-  duplicatesRejected: number;
   usage: Usage;
   promptMetadata: PromptMetadata[];
 }
@@ -51,9 +48,6 @@ export interface SolveErrorDetails {
   contextWindow?: number;
   latencyMs?: number;
   temperature?: number;
-  numResponses?: number;
-  promptAttempts?: number;
-  duplicatesRejected?: number;
   usage?: Usage;
   promptMetadata?: PromptMetadata[];
 }
@@ -176,8 +170,6 @@ export async function proposeGroup(
         batchProposals.push({
           promptNumber,
           word_ids: ids,
-          category: group.category,
-          confidence: group.confidence,
           reasoning: group.reasoning,
           status: "rejected_duplicate",
         });
@@ -188,8 +180,6 @@ export async function proposeGroup(
       batchProposals.push({
         promptNumber,
         word_ids: ids,
-        category: group.category,
-        confidence: group.confidence,
         reasoning: group.reasoning,
         status: "used",
       });
@@ -201,8 +191,6 @@ export async function proposeGroup(
           batchProposals.push({
             promptNumber,
             word_ids: rest.word_ids,
-            category: rest.category,
-            confidence: rest.confidence,
             reasoning: rest.reasoning,
             status: "not_selected",
           });
@@ -250,7 +238,6 @@ export async function proposeGroup(
       promptMetadata.push({
         attempt: attempts,
         temperature,
-        numResponses,
         model: getModelName(provider),
         contextWindow: getContextWindow(),
         latencyMs,
@@ -301,7 +288,6 @@ export async function proposeGroup(
     promptMetadata.push({
       attempt: attempts,
       temperature,
-      numResponses,
       model: lastModel,
       contextWindow: lastContextWindow,
       latencyMs,
@@ -322,9 +308,6 @@ export async function proposeGroup(
         contextWindow: lastContextWindow,
         latencyMs: totalLatencyMs,
         temperature,
-        numResponses,
-        promptAttempts: attempts,
-        duplicatesRejected,
         usage,
         promptMetadata,
       };
@@ -353,9 +336,6 @@ export async function proposeGroup(
     contextWindow: lastContextWindow,
     latencyMs: totalLatencyMs,
     temperature,
-    numResponses,
-    promptAttempts: attempts,
-    duplicatesRejected,
     usage,
     promptMetadata,
   });

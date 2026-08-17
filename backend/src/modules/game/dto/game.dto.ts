@@ -38,8 +38,6 @@ export class SolveDto {
 
 export interface ProposedGroupDto {
   word_ids: number[];
-  category: string;
-  confidence: number;
   reasoning: string;
 }
 
@@ -52,7 +50,6 @@ export interface SolveUsageDto {
 export interface PromptMetadataDto {
   attempt: number;
   temperature: number;
-  numResponses: number;
   model: string;
   contextWindow: number;
   latencyMs: number;
@@ -67,9 +64,6 @@ export interface SolveResponseDto {
   contextWindow?: number;
   latencyMs?: number;
   temperature?: number;
-  numResponses?: number;
-  promptAttempts?: number;
-  duplicatesRejected?: number;
   usage?: SolveUsageDto;
   promptMetadata?: PromptMetadataDto[];
 }

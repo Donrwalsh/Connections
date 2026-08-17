@@ -70,25 +70,6 @@ export class Guess {
   })
   source: GuessSource;
 
-  // LLM strategy: the sampling parameters that produced this guess.
-  // numResponses escalates while the orchestrator hunts for a candidate that
-  // doesn't repeat a prior guess; promptAttempts counts the model calls in
-  // that step and duplicatesRejected how many repeats were discarded before
-  // the winner (or before the prompt budget ran out).
-  @Column({ type: "int", nullable: true })
-  numResponses: number | null;
-
-  @Column({ type: "int", nullable: true })
-  promptAttempts: number | null;
-
-  @Column({ type: "int", nullable: true })
-  duplicatesRejected: number | null;
-
-  // LLM strategy: free-form metadata (category, confidence, reasoning, and
-  // the exact prompt sent to the model for this step).
-  @Column({ type: "jsonb", nullable: true })
-  llmDetails: Record<string, unknown> | null;
-
   @CreateDateColumn({
     type: "timestamptz",
     default: () => "CURRENT_TIMESTAMP",

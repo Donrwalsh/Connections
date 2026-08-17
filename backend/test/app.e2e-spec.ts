@@ -49,8 +49,6 @@ describe("App (e2e)", () => {
               proposedGroups: [
                 {
                   word_ids: [0, 1, 2, 3],
-                  category: "Test category",
-                  confidence: 0.99,
                   reasoning: "E2E fake",
                 },
               ],
@@ -58,8 +56,6 @@ describe("App (e2e)", () => {
                 {
                   promptNumber: 1,
                   word_ids: [0, 1, 2, 3],
-                  category: "Test category",
-                  confidence: 0.99,
                   reasoning: "E2E fake",
                   status: "used",
                 },
@@ -69,6 +65,18 @@ describe("App (e2e)", () => {
               contextWindow: 8192,
               latencyMs: 42,
               usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+            }),
+          );
+        } else if (req.url === "/solve-assist" && req.method === "POST") {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              response: "ANSWER:\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
+              groups: [
+                ["AAAA", "BBBB", "CCCC", "DDDD"],
+                ["EEEE", "FFFF", "GGGG", "HHHH"],
+              ],
+              model: "e2e-fake-model",
             }),
           );
         } else if (req.url === "/health") {
@@ -265,15 +273,6 @@ describe("App (e2e)", () => {
       result: GuessResult.SUCCESS,
       sequenceNumber: 1,
       source: GuessSource.STRATEGY,
-      numResponses: 3,
-      promptAttempts: 2,
-      duplicatesRejected: 1,
-      llmDetails: {
-        category: "Test category",
-        confidence: 0.99,
-        reasoning: "E2E fake",
-        prompt: "solve step",
-      },
     });
 
     const res = await request(app.getHttpServer()).get(
@@ -286,15 +285,6 @@ describe("App (e2e)", () => {
       words: ["AAAA", "BBBB", "CCCC", "DDDD"],
       result: "success",
       guessedAt: expect.any(String),
-      numResponses: 3,
-      promptAttempts: 2,
-      duplicatesRejected: 1,
-      llmDetails: {
-        category: "Test category",
-        confidence: 0.99,
-        reasoning: "E2E fake",
-        prompt: "solve step",
-      },
     });
     expect(guess.id).toBeTruthy();
   });
@@ -343,23 +333,17 @@ describe("App (e2e)", () => {
     });
     const proposals = await dataSource.getRepository(LlmProposal).find({
       where: { strategyRunId: run.id },
-      order: { guessNumber: "ASC" },
+      order: { id: "ASC" },
     });
 
     expect(proposals).toHaveLength(4);
     expect(proposals[0]).toMatchObject({
-      promptNumber: 1,
-      guessNumber: 1,
-      category: "Test category",
-      confidence: 0.99,
       reasoning: "E2E fake",
       status: LlmProposalStatus.USED,
     });
     expect(proposals[0].words).toEqual(["AAAA", "BBBB", "CCCC", "DDDD"]);
     // The 'used' proposal links to the guess that realized it.
     expect(proposals[0].guessId).not.toBeNull();
-    // Each solved step leaves its own proposal row.
-    expect(proposals.map((p) => p.guessNumber)).toEqual([1, 2, 3, 4]);
   }, 30000);
 
   it("POST /api/solve rejects an invalid body", async () => {

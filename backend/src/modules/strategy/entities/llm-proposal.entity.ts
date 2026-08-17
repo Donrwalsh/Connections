@@ -56,16 +56,10 @@ export class LlmProposal {
   solvePrompt: SolvePrompt;
 
   @Column({ type: "int", nullable: true })
-  guessNumber: number | null;
+  promptNumber: number | null;
 
   @Column({ type: "jsonb" })
   words: string[];
-
-  @Column({ type: "text" })
-  category: string;
-
-  @Column({ type: "double precision" })
-  confidence: number;
 
   @Column({ type: "text" })
   reasoning: string;
@@ -76,6 +70,9 @@ export class LlmProposal {
     enumName: "llm_proposal_status_enum",
   })
   status: LlmProposalStatus;
+
+  @Column({ type: "jsonb", nullable: true })
+  llmDetails: Record<string, unknown> | null;
 
   @CreateDateColumn({
     type: "timestamptz",

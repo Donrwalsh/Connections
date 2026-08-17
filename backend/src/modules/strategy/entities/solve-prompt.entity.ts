@@ -8,7 +8,6 @@ import {
   JoinColumn,
 } from "typeorm";
 import { StrategyRun } from "./strategy-run.entity";
-import { Guess } from "./guess.entity";
 
 export enum SolvePromptType {
   INITIAL_SOLVE = "initialSolve",
@@ -59,15 +58,6 @@ export class SolvePrompt {
     default: SolvePromptStatus.PARSED,
   })
   status: SolvePromptStatus;
-
-  // The Guess that triggered a retry (set on all prompts except the first
-  // initialSolve, which has no preceding guess to retry from).
-  @Column({ type: "int", nullable: true })
-  triggeredByGuessId: number | null;
-
-  @ManyToOne(() => Guess, { nullable: true, onDelete: "SET NULL" })
-  @JoinColumn({ name: "triggeredByGuessId" })
-  triggeredByGuess: Guess | null;
 
   @Column({ type: "text", nullable: true })
   rawResponseText: string | null;

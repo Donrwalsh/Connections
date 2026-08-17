@@ -14,7 +14,6 @@ export interface SolveUsage {
 export interface PromptMetadata {
   attempt: number;
   temperature: number;
-  numResponses: number;
   model: string;
   contextWindow: number;
   latencyMs: number;
@@ -24,8 +23,6 @@ export interface PromptMetadata {
 
 export interface ProposedGroup {
   word_ids: number[];
-  category: string;
-  confidence: number;
   reasoning: string;
 }
 
@@ -34,8 +31,6 @@ export type ProposalStatus = "used" | "rejected_duplicate" | "not_selected";
 export interface ProposalAnnotation {
   promptNumber: number;
   word_ids: number[];
-  category: string;
-  confidence: number;
   reasoning: string;
   status: ProposalStatus;
 }
@@ -48,9 +43,6 @@ export interface SolveSuccess {
   contextWindow: number;
   latencyMs: number;
   temperature: number;
-  numResponses: number;
-  promptAttempts: number;
-  duplicatesRejected: number;
   usage: SolveUsage;
   promptMetadata: PromptMetadata[];
 }
@@ -63,9 +55,6 @@ export interface SolveErrorDetails {
   contextWindow?: number;
   latencyMs?: number;
   temperature?: number;
-  numResponses?: number;
-  promptAttempts?: number;
-  duplicatesRejected?: number;
   usage?: SolveUsage;
   promptMetadata?: PromptMetadata[];
 }
@@ -81,9 +70,6 @@ export type SolveOutcome = { ok: true; data: SolveSuccess } | { ok: false; error
 export interface OrchestratorSolveRequest {
   puzzleWords: string[];
   priorGuesses: { words: string[]; result: "correct" | "incorrect" | "oneAway" }[];
-  // Which LLM backend the orchestrator should consult for this step, derived
-  // from the strategy name (llm-openai -> openai, llm-ollama -> ollama).
-  // Omitted for provider-less callers (the orchestrator then uses its default).
   modelProvider?: ModelProvider;
   temperature?: number;
   numResponses?: number;
@@ -91,19 +77,35 @@ export interface OrchestratorSolveRequest {
   maxPrompts?: number;
 }
 
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface SolveAssistSuccess {
+  response: string;
+  groups: string[][];
+  model: string;
+  latencyMs: number;
+}
+
+export interface SolveAssistFailure {
+  error: string;
+  code: SolveErrorCode;
+}
+
+export type SolveAssistOutcome =
+  | { ok: true; data: SolveAssistSuccess }
+  | { ok: false; error: SolveAssistFailure };
+
 const MAX_RETRIES = 3;
 const INITIAL_DELAY_MS = 1000;
-// A single solve step makes up to LLM_MAX_PROMPTS (default 19) sequential model
-// calls with escalating candidate counts, so a legitimate step can take well
-// over a minute. Budget the whole step on every attempt rather than sizing for
-// one model call (the old 40s/15s split assumed a single call plus cold start).
 const TIMEOUT_MS = orchestratorTimeoutMs();
 
 /**
- * Thin client for the orchestrator's POST /solve endpoint. The LLM strategy
- * calls this repeatedly (one proposal per guess step), so the outcome is a
- * typed discriminated union rather than a thrown exception: the caller
- * decides whether a failure is recoverable by re-prompting.
+ * Thin client for the orchestrator's POST /solve and POST /solve-assist
+ * endpoints. The LLM strategy runner calls proposeGroup repeatedly (one
+ * proposal per guess step) or solveAssist for the unified AI Assist flow.
  */
 @Injectable()
 export class OrchestratorService {
@@ -116,15 +118,13 @@ export class OrchestratorService {
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const response = await this.fetchOnce(request);
+        const response = await this.fetchOnce("/solve", request);
 
         if (response.ok) {
           const data: SolveSuccess = await response.json();
           return { ok: true, data };
         }
 
-        // 400/409 are meaningful model outputs, not transport failures —
-        // don't retry them.
         if (response.status === 400 || response.status === 409) {
           const body = (await response.json().catch(() => null)) as
             (Partial<SolveFailure> & { code?: string }) | null;
@@ -138,14 +138,8 @@ export class OrchestratorService {
           };
         }
 
-        // 5xx (including the orchestrator's own model_error) and any other
-        // unexpected status are treated as transport failures: retry.
         lastError = new Error(`HTTP ${response.status} ${response.statusText}`);
       } catch (err) {
-        // A timeout means the step exceeded its budget. The orchestrator is
-        // likely still working on the aborted request, so retrying would just
-        // queue behind it and burn the budget again. Fail fast — the strategy
-        // worker re-runs the guess step on its own backoff schedule.
         if (err instanceof Error && err.name === "AbortError") {
           return {
             ok: false,
@@ -177,18 +171,88 @@ export class OrchestratorService {
     };
   }
 
-  private async fetchOnce(request: OrchestratorSolveRequest): Promise<Response> {
+  /**
+   * Calls the orchestrator's POST /solve-assist endpoint with the full
+   * conversation history. Used by the LLM strategy runner for the unified
+   * AI Assist flow — the backend owns prompt building and conversation state.
+   */
+  async solveAssist(messages: ChatMessage[]): Promise<SolveAssistOutcome> {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const response = await this.fetchOnce("/solve-assist", { messages });
+
+        if (response.ok) {
+          const body = await response.json();
+          return {
+            ok: true,
+            data: {
+              response: body.response,
+              groups: body.groups,
+              model: body.model,
+              latencyMs: 0, // orchestrator doesn't report latency for this endpoint
+            },
+          };
+        }
+
+        if (response.status === 400 || response.status === 409) {
+          const body = (await response.json().catch(() => null)) as
+            (Partial<SolveAssistFailure> & { code?: string }) | null;
+          return {
+            ok: false,
+            error: {
+              error: body?.error ?? `HTTP ${response.status}`,
+              code: this.isKnownErrorCode(body?.code) ? body.code : "model_error",
+            },
+          };
+        }
+
+        lastError = new Error(`HTTP ${response.status} ${response.statusText}`);
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") {
+          return {
+            ok: false,
+            error: {
+              error: "Request timed out",
+              code: "model_error",
+            },
+          };
+        }
+        lastError = err;
+      }
+
+      if (attempt < MAX_RETRIES) {
+        const delay = INITIAL_DELAY_MS * 2 ** attempt;
+        this.logger.warn(
+          `Orchestrator /solve-assist attempt ${attempt + 1} of ${MAX_RETRIES + 1} failed` +
+            ` (${this.describeError(lastError)}). Retrying in ${delay}ms...`,
+        );
+        await this.sleep(delay);
+      }
+    }
+
+    return {
+      ok: false,
+      error: {
+        error: `Orchestrator /solve-assist failed after ${MAX_RETRIES + 1} attempts: ${this.describeError(lastError)}`,
+        code: "model_error",
+      },
+    };
+  }
+
+  private async fetchOnce(path: string, body: unknown): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
     try {
-      return await fetch(`${this.orchestratorUrl}/solve`, {
+      return await fetch(`${this.orchestratorUrl}${path}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "x-internal-api-key": this.internalApiKey,
         },
-        body: JSON.stringify(request),
+        body: JSON.stringify(body),
         signal: controller.signal,
       });
     } finally {

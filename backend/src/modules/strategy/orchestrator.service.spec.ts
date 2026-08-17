@@ -13,8 +13,6 @@ describe("OrchestratorService", () => {
     proposedGroups: [
       {
         word_ids: [0, 1, 2, 3],
-        category: "Fruit",
-        confidence: 0.9,
         reasoning: "test",
       },
     ],
@@ -27,7 +25,6 @@ describe("OrchestratorService", () => {
       {
         attempt: 1,
         temperature: 0,
-        numResponses: 1,
         model: "mistral",
         contextWindow: 8192,
         latencyMs: 5,

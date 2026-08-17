@@ -119,8 +119,6 @@ describe("orchestrator app", () => {
       proposedGroups: [
         {
           word_ids: [0, 1, 2, 3],
-          category: "Test",
-          confidence: 0.9,
           reasoning: "test",
         },
       ],
@@ -128,16 +126,12 @@ describe("orchestrator app", () => {
         {
           promptNumber: 1,
           word_ids: [0, 1, 2, 3],
-          category: "Test",
-          confidence: 0.9,
           reasoning: "test",
           status: "used",
         },
         {
           promptNumber: 1,
           word_ids: [4, 5, 6, 7],
-          category: "Test",
-          confidence: 0.8,
           reasoning: "test",
           status: "not_selected",
         },
@@ -147,15 +141,11 @@ describe("orchestrator app", () => {
       contextWindow: 8192,
       latencyMs: 1234,
       temperature: 1.0,
-      numResponses: 1,
-      promptAttempts: 1,
-      duplicatesRejected: 0,
       usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
       promptMetadata: [
         {
           attempt: 1,
           temperature: 1.0,
-          numResponses: 1,
           model: "test-model",
           contextWindow: 8192,
           latencyMs: 1234,
@@ -171,8 +161,6 @@ describe("orchestrator app", () => {
       proposedGroups: [
         {
           word_ids: [0, 1, 2, 3],
-          category: "Test",
-          confidence: 0.9,
           reasoning: "test",
         },
       ],
@@ -180,16 +168,12 @@ describe("orchestrator app", () => {
         {
           promptNumber: 1,
           word_ids: [0, 1, 2, 3],
-          category: "Test",
-          confidence: 0.9,
           reasoning: "test",
           status: "used",
         },
         {
           promptNumber: 1,
           word_ids: [4, 5, 6, 7],
-          category: "Test",
-          confidence: 0.8,
           reasoning: "test",
           status: "not_selected",
         },
@@ -199,15 +183,11 @@ describe("orchestrator app", () => {
       contextWindow: 8192,
       latencyMs: 1234,
       temperature: 1.0,
-      numResponses: 1,
-      promptAttempts: 1,
-      duplicatesRejected: 0,
       usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
       promptMetadata: [
         {
           attempt: 1,
           temperature: 1.0,
-          numResponses: 1,
           model: "test-model",
           contextWindow: 8192,
           latencyMs: 1234,
@@ -223,8 +203,6 @@ describe("orchestrator app", () => {
       proposedGroups: [
         {
           word_ids: [0, 1, 2, 3],
-          category: "Test",
-          confidence: 0.9,
           reasoning: "test",
         },
       ],
@@ -232,8 +210,6 @@ describe("orchestrator app", () => {
         {
           promptNumber: 1,
           word_ids: [0, 1, 2, 3],
-          category: "Test",
-          confidence: 0.9,
           reasoning: "test",
           status: "used",
         },
@@ -243,9 +219,6 @@ describe("orchestrator app", () => {
       contextWindow: 8192,
       latencyMs: 10,
       temperature: 1.2,
-      numResponses: 1,
-      promptAttempts: 1,
-      duplicatesRejected: 0,
       usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
       promptMetadata: [],
     });
@@ -264,8 +237,6 @@ describe("orchestrator app", () => {
       proposedGroups: [
         {
           word_ids: [0, 1, 2, 3],
-          category: "Test",
-          confidence: 0.9,
           reasoning: "test",
         },
       ],
@@ -273,8 +244,6 @@ describe("orchestrator app", () => {
         {
           promptNumber: 1,
           word_ids: [0, 1, 2, 3],
-          category: "Test",
-          confidence: 0.9,
           reasoning: "test",
           status: "used",
         },
@@ -284,9 +253,6 @@ describe("orchestrator app", () => {
       contextWindow: 8192,
       latencyMs: 10,
       temperature: 0,
-      numResponses: 1,
-      promptAttempts: 1,
-      duplicatesRejected: 0,
       usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
       promptMetadata: [],
     });
@@ -304,8 +270,6 @@ describe("orchestrator app", () => {
       proposedGroups: [
         {
           word_ids: [0, 1, 2, 3],
-          category: "Test",
-          confidence: 0.9,
           reasoning: "test",
         },
       ],
@@ -313,8 +277,6 @@ describe("orchestrator app", () => {
         {
           promptNumber: 1,
           word_ids: [0, 1, 2, 3],
-          category: "Test",
-          confidence: 0.9,
           reasoning: "test",
           status: "used",
         },
@@ -324,9 +286,6 @@ describe("orchestrator app", () => {
       contextWindow: 8192,
       latencyMs: 10,
       temperature: 0,
-      numResponses: 1,
-      promptAttempts: 1,
-      duplicatesRejected: 0,
       usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
       promptMetadata: [],
     });
@@ -343,8 +302,6 @@ describe("orchestrator app", () => {
       proposedGroups: [
         {
           word_ids: [0, 1, 2, 3],
-          category: "Test",
-          confidence: 0.9,
           reasoning: "test",
         },
       ],
@@ -352,8 +309,6 @@ describe("orchestrator app", () => {
         {
           promptNumber: 1,
           word_ids: [0, 1, 2, 3],
-          category: "Test",
-          confidence: 0.9,
           reasoning: "test",
           status: "used",
         },
@@ -363,9 +318,6 @@ describe("orchestrator app", () => {
       contextWindow: 8192,
       latencyMs: 10,
       temperature: 0,
-      numResponses: 1,
-      promptAttempts: 1,
-      duplicatesRejected: 0,
       usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
       promptMetadata: [],
     });
@@ -388,8 +340,6 @@ describe("orchestrator app", () => {
         proposedGroups: [
           {
             word_ids: [0, 1, 2, 3],
-            category: "Test",
-            confidence: 0.9,
             reasoning: "test",
           },
         ],
@@ -404,8 +354,6 @@ describe("orchestrator app", () => {
     ).toEqual([
       {
         word_ids: [0, 1, 2, 3],
-        category: "Test",
-        confidence: 0.9,
         reasoning: "test",
       },
     ]);

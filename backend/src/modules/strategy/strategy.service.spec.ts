@@ -8,6 +8,7 @@ import { StrategyRunStore } from "./strategy-run-store.service";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
+import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { GameService } from "../game/game.service";
 
 describe("StrategyService", () => {
@@ -27,6 +28,9 @@ describe("StrategyService", () => {
     find: jest.Mock;
     findOne: jest.Mock;
     createQueryBuilder: jest.Mock;
+  };
+  let mockSolvePromptRepo: {
+    count: jest.Mock;
   };
   let mockGameService: {
     resolveDateToPuzzleId: jest.Mock;
@@ -101,6 +105,9 @@ describe("StrategyService", () => {
     mockGameService = {
       resolveDateToPuzzleId: jest.fn(),
     };
+    mockSolvePromptRepo = {
+      count: jest.fn().mockResolvedValue(0),
+    };
     mockManager = {
       insert: jest.fn().mockResolvedValue({ identifiers: [{ id: 1 }] }),
       save: jest.fn().mockResolvedValue(undefined),
@@ -120,6 +127,7 @@ describe("StrategyService", () => {
         { provide: getRepositoryToken(StrategyRun), useValue: mockStrategyRunRepo },
         { provide: getRepositoryToken(Puzzle), useValue: mockPuzzleRepo },
         { provide: getRepositoryToken(Guess), useValue: mockGuessRepo },
+        { provide: getRepositoryToken(SolvePrompt), useValue: mockSolvePromptRepo },
         { provide: GameService, useValue: mockGameService },
       ],
     }).compile();
@@ -356,10 +364,6 @@ describe("StrategyService", () => {
         words: ["APPLE", "BANANA", "CHERRY", "DATE"],
         result: GuessResult.SUCCESS,
         guessedAt: new Date("2024-01-02T01:01:00Z"),
-        numResponses: 1,
-        promptAttempts: 1,
-        duplicatesRejected: 0,
-        llmDetails: { category: "Fruit", confidence: 0.9 },
       });
 
       await service.getGuessDetail("2024-01-02", "llm-openai", 0, 1);
@@ -369,7 +373,7 @@ describe("StrategyService", () => {
       });
     });
 
-    it("should map the guess and its LLM telemetry into a detail DTO", async () => {
+    it("should map the guess into a detail DTO", async () => {
       const guessedAt = new Date("2024-01-02T01:01:00Z");
 
       mockGameService.resolveDateToPuzzleId.mockResolvedValueOnce(5);
@@ -379,15 +383,6 @@ describe("StrategyService", () => {
         words: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
         result: GuessResult.DUPLICATE,
         guessedAt,
-        numResponses: 3,
-        promptAttempts: 2,
-        duplicatesRejected: 1,
-        llmDetails: {
-          category: "Fruit",
-          confidence: 0.9,
-          reasoning: "test",
-          prompt: "solve step",
-        },
       });
 
       const result = await service.getGuessDetail("2024-01-02", "llm-openai", 0, 2);
@@ -397,15 +392,6 @@ describe("StrategyService", () => {
         words: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
         result: GuessResult.DUPLICATE,
         guessedAt,
-        numResponses: 3,
-        promptAttempts: 2,
-        duplicatesRejected: 1,
-        llmDetails: {
-          category: "Fruit",
-          confidence: 0.9,
-          reasoning: "test",
-          prompt: "solve step",
-        },
       });
     });
   });

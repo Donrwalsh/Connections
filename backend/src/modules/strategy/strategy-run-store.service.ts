@@ -4,6 +4,7 @@ import { DataSource, Repository } from "typeorm";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { Guess } from "./entities/guess.entity";
 import { LlmProposal, LlmProposalStatus } from "./entities/llm-proposal.entity";
+import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { firstCombination } from "./combinatorics";
 import { SHUFFLE_SMART, SHUFFLE_FOOLISH, LLM_OPENAI, LLM_OLLAMA } from "../../strategies";
@@ -24,6 +25,8 @@ export class StrategyRunStore {
     private readonly strategyRunRepo: Repository<StrategyRun>,
     @InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>,
     @InjectRepository(Guess) private readonly guessRepo: Repository<Guess>,
+    @InjectRepository(SolvePrompt)
+    private readonly solvePromptRepo: Repository<SolvePrompt>,
   ) {}
 
   async loadOrCreateRun(
@@ -95,9 +98,13 @@ export class StrategyRunStore {
   }
 
   async countGuesses(strategyRunId: number): Promise<number> {
-    // Plain indexed-column filter instead of a relation predicate so TypeORM
-    // doesn't emit an unnecessary join/subquery.
     return this.guessRepo.count({
+      where: { strategyRunId },
+    });
+  }
+
+  async countPrompts(strategyRunId: number): Promise<number> {
+    return this.solvePromptRepo.count({
       where: { strategyRunId },
     });
   }
@@ -106,19 +113,26 @@ export class StrategyRunStore {
     run: StrategyRun,
     pendingGuesses: Partial<Guess>[],
     pendingProposals: Partial<LlmProposal>[] = [],
+    pendingPrompts: Partial<SolvePrompt>[] = [],
   ): Promise<void> {
-    // Create a shallow copy to insert and clear the original buffer. The run is
-    // always saved — even with no new guesses — so terminal states reached
-    // without a recorded guess (e.g. LLM malformed/error limits) persist.
     const guessesToInsert = [...pendingGuesses];
     pendingGuesses.length = 0;
     const proposalsToInsert = [...pendingProposals];
     pendingProposals.length = 0;
+    const promptsToInsert = [...pendingPrompts];
+    pendingPrompts.length = 0;
 
     await this.dataSource.transaction(async (manager) => {
-      // Proposals are flushed together with the guess they belong to (one solve
-      // step per flush), so a single inserted guess id links the 'used'
-      // proposal to the guess that realized it.
+      // Insert SolvePrompt rows first so their IDs are available for proposals.
+      let promptIdByNumber: Map<number, number> | undefined;
+      if (promptsToInsert.length > 0) {
+        const result = await manager.insert("SolvePrompt", promptsToInsert);
+        promptIdByNumber = new Map(
+          promptsToInsert.map((p, i) => [p.promptNumber!, result.identifiers[i].id]),
+        );
+      }
+
+      // Insert Guess rows and capture the inserted ID for linking proposals.
       let insertedGuessId: number | undefined;
       if (guessesToInsert.length > 0) {
         const result = await manager.insert("Guess", guessesToInsert);
@@ -128,11 +142,26 @@ export class StrategyRunStore {
       if (proposalsToInsert.length > 0) {
         await manager.insert(
           "LlmProposal",
-          proposalsToInsert.map((proposal) =>
-            proposal.status === LlmProposalStatus.USED && insertedGuessId !== undefined
-              ? { ...proposal, guess: { id: insertedGuessId } as Guess }
-              : proposal,
-          ),
+          proposalsToInsert.map((proposal) => {
+            const resolved: Record<string, unknown> = { ...proposal };
+
+            // Resolve promptNumber to solvePromptId if the runner sent
+            // promptNumber instead of solvePromptId directly.
+            if (promptIdByNumber && typeof resolved.promptNumber === "number") {
+              resolved.solvePromptId = promptIdByNumber.get(resolved.promptNumber as number);
+              delete resolved.promptNumber;
+            }
+
+            // Link the 'used' proposal to the guess it became.
+            if (
+              resolved.status === LlmProposalStatus.USED &&
+              insertedGuessId !== undefined
+            ) {
+              resolved.guessId = insertedGuessId;
+            }
+
+            return resolved;
+          }),
         );
       }
       await manager.save(StrategyRun, run);

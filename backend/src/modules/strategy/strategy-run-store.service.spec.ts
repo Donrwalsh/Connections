@@ -6,6 +6,8 @@ import { StrategyRunStore } from "./strategy-run-store.service";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { Guess } from "./entities/guess.entity";
+import { SolvePrompt, SolvePromptType } from "./entities/solve-prompt.entity";
+import { LlmProposalStatus } from "./entities/llm-proposal.entity";
 
 describe("StrategyRunStore", () => {
   let store: StrategyRunStore;
@@ -16,6 +18,7 @@ describe("StrategyRunStore", () => {
   };
   let mockPuzzleRepo: { findOne: jest.Mock };
   let mockGuessRepo: { count: jest.Mock };
+  let mockSolvePromptRepo: { count: jest.Mock };
   let mockManager: { insert: jest.Mock; save: jest.Mock };
   let mockDataSource: { transaction: jest.Mock };
 
@@ -45,6 +48,9 @@ describe("StrategyRunStore", () => {
     mockGuessRepo = {
       count: jest.fn().mockResolvedValue(0),
     };
+    mockSolvePromptRepo = {
+      count: jest.fn().mockResolvedValue(0),
+    };
     mockManager = {
       insert: jest.fn().mockResolvedValue({ identifiers: [{ id: 1 }] }),
       save: jest.fn().mockResolvedValue(undefined),
@@ -60,6 +66,7 @@ describe("StrategyRunStore", () => {
         { provide: getRepositoryToken(StrategyRun), useValue: mockStrategyRunRepo },
         { provide: getRepositoryToken(Puzzle), useValue: mockPuzzleRepo },
         { provide: getRepositoryToken(Guess), useValue: mockGuessRepo },
+        { provide: getRepositoryToken(SolvePrompt), useValue: mockSolvePromptRepo },
       ],
     }).compile();
 
@@ -155,6 +162,19 @@ describe("StrategyRunStore", () => {
     });
   });
 
+  describe("countPrompts", () => {
+    it("should count SolvePrompt rows scoped to the strategy run", async () => {
+      mockSolvePromptRepo.count.mockResolvedValueOnce(5);
+
+      const result = await store.countPrompts(7);
+
+      expect(result).toBe(5);
+      expect(mockSolvePromptRepo.count).toHaveBeenCalledWith({
+        where: { strategyRunId: 7 },
+      });
+    });
+  });
+
   describe("flushBatch", () => {
     it("should persist run state even when there are no new guesses", async () => {
       await store.flushBatch(makeRun() as StrategyRun, []);
@@ -162,6 +182,57 @@ describe("StrategyRunStore", () => {
       expect(mockDataSource.transaction).toHaveBeenCalledTimes(1);
       expect(mockManager.insert).not.toHaveBeenCalled();
       expect(mockManager.save).toHaveBeenCalledWith(StrategyRun, expect.anything());
+    });
+
+    it("should insert SolvePrompt rows before proposals and resolve promptNumber to solvePromptId", async () => {
+      mockManager.insert
+        .mockResolvedValueOnce({ identifiers: [{ id: 10 }, { id: 11 }] }) // SolvePrompt
+        .mockResolvedValueOnce({ identifiers: [{ id: 20 }] }); // Guess
+
+      const prompts = [
+        { strategyRunId: 7, promptNumber: 1, promptType: SolvePromptType.INITIAL_SOLVE },
+        { strategyRunId: 7, promptNumber: 2, promptType: SolvePromptType.RETRY },
+      ];
+      const guesses = [
+        { words: ["A", "B", "C", "D"], result: "success", sequenceNumber: 1 },
+      ];
+      const proposals = [
+        {
+          strategyRun: { id: 7 },
+          promptNumber: 2,
+          words: ["A", "B", "C", "D"],
+          reasoning: "test",
+          status: LlmProposalStatus.USED,
+        },
+      ];
+
+      await store.flushBatch(
+        makeRun() as StrategyRun,
+        guesses as Partial<Guess>[],
+        proposals as (Partial<import("./entities/llm-proposal.entity").LlmProposal> & {
+          promptNumber?: number;
+        })[],
+        [...prompts],
+      );
+
+      // SolvePrompt inserted first
+      expect(mockManager.insert.mock.calls[0][0]).toBe("SolvePrompt");
+      expect(mockManager.insert.mock.calls[0][1]).toEqual(prompts);
+
+      // Guess inserted second
+      expect(mockManager.insert.mock.calls[1][0]).toBe("Guess");
+
+      // LlmProposal inserted third with resolved solvePromptId and guessId
+      expect(mockManager.insert.mock.calls[2][0]).toBe("LlmProposal");
+      const insertedProposals = mockManager.insert.mock.calls[2][1];
+      expect(insertedProposals[0]).toEqual({
+        strategyRun: { id: 7 },
+        words: ["A", "B", "C", "D"],
+        reasoning: "test",
+        status: LlmProposalStatus.USED,
+        solvePromptId: 11,
+        guessId: 20,
+      });
     });
   });
 });

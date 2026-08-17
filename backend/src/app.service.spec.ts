@@ -40,8 +40,6 @@ describe("AppService", () => {
     const body = {
       proposedGroup: {
         word_ids: [0, 1, 2, 3],
-        category: "Things",
-        confidence: 0.95,
         reasoning: "all start with A",
       },
       prompt: "pick a group",
