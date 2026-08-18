@@ -2,12 +2,28 @@ import { BadRequestException, Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { SupportedModel } from "./entities/supported-model.entity";
+import { ModelPrice } from "./entities/model-price.entity";
+
+// SupportedModel joined with its current (most recently added) ModelPrice
+// row — the shape GET /strategy/models returns and getLeaderboard/
+// getRunHistory price runs from. Cost fields are nullable: a model can exist
+// (and be dispatchable) before it's ever been given a price row.
+export interface SupportedModelWithRate {
+  id: number;
+  strategyName: string;
+  modelName: string;
+  supported: boolean;
+  inputCostPerMillionTokens: number | null;
+  outputCostPerMillionTokens: number | null;
+}
 
 @Injectable()
 export class SupportedModelService {
   constructor(
     @InjectRepository(SupportedModel)
     private readonly repo: Repository<SupportedModel>,
+    @InjectRepository(ModelPrice)
+    private readonly priceRepo: Repository<ModelPrice>,
   ) {}
 
   /**
@@ -77,9 +93,34 @@ export class SupportedModelService {
    * that's since been marked unsupported can still have real historical runs
    * that need to resolve to *something* (e.g. the leaderboard's per-model
    * page), so callers that need to recognize "is this a real model" should
-   * not filter this down to supported-only themselves.
+   * not filter this down to supported-only themselves. Each model is priced
+   * from its current rate — see ModelPrice — which is null if the model has
+   * never been given a price row.
    */
-  async findAll(): Promise<SupportedModel[]> {
-    return this.repo.find({ order: { id: "ASC" } });
+  async findAll(): Promise<SupportedModelWithRate[]> {
+    const [models, prices] = await Promise.all([
+      this.repo.find({ order: { id: "ASC" } }),
+      this.priceRepo.find({ order: { id: "ASC" } }),
+    ]);
+
+    // Prices are append-only and fetched oldest-first, so the last write for
+    // a given model in this loop is its highest-id (most recent) row —
+    // "the current price" — see ModelPrice's entity comment.
+    const currentPriceByModelId = new Map<number, ModelPrice>();
+    for (const price of prices) {
+      currentPriceByModelId.set(price.supportedModelId, price);
+    }
+
+    return models.map((model) => {
+      const price = currentPriceByModelId.get(model.id);
+      return {
+        id: model.id,
+        strategyName: model.strategyName,
+        modelName: model.modelName,
+        supported: model.supported,
+        inputCostPerMillionTokens: price?.inputCostPerMillionTokens ?? null,
+        outputCostPerMillionTokens: price?.outputCostPerMillionTokens ?? null,
+      };
+    });
   }
 }

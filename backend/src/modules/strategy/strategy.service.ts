@@ -20,7 +20,6 @@ import {
   RunHistoryRowDto,
   RunHistorySortBy,
 } from "./dto/strategy.dto";
-import { SupportedModel } from "../supported-model/entities/supported-model.entity";
 import {
   SHUFFLE_SMART,
   SHUFFLE_FOOLISH,
@@ -31,7 +30,10 @@ import {
 import { runStrategyJobId, queueForStrategy } from "../queue/strategy.queue";
 import { StrategyRunStore, computeInitialWordOrder } from "./strategy-run-store.service";
 import { reconstructSolvePrompts } from "./prompt-reconstruction";
-import { SupportedModelService } from "../supported-model/supported-model.service";
+import {
+  SupportedModelService,
+  SupportedModelWithRate,
+} from "../supported-model/supported-model.service";
 
 const GROUP_SIZE = 4;
 const BATCH_SIZE = 50;
@@ -65,21 +67,35 @@ function leaderboardKey(strategyName: string, modelName: string | null): string 
   return `${strategyName}::${modelName ?? ""}`;
 }
 
+// The two rate fields computeTokenCostUsd actually needs — narrower than
+// SupportedModelWithRate so a caller must resolve the "no price row yet"
+// null case (see hasPrice) before it can call this.
+interface ModelRate {
+  inputCostPerMillionTokens: number;
+  outputCostPerMillionTokens: number;
+}
+
 /**
- * USD cost of one run's token usage, from its model's configured
- * per-million-token rates (SupportedModel). Shared by getLeaderboard (cost
- * across every run of a model) and tokenCostByRun (cost of one page of
- * runs) so the pricing formula lives in exactly one place.
+ * USD cost of one run's token usage, from its model's current per-million-
+ * token rate (ModelPrice). Shared by getLeaderboard (cost across every run
+ * of a model) and tokenCostByRun (cost of one page of runs) so the pricing
+ * formula lives in exactly one place.
  */
 function computeTokenCostUsd(
   promptTokens: number,
   completionTokens: number,
-  rate: SupportedModel,
+  rate: ModelRate,
 ): number {
   return (
     (promptTokens / 1_000_000) * rate.inputCostPerMillionTokens +
     (completionTokens / 1_000_000) * rate.outputCostPerMillionTokens
   );
+}
+
+// A model only prices runs once it's been given at least one ModelPrice row
+// — SupportedModelService.findAll leaves both fields null until then.
+function hasPrice(model: SupportedModelWithRate): model is SupportedModelWithRate & ModelRate {
+  return model.inputCostPerMillionTokens !== null && model.outputCostPerMillionTokens !== null;
 }
 
 interface LeaderboardAccumulator {
@@ -353,7 +369,7 @@ export class StrategyService {
       });
     }
 
-    const rateByModel = new Map<string, SupportedModel>();
+    const rateByModel = new Map<string, SupportedModelWithRate>();
     for (const model of models) {
       rateByModel.set(leaderboardKey(model.strategyName, model.modelName), model);
     }
@@ -412,7 +428,7 @@ export class StrategyService {
       if (run.modelName) {
         const tokens = tokensByRun.get(run.id);
         const rate = rateByModel.get(leaderboardKey(run.strategyName, run.modelName));
-        if (tokens && rate) {
+        if (tokens && rate && hasPrice(rate)) {
           acc.costsUsd.push(computeTokenCostUsd(tokens.promptTokens, tokens.completionTokens, rate));
         }
       }
@@ -838,10 +854,10 @@ export class StrategyService {
 
   /**
    * USD cost of the LLM tokens spent by each given run, keyed by run id —
-   * each run's own modelName resolves its rate (SupportedModel), summed over
-   * every SolvePrompt the run made. A run is simply absent from the returned
-   * map (never present as 0) when its tokens or its model's rate can't be
-   * resolved, so callers can tell "no cost data" apart from "free".
+   * each run's own modelName resolves its current rate (ModelPrice), summed
+   * over every SolvePrompt the run made. A run is simply absent from the
+   * returned map (never present as 0) when its tokens or its model's rate
+   * can't be resolved, so callers can tell "no cost data" apart from "free".
    */
   private async tokenCostByRun(
     strategyName: string,
@@ -865,7 +881,7 @@ export class StrategyService {
       this.supportedModelService.findAll(),
     ]);
 
-    const rateByModel = new Map<string, SupportedModel>();
+    const rateByModel = new Map<string, SupportedModelWithRate>();
     for (const model of models) {
       if (model.strategyName === strategyName) {
         rateByModel.set(leaderboardKey(model.strategyName, model.modelName), model);
@@ -879,7 +895,7 @@ export class StrategyService {
       const runId = Number(row.strategyRunId);
       const modelName = modelByRun.get(runId);
       const rate = modelName ? rateByModel.get(leaderboardKey(strategyName, modelName)) : undefined;
-      if (!rate) continue;
+      if (!rate || !hasPrice(rate)) continue;
 
       costs.set(
         runId,

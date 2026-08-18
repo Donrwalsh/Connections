@@ -17,6 +17,7 @@ import { LlmProposal } from "./modules/strategy/entities/llm-proposal.entity";
 import { SolvePrompt } from "./modules/strategy/entities/solve-prompt.entity";
 import { StrategyRun } from "./modules/strategy/entities/strategy-run.entity";
 import { SupportedModel } from "./modules/supported-model/entities/supported-model.entity";
+import { ModelPrice } from "./modules/supported-model/entities/model-price.entity";
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { SupportedModel } from "./modules/supported-model/entities/supported-mod
         LlmProposal,
         SolvePrompt,
         SupportedModel,
+        ModelPrice,
       ],
       synchronize: false,
       migrations: [__dirname + "/migrations/*{.ts,.js}"],

@@ -3,18 +3,22 @@ import { BadRequestException } from "@nestjs/common";
 import { getRepositoryToken } from "@nestjs/typeorm";
 import { SupportedModelService } from "./supported-model.service";
 import { SupportedModel } from "./entities/supported-model.entity";
+import { ModelPrice } from "./entities/model-price.entity";
 
 describe("SupportedModelService", () => {
   let service: SupportedModelService;
   let mockRepo: { findOne: jest.Mock; find: jest.Mock };
+  let mockPriceRepo: { find: jest.Mock };
 
   beforeEach(async () => {
     mockRepo = { findOne: jest.fn(), find: jest.fn() };
+    mockPriceRepo = { find: jest.fn().mockResolvedValue([]) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SupportedModelService,
         { provide: getRepositoryToken(SupportedModel), useValue: mockRepo },
+        { provide: getRepositoryToken(ModelPrice), useValue: mockPriceRepo },
       ],
     }).compile();
 
@@ -135,11 +139,56 @@ describe("SupportedModelService", () => {
         { id: 3, strategyName: "llm-openai", modelName: "gpt-3.5-turbo", supported: false },
       ];
       mockRepo.find.mockResolvedValueOnce(rows);
+      mockPriceRepo.find.mockResolvedValueOnce([]);
 
       const result = await service.findAll();
 
-      expect(result).toBe(rows);
+      expect(result).toEqual([
+        { ...rows[0], inputCostPerMillionTokens: null, outputCostPerMillionTokens: null },
+        { ...rows[1], inputCostPerMillionTokens: null, outputCostPerMillionTokens: null },
+        { ...rows[2], inputCostPerMillionTokens: null, outputCostPerMillionTokens: null },
+      ]);
       expect(mockRepo.find).toHaveBeenCalledWith({ order: { id: "ASC" } });
+      expect(mockPriceRepo.find).toHaveBeenCalledWith({ order: { id: "ASC" } });
+    });
+
+    it("should price each model from its current (highest-id) ModelPrice row", async () => {
+      mockRepo.find.mockResolvedValueOnce([
+        { id: 1, strategyName: "llm-openai", modelName: "gpt-4.1-nano-2025-04-14", supported: true },
+      ]);
+      // Ascending by id: the second row for supportedModelId 1 is the most
+      // recent price and should win over the first.
+      mockPriceRepo.find.mockResolvedValueOnce([
+        { id: 10, supportedModelId: 1, inputCostPerMillionTokens: 0.2, outputCostPerMillionTokens: 0.8 },
+        { id: 11, supportedModelId: 1, inputCostPerMillionTokens: 0.1, outputCostPerMillionTokens: 0.4 },
+      ]);
+
+      const result = await service.findAll();
+
+      expect(result).toEqual([
+        {
+          id: 1,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano-2025-04-14",
+          supported: true,
+          inputCostPerMillionTokens: 0.1,
+          outputCostPerMillionTokens: 0.4,
+        },
+      ]);
+    });
+
+    it("should leave cost fields null for a model with no ModelPrice row", async () => {
+      mockRepo.find.mockResolvedValueOnce([
+        { id: 1, strategyName: "llm-openai", modelName: "brand-new-model", supported: true },
+      ]);
+      mockPriceRepo.find.mockResolvedValueOnce([]);
+
+      const result = await service.findAll();
+
+      expect(result[0]).toMatchObject({
+        inputCostPerMillionTokens: null,
+        outputCostPerMillionTokens: null,
+      });
     });
   });
 });

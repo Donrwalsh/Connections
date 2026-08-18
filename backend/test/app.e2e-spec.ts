@@ -179,7 +179,7 @@ describe("App (e2e)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("GET /strategy/models returns the seeded model catalog", async () => {
+  it("GET /strategy/models returns the seeded model catalog priced from its current ModelPrice row", async () => {
     const res = await request(app.getHttpServer()).get("/strategy/models");
 
     expect(res.status).toBe(200);
@@ -189,14 +189,22 @@ describe("App (e2e)", () => {
           strategyName: "llm-openai",
           modelName: "gpt-4.1-nano-2025-04-14",
           supported: true,
+          inputCostPerMillionTokens: expect.any(Number),
+          outputCostPerMillionTokens: expect.any(Number),
         }),
         expect.objectContaining({
           strategyName: "llm-openai",
           modelName: "gpt-5-nano",
           supported: true,
+          inputCostPerMillionTokens: expect.any(Number),
+          outputCostPerMillionTokens: expect.any(Number),
         }),
       ]),
     );
+    // The old SupportedModel-only cost field is gone now that pricing lives
+    // on ModelPrice — nothing in this project ever priced cached input
+    // tokens, so it wasn't carried over.
+    expect(res.body[0]).not.toHaveProperty("cachedInputCostPerMillionTokens");
   });
 
   it("POST /dispatch/strategy/:strategy/:date queues a deterministic strategy", async () => {

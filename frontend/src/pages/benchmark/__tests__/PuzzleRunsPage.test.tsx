@@ -167,7 +167,6 @@ describe("PuzzleRunsPage", () => {
           strategyName: "llm-openai",
           modelName: "gpt-5-nano",
           inputCostPerMillionTokens: 0.05,
-          cachedInputCostPerMillionTokens: 0.005,
           outputCostPerMillionTokens: 0.4,
           supported: true,
         },

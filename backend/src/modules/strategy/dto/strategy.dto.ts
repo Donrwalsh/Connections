@@ -127,10 +127,10 @@ export interface LeaderboardRowDto {
   minGuesses: number | null;
   maxGuesses: number | null;
   avgDurationMs: number | null;
-  // USD cost of this model's runs, from its configured per-million-token
-  // rates applied to actual token usage — null for deterministic/shuffle
-  // rows (no LLM cost concept) and for LLM rows with no priceable runs yet
-  // (e.g. a model missing its SupportedModel rate). Unlike avgGuessesToSolve
+  // USD cost of this model's runs, from its current per-million-token rate
+  // (ModelPrice) applied to actual token usage — null for deterministic/
+  // shuffle rows (no LLM cost concept) and for LLM rows with no priceable
+  // runs yet (e.g. a model with no ModelPrice row). Unlike avgGuessesToSolve
   // above, this covers every run regardless of outcome — a failed run still
   // spent tokens.
   avgCostUsd: number | null;
@@ -160,10 +160,10 @@ export interface RunHistoryRowDto {
   startedAt: Date;
   finishedAt: Date | null;
   guessCount: number;
-  // Total USD cost of this run's LLM calls, from the model's configured
-  // per-million-token rates (SupportedModel) applied to its summed
-  // SolvePrompt token usage. Null for non-LLM strategies, and for an LLM run
-  // whose model's rate can no longer be resolved (e.g. since removed).
+  // Total USD cost of this run's LLM calls, from the model's current
+  // per-million-token rate (ModelPrice) applied to its summed SolvePrompt
+  // token usage. Null for non-LLM strategies, and for an LLM run whose
+  // model's rate can no longer be resolved (e.g. since removed).
   tokenCostUsd: number | null;
 }
 
@@ -182,12 +182,13 @@ export interface RunHistoryDto {
 // leaderboard's per-model run page) recognize a real model it doesn't
 // otherwise know about and resolve which backend strategy it belongs to.
 // Includes rows regardless of `supported` — see SupportedModelService.findAll.
+// Cost fields reflect the model's current price (ModelPrice) and are null
+// until it's been given one.
 export interface SupportedModelDto {
   id: number;
   strategyName: string;
   modelName: string;
-  inputCostPerMillionTokens: number;
-  cachedInputCostPerMillionTokens: number;
-  outputCostPerMillionTokens: number;
+  inputCostPerMillionTokens: number | null;
+  outputCostPerMillionTokens: number | null;
   supported: boolean;
 }

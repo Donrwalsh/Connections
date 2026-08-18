@@ -149,9 +149,8 @@ export interface SupportedModelRecord {
   id: number;
   strategyName: string;
   modelName: string;
-  inputCostPerMillionTokens: number;
-  cachedInputCostPerMillionTokens: number;
-  outputCostPerMillionTokens: number;
+  inputCostPerMillionTokens: number | null;
+  outputCostPerMillionTokens: number | null;
   supported: boolean;
 }
 
