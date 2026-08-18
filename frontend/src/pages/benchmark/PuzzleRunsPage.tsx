@@ -3,10 +3,38 @@ import { Link, useParams } from "react-router-dom";
 import { GuessChainVisualizer } from "../../components/benchmark/GuessChainVisualizer";
 import { RunsTable } from "../../components/benchmark/RunsTable";
 import { StatusPill } from "../../components/benchmark/StatusPill";
-import { fetchPuzzleDate, fetchRunsForPuzzle, toRunRecord } from "../../data/benchmark/api";
+import {
+  fetchPuzzleDate,
+  fetchRunsForPuzzle,
+  fetchSupportedModels,
+  toRunRecord,
+} from "../../data/benchmark/api";
 import { formatDateLabel, getStrategyMeta } from "../../data/benchmark/mockData";
 import { isFailedStatus, puzzleStatusLabel, puzzleStatusTone } from "../../data/benchmark/runStatus";
-import type { PuzzleRunStatus, RunRecord } from "../../data/benchmark/types";
+import type {
+  PuzzleRunStatus,
+  RunRecord,
+  StrategyMeta,
+  SupportedModelRecord,
+} from "../../data/benchmark/types";
+
+/** Synthesizes StrategyMeta for a model the static mock catalog doesn't know
+ * about, from the real backend allowlist (GET /strategy/models). Only ever
+ * needed for LLM rows — deterministic/shuffle strategies are always in the
+ * mock catalog already. `runsPerPuzzle` is a placeholder: this page derives
+ * single-vs-multi-run layout from the actual fetched run count, not this
+ * field, so it isn't load-bearing here. */
+function buildDynamicMeta(model: SupportedModelRecord): StrategyMeta {
+  const providerLabel = model.strategyName === "llm-ollama" ? "Ollama" : "OpenAI";
+  return {
+    id: model.modelName,
+    name: `LLM · ${model.modelName}`,
+    kind: "llm",
+    description: `LLM-based · ${providerLabel} model proposes candidate groups`,
+    runsPerPuzzle: 3,
+    strategyName: model.strategyName,
+  };
+}
 
 /**
  * Runs for one strategy (or, for LLM rows, one model) + puzzle, fetched live
@@ -17,10 +45,16 @@ import type { PuzzleRunStatus, RunRecord } from "../../data/benchmark/types";
  * see StrategyMeta. A few judgment calls made while wiring this up, worth
  * revisiting later:
  *
- * - Strategy *metadata* (name/kind/description) still comes from the static
- *   mock list. The backend has no "strategy catalog" endpoint, and that
- *   content is effectively UI copy rather than puzzle-run data, so it was
- *   left out of scope here.
+ * - Strategy *metadata* (name/kind/description) primarily comes from the
+ *   static mock list, since the backend has no general "strategy catalog"
+ *   and that content is effectively UI copy rather than puzzle-run data.
+ *   The one exception: an `:strategyId` the mock list doesn't recognize is
+ *   checked against the real model allowlist (GET /strategy/models) before
+ *   giving up — this is what makes a link generated from real backend data
+ *   (e.g. GuessSequencePanel's "View full run details", or a model added
+ *   after the mock list was last updated) resolve correctly instead of
+ *   always reporting "Unknown strategy" for anything not in the mock's
+ *   hardcoded set.
  * - The backend has no per-model query — only per-strategy
  *   ("llm-openai"/"llm-ollama"). So for LLM rows this fetches every run of
  *   the underlying strategy (meta.strategyName) and filters client-side to
@@ -44,15 +78,55 @@ export function PuzzleRunsPage() {
   const { strategyId, puzzleId: puzzleIdParam } = useParams();
   const puzzleId = Number(puzzleIdParam);
   const isValidPuzzleId = Number.isInteger(puzzleId);
-  const meta = strategyId ? getStrategyMeta(strategyId) : undefined;
+  const staticMeta = strategyId ? getStrategyMeta(strategyId) : undefined;
+
+  const [dynamicMeta, setDynamicMeta] = useState<StrategyMeta | null>(null);
+  const [isResolvingMeta, setIsResolvingMeta] = useState(false);
+  const meta = staticMeta ?? dynamicMeta ?? undefined;
+  // Stable primitives (not `meta` itself — a fresh object every render for
+  // the static-lookup case) so effects below can depend on "is this strategy
+  // resolved" without re-firing on every render.
+  const resolvedStrategyName = meta?.strategyName;
+  const resolvedKind = meta?.kind;
+  const resolvedModelId = meta?.id;
 
   const [runs, setRuns] = useState<RunRecord[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [date, setDate] = useState<string | null>(null);
 
+  // Falls back to the real backend model allowlist when the static mock
+  // catalog doesn't recognize strategyId — see the "Strategy metadata" note
+  // above. Only fires when the fast synchronous lookup already failed.
   useEffect(() => {
-    if (!strategyId || !isValidPuzzleId || !getStrategyMeta(strategyId)) return;
+    if (!strategyId || getStrategyMeta(strategyId)) {
+      setDynamicMeta(null);
+      setIsResolvingMeta(false);
+      return;
+    }
+
+    setIsResolvingMeta(true);
+    setDynamicMeta(null);
+
+    const controller = new AbortController();
+    fetchSupportedModels(controller.signal)
+      .then((models) => {
+        const match = models.find((model) => model.modelName === strategyId);
+        setDynamicMeta(match ? buildDynamicMeta(match) : null);
+      })
+      .catch(() => {
+        // Best-effort fallback, not a hard requirement — falls through to
+        // the "Unknown strategy" state below like any other miss.
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsResolvingMeta(false);
+      });
+
+    return () => controller.abort();
+  }, [strategyId]);
+
+  useEffect(() => {
+    if (!resolvedStrategyName || !isValidPuzzleId) return;
 
     const controller = new AbortController();
     fetchPuzzleDate(puzzleId, controller.signal)
@@ -63,27 +137,23 @@ export function PuzzleRunsPage() {
       });
 
     return () => controller.abort();
-  }, [strategyId, puzzleId, isValidPuzzleId]);
+  }, [resolvedStrategyName, puzzleId, isValidPuzzleId]);
 
   useEffect(() => {
-    // Re-derive meta here (rather than depending on the outer `meta` object)
-    // since getStrategyMeta returns a fresh object every call — depending on
-    // it directly would re-fire this effect (and re-fetch) on every render.
-    const currentMeta = strategyId ? getStrategyMeta(strategyId) : undefined;
-    if (!strategyId || !isValidPuzzleId || !currentMeta) return;
+    if (!resolvedStrategyName || !isValidPuzzleId) return;
 
     setIsLoading(true);
     setError(null);
     setRuns(null);
 
     const controller = new AbortController();
-    fetchRunsForPuzzle(currentMeta.strategyName, puzzleId, controller.signal)
+    fetchRunsForPuzzle(resolvedStrategyName, puzzleId, controller.signal)
       .then((items) => {
         // LLM rows are keyed by model, but the backend can only filter by
         // strategy — narrow down to this model's own runs here.
         const modelItems =
-          currentMeta.kind === "llm"
-            ? items.filter((item) => item.modelName === currentMeta.id)
+          resolvedKind === "llm"
+            ? items.filter((item) => item.modelName === resolvedModelId)
             : items;
         setRuns(modelItems.map(toRunRecord));
         setIsLoading(false);
@@ -95,9 +165,27 @@ export function PuzzleRunsPage() {
       });
 
     return () => controller.abort();
-  }, [strategyId, puzzleId, isValidPuzzleId]);
+  }, [resolvedStrategyName, resolvedKind, resolvedModelId, puzzleId, isValidPuzzleId]);
 
-  if (!strategyId || !meta) {
+  if (!strategyId) {
+    return (
+      <div className="bench-page">
+        <p className="bench-muted">Unknown strategy.</p>
+        <Link to="/leaderboard" className="bench-page-header__back">
+          ← Back to leaderboard
+        </Link>
+      </div>
+    );
+  }
+
+  if (!meta) {
+    if (isResolvingMeta) {
+      return (
+        <div className="bench-page">
+          <p className="bench-muted">Loading…</p>
+        </div>
+      );
+    }
     return (
       <div className="bench-page">
         <p className="bench-muted">Unknown strategy.</p>

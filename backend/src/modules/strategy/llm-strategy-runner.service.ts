@@ -4,6 +4,7 @@ import { Repository } from "typeorm";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { GameService } from "../game/game.service";
 import {
+  LLM_OLLAMA,
   llmMaxDuplicateGuesses,
   llmMaxFailedGuesses,
   llmMaxMalformedResponses,
@@ -130,8 +131,18 @@ export class LlmStrategyRunner {
     @Inject(OrchestratorService) private readonly orchestratorService: OrchestratorService,
   ) {}
 
-  async runLlmStrategy(puzzleId: number, strategyName: string, trialNumber = 0) {
-    const { run, puzzle } = await this.store.loadOrCreateRun(puzzleId, strategyName, trialNumber);
+  async runLlmStrategy(puzzleId: number, strategyName: string, trialNumber = 0, model?: string) {
+    // The strategy name alone determines the provider (there's no per-run
+    // choice of provider today, only of model within it) — resolved once so
+    // every orchestrator call for this run tells it which client to use.
+    const provider = strategyName === LLM_OLLAMA ? "ollama" : "openai";
+
+    const { run, puzzle } = await this.store.loadOrCreateRun(
+      puzzleId,
+      strategyName,
+      trialNumber,
+      model,
+    );
 
     if (TERMINAL_STATUSES.has(run.status)) {
       return {
@@ -187,7 +198,7 @@ export class LlmStrategyRunner {
       // Append the user message to conversation history.
       messages.push({ role: "user", content: prompt });
 
-      const outcome = await this.orchestratorService.solveAssist(messages);
+      const outcome = await this.orchestratorService.solveAssist(messages, model, provider);
 
       if (outcome.ok) {
         const data = outcome.data;

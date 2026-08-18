@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PuzzleRunsPage } from "../PuzzleRunsPage";
-import type { StrategyRunListItem } from "../../../data/benchmark/types";
+import type { StrategyRunListItem, SupportedModelRecord } from "../../../data/benchmark/types";
 
 const singleRun: StrategyRunListItem[] = [
   {
@@ -69,12 +69,19 @@ function runDetailFor(id: number) {
 
 function stubFetch(
   runs: StrategyRunListItem[] | null,
-  { ok = true, date }: { ok?: boolean; date?: string } = {},
+  {
+    ok = true,
+    date,
+    models = [],
+  }: { ok?: boolean; date?: string; models?: SupportedModelRecord[] } = {},
 ) {
   vi.stubGlobal(
     "fetch",
     vi.fn((url: unknown) => {
       const href = String(url);
+      if (href.includes("/strategy/models")) {
+        return Promise.resolve({ ok: true, json: async () => models });
+      }
       if (href.includes("/game/puzzle-id/")) {
         if (date === undefined) {
           return Promise.resolve({
@@ -118,13 +125,59 @@ afterEach(() => {
 });
 
 describe("PuzzleRunsPage", () => {
-  it("shows a not-found state for an unknown strategy, without fetching", () => {
-    stubFetch([]);
+  it("shows a not-found state for a strategyId absent from both the mock catalog and the real model allowlist", async () => {
+    stubFetch([], { models: [] });
 
     renderRuns("/leaderboard/nope/1");
 
-    expect(screen.getByText("Unknown strategy.")).toBeInTheDocument();
-    expect(fetch).not.toHaveBeenCalled();
+    // While the real allowlist check is in flight, the page doesn't jump
+    // straight to "Unknown strategy" — it waits to be sure.
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+
+    expect(await screen.findByText("Unknown strategy.")).toBeInTheDocument();
+    // No match was found, so there's no strategyName to fetch runs for.
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/strategy/models"),
+      expect.anything(),
+    );
+    expect(fetch).not.toHaveBeenCalledWith(
+      expect.stringContaining("/puzzle-id/1"),
+      expect.anything(),
+    );
+  });
+
+  it("resolves a strategyId the mock catalog doesn't know via the real model allowlist", async () => {
+    const runs: StrategyRunListItem[] = [
+      {
+        id: 701,
+        strategyName: "llm-openai",
+        trialNumber: 1,
+        status: "completed",
+        modelName: "gpt-5-nano",
+        contextWindow: null,
+        startedAt: "2025-01-01T00:00:00Z",
+        finishedAt: "2025-01-01T00:00:02Z",
+        guessCount: 3,
+      },
+    ];
+    stubFetch(runs, {
+      models: [
+        {
+          id: 2,
+          strategyName: "llm-openai",
+          modelName: "gpt-5-nano",
+          inputCostPerMillionTokens: 0.05,
+          cachedInputCostPerMillionTokens: 0.005,
+          outputCostPerMillionTokens: 0.4,
+          supported: true,
+        },
+      ],
+    });
+
+    renderRuns("/leaderboard/gpt-5-nano/1");
+
+    expect(await screen.findByRole("heading", { name: "LLM · gpt-5-nano" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Guess chain" })).toBeInTheDocument();
   });
 
   it("shows a not-found state for a non-numeric puzzle id", () => {

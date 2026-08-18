@@ -13,8 +13,10 @@ import { runStrategyJobId, queueForStrategy } from "../queue/strategy.queue";
 import {
   SUPPORTED_STRATEGIES,
   dispatchStrategyJobsOnIngestion,
+  isLlmStrategy,
   strategyTrialNumbers,
 } from "../../strategies";
+import { SupportedModelService } from "../supported-model/supported-model.service";
 
 interface ConnectionsCard {
   content: string;
@@ -47,6 +49,7 @@ export class PuzzleIngestionService {
     @Inject(STRATEGY_QUEUE) private readonly strategyQueue: Queue,
     @Inject(LLM_OPENAI_QUEUE) private readonly llmOpenAIQueue: Queue,
     @Inject(LLM_OLLAMA_QUEUE) private readonly llmOllamaQueue: Queue,
+    @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
   ) {}
 
   /**
@@ -250,6 +253,12 @@ export class PuzzleIngestionService {
    * re-run of ingestion collapses onto the existing jobs instead of
    * duplicating them.
    *
+   * For each LLM strategy, the model dispatched is whichever supported model
+   * SupportedModelService.getDefaultModel resolves (there's no human caller
+   * here to ask) — a strategy with no supported model configured at all is
+   * skipped entirely rather than guessing, so e.g. llm-ollama simply stops
+   * getting automatic runs until a SupportedModel row exists for it.
+   *
    * Skips entirely when PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS is disabled —
    * the puzzle is still inserted, just no solution runs are enqueued for it.
    *
@@ -273,6 +282,18 @@ export class PuzzleIngestionService {
     >();
 
     for (const strategyName of SUPPORTED_STRATEGIES) {
+      let model: string | null = null;
+      if (isLlmStrategy(strategyName)) {
+        model = await this.supportedModelService.getDefaultModel(strategyName);
+        if (model === null) {
+          this.logger.warn(
+            `Skipping automatic dispatch of '${strategyName}' for puzzle ${date} (id ${puzzleId}) — ` +
+              "no supported model is configured for it",
+          );
+          continue;
+        }
+      }
+
       const queue = queueForStrategy(
         this.strategyQueue,
         this.llmOpenAIQueue,
@@ -283,7 +304,7 @@ export class PuzzleIngestionService {
       for (const trialNumber of strategyTrialNumbers(strategyName)) {
         jobs.push({
           name: "run-strategy",
-          data: { puzzleId, strategyName, date, trialNumber },
+          data: { puzzleId, strategyName, date, trialNumber, model },
           opts: { jobId: runStrategyJobId(puzzleId, strategyName, trialNumber) },
         });
       }

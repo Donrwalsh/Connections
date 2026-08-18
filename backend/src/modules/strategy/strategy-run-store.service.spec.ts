@@ -144,9 +144,35 @@ describe("StrategyRunStore", () => {
           status: StrategyRunStatus.RUNNING,
           availableWords: expectedWords,
           currentCombination: [0, 1, 2, 3],
+          modelName: null,
         });
       },
     );
+
+    it("should set modelName from the given model when creating a new run", async () => {
+      mockPuzzleRepo.findOne.mockResolvedValueOnce(puzzle);
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(null);
+      const created = makeRun();
+      mockStrategyRunRepo.create.mockReturnValueOnce(created);
+      mockStrategyRunRepo.save.mockResolvedValueOnce(created);
+
+      await store.loadOrCreateRun(100, "llm-openai", 0, "gpt-4.1-nano-2025-04-14");
+
+      expect(mockStrategyRunRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ modelName: "gpt-4.1-nano-2025-04-14" }),
+      );
+    });
+
+    it("should not overwrite an existing run's modelName when resuming", async () => {
+      const existing = makeRun({ modelName: "gpt-4.1-nano-2025-04-14" });
+      mockPuzzleRepo.findOne.mockResolvedValueOnce(puzzle);
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(existing);
+
+      const result = await store.loadOrCreateRun(100, "llm-openai", 0, "gpt-5-nano");
+
+      expect(result.run).toBe(existing);
+      expect(mockStrategyRunRepo.create).not.toHaveBeenCalled();
+    });
   });
 
   describe("countGuesses", () => {

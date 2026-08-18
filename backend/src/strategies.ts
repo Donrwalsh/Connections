@@ -37,7 +37,7 @@ export const AUTOMATIC_STRATEGIES: readonly string[] = SUPPORTED_STRATEGIES.filt
 
 export const DEFAULT_SHUFFLE_SMART_TRIALS = 3;
 export const DEFAULT_SHUFFLE_FOOLISH_TRIALS = 3;
-export const DEFAULT_LLM_TRIALS = 3;
+export const DEFAULT_LLM_TRIALS_PER_MODEL = 3;
 export const DEFAULT_LLM_MAX_DUPLICATE_GUESSES = 10;
 export const DEFAULT_LLM_MAX_MALFORMED_RESPONSES = 3;
 export const DEFAULT_LLM_MAX_MODEL_ERRORS = 5;
@@ -98,13 +98,16 @@ export function shuffleFoolishTrialCount(env: NodeJS.ProcessEnv = process.env): 
 }
 
 /**
- * Number of independent LLM trials to run per puzzle, from LLM_TRIALS. Each
- * trial is a separate strategy run of the same configured model, so the
- * runs can be compared against each other (like shuffle-smart/foolish).
- * Falls back to DEFAULT_LLM_TRIALS for missing/invalid values.
+ * Maximum number of independent trials a single LLM model may accumulate for
+ * a strategy on one puzzle, from LLM_TRIALS_PER_MODEL. Each trial is a
+ * separate strategy run of that model, so the runs can be compared against
+ * each other (like shuffle-smart/foolish) — the limit applies per model, not
+ * per strategy run as a whole, so e.g. 'llm-openai' can accumulate this many
+ * trials of 'gpt-4.1-nano' *and* this many of a second model, independently.
+ * Falls back to DEFAULT_LLM_TRIALS_PER_MODEL for missing/invalid values.
  */
-export function llmTrialCount(env: NodeJS.ProcessEnv = process.env): number {
-  return positiveTrialCount(env.LLM_TRIALS, DEFAULT_LLM_TRIALS);
+export function llmMaxTrialsPerModel(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.LLM_TRIALS_PER_MODEL, DEFAULT_LLM_TRIALS_PER_MODEL);
 }
 
 /**
@@ -210,9 +213,18 @@ export function shuffleFoolishDuplicateLimit(env: NodeJS.ProcessEnv = process.en
 }
 
 /**
- * Trial numbers to create for a strategy. Deterministic strategies run a
- * single trial (0); shuffle and LLM strategies run their configured trial
- * count (1..N) so the runs can be compared against each other.
+ * Trial numbers to create for a strategy in one bulk dispatch. Deterministic
+ * strategies run a single trial (0); shuffle strategies run their configured
+ * trial count (1..N) so the runs can be compared against each other.
+ *
+ * For LLM strategies this bulk-creates 1..llmMaxTrialsPerModel() trials for a
+ * single model in one shot — the shape puzzle ingestion needs, since it
+ * dispatches every strategy against one default model per provider with no
+ * human caller to ask. It's the per-model cap in full, not a partial slice,
+ * so it's only correct for a single model at a time; the /strategy/queue
+ * endpoint, where callers can name a different model per request, instead
+ * dispatches one trial per call and tracks each model's count separately
+ * (see StrategyService.triggerStrategyRuns).
  */
 export function strategyTrialNumbers(
   strategyName: string,
@@ -224,7 +236,7 @@ export function strategyTrialNumbers(
       : strategyName === SHUFFLE_FOOLISH
         ? shuffleFoolishTrialCount(env)
         : isLlmStrategy(strategyName)
-          ? llmTrialCount(env)
+          ? llmMaxTrialsPerModel(env)
           : 0;
 
   if (count === 0) return [0];

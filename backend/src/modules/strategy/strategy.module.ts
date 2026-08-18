@@ -12,12 +12,14 @@ import { LlmStrategyRunner } from "./llm-strategy-runner.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { OrchestratorService } from "./orchestrator.service";
 import { GameModule } from "../game/game.module";
+import { SupportedModelModule } from "../supported-model/supported-model.module";
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Puzzle, StrategyRun, Guess, LlmProposal, SolvePrompt]),
     QueueModule,
     GameModule,
+    SupportedModelModule,
   ],
   controllers: [StrategyController],
   providers: [StrategyService, StrategyRunStore, LlmStrategyRunner, OrchestratorService],

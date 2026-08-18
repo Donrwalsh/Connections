@@ -6,6 +6,7 @@ import * as fs from "fs";
 import { PuzzleIngestionService } from "./puzzle-ingestion.service";
 import { STRATEGY_QUEUE, LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE } from "../queue/queue.module";
 import { SUPPORTED_STRATEGIES } from "../../strategies";
+import { SupportedModelService } from "../supported-model/supported-model.service";
 
 const PUZZLE_DATA = {
   categories: [
@@ -30,7 +31,13 @@ const fetchResponse = (status: number, body?: unknown) =>
 
 interface JobShape {
   name: string;
-  data: { puzzleId: number; strategyName: string; date: string; trialNumber: number };
+  data: {
+    puzzleId: number;
+    strategyName: string;
+    date: string;
+    trialNumber: number;
+    model: string | null;
+  };
   opts: { jobId: string };
 }
 
@@ -52,6 +59,7 @@ describe("PuzzleIngestionService", () => {
   let mockStrategyQueue: { addBulk: jest.Mock };
   let mockOpenAIQueue: { addBulk: jest.Mock };
   let mockOllamaQueue: { addBulk: jest.Mock };
+  let mockSupportedModelService: { getDefaultModel: jest.Mock };
 
   beforeEach(async () => {
     process.env.PUZZLE_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "puzzle-cache-"));
@@ -71,6 +79,13 @@ describe("PuzzleIngestionService", () => {
     };
     mockOllamaQueue = {
       addBulk: jest.fn().mockResolvedValue(undefined),
+    };
+    // Default: every LLM strategy has a supported model, so existing tests
+    // that don't care about model resolution keep dispatching every strategy
+    // exactly as before. Tests of the "no model configured" behavior
+    // override this per-test.
+    mockSupportedModelService = {
+      getDefaultModel: jest.fn().mockResolvedValue("test-model"),
     };
 
     mockRepo = {
@@ -101,6 +116,7 @@ describe("PuzzleIngestionService", () => {
         { provide: STRATEGY_QUEUE, useValue: mockStrategyQueue },
         { provide: LLM_OPENAI_QUEUE, useValue: mockOpenAIQueue },
         { provide: LLM_OLLAMA_QUEUE, useValue: mockOllamaQueue },
+        { provide: SupportedModelService, useValue: mockSupportedModelService },
       ],
     }).compile();
 
@@ -214,6 +230,39 @@ describe("PuzzleIngestionService", () => {
           `run-${job.data.puzzleId}-${job.data.strategyName}-${job.data.trialNumber}`,
         );
       }
+
+      // LLM jobs carry the resolved default model; non-LLM strategies have none.
+      expect(openAIJobs.every((job) => job.data.model === "test-model")).toBe(true);
+      expect(ollamaJobs.every((job) => job.data.model === "test-model")).toBe(true);
+      expect(strategyJobs.every((job) => job.data.model === null)).toBe(true);
+    });
+
+    it("should skip dispatching an LLM strategy with no supported model configured", async () => {
+      mockLatestDate(2024, 0, 1);
+      jest
+        .spyOn(service as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(global, "fetch")
+        .mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA))
+        .mockResolvedValueOnce(fetchResponse(404));
+      mockSupportedModelService.getDefaultModel.mockImplementation((strategyName: string) =>
+        Promise.resolve(strategyName === "llm-ollama" ? null : "test-model"),
+      );
+      const warnSpy = jest.spyOn(
+        (service as unknown as { logger: { warn: jest.Mock } }).logger,
+        "warn",
+      );
+
+      await service.populateUntilCaughtUp();
+
+      expect(mockOllamaQueue.addBulk).not.toHaveBeenCalled();
+      expect(mockOpenAIQueue.addBulk).toHaveBeenCalledTimes(1);
+      const openAIJobs = mockOpenAIQueue.addBulk.mock.calls[0][0] as JobShape[];
+      expect(openAIJobs.every((job) => job.data.model === "test-model")).toBe(true);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Skipping automatic dispatch of 'llm-ollama'"),
+      );
     });
 
     it("should not dispatch strategy runs when the puzzle already exists", async () => {

@@ -15,12 +15,14 @@ import {
   SHUFFLE_SMART,
   SHUFFLE_FOOLISH,
   isLlmStrategy,
+  llmMaxTrialsPerModel,
   shuffleFoolishDuplicateLimit,
   strategyTrialNumbers,
 } from "../../strategies";
 import { runStrategyJobId, queueForStrategy } from "../queue/strategy.queue";
 import { StrategyRunStore, computeInitialWordOrder } from "./strategy-run-store.service";
 import { reconstructSolvePrompts } from "./prompt-reconstruction";
+import { SupportedModelService } from "../supported-model/supported-model.service";
 
 const GROUP_SIZE = 4;
 const BATCH_SIZE = 50;
@@ -39,6 +41,7 @@ export class StrategyService {
     @InjectRepository(LlmProposal) private readonly llmProposalRepo: Repository<LlmProposal>,
     @Inject(GameService) private readonly gameService: GameService,
     @Inject(StrategyRunStore) private readonly store: StrategyRunStore,
+    @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
   ) {}
 
   /**
@@ -50,7 +53,19 @@ export class StrategyService {
     return queueForStrategy(this.queue, this.llmOpenAIQueue, this.llmOllamaQueue, strategyName);
   }
 
-  async triggerRun(puzzleId: number, strategyName: string, date?: string, trialNumber = 0) {
+  async triggerRun(
+    puzzleId: number,
+    strategyName: string,
+    date?: string,
+    trialNumber = 0,
+    model?: string,
+  ) {
+    // LLM strategies must dispatch against an allowed, supported model — no
+    // job gets queued at all if the check fails.
+    if (isLlmStrategy(strategyName)) {
+      await this.supportedModelService.assertSupported(strategyName, model);
+    }
+
     await this.queueFor(strategyName).add(
       "run-strategy",
       {
@@ -58,6 +73,7 @@ export class StrategyService {
         strategyName,
         date,
         trialNumber,
+        model: model ?? null,
       },
       {
         // Deterministic id so duplicate enqueues of the same run collapse to a
@@ -68,17 +84,72 @@ export class StrategyService {
   }
 
   /**
-   * Queues one job per trial for the strategy — a single trial (0) for
-   * deterministic strategies, one per shuffle-smart/shuffle-foolish trial (1..N).
+   * Queues run(s) for the strategy on a puzzle. Deterministic strategies get
+   * a single trial (0); shuffle-smart/shuffle-foolish get one job per
+   * configured trial (1..N), all at once. LLM strategies are different: each
+   * call queues exactly one new trial for the given `model` (which must name
+   * a currently-supported model — see SupportedModelService — or nothing is
+   * queued at all), and repeated calls advance the trial number until that
+   * model hits its cap (see triggerNextLlmTrial).
    */
-  async triggerStrategyRuns(puzzleId: number, strategyName: string, date: string) {
+  async triggerStrategyRuns(puzzleId: number, strategyName: string, date: string, model?: string) {
+    if (isLlmStrategy(strategyName)) {
+      await this.supportedModelService.assertSupported(strategyName, model);
+      await this.triggerNextLlmTrial(puzzleId, strategyName, date, model as string);
+      return;
+    }
+
     const trialNumbers = strategyTrialNumbers(strategyName);
     await this.queueFor(strategyName).addBulk(
       trialNumbers.map((trialNumber) => ({
         name: "run-strategy",
-        data: { puzzleId, strategyName, date, trialNumber },
+        data: { puzzleId, strategyName, date, trialNumber, model: model ?? null },
         opts: { jobId: runStrategyJobId(puzzleId, strategyName, trialNumber) },
       })),
+    );
+  }
+
+  /**
+   * Queues a single new trial for an LLM strategy + model. The
+   * LLM_TRIALS_PER_MODEL cap (llmMaxTrialsPerModel) applies per model, not
+   * per strategy run as a whole — so 'llm-openai' can accumulate up to the
+   * cap of 'gpt-4.1-nano' trials *and*, independently, up to the cap of a
+   * second model's trials, on the same puzzle. Throws (queuing nothing) once
+   * the model has already reached its cap.
+   *
+   * Trial numbers themselves stay a single increasing sequence across every
+   * model for the (puzzle, strategy) pair — not restarted per model — so they
+   * stay unique against the existing DB constraint (puzzleId, strategyName,
+   * trialNumber) without a schema change; only the per-model *count* used for
+   * the cap check is filtered by model.
+   */
+  private async triggerNextLlmTrial(
+    puzzleId: number,
+    strategyName: string,
+    date: string,
+    model: string,
+  ): Promise<void> {
+    const existingRuns = await this.strategyRunRepo.find({
+      where: { puzzleId, strategyName },
+      select: { trialNumber: true, modelName: true },
+    });
+
+    const limit = llmMaxTrialsPerModel();
+    const modelRunCount = existingRuns.filter((run) => run.modelName === model).length;
+
+    if (modelRunCount >= limit) {
+      throw new BadRequestException(
+        `Model '${model}' has already reached its limit of ${limit} trial(s) for strategy` +
+          ` '${strategyName}' on this puzzle (see LLM_TRIALS_PER_MODEL).`,
+      );
+    }
+
+    const nextTrialNumber = existingRuns.reduce((max, run) => Math.max(max, run.trialNumber), 0) + 1;
+
+    await this.queueFor(strategyName).add(
+      "run-strategy",
+      { puzzleId, strategyName, date, trialNumber: nextTrialNumber, model },
+      { jobId: runStrategyJobId(puzzleId, strategyName, nextTrialNumber) },
     );
   }
 

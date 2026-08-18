@@ -22,11 +22,30 @@ vi.mock("./assist.js", () => ({
   }),
 }));
 
+vi.mock("./solve-assist.js", () => ({
+  solveAssist: vi.fn(async () => {
+    throw new Error("model call failed");
+  }),
+}));
+
 import { runAssistStep } from "./assist.js";
+import { solveAssist } from "./solve-assist.js";
 const runAssistStepMock = vi.mocked(runAssistStep);
+const solveAssistMock = vi.mocked(solveAssist);
 
 function diagnoseRequest(body: unknown) {
   return app.request("/diagnose", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-internal-api-key": KEY,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+function solveAssistRequest(body: unknown) {
+  return app.request("/solve-assist", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -41,6 +60,8 @@ describe("orchestrator app", () => {
     process.env.INTERNAL_API_KEY = KEY;
     runAssistStepMock.mockReset();
     runAssistStepMock.mockRejectedValue(new Error("model call failed"));
+    solveAssistMock.mockReset();
+    solveAssistMock.mockRejectedValue(new Error("model call failed"));
   });
 
   afterEach(() => {
@@ -139,6 +160,58 @@ describe("orchestrator app", () => {
         messages: [{ role: "user", content: "x".repeat(SOLVE_BODY_LIMIT + 1) }],
       });
       expect(res.status).toBe(413);
+    });
+  });
+
+  describe("POST /solve-assist", () => {
+    const SOLVE_ASSIST_BODY = {
+      messages: [{ role: "user", content: "Analyze the 16 provided items..." }],
+      model: "gpt-4.1-nano-2025-04-14",
+      provider: "openai",
+    };
+
+    it("passes model and provider through to solveAssist", async () => {
+      solveAssistMock.mockResolvedValueOnce({
+        response: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
+        groups: [["AAAA", "BBBB", "CCCC", "DDDD"]],
+        proposals: [],
+        model: "gpt-4.1-nano-2025-04-14",
+        latencyMs: 5,
+      });
+
+      const res = await solveAssistRequest(SOLVE_ASSIST_BODY);
+
+      expect(res.status).toBe(200);
+      expect(solveAssistMock).toHaveBeenCalledWith(
+        SOLVE_ASSIST_BODY.messages,
+        "gpt-4.1-nano-2025-04-14",
+        "openai",
+      );
+    });
+
+    it("works without model/provider (falls back to the env-configured default)", async () => {
+      solveAssistMock.mockResolvedValueOnce({
+        response: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
+        groups: [["AAAA", "BBBB", "CCCC", "DDDD"]],
+        proposals: [],
+        model: "gpt-4.1-nano",
+        latencyMs: 5,
+      });
+
+      const res = await solveAssistRequest({ messages: SOLVE_ASSIST_BODY.messages });
+
+      expect(res.status).toBe(200);
+      expect(solveAssistMock).toHaveBeenCalledWith(SOLVE_ASSIST_BODY.messages, undefined, undefined);
+    });
+
+    it("rejects an unknown provider value", async () => {
+      const res = await solveAssistRequest({
+        messages: SOLVE_ASSIST_BODY.messages,
+        provider: "anthropic",
+      });
+
+      expect(res.status).toBe(400);
+      expect(solveAssistMock).not.toHaveBeenCalled();
     });
   });
 });

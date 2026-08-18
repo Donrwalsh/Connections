@@ -265,6 +265,7 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should consult the Ollama provider for the llm-ollama strategy", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-ollama" }));
       mockOrchestratorService.solveAssist.mockResolvedValueOnce(
         makeAssistResponse([
           ["APPLE", "BANANA", "CHERRY", "DATE"],
@@ -272,9 +273,35 @@ describe("LlmStrategyRunner", () => {
         ]),
       );
 
-      await runner.runLlmStrategy(100, "llm-ollama");
+      await runner.runLlmStrategy(100, "llm-ollama", 0, "mistral");
 
       expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledWith(
+        expect.any(Array),
+        "mistral",
+        "ollama",
+      );
+    });
+
+    it("should pass the requested model and the openai provider for llm-openai", async () => {
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([
+          ["APPLE", "BANANA", "CHERRY", "DATE"],
+          ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        ]),
+      );
+
+      await runner.runLlmStrategy(100, "llm-openai", 0, "gpt-4.1-nano-2025-04-14");
+
+      // loadOrCreateRun's own tests cover setting StrategyRun.modelName from
+      // this value at creation time — here just confirm the runner passes it
+      // through to the orchestrator call rather than leaving it for the
+      // response-based fallback.
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledWith(
+        expect.any(Array),
+        "gpt-4.1-nano-2025-04-14",
+        "openai",
+      );
     });
 
     it("should resume with prior guesses loaded from the database", async () => {

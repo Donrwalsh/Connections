@@ -11,6 +11,7 @@ import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { LlmProposal } from "./entities/llm-proposal.entity";
 import { GameService } from "../game/game.service";
+import { SupportedModelService } from "../supported-model/supported-model.service";
 
 describe("StrategyService", () => {
   let service: StrategyService;
@@ -39,6 +40,10 @@ describe("StrategyService", () => {
   };
   let mockGameService: {
     resolveDateToPuzzleId: jest.Mock;
+  };
+  let mockSupportedModelService: {
+    assertSupported: jest.Mock;
+    getDefaultModel: jest.Mock;
   };
   let mockManager: { insert: jest.Mock; save: jest.Mock };
   let mockDataSource: { transaction: jest.Mock };
@@ -117,6 +122,10 @@ describe("StrategyService", () => {
     mockLlmProposalRepo = {
       find: jest.fn().mockResolvedValue([]),
     };
+    mockSupportedModelService = {
+      assertSupported: jest.fn().mockResolvedValue(undefined),
+      getDefaultModel: jest.fn(),
+    };
     mockManager = {
       insert: jest.fn().mockResolvedValue({ identifiers: [{ id: 1 }] }),
       save: jest.fn().mockResolvedValue(undefined),
@@ -139,6 +148,7 @@ describe("StrategyService", () => {
         { provide: getRepositoryToken(SolvePrompt), useValue: mockSolvePromptRepo },
         { provide: getRepositoryToken(LlmProposal), useValue: mockLlmProposalRepo },
         { provide: GameService, useValue: mockGameService },
+        { provide: SupportedModelService, useValue: mockSupportedModelService },
       ],
     }).compile();
 
@@ -161,9 +171,11 @@ describe("StrategyService", () => {
           strategyName: "order",
           date: "2024-01-02",
           trialNumber: 0,
+          model: null,
         },
         { jobId: "run-100-order-0" },
       );
+      expect(mockSupportedModelService.assertSupported).not.toHaveBeenCalled();
     });
 
     it("should enqueue a run-strategy job without a date", async () => {
@@ -176,14 +188,19 @@ describe("StrategyService", () => {
           strategyName: "order",
           date: undefined,
           trialNumber: 0,
+          model: null,
         },
         { jobId: "run-100-order-0" },
       );
     });
 
-    it("should route llm-openai runs to the OpenAI queue", async () => {
-      await service.triggerRun(100, "llm-openai", "2024-01-02");
+    it("should route llm-openai runs to the OpenAI queue after validating the model", async () => {
+      await service.triggerRun(100, "llm-openai", "2024-01-02", 0, "gpt-4.1-nano-2025-04-14");
 
+      expect(mockSupportedModelService.assertSupported).toHaveBeenCalledWith(
+        "llm-openai",
+        "gpt-4.1-nano-2025-04-14",
+      );
       expect(mockOpenAIQueue.add).toHaveBeenCalledWith(
         "run-strategy",
         {
@@ -191,6 +208,7 @@ describe("StrategyService", () => {
           strategyName: "llm-openai",
           date: "2024-01-02",
           trialNumber: 0,
+          model: "gpt-4.1-nano-2025-04-14",
         },
         { jobId: "run-100-llm-openai-0" },
       );
@@ -198,9 +216,10 @@ describe("StrategyService", () => {
       expect(mockOllamaQueue.add).not.toHaveBeenCalled();
     });
 
-    it("should route llm-ollama runs to the Ollama queue", async () => {
-      await service.triggerRun(100, "llm-ollama", "2024-01-02");
+    it("should route llm-ollama runs to the Ollama queue after validating the model", async () => {
+      await service.triggerRun(100, "llm-ollama", "2024-01-02", 0, "mistral");
 
+      expect(mockSupportedModelService.assertSupported).toHaveBeenCalledWith("llm-ollama", "mistral");
       expect(mockOllamaQueue.add).toHaveBeenCalledWith(
         "run-strategy",
         {
@@ -208,10 +227,22 @@ describe("StrategyService", () => {
           strategyName: "llm-ollama",
           date: "2024-01-02",
           trialNumber: 0,
+          model: "mistral",
         },
         { jobId: "run-100-llm-ollama-0" },
       );
       expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("should not enqueue anything when the model is rejected", async () => {
+      mockSupportedModelService.assertSupported.mockRejectedValueOnce(
+        new BadRequestException("Model 'bogus' is not a supported model for strategy 'llm-openai'."),
+      );
+
+      await expect(
+        service.triggerRun(100, "llm-openai", "2024-01-02", 0, "bogus"),
+      ).rejects.toThrow(BadRequestException);
       expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
     });
   });
@@ -619,10 +650,12 @@ describe("StrategyService", () => {
             strategyName: "order",
             date: "2024-01-02",
             trialNumber: 0,
+            model: null,
           },
           opts: { jobId: "run-100-order-0" },
         },
       ]);
+      expect(mockSupportedModelService.assertSupported).not.toHaveBeenCalled();
     });
 
     it("should queue one job per shuffle-smart trial", async () => {
@@ -642,6 +675,7 @@ describe("StrategyService", () => {
             strategyName: "shuffle-smart",
             date: "2024-01-02",
             trialNumber: 1,
+            model: null,
           },
           opts: { jobId: "run-100-shuffle-smart-1" },
         },
@@ -652,6 +686,7 @@ describe("StrategyService", () => {
             strategyName: "shuffle-smart",
             date: "2024-01-02",
             trialNumber: 2,
+            model: null,
           },
           opts: { jobId: "run-100-shuffle-smart-2" },
         },
@@ -662,6 +697,7 @@ describe("StrategyService", () => {
             strategyName: "shuffle-smart",
             date: "2024-01-02",
             trialNumber: 3,
+            model: null,
           },
           opts: { jobId: "run-100-shuffle-smart-3" },
         },
@@ -685,6 +721,7 @@ describe("StrategyService", () => {
             strategyName: "shuffle-foolish",
             date: "2024-01-02",
             trialNumber: 1,
+            model: null,
           },
           opts: { jobId: "run-100-shuffle-foolish-1" },
         },
@@ -695,80 +732,148 @@ describe("StrategyService", () => {
             strategyName: "shuffle-foolish",
             date: "2024-01-02",
             trialNumber: 2,
+            model: null,
           },
           opts: { jobId: "run-100-shuffle-foolish-2" },
         },
       ]);
     });
 
-    it("should queue one job per llm-openai trial on the OpenAI queue", async () => {
-      process.env.LLM_TRIALS = "2";
-      try {
-        await service.triggerStrategyRuns(100, "llm-openai", "2024-01-02");
-      } finally {
-        delete process.env.LLM_TRIALS;
-      }
+    it("should queue exactly one new llm-openai trial on the OpenAI queue after validating the model", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([]);
 
-      expect(mockOpenAIQueue.addBulk).toHaveBeenCalledTimes(1);
+      await service.triggerStrategyRuns(100, "llm-openai", "2024-01-02", "gpt-4.1-nano-2025-04-14");
+
+      expect(mockSupportedModelService.assertSupported).toHaveBeenCalledWith(
+        "llm-openai",
+        "gpt-4.1-nano-2025-04-14",
+      );
+      expect(mockStrategyRunRepo.find).toHaveBeenCalledWith({
+        where: { puzzleId: 100, strategyName: "llm-openai" },
+        select: { trialNumber: true, modelName: true },
+      });
+      expect(mockOpenAIQueue.add).toHaveBeenCalledTimes(1);
       expect(mockQueue.addBulk).not.toHaveBeenCalled();
-      expect(mockOllamaQueue.addBulk).not.toHaveBeenCalled();
-      expect(mockOpenAIQueue.addBulk).toHaveBeenCalledWith([
+      expect(mockOllamaQueue.add).not.toHaveBeenCalled();
+      expect(mockOpenAIQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
         {
-          name: "run-strategy",
-          data: {
-            puzzleId: 100,
-            strategyName: "llm-openai",
-            date: "2024-01-02",
-            trialNumber: 1,
-          },
-          opts: { jobId: "run-100-llm-openai-1" },
+          puzzleId: 100,
+          strategyName: "llm-openai",
+          date: "2024-01-02",
+          trialNumber: 1,
+          model: "gpt-4.1-nano-2025-04-14",
         },
-        {
-          name: "run-strategy",
-          data: {
-            puzzleId: 100,
-            strategyName: "llm-openai",
-            date: "2024-01-02",
-            trialNumber: 2,
-          },
-          opts: { jobId: "run-100-llm-openai-2" },
-        },
-      ]);
+        { jobId: "run-100-llm-openai-1" },
+      );
     });
 
-    it("should queue one job per llm-ollama trial on the Ollama queue", async () => {
-      process.env.LLM_TRIALS = "2";
+    it("should queue exactly one new llm-ollama trial on the Ollama queue after validating the model", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([]);
+
+      await service.triggerStrategyRuns(100, "llm-ollama", "2024-01-02", "mistral");
+
+      expect(mockSupportedModelService.assertSupported).toHaveBeenCalledWith("llm-ollama", "mistral");
+      expect(mockOllamaQueue.add).toHaveBeenCalledTimes(1);
+      expect(mockQueue.addBulk).not.toHaveBeenCalled();
+      expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
+      expect(mockOllamaQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
+        {
+          puzzleId: 100,
+          strategyName: "llm-ollama",
+          date: "2024-01-02",
+          trialNumber: 1,
+          model: "mistral",
+        },
+        { jobId: "run-100-llm-ollama-1" },
+      );
+    });
+
+    it("should advance the trial number on repeated calls for the same model", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([
+        { trialNumber: 1, modelName: "gpt-4.1-nano-2025-04-14" },
+      ]);
+
+      await service.triggerStrategyRuns(100, "llm-openai", "2024-01-02", "gpt-4.1-nano-2025-04-14");
+
+      expect(mockOpenAIQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
+        {
+          puzzleId: 100,
+          strategyName: "llm-openai",
+          date: "2024-01-02",
+          trialNumber: 2,
+          model: "gpt-4.1-nano-2025-04-14",
+        },
+        { jobId: "run-100-llm-openai-2" },
+      );
+    });
+
+    it("should give a different model its own independent trial budget", async () => {
+      // Two prior trials already exist for gpt-4.1-nano; a request for a
+      // different model should still be allowed (its own count is 0) and
+      // should not reuse gpt-4.1-nano's trial numbers.
+      mockStrategyRunRepo.find.mockResolvedValueOnce([
+        { trialNumber: 1, modelName: "gpt-4.1-nano-2025-04-14" },
+        { trialNumber: 2, modelName: "gpt-4.1-nano-2025-04-14" },
+      ]);
+
+      await service.triggerStrategyRuns(100, "llm-openai", "2024-01-02", "gpt-4.1-mini-2025-04-14");
+
+      expect(mockOpenAIQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
+        {
+          puzzleId: 100,
+          strategyName: "llm-openai",
+          date: "2024-01-02",
+          trialNumber: 3,
+          model: "gpt-4.1-mini-2025-04-14",
+        },
+        { jobId: "run-100-llm-openai-3" },
+      );
+    });
+
+    it("should reject dispatch once a model has reached LLM_TRIALS_PER_MODEL", async () => {
+      process.env.LLM_TRIALS_PER_MODEL = "2";
+      mockStrategyRunRepo.find.mockResolvedValueOnce([
+        { trialNumber: 1, modelName: "gpt-4.1-nano-2025-04-14" },
+        { trialNumber: 2, modelName: "gpt-4.1-nano-2025-04-14" },
+      ]);
+
       try {
-        await service.triggerStrategyRuns(100, "llm-ollama", "2024-01-02");
+        await expect(
+          service.triggerStrategyRuns(100, "llm-openai", "2024-01-02", "gpt-4.1-nano-2025-04-14"),
+        ).rejects.toThrow(BadRequestException);
       } finally {
-        delete process.env.LLM_TRIALS;
+        delete process.env.LLM_TRIALS_PER_MODEL;
       }
 
-      expect(mockOllamaQueue.addBulk).toHaveBeenCalledTimes(1);
-      expect(mockQueue.addBulk).not.toHaveBeenCalled();
-      expect(mockOpenAIQueue.addBulk).not.toHaveBeenCalled();
-      expect(mockOllamaQueue.addBulk).toHaveBeenCalledWith([
-        {
-          name: "run-strategy",
-          data: {
-            puzzleId: 100,
-            strategyName: "llm-ollama",
-            date: "2024-01-02",
-            trialNumber: 1,
-          },
-          opts: { jobId: "run-100-llm-ollama-1" },
-        },
-        {
-          name: "run-strategy",
-          data: {
-            puzzleId: 100,
-            strategyName: "llm-ollama",
-            date: "2024-01-02",
-            trialNumber: 2,
-          },
-          opts: { jobId: "run-100-llm-ollama-2" },
-        },
-      ]);
+      expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("should not enqueue anything when no model is given for an LLM strategy", async () => {
+      mockSupportedModelService.assertSupported.mockRejectedValueOnce(
+        new BadRequestException("A 'model' is required to dispatch strategy 'llm-openai'."),
+      );
+
+      await expect(service.triggerStrategyRuns(100, "llm-openai", "2024-01-02")).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("should not enqueue anything when the model is not supported", async () => {
+      mockSupportedModelService.assertSupported.mockRejectedValueOnce(
+        new BadRequestException(
+          "Model 'gpt-3.5-turbo' is not a supported model for strategy 'llm-openai'.",
+        ),
+      );
+
+      await expect(
+        service.triggerStrategyRuns(100, "llm-openai", "2024-01-02", "gpt-3.5-turbo"),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
     });
   });
 

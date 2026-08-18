@@ -57,6 +57,25 @@ describe("getModel", () => {
     expect(openaiMock).toHaveBeenCalledWith("gpt-4.1-nano");
     expect(createOllamaMock).not.toHaveBeenCalled();
   });
+
+  it("uses the model override instead of OPENAI_MODEL when given", () => {
+    vi.stubEnv("OPENAI_MODEL", "gpt-4.1-nano");
+
+    getModel("openai", "gpt-5-nano");
+
+    expect(openaiMock).toHaveBeenCalledWith("gpt-5-nano");
+  });
+
+  it("uses the model override instead of OLLAMA_MODEL when given", () => {
+    vi.stubEnv("OLLAMA_MODEL", "llama3.2");
+
+    getModel("ollama", "mistral");
+
+    const modelFactory = createOllamaMock.mock.results[0].value;
+    expect(modelFactory).toHaveBeenCalledWith("mistral", {
+      options: { num_ctx: 8192 },
+    });
+  });
 });
 
 describe("getModelName", () => {
@@ -77,6 +96,11 @@ describe("getModelName", () => {
   it("falls back to the defaults when unset", () => {
     expect(getModelName("openai")).toBe("gpt-4.1-nano");
     expect(getModelName("ollama")).toBe("llama3.2");
+  });
+
+  it("prefers the model override over the env var", () => {
+    vi.stubEnv("OPENAI_MODEL", "gpt-4o-mini");
+    expect(getModelName("openai", "gpt-5-nano")).toBe("gpt-5-nano");
   });
 });
 

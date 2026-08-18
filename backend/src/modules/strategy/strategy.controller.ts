@@ -9,9 +9,10 @@ import {
   DefaultValuePipe,
   BadRequestException,
 } from "@nestjs/common";
-import { ApiParam } from "@nestjs/swagger";
+import { ApiParam, ApiQuery } from "@nestjs/swagger";
 import { StrategyService } from "./strategy.service";
 import { GameService } from "../game/game.service";
+import { SupportedModelService } from "../supported-model/supported-model.service";
 import { AUTOMATIC_STRATEGIES, LLM_STRATEGIES, STRATEGY_SET } from "../../strategies";
 
 @Controller("strategy")
@@ -19,7 +20,16 @@ export class StrategyController {
   constructor(
     @Inject(StrategyService) private readonly strategyService: StrategyService,
     @Inject(GameService) private readonly gameService: GameService,
+    @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
   ) {}
+
+  // Listed before the more specific :strategyName/... routes only for
+  // readability — path shape ("models" as a literal first segment) already
+  // makes it unambiguous with them regardless of registration order.
+  @Get("models")
+  async getSupportedModels() {
+    return this.supportedModelService.findAll();
+  }
 
   @Post("queue/:strategyName/:date")
   @ApiParam({
@@ -35,9 +45,24 @@ export class StrategyController {
     description: "Puzzle date in YYYY-MM-DD format",
     example: "2023-08-01",
   })
+  @ApiQuery({
+    name: "model",
+    type: String,
+    required: false,
+    description:
+      "Required for 'llm-openai'/'llm-ollama': the model to dispatch this run against. Must be a" +
+      " currently-supported model for the strategy (see the SupportedModel table) or the request" +
+      " is rejected and no run is queued. For LLM strategies each call queues exactly one new" +
+      " trial of this model — call the endpoint again (with the same model) to queue another —" +
+      " up to LLM_TRIALS_PER_MODEL trials per model; once that model has reached its limit for" +
+      " this puzzle the request is rejected and no run is queued. The limit is tracked per model," +
+      " so a different model can still be queued independently. Ignored for every other strategy.",
+    example: "gpt-4.1-nano-2025-04-14",
+  })
   async queueSingleStrategy(
     @Param("strategyName") strategyName: string,
     @Param("date") date: string,
+    @Query("model") model?: string,
   ) {
     const isAll = strategyName.toLowerCase() === "all";
 
@@ -50,6 +75,8 @@ export class StrategyController {
     const puzzleId = await this.gameService.resolveDateToPuzzleId(date);
 
     if (isAll) {
+      // AUTOMATIC_STRATEGIES excludes both LLM strategies, so no model is
+      // ever needed on this branch.
       await Promise.all(
         AUTOMATIC_STRATEGIES.map((strat) =>
           this.strategyService.triggerStrategyRuns(puzzleId, strat, date),
@@ -65,13 +92,16 @@ export class StrategyController {
       };
     }
 
-    await this.strategyService.triggerStrategyRuns(puzzleId, strategyName, date);
+    // triggerStrategyRuns throws (queuing nothing) if strategyName is an LLM
+    // strategy and `model` is missing, unknown, or unsupported.
+    await this.strategyService.triggerStrategyRuns(puzzleId, strategyName, date, model);
 
     return {
       message: `Jobs queued for strategy '${strategyName}' on puzzle date ${date}`,
       puzzleId,
       date,
       strategyName,
+      model: model ?? null,
     };
   }
 

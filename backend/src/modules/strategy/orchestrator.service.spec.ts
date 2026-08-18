@@ -62,6 +62,23 @@ describe("OrchestratorService", () => {
     );
   });
 
+  it("should include the model and provider in the request body when given", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
+
+    await service.solveAssist(messages, "gpt-4.1-nano-2025-04-14", "openai");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://orchestrator.test/solve-assist",
+      expect.objectContaining({
+        body: JSON.stringify({
+          messages,
+          model: "gpt-4.1-nano-2025-04-14",
+          provider: "openai",
+        }),
+      }),
+    );
+  });
+
   it("should default latencyMs to 0 when the orchestrator omits it", async () => {
     mockFetch.mockResolvedValueOnce(
       mockResponse({

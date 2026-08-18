@@ -9,6 +9,15 @@ export class PuzzleQueueBootstrap implements OnApplicationBootstrap {
   constructor(@Inject(PUZZLE_QUEUE) private readonly queue: Queue) {}
 
   async onApplicationBootstrap() {
+    // Never schedule real ingestion/cron jobs from a test process — even
+    // with Redis isolation (REDIS_DB, see test/setup-env.ts) making these
+    // invisible to a live worker, a test boot has no business registering
+    // production scheduling at all. Jest sets NODE_ENV=test by default.
+    if (process.env.NODE_ENV === "test") {
+      this.logger.log("Skipping puzzle-population job scheduling (NODE_ENV=test)");
+      return;
+    }
+
     // Run once immediately on startup, to catch up on anything missed.
     // Fixed jobId => if backend and worker both fire this within the same
     // moment, BullMQ resolves them to the same job instead of duplicating it.

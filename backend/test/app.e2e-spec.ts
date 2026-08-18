@@ -179,8 +179,30 @@ describe("App (e2e)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("POST /strategy/queue/llm-openai/:date queues one trial job per configured trial", async () => {
-    const res = await request(app.getHttpServer()).post(`/strategy/queue/llm-openai/${TEST_DATE}`);
+  it("GET /strategy/models returns the seeded model catalog", async () => {
+    const res = await request(app.getHttpServer()).get("/strategy/models");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano-2025-04-14",
+          supported: true,
+        }),
+        expect.objectContaining({
+          strategyName: "llm-openai",
+          modelName: "gpt-5-nano",
+          supported: true,
+        }),
+      ]),
+    );
+  });
+
+  it("POST /strategy/queue/llm-openai/:date queues one trial job per configured trial for a supported model", async () => {
+    const res = await request(app.getHttpServer()).post(
+      `/strategy/queue/llm-openai/${TEST_DATE}?model=gpt-4.1-nano-2025-04-14`,
+    );
 
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({
@@ -188,11 +210,34 @@ describe("App (e2e)", () => {
       puzzleId: expect.any(Number),
       date: TEST_DATE,
       strategyName: "llm-openai",
+      model: "gpt-4.1-nano-2025-04-14",
     });
 
     for (const trialNumber of res.body.trialNumbers ?? [1, 2, 3]) {
       await llmOpenAIQueue.remove(`run-${res.body.puzzleId}-llm-openai-${trialNumber}`);
     }
+  });
+
+  // "Nothing gets queued when the model is rejected" is already covered
+  // precisely by strategy.service.spec.ts against a mocked queue — this
+  // Redis instance is shared with the live dev stack (a real worker
+  // container polls it too), so asserting queue emptiness here would be
+  // racing that worker rather than testing this endpoint. These e2e tests
+  // own the HTTP contract: an invalid model is rejected with 400.
+  it("POST /strategy/queue/llm-openai/:date rejects dispatch with no model", async () => {
+    const res = await request(app.getHttpServer()).post(`/strategy/queue/llm-openai/${TEST_DATE}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain("A 'model' is required");
+  });
+
+  it("POST /strategy/queue/llm-openai/:date rejects dispatch with an unsupported model", async () => {
+    const res = await request(app.getHttpServer()).post(
+      `/strategy/queue/llm-openai/${TEST_DATE}?model=gpt-3.5-turbo`,
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain("is not a supported model");
   });
 
   it("GET /strategy/:strategy/puzzle/:date returns an empty run list", async () => {

@@ -1,6 +1,6 @@
 import { generateText, type LanguageModelUsage } from "ai";
 import { type ChatMessage } from "./types.js";
-import { defaultProvider, getModel, getModelName } from "./provider.js";
+import { defaultProvider, getModel, getModelName, type ModelProvider } from "./provider.js";
 import { SolveError, classifyModelCallError } from "./solver.js";
 
 export interface ParsedGroupProposal {
@@ -80,11 +80,18 @@ export function parseAnswerGroups(responseText: string): string[][] {
  * Runs a single solve-assist step: feeds the full conversation history to the
  * model and returns its raw answer, extracted group proposals, final answer grid,
  * and token usage telemetry.
+ *
+ * `model`/`provider` override the env-configured default — the backend
+ * strategy runner sends both on every call, since it's already validated
+ * `model` against its own SupportedModel table before this endpoint is ever
+ * hit.
  */
 export async function solveAssist(
   messages: ChatMessage[],
+  model?: string,
+  provider?: ModelProvider,
 ): Promise<SolveAssistResult> {
-  const provider = defaultProvider();
+  const resolvedProvider = provider ?? defaultProvider();
 
   let text: string;
   let modelId: string;
@@ -94,7 +101,7 @@ export async function solveAssist(
 
   try {
     const result = await generateText({
-      model: getModel(provider),
+      model: getModel(resolvedProvider, model),
       messages,
       temperature: SOLVE_ASSIST_TEMPERATURE,
     });
@@ -111,7 +118,7 @@ export async function solveAssist(
       };
     }
   } catch (err) {
-    throw classifyModelCallError(err, { model: getModelName(provider) });
+    throw classifyModelCallError(err, { model: getModelName(resolvedProvider, model) });
   }
 
   // 1. Extract proposals (Reasoning + Words) from the ### GROUPS section

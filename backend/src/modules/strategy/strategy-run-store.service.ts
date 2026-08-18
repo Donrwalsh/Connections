@@ -70,6 +70,7 @@ export class StrategyRunStore {
     puzzleId: number,
     strategyName: string,
     trialNumber = 0,
+    model?: string,
   ): Promise<{ run: StrategyRun; puzzle: Puzzle }> {
     const puzzle = await this.puzzleRepo.findOne({
       where: { id: puzzleId },
@@ -95,6 +96,10 @@ export class StrategyRunStore {
       status: StrategyRunStatus.RUNNING,
       availableWords: allWords,
       currentCombination: firstCombination(GROUP_SIZE),
+      // Known upfront for LLM runs dispatched with a validated model — more
+      // accurate than waiting for the first orchestrator response to report
+      // it (the previous behavior, still the fallback when model is unset).
+      modelName: model ?? null,
     });
 
     const saved = await this.strategyRunRepo.save(run);

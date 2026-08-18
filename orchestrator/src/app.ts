@@ -105,7 +105,7 @@ app.post(
     }
 
     try {
-      const result = await solveAssist(parsed.data.messages);
+      const result = await solveAssist(parsed.data.messages, parsed.data.model, parsed.data.provider);
       const response: SolveAssistResponse = result;
       return c.json(response, 200);
     } catch (err) {

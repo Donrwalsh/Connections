@@ -67,8 +67,25 @@ export type SolveErrorCode = z.infer<typeof SolveErrorCodeSchema>;
  * session: it builds the prompts (INITIAL on a fresh step, RETRY after a
  * failed guess), accumulates the model's responses, and submits the full
  * message history on every call. The orchestrator stays stateless.
+ *
+ * `model`/`provider` are optional overrides: the backend validates `model`
+ * against its SupportedModel table before ever calling this endpoint (see
+ * StrategyService), so a strategy run always sends both. When omitted (the
+ * provider-less /diagnose AI Assist path uses AssistRequestSchema directly
+ * and never has these), the orchestrator falls back to its own
+ * env-configured default provider/model.
  */
-export const SolveAssistRequestSchema = AssistRequestSchema;
+export const SolveAssistRequestSchema = AssistRequestSchema.extend({
+  model: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Model to call, overriding the orchestrator's env-configured default"),
+  provider: z
+    .enum(["openai", "ollama"])
+    .optional()
+    .describe("Provider to call, overriding MODEL_PROVIDER"),
+});
 export type SolveAssistRequest = z.infer<typeof SolveAssistRequestSchema>;
 
 /**

@@ -3,7 +3,12 @@
 // in mockData.ts. Kept separate from mockData.ts so it's obvious at a glance
 // which parts of the benchmark UI are still mock-driven.
 
-import type { RunRecord, StrategyRunDetail, StrategyRunListItem } from "./types";
+import type {
+  RunRecord,
+  StrategyRunDetail,
+  StrategyRunListItem,
+  SupportedModelRecord,
+} from "./types";
 
 const apiUrl = (path: string) => `${import.meta.env.VITE_API_URL}${path}`;
 
@@ -35,6 +40,14 @@ export async function fetchPuzzleDate(puzzleId: number, signal?: AbortSignal): P
     signal,
   );
   return date;
+}
+
+/** The real model allowlist (every configured model, any strategy). Used to
+ * resolve a :strategyId route param the static mock catalog doesn't
+ * recognize — e.g. a model added to the backend after the mock list was
+ * last updated — rather than treating it as an unknown strategy outright. */
+export function fetchSupportedModels(signal?: AbortSignal): Promise<SupportedModelRecord[]> {
+  return fetchJson("/strategy/models", signal);
 }
 
 const DETAIL_PAGE_SIZE = 200;

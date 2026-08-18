@@ -89,3 +89,17 @@ export interface StrategyRunListItemDto {
   finishedAt: Date | null;
   guessCount: number;
 }
+
+// The full allowlist entry for one model — lets a caller (e.g. the
+// leaderboard's per-model run page) recognize a real model it doesn't
+// otherwise know about and resolve which backend strategy it belongs to.
+// Includes rows regardless of `supported` — see SupportedModelService.findAll.
+export interface SupportedModelDto {
+  id: number;
+  strategyName: string;
+  modelName: string;
+  inputCostPerMillionTokens: number;
+  cachedInputCostPerMillionTokens: number;
+  outputCostPerMillionTokens: number;
+  supported: boolean;
+}

@@ -50,11 +50,22 @@ export class OrchestratorService {
    * Calls the orchestrator's POST /solve-assist endpoint with the full
    * conversation history. Used by the LLM strategy runner for the unified
    * AI Assist flow — the backend owns prompt building and conversation state.
+   *
+   * `model`/`provider` tell the orchestrator which model to actually call —
+   * the backend has already validated `model` against the SupportedModel
+   * table before a run ever gets this far (see StrategyService), so this is
+   * the one place that choice is handed off. Omit either to fall back to the
+   * orchestrator's own env-configured default (used for the provider-less
+   * /diagnose AI Assist path, which never sends these).
    */
-  async solveAssist(messages: ChatMessage[]): Promise<SolveAssistOutcome> {
+  async solveAssist(
+    messages: ChatMessage[],
+    model?: string,
+    provider?: "openai" | "ollama",
+  ): Promise<SolveAssistOutcome> {
     return this.executeWithRetry<SolveAssistSuccess>(
       "/solve-assist",
-      { messages },
+      { messages, model, provider },
       (raw) => ({
         response: raw.response,
         groups: raw.groups,

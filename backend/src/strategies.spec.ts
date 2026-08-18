@@ -7,7 +7,7 @@ import {
   DEFAULT_LLM_MAX_PROMPTS,
   DEFAULT_LLM_NUM_RESPONSES,
   DEFAULT_LLM_TEMPERATURE,
-  DEFAULT_LLM_TRIALS,
+  DEFAULT_LLM_TRIALS_PER_MODEL,
   DEFAULT_LLM_OPENAI_CONCURRENCY,
   DEFAULT_LLM_OLLAMA_CONCURRENCY,
   DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT,
@@ -26,7 +26,7 @@ import {
   llmOllamaConcurrency,
   llmOpenAIConcurrency,
   llmTemperature,
-  llmTrialCount,
+  llmMaxTrialsPerModel,
   dispatchStrategyJobsOnIngestion,
   shuffleFoolishDuplicateLimit,
   shuffleFoolishTrialCount,
@@ -75,19 +75,25 @@ describe("strategies", () => {
     });
   });
 
-  describe("llmTrialCount", () => {
+  describe("llmMaxTrialsPerModel", () => {
     it("should default when the env var is missing", () => {
-      expect(llmTrialCount({})).toBe(DEFAULT_LLM_TRIALS);
+      expect(llmMaxTrialsPerModel({})).toBe(DEFAULT_LLM_TRIALS_PER_MODEL);
     });
 
     it("should default when the env var is invalid", () => {
-      expect(llmTrialCount({ LLM_TRIALS: "abc" })).toBe(DEFAULT_LLM_TRIALS);
-      expect(llmTrialCount({ LLM_TRIALS: "0" })).toBe(DEFAULT_LLM_TRIALS);
-      expect(llmTrialCount({ LLM_TRIALS: "-2" })).toBe(DEFAULT_LLM_TRIALS);
+      expect(llmMaxTrialsPerModel({ LLM_TRIALS_PER_MODEL: "abc" })).toBe(
+        DEFAULT_LLM_TRIALS_PER_MODEL,
+      );
+      expect(llmMaxTrialsPerModel({ LLM_TRIALS_PER_MODEL: "0" })).toBe(
+        DEFAULT_LLM_TRIALS_PER_MODEL,
+      );
+      expect(llmMaxTrialsPerModel({ LLM_TRIALS_PER_MODEL: "-2" })).toBe(
+        DEFAULT_LLM_TRIALS_PER_MODEL,
+      );
     });
 
     it("should read a valid positive integer", () => {
-      expect(llmTrialCount({ LLM_TRIALS: "5" })).toBe(5);
+      expect(llmMaxTrialsPerModel({ LLM_TRIALS_PER_MODEL: "5" })).toBe(5);
     });
   });
 
@@ -308,7 +314,7 @@ describe("strategies", () => {
 
     it("should return 1..N for each LLM strategy", () => {
       for (const strategyName of LLM_STRATEGIES) {
-        expect(strategyTrialNumbers(strategyName, { LLM_TRIALS: "2" })).toEqual([1, 2]);
+        expect(strategyTrialNumbers(strategyName, { LLM_TRIALS_PER_MODEL: "2" })).toEqual([1, 2]);
         expect(strategyTrialNumbers(strategyName, {})).toEqual([1, 2, 3]);
       }
     });

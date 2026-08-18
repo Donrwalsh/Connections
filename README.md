@@ -39,15 +39,16 @@ Daily cron (06:00 UTC)
        └─ queues strategy runs ──► strategy-runs queue ──► worker ──► solve
             (4 deterministic + SHUFFLE_SMART_TRIALS shuffle-smart trials + SHUFFLE_FOOLISH_TRIALS shuffle-foolish trials)
        └─ queues LLM runs ──► llm-openai-runs queue ──► worker ──► OpenAI
-            (LLM_TRIALS llm-openai trials; LLM_OPENAI_CONCURRENCY at once)
+            (up to LLM_TRIALS_PER_MODEL llm-openai trials of the default model; LLM_OPENAI_CONCURRENCY at once)
        └─ queues LLM runs ──► llm-ollama-runs queue ──► worker ──► Ollama
-            (LLM_TRIALS llm-ollama trials; LLM_OLLAMA_CONCURRENCY at once)
+            (up to LLM_TRIALS_PER_MODEL llm-ollama trials of the default model; LLM_OLLAMA_CONCURRENCY at once)
 
 Frontend "AI Assist" button
   └─ POST /api/diagnose ──► backend ──► POST /diagnose ──► orchestrator ──► default provider (openai)
 
 Frontend strategy panel (llm-openai / llm-ollama buttons)
-  └─ POST /strategy/queue/:strategy/:date ──► worker ──► POST /solve-assist ──► orchestrator ──► OpenAI or Ollama
+  └─ POST /strategy/queue/:strategy/:date?model=... ──► worker ──► POST /solve-assist ──► orchestrator ──► OpenAI or Ollama
+       (queues one new trial of `model` per call, up to LLM_TRIALS_PER_MODEL trials for that model)
 ```
 
 ## Getting Started
@@ -81,7 +82,7 @@ docker compose up
 | `http://localhost:4000/api/docs` | Swagger API docs |
 | `http://localhost:4000/admin/queues` | Bull Board queue dashboard (basic auth — `BULL_BOARD_USER` / `BULL_BOARD_PASS`, defaults `admin` / `bullboard`) |
 
-On first startup the worker fetches all historical puzzles and runs all strategies on each (four deterministic runs plus `SHUFFLE_SMART_TRIALS` shuffle-smart trials, `SHUFFLE_FOOLISH_TRIALS` shuffle-foolish trials, and `LLM_TRIALS` trials each of `llm-openai` and `llm-ollama`). This can take a while for large backlogs.
+On first startup the worker fetches all historical puzzles and runs all strategies on each (four deterministic runs plus `SHUFFLE_SMART_TRIALS` shuffle-smart trials, `SHUFFLE_FOOLISH_TRIALS` shuffle-foolish trials, and up to `LLM_TRIALS_PER_MODEL` trials each of the default `llm-openai` and `llm-ollama` model). This can take a while for large backlogs.
 
 ## Configuration
 
@@ -107,7 +108,7 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `SHUFFLE_SMART_TRIALS` | `3` | Number of shuffle-smart trials run per puzzle |
 | `SHUFFLE_FOOLISH_TRIALS` | `3` | Number of shuffle-foolish trials run per puzzle |
 | `SHUFFLE_FOOLISH_DUPLICATE_LIMIT` | `3` | Maximum repeated groups a shuffle-foolish run may propose before it ends with a `duplicate` status |
-| `LLM_TRIALS` | `3` | Number of independent LLM trials run per puzzle, per provider (`llm-openai` and `llm-ollama` each get this many) |
+| `LLM_TRIALS_PER_MODEL` | `3` | Maximum number of independent trials a single LLM model may accumulate per puzzle. Applies per model, not per strategy run — `POST /strategy/queue/:strategy/:date` queues one new trial per call (rejecting once a model hits this cap), and a different model gets its own independent budget |
 | `LLM_MAX_DUPLICATE_GUESSES` | `10` | Maximum repeated groups an LLM run may propose before it ends with a `duplicate` status (applies to both `llm-openai` and `llm-ollama`) |
 | `LLM_MAX_MALFORMED_RESPONSES` | `3` | Maximum consecutive malformed LLM responses before a run ends with a `malformedResponse` status |
 | `LLM_MAX_MODEL_ERRORS` | `5` | Maximum consecutive transient model failures before a run ends with an `error` status |

@@ -96,6 +96,22 @@ export interface RunRecord {
 
 export type GuessResultValue = "success" | "failure" | "offBy1" | "duplicate";
 
+/** One row from GET /strategy/models — the real allowlist of models a
+ * strategy may dispatch runs against. Used to recognize a model the static
+ * mock catalog (mockData.ts) doesn't know about, e.g. one added to the
+ * backend after the mock list was last updated. Includes rows regardless of
+ * `supported`, since an unsupported model can still have real historical
+ * runs worth viewing. */
+export interface SupportedModelRecord {
+  id: number;
+  strategyName: string;
+  modelName: string;
+  inputCostPerMillionTokens: number;
+  cachedInputCostPerMillionTokens: number;
+  outputCostPerMillionTokens: number;
+  supported: boolean;
+}
+
 /** A run row from GET /strategy/:strategyName/puzzle-id/:puzzleId. The
  * backend never returns "queued" (a StrategyRun row only exists once a job
  * has actually started), so this is always one of the other RunStatus

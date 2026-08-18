@@ -28,33 +28,38 @@ export function defaultProvider(): ModelProvider {
  * solver.ts (and any future callers) never need to know which backend is
  * active. Config is read on every call so a restart isn't needed to flip
  * providers in development.
+ *
+ * `modelOverride` names the exact model to call — set on every strategy-run
+ * call (the backend validates it against SupportedModel first), omitted on
+ * the provider-less /diagnose AI Assist path, which falls back to the
+ * env-configured default.
  */
-export function getModel(provider: ModelProvider): LanguageModel {
+export function getModel(provider: ModelProvider, modelOverride?: string): LanguageModel {
   if (provider === "ollama") {
     const ollama = createOllama({
       baseURL: process.env.OLLAMA_BASE_URL ?? "http://localhost:11434",
     });
     // Pass the configured context window through as num_ctx so Ollama's real
     // context matches the reported MODEL_CONTEXT_WINDOW telemetry value.
-    return ollama(process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL, {
+    return ollama(modelOverride ?? process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL, {
       options: { num_ctx: getContextWindow() },
     });
   }
 
-  return openai(process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL);
+  return openai(modelOverride ?? process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL);
 }
 
 /**
- * Returns the configured model name for the given provider, from
- * OPENAI_MODEL/OLLAMA_MODEL. Unlike `result.response.modelId` this is known
- * even for a failed call, so per-prompt telemetry can always name the model
- * the prompt was sent to.
+ * Returns the model name that will be (or was) used for the given provider —
+ * `modelOverride` if given, else OPENAI_MODEL/OLLAMA_MODEL. Unlike
+ * `result.response.modelId` this is known even for a failed call, so
+ * per-prompt telemetry can always name the model the prompt was sent to.
  */
-export function getModelName(provider: ModelProvider): string {
+export function getModelName(provider: ModelProvider, modelOverride?: string): string {
   if (provider === "ollama") {
-    return process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL;
+    return modelOverride ?? process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL;
   }
-  return process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL;
+  return modelOverride ?? process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL;
 }
 
 /**

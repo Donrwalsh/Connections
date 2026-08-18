@@ -20,6 +20,10 @@ interface RunStrategyJobData {
   strategyName: string;
   date: string;
   trialNumber: number;
+  // The dispatcher already validated this against the SupportedModel table
+  // before enqueueing (StrategyService/PuzzleIngestionService) — null/absent
+  // for non-LLM strategies, which don't have a model at all.
+  model?: string | null;
 }
 
 async function bootstrap() {
@@ -32,7 +36,7 @@ async function bootstrap() {
   const worker = new Worker(
     "strategy-runs",
     async (job: Job<RunStrategyJobData>) => {
-      const { puzzleId, strategyName, date, trialNumber } = job.data;
+      const { puzzleId, strategyName, date, trialNumber, model } = job.data;
 
       if (!STRATEGY_SET.has(strategyName)) {
         throw new Error(
@@ -48,7 +52,12 @@ async function bootstrap() {
         ? // Defensive: LLM jobs are normally routed to their per-provider
           // queues, but a stale job left on this queue before a deploy still
           // needs processing rather than failing forever.
-          await llmStrategyRunner.runLlmStrategy(puzzleId, strategyName, trialNumber)
+          await llmStrategyRunner.runLlmStrategy(
+            puzzleId,
+            strategyName,
+            trialNumber,
+            model ?? undefined,
+          )
         : await strategyService.runDeterministicStrategy(puzzleId, strategyName, trialNumber);
 
       logger.log(
@@ -86,7 +95,7 @@ async function bootstrap() {
     const llmWorker = new Worker(
       queueName,
       async (job: Job<RunStrategyJobData>) => {
-        const { puzzleId, strategyName, date, trialNumber } = job.data;
+        const { puzzleId, strategyName, date, trialNumber, model } = job.data;
 
         if (strategyName !== expectedStrategy) {
           throw new Error(
@@ -98,7 +107,12 @@ async function bootstrap() {
           `starting job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName} trial=${trialNumber}`,
         );
 
-        const result = await llmStrategyRunner.runLlmStrategy(puzzleId, strategyName, trialNumber);
+        const result = await llmStrategyRunner.runLlmStrategy(
+          puzzleId,
+          strategyName,
+          trialNumber,
+          model ?? undefined,
+        );
 
         logger.log(
           `finished job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName} trial=${trialNumber} status=${result.status}`,
