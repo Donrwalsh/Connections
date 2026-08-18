@@ -213,6 +213,11 @@
   cursor: pointer;
 }
 
+.bench-sort-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .bench-filter {
   display: inline-flex;
   align-items: center;

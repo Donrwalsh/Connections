@@ -3,38 +3,11 @@ import { Link, useParams } from "react-router-dom";
 import { GuessChainVisualizer } from "../../components/benchmark/GuessChainVisualizer";
 import { RunsTable } from "../../components/benchmark/RunsTable";
 import { StatusPill } from "../../components/benchmark/StatusPill";
-import {
-  fetchPuzzleDate,
-  fetchRunsForPuzzle,
-  fetchSupportedModels,
-  toRunRecord,
-} from "../../data/benchmark/api";
-import { formatDateLabel, getStrategyMeta } from "../../data/benchmark/mockData";
+import { fetchPuzzleDate, fetchRunsForPuzzle, toRunRecord } from "../../data/benchmark/api";
+import { formatDateLabel } from "../../data/benchmark/mockData";
 import { isFailedStatus, puzzleStatusLabel, puzzleStatusTone } from "../../data/benchmark/runStatus";
-import type {
-  PuzzleRunStatus,
-  RunRecord,
-  StrategyMeta,
-  SupportedModelRecord,
-} from "../../data/benchmark/types";
-
-/** Synthesizes StrategyMeta for a model the static mock catalog doesn't know
- * about, from the real backend allowlist (GET /strategy/models). Only ever
- * needed for LLM rows — deterministic/shuffle strategies are always in the
- * mock catalog already. `runsPerPuzzle` is a placeholder: this page derives
- * single-vs-multi-run layout from the actual fetched run count, not this
- * field, so it isn't load-bearing here. */
-function buildDynamicMeta(model: SupportedModelRecord): StrategyMeta {
-  const providerLabel = model.strategyName === "llm-ollama" ? "Ollama" : "OpenAI";
-  return {
-    id: model.modelName,
-    name: `LLM · ${model.modelName}`,
-    kind: "llm",
-    description: `LLM-based · ${providerLabel} model proposes candidate groups`,
-    runsPerPuzzle: 3,
-    strategyName: model.strategyName,
-  };
-}
+import { useStrategyMeta } from "../../data/benchmark/useStrategyMeta";
+import type { PuzzleRunStatus, RunRecord } from "../../data/benchmark/types";
 
 /**
  * Runs for one strategy (or, for LLM rows, one model) + puzzle, fetched live
@@ -78,11 +51,8 @@ export function PuzzleRunsPage() {
   const { strategyId, puzzleId: puzzleIdParam } = useParams();
   const puzzleId = Number(puzzleIdParam);
   const isValidPuzzleId = Number.isInteger(puzzleId);
-  const staticMeta = strategyId ? getStrategyMeta(strategyId) : undefined;
 
-  const [dynamicMeta, setDynamicMeta] = useState<StrategyMeta | null>(null);
-  const [isResolvingMeta, setIsResolvingMeta] = useState(false);
-  const meta = staticMeta ?? dynamicMeta ?? undefined;
+  const { meta, isResolving: isResolvingMeta } = useStrategyMeta(strategyId);
   // Stable primitives (not `meta` itself — a fresh object every render for
   // the static-lookup case) so effects below can depend on "is this strategy
   // resolved" without re-firing on every render.
@@ -94,36 +64,6 @@ export function PuzzleRunsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [date, setDate] = useState<string | null>(null);
-
-  // Falls back to the real backend model allowlist when the static mock
-  // catalog doesn't recognize strategyId — see the "Strategy metadata" note
-  // above. Only fires when the fast synchronous lookup already failed.
-  useEffect(() => {
-    if (!strategyId || getStrategyMeta(strategyId)) {
-      setDynamicMeta(null);
-      setIsResolvingMeta(false);
-      return;
-    }
-
-    setIsResolvingMeta(true);
-    setDynamicMeta(null);
-
-    const controller = new AbortController();
-    fetchSupportedModels(controller.signal)
-      .then((models) => {
-        const match = models.find((model) => model.modelName === strategyId);
-        setDynamicMeta(match ? buildDynamicMeta(match) : null);
-      })
-      .catch(() => {
-        // Best-effort fallback, not a hard requirement — falls through to
-        // the "Unknown strategy" state below like any other miss.
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setIsResolvingMeta(false);
-      });
-
-    return () => controller.abort();
-  }, [strategyId]);
 
   useEffect(() => {
     if (!resolvedStrategyName || !isValidPuzzleId) return;

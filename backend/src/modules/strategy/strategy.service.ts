@@ -16,7 +16,11 @@ import {
   GuessDetailDto,
   LeaderboardDto,
   LeaderboardRowDto,
+  RunHistoryDto,
+  RunHistoryRowDto,
+  RunHistorySortBy,
 } from "./dto/strategy.dto";
+import { SupportedModel } from "../supported-model/entities/supported-model.entity";
 import {
   SHUFFLE_SMART,
   SHUFFLE_FOOLISH,
@@ -36,6 +40,21 @@ const BATCH_SIZE = 50;
 // queued counts — see StrategyService.queuedCountsByKey.
 const QUEUE_PAGE_SIZE = 1000;
 
+const DEFAULT_RUN_HISTORY_LIMIT = 100;
+const MAX_RUN_HISTORY_LIMIT = 500;
+
+// Raw ORDER BY expressions for getRunHistory, keyed by the sort the caller
+// asked for. "puzzleDate" and "guessCount" order by their raw-query SELECT
+// aliases (Postgres resolves an ORDER BY name against the SELECT list before
+// falling back to a real column), so those must stay in sync with the
+// aliases getRunHistory's query actually selects.
+const RUN_HISTORY_SORT_EXPR: Record<RunHistorySortBy, string> = {
+  puzzleDate: '"puzzleDate"',
+  startedAt: 'run."startedAt"',
+  guessCount: '"guessCount"',
+  duration: '(run."finishedAt" - run."startedAt")',
+};
+
 /**
  * Groups a leaderboard row by strategy + model — the same pair a StrategyRun
  * row and a queued BullMQ job both carry, so DB aggregates and live queue
@@ -46,18 +65,53 @@ function leaderboardKey(strategyName: string, modelName: string | null): string 
   return `${strategyName}::${modelName ?? ""}`;
 }
 
+/**
+ * USD cost of one run's token usage, from its model's configured
+ * per-million-token rates (SupportedModel). Shared by getLeaderboard (cost
+ * across every run of a model) and tokenCostByRun (cost of one page of
+ * runs) so the pricing formula lives in exactly one place.
+ */
+function computeTokenCostUsd(
+  promptTokens: number,
+  completionTokens: number,
+  rate: SupportedModel,
+): number {
+  return (
+    (promptTokens / 1_000_000) * rate.inputCostPerMillionTokens +
+    (completionTokens / 1_000_000) * rate.outputCostPerMillionTokens
+  );
+}
+
 interface LeaderboardAccumulator {
   strategyName: string;
   modelName: string | null;
   puzzleIds: Set<number>;
+  // Real StrategyRunStatus.COMPLETED count — the successRate numerator.
   completed: number;
   active: number;
+  // Every non-completed, non-running run (FAILED, DUPLICATE,
+  // MALFORMED_RESPONSE, ERROR) — the successRate denominator is
+  // completed + failed, unchanged regardless of the LLM-specific display
+  // adjustment below.
   failed: number;
-  // Guess counts and durations of COMPLETED runs only — the metrics a
-  // leaderboard row surfaces (avg/min/max guesses, avg duration) are only
-  // meaningful for runs that actually solved the puzzle.
+  // Subset of `failed`: specifically FAILED (hit the mistake cap), never
+  // DUPLICATE/MALFORMED_RESPONSE/ERROR. For LLM strategies this is folded
+  // back into `completed` for progress/averaging display purposes — see
+  // getLeaderboard — since a run that played out the whole puzzle and lost
+  // is a normal complete attempt, not a broken one. successRate itself
+  // still uses the real `completed`/`failed` counts above, so it keeps
+  // distinguishing actual wins from actual losses.
+  lostRuns: number;
+  // Guess counts and durations of COMPLETED runs, plus — for LLM
+  // strategies — FAILED runs too (see `lostRuns`): both represent a full
+  // real playthrough with real guesses over real time, unlike a
+  // duplicate-loop/malformed/error run which doesn't.
   guessCounts: number[];
   durationsMs: number[];
+  // USD cost of every run with resolvable token usage and a resolvable
+  // model rate — unlike guesses/duration this covers every run regardless
+  // of outcome, since a failed or errored LLM run still spent tokens.
+  costsUsd: number[];
 }
 
 @Injectable()
@@ -207,7 +261,7 @@ export class StrategyService {
    * should move to a grouped SQL aggregate instead.
    */
   async getLeaderboard(): Promise<LeaderboardDto> {
-    const [runs, guessCountRows, queuedCounts, totalPuzzles] = await Promise.all([
+    const [runs, guessCountRows, tokenRows, models, queuedCounts, totalPuzzles] = await Promise.all([
       this.strategyRunRepo.find({
         select: {
           id: true,
@@ -225,6 +279,21 @@ export class StrategyService {
         .addSelect("COUNT(guess.id)", "count")
         .groupBy("guess.strategyRunId")
         .getRawMany<{ strategyRunId: number; count: string }>(),
+      // Only ever populated for LLM runs (SolvePrompt rows don't exist for
+      // deterministic/shuffle strategies), so no strategy filter is needed
+      // here — a deterministic run simply has no matching row.
+      this.solvePromptRepo
+        .createQueryBuilder("prompt")
+        .select("prompt.strategyRunId", "strategyRunId")
+        .addSelect("SUM(prompt.promptTokens)", "promptTokens")
+        .addSelect("SUM(prompt.completionTokens)", "completionTokens")
+        .groupBy("prompt.strategyRunId")
+        .getRawMany<{
+          strategyRunId: number;
+          promptTokens: string | null;
+          completionTokens: string | null;
+        }>(),
+      this.supportedModelService.findAll(),
       this.queuedCountsByKey(),
       this.puzzleRepo.count(),
     ]);
@@ -232,6 +301,19 @@ export class StrategyService {
     const guessCountByRun = new Map<number, number>();
     for (const row of guessCountRows) {
       guessCountByRun.set(Number(row.strategyRunId), Number(row.count));
+    }
+
+    const tokensByRun = new Map<number, { promptTokens: number; completionTokens: number }>();
+    for (const row of tokenRows) {
+      tokensByRun.set(Number(row.strategyRunId), {
+        promptTokens: Number(row.promptTokens ?? 0),
+        completionTokens: Number(row.completionTokens ?? 0),
+      });
+    }
+
+    const rateByModel = new Map<string, SupportedModel>();
+    for (const model of models) {
+      rateByModel.set(leaderboardKey(model.strategyName, model.modelName), model);
     }
 
     const aggregates = new Map<string, LeaderboardAccumulator>();
@@ -246,8 +328,10 @@ export class StrategyService {
           completed: 0,
           active: 0,
           failed: 0,
+          lostRuns: 0,
           guessCounts: [],
           durationsMs: [],
+          costsUsd: [],
         };
         aggregates.set(key, acc);
       }
@@ -264,24 +348,63 @@ export class StrategyService {
         acc.active++;
       } else {
         acc.failed++;
+
+        if (run.status === StrategyRunStatus.FAILED) {
+          acc.lostRuns++;
+
+          if (isLlmStrategy(run.strategyName)) {
+            // Hit the mistake cap after a genuine full playthrough — still
+            // real guesses over real time, so it counts toward these
+            // averages the same as a solve (see LeaderboardAccumulator).
+            acc.guessCounts.push(guessCountByRun.get(run.id) ?? 0);
+            if (run.finishedAt) {
+              acc.durationsMs.push(run.finishedAt.getTime() - run.startedAt.getTime());
+            }
+          }
+        }
+      }
+
+      // Cost counts for every run regardless of outcome — a failed or
+      // errored LLM run still spent tokens — so this sits outside the
+      // status branches above.
+      if (run.modelName) {
+        const tokens = tokensByRun.get(run.id);
+        const rate = rateByModel.get(leaderboardKey(run.strategyName, run.modelName));
+        if (tokens && rate) {
+          acc.costsUsd.push(computeTokenCostUsd(tokens.promptTokens, tokens.completionTokens, rate));
+        }
       }
     }
 
     const rows: LeaderboardRowDto[] = [...aggregates.values()].map((acc) => {
+      // successRate keeps using the real completed/failed counts — a lost
+      // run is still a loss for win-rate purposes, even though it's
+      // "finished" for progress-display purposes below.
       const finished = acc.completed + acc.failed;
       const sortedGuesses = [...acc.guessCounts].sort((a, b) => a - b);
+      const totalCostUsd =
+        acc.costsUsd.length === 0 ? null : acc.costsUsd.reduce((a, b) => a + b, 0);
+      const isLlmRow = isLlmStrategy(acc.strategyName);
+      // For LLM strategies, a run that hit the mistake cap (lostRuns) is a
+      // normal complete attempt, not a broken one — fold it into the
+      // "completed" bucket the Progress column displays instead of
+      // flagging it as "Failed". Only genuinely broken outcomes (duplicate
+      // loops, malformed responses, transient errors) still show as
+      // Failed. Deterministic/shuffle strategies are unaffected.
+      const displayCompleted = acc.completed + (isLlmRow ? acc.lostRuns : 0);
+      const displayFailed = acc.failed - (isLlmRow ? acc.lostRuns : 0);
 
       return {
         id: acc.modelName ?? acc.strategyName,
         strategyName: acc.strategyName,
         modelName: acc.modelName,
-        kind: isLlmStrategy(acc.strategyName) ? "llm" : "deterministic",
+        kind: isLlmRow ? "llm" : "deterministic",
         puzzlesCovered: acc.puzzleIds.size,
         totalPuzzles,
         progress: {
-          completed: acc.completed,
+          completed: displayCompleted,
           active: acc.active,
-          failed: acc.failed,
+          failed: displayFailed,
           queued: queuedCounts.get(leaderboardKey(acc.strategyName, acc.modelName)) ?? 0,
         },
         successRate: finished === 0 ? null : (acc.completed / finished) * 100,
@@ -295,6 +418,8 @@ export class StrategyService {
           acc.durationsMs.length === 0
             ? null
             : acc.durationsMs.reduce((a, b) => a + b, 0) / acc.durationsMs.length,
+        avgCostUsd: totalCostUsd === null ? null : totalCostUsd / acc.costsUsd.length,
+        totalCostUsd,
       };
     });
 
@@ -551,6 +676,176 @@ export class StrategyService {
       finishedAt: run.finishedAt,
       guessCount: countByRun.get(run.id) ?? 0,
     }));
+  }
+
+  /**
+   * Paginated, sortable history of every individual run for a strategy —
+   * one row per StrategyRun across every puzzle, unlike getRunsForPuzzleId
+   * (which scopes to a single puzzle) or getLeaderboard (which aggregates
+   * across runs). Powers the /leaderboard/:strategyId run-history table.
+   *
+   * `model` narrows to one LLM model's runs; it's ignored for non-LLM
+   * strategies (which never set modelName). Even without it, each row still
+   * resolves its own token cost from its own modelName, so a mixed-model
+   * result set still gets a per-row cost.
+   *
+   * Sorting/pagination happen in SQL (not fetch-then-sort in JS) because
+   * `guessCount` and `duration` aren't real StrategyRun columns — see
+   * RUN_HISTORY_SORT_EXPR. `guessCount` is a correlated scalar subquery
+   * rather than a JOIN+GROUP BY specifically to avoid a Guess-row fan-out
+   * multiplying the page's row count.
+   */
+  async getRunHistory(
+    strategyName: string,
+    options: {
+      model?: string;
+      page?: number;
+      limit?: number;
+      sortBy?: string;
+      sortDir?: string;
+    },
+  ): Promise<RunHistoryDto> {
+    const safePage = Math.max(1, Math.floor(options.page ?? 1));
+    const safeLimit = Math.min(
+      MAX_RUN_HISTORY_LIMIT,
+      Math.max(1, Math.floor(options.limit ?? DEFAULT_RUN_HISTORY_LIMIT)),
+    );
+    const sortBy: RunHistorySortBy =
+      options.sortBy && options.sortBy in RUN_HISTORY_SORT_EXPR
+        ? (options.sortBy as RunHistorySortBy)
+        : "puzzleDate";
+    const sortDir = options.sortDir === "asc" ? "ASC" : "DESC";
+
+    const baseQuery = this.strategyRunRepo
+      .createQueryBuilder("run")
+      .innerJoin(Puzzle, "puzzle", 'puzzle.id = run."puzzleId"')
+      .where("run.strategyName = :strategyName", { strategyName });
+
+    if (options.model) {
+      baseQuery.andWhere("run.modelName = :model", { model: options.model });
+    }
+
+    const total = await baseQuery.clone().getCount();
+
+    const rawRows = await baseQuery
+      .clone()
+      .select("run.id", "id")
+      .addSelect("run.puzzleId", "puzzleId")
+      // Cast to text: getRawMany() bypasses TypeORM's entity-level DATE
+      // transformer (Puzzle.date is typed as a plain "YYYY-MM-DD" string via
+      // that transformer), so left uncast this came back as a JS Date object
+      // whose JSON serialization ("2024-01-01T00:00:00.000Z") broke
+      // frontend's plain-date parsing.
+      .addSelect("puzzle.date::text", "puzzleDate")
+      .addSelect("run.trialNumber", "trialNumber")
+      .addSelect("run.status", "status")
+      .addSelect("run.modelName", "modelName")
+      .addSelect("run.startedAt", "startedAt")
+      .addSelect("run.finishedAt", "finishedAt")
+      .addSelect(
+        '(SELECT COUNT(*)::int FROM "Guess" g WHERE g."strategyRunId" = run.id)',
+        "guessCount",
+      )
+      .orderBy(RUN_HISTORY_SORT_EXPR[sortBy], sortDir)
+      // Stable tiebreaker: without one, ties on the chosen sort column can
+      // shuffle rows between identical LIMIT/OFFSET pages.
+      .addOrderBy("run.id", sortDir)
+      // limit()/offset(), not skip()/take(): TypeORM's skip/take are meant
+      // for getMany() and don't reliably translate to SQL LIMIT/OFFSET once
+      // a JOIN is present (this query joins Puzzle) — they were silently
+      // dropped entirely, so every page returned the full unpaginated result
+      // set. limit()/offset() map straight to LIMIT/OFFSET regardless of
+      // joins.
+      .offset((safePage - 1) * safeLimit)
+      .limit(safeLimit)
+      .getRawMany<{
+        id: number;
+        puzzleId: number;
+        puzzleDate: string;
+        trialNumber: number;
+        status: StrategyRunStatus;
+        modelName: string | null;
+        startedAt: Date | string;
+        finishedAt: Date | string | null;
+        guessCount: number;
+      }>();
+
+    const tokenCostByRun = isLlmStrategy(strategyName)
+      ? await this.tokenCostByRun(
+          strategyName,
+          rawRows.map((row) => ({ id: row.id, modelName: row.modelName })),
+        )
+      : new Map<number, number>();
+
+    const rows: RunHistoryRowDto[] = rawRows.map((row) => ({
+      id: row.id,
+      puzzleId: row.puzzleId,
+      puzzleDate: row.puzzleDate,
+      strategyName,
+      modelName: row.modelName,
+      trialNumber: row.trialNumber,
+      status: row.status,
+      startedAt: new Date(row.startedAt),
+      finishedAt: row.finishedAt ? new Date(row.finishedAt) : null,
+      guessCount: Number(row.guessCount),
+      tokenCostUsd: tokenCostByRun.get(row.id) ?? null,
+    }));
+
+    return { rows, meta: { total, page: safePage, limit: safeLimit } };
+  }
+
+  /**
+   * USD cost of the LLM tokens spent by each given run, keyed by run id —
+   * each run's own modelName resolves its rate (SupportedModel), summed over
+   * every SolvePrompt the run made. A run is simply absent from the returned
+   * map (never present as 0) when its tokens or its model's rate can't be
+   * resolved, so callers can tell "no cost data" apart from "free".
+   */
+  private async tokenCostByRun(
+    strategyName: string,
+    runs: { id: number; modelName: string | null }[],
+  ): Promise<Map<number, number>> {
+    if (runs.length === 0) return new Map();
+
+    const [tokenRows, models] = await Promise.all([
+      this.solvePromptRepo
+        .createQueryBuilder("prompt")
+        .select("prompt.strategyRunId", "strategyRunId")
+        .addSelect("SUM(prompt.promptTokens)", "promptTokens")
+        .addSelect("SUM(prompt.completionTokens)", "completionTokens")
+        .where("prompt.strategyRunId IN (:...ids)", { ids: runs.map((run) => run.id) })
+        .groupBy("prompt.strategyRunId")
+        .getRawMany<{
+          strategyRunId: number;
+          promptTokens: string | null;
+          completionTokens: string | null;
+        }>(),
+      this.supportedModelService.findAll(),
+    ]);
+
+    const rateByModel = new Map<string, SupportedModel>();
+    for (const model of models) {
+      if (model.strategyName === strategyName) {
+        rateByModel.set(leaderboardKey(model.strategyName, model.modelName), model);
+      }
+    }
+
+    const modelByRun = new Map(runs.map((run) => [run.id, run.modelName]));
+    const costs = new Map<number, number>();
+
+    for (const row of tokenRows) {
+      const runId = Number(row.strategyRunId);
+      const modelName = modelByRun.get(runId);
+      const rate = modelName ? rateByModel.get(leaderboardKey(strategyName, modelName)) : undefined;
+      if (!rate) continue;
+
+      costs.set(
+        runId,
+        computeTokenCostUsd(Number(row.promptTokens ?? 0), Number(row.completionTokens ?? 0), rate),
+      );
+    }
+
+    return costs;
   }
 
   private mapRunDetail(

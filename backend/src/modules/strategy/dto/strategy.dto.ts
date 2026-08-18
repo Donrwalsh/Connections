@@ -127,11 +127,55 @@ export interface LeaderboardRowDto {
   minGuesses: number | null;
   maxGuesses: number | null;
   avgDurationMs: number | null;
+  // USD cost of this model's runs, from its configured per-million-token
+  // rates applied to actual token usage — null for deterministic/shuffle
+  // rows (no LLM cost concept) and for LLM rows with no priceable runs yet
+  // (e.g. a model missing its SupportedModel rate). Unlike avgGuessesToSolve
+  // above, this covers every run regardless of outcome — a failed run still
+  // spent tokens.
+  avgCostUsd: number | null;
+  totalCostUsd: number | null;
 }
 
 export interface LeaderboardDto {
   deterministic: LeaderboardRowDto[];
   llm: LeaderboardRowDto[];
+}
+
+export type RunHistorySortBy = "puzzleDate" | "startedAt" | "guessCount" | "duration";
+export type RunHistorySortDir = "asc" | "desc";
+
+// One row of GET /strategy/:strategyName/runs: a single StrategyRun (not a
+// per-puzzle aggregate like StrategyRunListItemDto's siblings) — every
+// strategy/model's run history renders from the same shape, one row per
+// actual run, regardless of how many trials share a puzzle.
+export interface RunHistoryRowDto {
+  id: number;
+  puzzleId: number;
+  puzzleDate: string;
+  strategyName: string;
+  modelName: string | null;
+  trialNumber: number;
+  status: StrategyRunStatus;
+  startedAt: Date;
+  finishedAt: Date | null;
+  guessCount: number;
+  // Total USD cost of this run's LLM calls, from the model's configured
+  // per-million-token rates (SupportedModel) applied to its summed
+  // SolvePrompt token usage. Null for non-LLM strategies, and for an LLM run
+  // whose model's rate can no longer be resolved (e.g. since removed).
+  tokenCostUsd: number | null;
+}
+
+export interface RunHistoryMetaDto {
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface RunHistoryDto {
+  rows: RunHistoryRowDto[];
+  meta: RunHistoryMetaDto;
 }
 
 // The full allowlist entry for one model — lets a caller (e.g. the

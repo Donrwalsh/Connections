@@ -1,5 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import {
+  formatCostUsd,
+  formatDuration,
   formatGuessCount,
   getMetricDefinition,
   metricValue,
@@ -13,9 +15,11 @@ import { StatusPill } from "./StatusPill";
 export interface StrategyTableProps {
   rows: LeaderboardRow[];
   metricKey: LeaderboardMetricKey;
-  /** 'llm' shows Success rate and Avg speed — guess counts aren't
-   * comparable across models the way solve speed is, and column real
-   * estate is scarce. 'deterministic' covers deterministic *and*
+  /** 'llm' shows Success rate and Avg duration (the raw average time an LLM
+   * call took, in ms/s as appropriate) — an LLM run's wall-clock time is
+   * itself the meaningful number, unlike deterministic/shuffle runs which
+   * finish in single-digit milliseconds and are more legible as a derived
+   * "solves/hr" rate. 'deterministic' covers deterministic *and*
    * shuffle-smart/shuffle-foolish rows — instead of Success rate it shows
    * Avg speed, Avg guesses, and Range: none of these strategies are bound by
    * the LLM's 4-mistake failure cap, so a brute-force run can rack up
@@ -45,20 +49,22 @@ export function StrategyTable({ rows, metricKey, variant }: StrategyTableProps) 
   return (
     <table className="bench-table">
       <caption className="bench-table__caption">
-        {variant === "llm" ? "LLM models" : "Deterministic & shuffle strategies"} ·{" "}
+        {variant === "llm" ? "LLM strategies" : "Deterministic & shuffle strategies"} ·{" "}
         {metric.label} — {metric.higherIsBetter ? "best first" : "fewest guesses first"}
       </caption>
       <thead>
         <tr>
           <th scope="col">Strategy</th>
           {variant === "llm" ? <th scope="col">Success rate</th> : null}
-          <th scope="col">Avg speed</th>
+          <th scope="col">{variant === "llm" ? "Avg duration" : "Avg speed"}</th>
           {isDeterministic ? (
             <>
               <th scope="col">Avg guesses</th>
               <th scope="col">Range</th>
             </>
-          ) : null}
+          ) : (
+            <th scope="col">Avg cost</th>
+          )}
           <th scope="col">Progress</th>
         </tr>
       </thead>
@@ -76,6 +82,8 @@ export function StrategyTable({ rows, metricKey, variant }: StrategyTableProps) 
           // Unitless here — the "solves/hr" caption below the value supplies
           // the unit, so it isn't baked into this number too.
           const speedDisplay = speed === null ? "—" : Math.round(speed).toLocaleString();
+          const durationDisplay =
+            row.avgDurationMs === null ? "—" : formatDuration(row.avgDurationMs);
           return (
             <tr
               key={row.id}
@@ -96,10 +104,14 @@ export function StrategyTable({ rows, metricKey, variant }: StrategyTableProps) 
                 <span className="bench-strategy-desc">{description}</span>
               </td>
               {variant === "llm" ? <td className="bench-mono">{successRateDisplay}</td> : null}
-              <td>
-                <span className="bench-mono bench-metric-value">{speedDisplay}</span>
-                <span className="bench-metric-unit">solves/hr</span>
-              </td>
+              {variant === "llm" ? (
+                <td className="bench-mono">{durationDisplay}</td>
+              ) : (
+                <td>
+                  <span className="bench-mono bench-metric-value">{speedDisplay}</span>
+                  <span className="bench-metric-unit">solves/hr</span>
+                </td>
+              )}
               {isDeterministic ? (
                 <>
                   <td className="bench-mono">
@@ -109,16 +121,24 @@ export function StrategyTable({ rows, metricKey, variant }: StrategyTableProps) 
                     {formatRange(row.minGuesses, row.maxGuesses, formatGuessCount)}
                   </td>
                 </>
-              ) : null}
+              ) : (
+                <td className="bench-mono">
+                  {row.avgCostUsd === null ? "—" : formatCostUsd(row.avgCostUsd)}
+                </td>
+              )}
               <td>
                 <span className="bench-progress">
                   <span className="bench-mono">
-                    {row.puzzlesCovered} of {row.totalPuzzles} puzzles
+                    {row.puzzlesCovered.toLocaleString()} of {row.totalPuzzles.toLocaleString()} puzzles
                   </span>
                   <span className="bench-badges">
                     {queueBadges.map((badge) =>
                       badge.count > 0 ? (
-                        <StatusPill key={badge.label} label={`${badge.label} ${badge.count}`} tone={badge.tone} />
+                        <StatusPill
+                          key={badge.label}
+                          label={`${badge.label} ${badge.count.toLocaleString()}`}
+                          tone={badge.tone}
+                        />
                       ) : null,
                     )}
                     {queueBadges.every((badge) => badge.count === 0) ? (

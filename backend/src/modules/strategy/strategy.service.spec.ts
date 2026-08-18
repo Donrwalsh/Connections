@@ -23,6 +23,7 @@ describe("StrategyService", () => {
     find: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
+    createQueryBuilder: jest.Mock;
   };
   let mockPuzzleRepo: { findOne: jest.Mock; count: jest.Mock; createQueryBuilder: jest.Mock };
   let mockGuessRepo: {
@@ -34,6 +35,7 @@ describe("StrategyService", () => {
   let mockSolvePromptRepo: {
     count: jest.Mock;
     find: jest.Mock;
+    createQueryBuilder: jest.Mock;
   };
   let mockLlmProposalRepo: {
     find: jest.Mock;
@@ -44,6 +46,7 @@ describe("StrategyService", () => {
   let mockSupportedModelService: {
     assertSupported: jest.Mock;
     getDefaultModel: jest.Mock;
+    findAll: jest.Mock;
   };
   let mockManager: { insert: jest.Mock; save: jest.Mock };
   let mockDataSource: { transaction: jest.Mock };
@@ -104,6 +107,7 @@ describe("StrategyService", () => {
       find: jest.fn(),
       create: jest.fn(),
       save: jest.fn(),
+      createQueryBuilder: jest.fn(),
     };
     mockPuzzleRepo = {
       findOne: jest.fn(),
@@ -122,6 +126,16 @@ describe("StrategyService", () => {
     mockSolvePromptRepo = {
       count: jest.fn().mockResolvedValue(0),
       find: jest.fn().mockResolvedValue([]),
+      // Default: no token-usage rows, so tests that don't care about LLM
+      // cost (most of them) get avgCostUsd/totalCostUsd: null for free.
+      // Tests that do care override this per-test.
+      createQueryBuilder: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      }),
     };
     mockLlmProposalRepo = {
       find: jest.fn().mockResolvedValue([]),
@@ -129,6 +143,7 @@ describe("StrategyService", () => {
     mockSupportedModelService = {
       assertSupported: jest.fn().mockResolvedValue(undefined),
       getDefaultModel: jest.fn(),
+      findAll: jest.fn().mockResolvedValue([]),
     };
     mockManager = {
       insert: jest.fn().mockResolvedValue({ identifiers: [{ id: 1 }] }),
@@ -891,6 +906,67 @@ describe("StrategyService", () => {
       });
     }
 
+    it("should treat a lost LLM run (hit the mistake cap) as a normal completed attempt for progress/averages, while success rate still counts it as a loss", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([
+        {
+          id: 1,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          status: StrategyRunStatus.COMPLETED,
+          puzzleId: 1,
+          startedAt: new Date("2024-01-01T00:00:00Z"),
+          finishedAt: new Date("2024-01-01T00:00:30Z"),
+        },
+        // FAILED = played the whole puzzle out and hit the mistake cap —
+        // still a real, full playthrough.
+        {
+          id: 2,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          status: StrategyRunStatus.FAILED,
+          puzzleId: 2,
+          startedAt: new Date("2024-01-02T00:00:00Z"),
+          finishedAt: new Date("2024-01-02T00:01:00Z"),
+        },
+        // DUPLICATE is a genuinely broken outcome, not a full playthrough —
+        // it must NOT count toward guesses/duration, and must still show as
+        // "Failed" on the Progress column.
+        {
+          id: 3,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          status: StrategyRunStatus.DUPLICATE,
+          puzzleId: 3,
+          startedAt: new Date("2024-01-03T00:00:00Z"),
+          finishedAt: new Date("2024-01-03T00:00:05Z"),
+        },
+      ]);
+      mockGuessCounts([
+        { strategyRunId: 1, count: "4" },
+        { strategyRunId: 2, count: "8" },
+        { strategyRunId: 3, count: "2" },
+      ]);
+      mockPuzzleRepo.count.mockResolvedValueOnce(10);
+
+      const result = await service.getLeaderboard();
+
+      const row = result.llm.find((r) => r.id === "gpt-4.1-nano")!;
+      // Progress: the FAILED run is folded into "completed" and dropped from
+      // "failed" — only the DUPLICATE run still counts as Failed.
+      expect(row.progress).toEqual({ completed: 2, active: 0, failed: 1, queued: 0 });
+      // Success rate still reflects the real 1 win out of 2 real outcomes
+      // (COMPLETED + FAILED) — DUPLICATE doesn't count as either a win or a
+      // "real" playthrough loss here since it never got that far. 1/3.
+      expect(row.successRate).toBeCloseTo(33.333, 2);
+      // Guesses/duration include the FAILED run (8 guesses, 60s) alongside
+      // the COMPLETED one (4 guesses, 30s) — DUPLICATE's 2 guesses/5s are
+      // excluded entirely.
+      expect(row.avgGuessesToSolve).toBe(6);
+      expect(row.minGuesses).toBe(4);
+      expect(row.maxGuesses).toBe(8);
+      expect(row.avgDurationMs).toBe(45_000);
+    });
+
     it("should aggregate rows into deterministic vs llm, keyed by strategy/model", async () => {
       mockStrategyRunRepo.find.mockResolvedValueOnce([
         {
@@ -1004,6 +1080,87 @@ describe("StrategyService", () => {
       });
     });
 
+    it("should compute avg/total cost per model from token usage and rates, leaving deterministic rows and unpriceable models null", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([
+        {
+          id: 1,
+          strategyName: "alphabetical",
+          modelName: null,
+          status: StrategyRunStatus.COMPLETED,
+          puzzleId: 1,
+          startedAt: new Date("2024-01-01T00:00:00Z"),
+          finishedAt: new Date("2024-01-01T00:00:00.100Z"),
+        },
+        {
+          id: 2,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          status: StrategyRunStatus.COMPLETED,
+          puzzleId: 1,
+          startedAt: new Date("2024-01-01T00:00:00Z"),
+          finishedAt: new Date("2024-01-01T00:00:30Z"),
+        },
+        // Failed runs still spent tokens, so they still count toward cost
+        // even though they're excluded from avgGuessesToSolve/avgDurationMs.
+        {
+          id: 3,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          status: StrategyRunStatus.FAILED,
+          puzzleId: 2,
+          startedAt: new Date("2024-01-02T00:00:00Z"),
+          finishedAt: new Date("2024-01-02T00:00:30Z"),
+        },
+        // No SupportedModel row for this one below -> cost stays unpriced.
+        {
+          id: 4,
+          strategyName: "llm-openai",
+          modelName: "gpt-4o-mini",
+          status: StrategyRunStatus.COMPLETED,
+          puzzleId: 3,
+          startedAt: new Date("2024-01-03T00:00:00Z"),
+          finishedAt: new Date("2024-01-03T00:00:30Z"),
+        },
+      ]);
+      mockGuessCounts([]);
+      mockPuzzleRepo.count.mockResolvedValueOnce(10);
+      mockSolvePromptRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          { strategyRunId: 2, promptTokens: "1000000", completionTokens: "500000" },
+          { strategyRunId: 3, promptTokens: "1000000", completionTokens: "500000" },
+          { strategyRunId: 4, promptTokens: "1000000", completionTokens: "0" },
+        ]),
+      });
+      mockSupportedModelService.findAll.mockResolvedValueOnce([
+        {
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          inputCostPerMillionTokens: 0.1,
+          cachedInputCostPerMillionTokens: 0.05,
+          outputCostPerMillionTokens: 0.4,
+          supported: true,
+        },
+      ]);
+
+      const result = await service.getLeaderboard();
+
+      const alphabetical = result.deterministic.find((row) => row.id === "alphabetical")!;
+      expect(alphabetical.avgCostUsd).toBeNull();
+      expect(alphabetical.totalCostUsd).toBeNull();
+
+      // 2 runs at $0.30 each ((1 * 0.1) + (0.5 * 0.4)) = $0.60 total, $0.30 avg.
+      const gptNano = result.llm.find((row) => row.id === "gpt-4.1-nano")!;
+      expect(gptNano.totalCostUsd).toBeCloseTo(0.6);
+      expect(gptNano.avgCostUsd).toBeCloseTo(0.3);
+
+      const gptMini = result.llm.find((row) => row.id === "gpt-4o-mini")!;
+      expect(gptMini.avgCostUsd).toBeNull();
+      expect(gptMini.totalCostUsd).toBeNull();
+    });
+
     it("should merge queued BullMQ counts onto existing rows only, never inventing new ones", async () => {
       mockStrategyRunRepo.find.mockResolvedValueOnce([
         {
@@ -1075,6 +1232,170 @@ describe("StrategyService", () => {
 
       expect(result.llm.find((row) => row.id === "gpt-4.1-nano")?.progress.queued).toBe(1);
       expect(result.llm.find((row) => row.id === "mistral")?.progress.queued).toBe(2);
+    });
+  });
+
+  describe("getRunHistory", () => {
+    function mockRunHistoryQuery(total: number, rawRows: unknown[]) {
+      const qb = {
+        innerJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        clone: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(total),
+        getRawMany: jest.fn().mockResolvedValue(rawRows),
+      };
+      mockStrategyRunRepo.createQueryBuilder.mockReturnValue(qb);
+      return qb;
+    }
+
+    function rawRun(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 1,
+        puzzleId: 10,
+        puzzleDate: "2024-01-01",
+        trialNumber: 0,
+        status: StrategyRunStatus.COMPLETED,
+        modelName: null,
+        startedAt: new Date("2024-01-01T00:00:00Z"),
+        finishedAt: new Date("2024-01-01T00:00:05Z"),
+        guessCount: 4,
+        ...overrides,
+      };
+    }
+
+    it("should return paginated rows with the default page/limit/sort", async () => {
+      const qb = mockRunHistoryQuery(1, [rawRun()]);
+
+      const result = await service.getRunHistory("alphabetical", {});
+
+      expect(mockStrategyRunRepo.createQueryBuilder).toHaveBeenCalledWith("run");
+      expect(qb.where).toHaveBeenCalledWith("run.strategyName = :strategyName", {
+        strategyName: "alphabetical",
+      });
+      expect(qb.andWhere).not.toHaveBeenCalled();
+      // Cast to text: getRawMany() bypasses Puzzle.date's entity-level
+      // string transformer, so left uncast the raw driver value serializes
+      // as a full ISO datetime instead of a plain "YYYY-MM-DD" string (the
+      // frontend's date parsing broke on this — see git history).
+      expect(qb.addSelect).toHaveBeenCalledWith("puzzle.date::text", "puzzleDate");
+      expect(qb.orderBy).toHaveBeenCalledWith('"puzzleDate"', "DESC");
+      expect(qb.addOrderBy).toHaveBeenCalledWith("run.id", "DESC");
+      // limit()/offset(), not skip()/take() — see the comment in
+      // StrategyService.getRunHistory: skip/take are silently ignored once a
+      // JOIN is present, which was the actual bug behind "every page returns
+      // the full unpaginated result set".
+      expect(qb.offset).toHaveBeenCalledWith(0);
+      expect(qb.limit).toHaveBeenCalledWith(100);
+      expect(result.meta).toEqual({ total: 1, page: 1, limit: 100 });
+      expect(result.rows).toEqual([
+        {
+          id: 1,
+          puzzleId: 10,
+          puzzleDate: "2024-01-01",
+          strategyName: "alphabetical",
+          modelName: null,
+          trialNumber: 0,
+          status: StrategyRunStatus.COMPLETED,
+          startedAt: new Date("2024-01-01T00:00:00Z"),
+          finishedAt: new Date("2024-01-01T00:00:05Z"),
+          guessCount: 4,
+          tokenCostUsd: null,
+        },
+      ]);
+    });
+
+    it("should filter by model and honor a given sortBy/sortDir/page/limit", async () => {
+      const qb = mockRunHistoryQuery(0, []);
+
+      await service.getRunHistory("llm-openai", {
+        model: "gpt-4.1-nano",
+        page: 2,
+        limit: 25,
+        sortBy: "guessCount",
+        sortDir: "asc",
+      });
+
+      expect(qb.andWhere).toHaveBeenCalledWith("run.modelName = :model", { model: "gpt-4.1-nano" });
+      expect(qb.orderBy).toHaveBeenCalledWith('"guessCount"', "ASC");
+      expect(qb.addOrderBy).toHaveBeenCalledWith("run.id", "ASC");
+      expect(qb.offset).toHaveBeenCalledWith(25);
+      expect(qb.limit).toHaveBeenCalledWith(25);
+    });
+
+    it("should sort by startedAt or duration when asked", async () => {
+      const qb = mockRunHistoryQuery(0, []);
+
+      await service.getRunHistory("alphabetical", { sortBy: "startedAt" });
+      expect(qb.orderBy).toHaveBeenLastCalledWith('run."startedAt"', "DESC");
+
+      await service.getRunHistory("alphabetical", { sortBy: "duration" });
+      expect(qb.orderBy).toHaveBeenLastCalledWith('(run."finishedAt" - run."startedAt")', "DESC");
+    });
+
+    it("should fall back to puzzleDate desc for an unrecognized sortBy/sortDir", async () => {
+      const qb = mockRunHistoryQuery(0, []);
+
+      await service.getRunHistory("alphabetical", { sortBy: "bogus", sortDir: "sideways" });
+
+      expect(qb.orderBy).toHaveBeenCalledWith('"puzzleDate"', "DESC");
+    });
+
+    it("should clamp an out-of-range page/limit", async () => {
+      const qb = mockRunHistoryQuery(0, []);
+
+      await service.getRunHistory("alphabetical", { page: 0, limit: 10000 });
+
+      expect(qb.offset).toHaveBeenCalledWith(0);
+      expect(qb.limit).toHaveBeenCalledWith(500);
+    });
+
+    it("should price each row from its own model's rate, leaving unpriceable rows null", async () => {
+      mockRunHistoryQuery(2, [
+        rawRun({ id: 1, modelName: "gpt-4.1-nano" }),
+        // No SupportedModel row for this one below -> cost stays null.
+        rawRun({ id: 2, modelName: "gpt-4o-mini" }),
+      ]);
+      mockSolvePromptRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          { strategyRunId: 1, promptTokens: "1000000", completionTokens: "500000" },
+          { strategyRunId: 2, promptTokens: "2000000", completionTokens: "0" },
+        ]),
+      });
+      mockSupportedModelService.findAll.mockResolvedValueOnce([
+        {
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          inputCostPerMillionTokens: 0.1,
+          cachedInputCostPerMillionTokens: 0.05,
+          outputCostPerMillionTokens: 0.4,
+          supported: true,
+        },
+      ]);
+
+      const result = await service.getRunHistory("llm-openai", {});
+
+      expect(result.rows[0].tokenCostUsd).toBeCloseTo(1 * 0.1 + 0.5 * 0.4);
+      expect(result.rows[1].tokenCostUsd).toBeNull();
+    });
+
+    it("should skip the token-cost lookup entirely for non-LLM strategies", async () => {
+      mockRunHistoryQuery(1, [rawRun()]);
+
+      await service.getRunHistory("alphabetical", {});
+
+      expect(mockSolvePromptRepo.createQueryBuilder).not.toHaveBeenCalled();
+      expect(mockSupportedModelService.findAll).not.toHaveBeenCalled();
     });
   });
 

@@ -5,6 +5,9 @@
 
 import type {
   Leaderboard,
+  RunHistory,
+  RunHistorySortBy,
+  RunHistorySortDir,
   RunRecord,
   StrategyRunDetail,
   StrategyRunListItem,
@@ -49,6 +52,35 @@ export async function fetchPuzzleDate(puzzleId: number, signal?: AbortSignal): P
  * this is never cached client-side beyond the single fetch. */
 export function fetchLeaderboard(signal?: AbortSignal): Promise<Leaderboard> {
   return fetchJson("/strategy/leaderboard", signal);
+}
+
+export interface FetchRunHistoryOptions {
+  /** Narrows to one LLM model's runs; ignored server-side for non-LLM
+   * strategies. */
+  model?: string;
+  page?: number;
+  limit?: number;
+  sortBy?: RunHistorySortBy;
+  sortDir?: RunHistorySortDir;
+}
+
+/** Paginated, sortable history of every individual run for a strategy — one
+ * row per run across every puzzle (unlike fetchRunsForPuzzle, which scopes to
+ * one puzzle). Powers the /leaderboard/:strategyId run-history table. */
+export function fetchRunHistory(
+  strategyName: string,
+  options: FetchRunHistoryOptions = {},
+  signal?: AbortSignal,
+): Promise<RunHistory> {
+  const params = new URLSearchParams();
+  if (options.model) params.set("model", options.model);
+  if (options.page) params.set("page", String(options.page));
+  if (options.limit) params.set("limit", String(options.limit));
+  if (options.sortBy) params.set("sortBy", options.sortBy);
+  if (options.sortDir) params.set("sortDir", options.sortDir);
+
+  const query = params.toString();
+  return fetchJson(`/strategy/${strategyName}/runs${query ? `?${query}` : ""}`, signal);
 }
 
 /** The real model allowlist (every configured model, any strategy). Used to

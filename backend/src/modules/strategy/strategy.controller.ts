@@ -200,6 +200,63 @@ export class StrategyController {
     return this.strategyService.getRunsForPuzzleId(puzzleId, strategyName);
   }
 
+  @Get(":strategyName/runs")
+  @ApiParam({
+    name: "strategyName",
+    type: String,
+    description:
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', or 'llm-ollama'",
+    example: "alphabetical",
+  })
+  @ApiQuery({
+    name: "model",
+    type: String,
+    required: false,
+    description:
+      "Narrows to one LLM model's runs (ignored for non-LLM strategies). Without it, an LLM" +
+      " strategy's full run history (every model) is returned, each row still priced from its" +
+      " own model's rate.",
+    example: "gpt-4.1-nano-2025-04-14",
+  })
+  @ApiQuery({ name: "page", type: Number, required: false, example: 1 })
+  @ApiQuery({
+    name: "limit",
+    type: Number,
+    required: false,
+    description: "Rows per page (default 100, max 500)",
+    example: 100,
+  })
+  @ApiQuery({
+    name: "sortBy",
+    type: String,
+    required: false,
+    description: "'puzzleDate' (default) | 'startedAt' | 'guessCount' | 'duration'",
+    example: "puzzleDate",
+  })
+  @ApiQuery({
+    name: "sortDir",
+    type: String,
+    required: false,
+    description: "'asc' | 'desc' (default)",
+    example: "desc",
+  })
+  async getRunHistory(
+    @Param("strategyName") strategyName: string,
+    @Query("model") model: string | undefined,
+    @Query("page", new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query("limit", new DefaultValuePipe(100), ParseIntPipe) limit: number,
+    @Query("sortBy") sortBy?: string,
+    @Query("sortDir") sortDir?: string,
+  ) {
+    if (!STRATEGY_SET.has(strategyName)) {
+      throw new BadRequestException(
+        `Invalid strategy: '${strategyName}'. Expected one of: ${[...STRATEGY_SET].join(", ")}.`,
+      );
+    }
+
+    return this.strategyService.getRunHistory(strategyName, { model, page, limit, sortBy, sortDir });
+  }
+
   // Looked up directly by the run's primary key rather than nested under
   // :strategyName/puzzle/:date/run/:trialNumber — the leaderboard's
   // individual-run page already has the runId (from getRunsForPuzzleId

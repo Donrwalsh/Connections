@@ -7,8 +7,8 @@ import { fetchLeaderboard } from "../../data/benchmark/api";
 import type { LeaderboardMetricKey } from "../../data/benchmark/metrics";
 import type { Leaderboard } from "../../data/benchmark/types";
 
-/** Homepage of the benchmark area: two DB-driven leaderboard tables (one for
- * deterministic/shuffle strategies, one for LLM models — see StrategyTable's
+/** Homepage of the benchmark area: two DB-driven leaderboard tables (LLM
+ * strategies above deterministic/shuffle strategies — see StrategyTable's
  * `variant`) sharing one configurable sort metric. A strategy or model only
  * gets a row once it has an actual run — see GET /strategy/leaderboard.
  * Rows navigate to /leaderboard/:id. */
@@ -51,26 +51,26 @@ export function LeaderboardPage() {
 
       {!isLoading && !error && leaderboard ? (
         <>
-          <section className="bench-page__section" aria-label="Deterministic and shuffle leaderboard">
-            <div className="bench-page__section-head">
-              <h2 className="bench-page__section-title">Deterministic &amp; Shuffle</h2>
-              <MetricSelector value={metricKey} onChange={setMetricKey} />
-            </div>
-            {leaderboard.deterministic.length === 0 ? (
-              <p className="bench-muted">No deterministic or shuffle runs yet.</p>
-            ) : (
-              <StrategyTable rows={leaderboard.deterministic} metricKey={metricKey} variant="deterministic" />
-            )}
-          </section>
-
           <section className="bench-page__section" aria-label="LLM leaderboard">
             <div className="bench-page__section-head">
-              <h2 className="bench-page__section-title">LLM Models</h2>
+              <h2 className="bench-page__section-title">LLM Strategies</h2>
+              <MetricSelector value={metricKey} onChange={setMetricKey} />
             </div>
             {leaderboard.llm.length === 0 ? (
               <p className="bench-muted">No LLM runs yet.</p>
             ) : (
               <StrategyTable rows={leaderboard.llm} metricKey={metricKey} variant="llm" />
+            )}
+          </section>
+
+          <section className="bench-page__section" aria-label="Deterministic and shuffle leaderboard">
+            <div className="bench-page__section-head">
+              <h2 className="bench-page__section-title">Deterministic &amp; Shuffle</h2>
+            </div>
+            {leaderboard.deterministic.length === 0 ? (
+              <p className="bench-muted">No deterministic or shuffle runs yet.</p>
+            ) : (
+              <StrategyTable rows={leaderboard.deterministic} metricKey={metricKey} variant="deterministic" />
             )}
           </section>
         </>

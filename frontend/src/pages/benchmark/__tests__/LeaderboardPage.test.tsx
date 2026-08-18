@@ -19,6 +19,8 @@ function makeRow(overrides: Partial<LeaderboardRow> = {}): LeaderboardRow {
     minGuesses: 4,
     maxGuesses: 40,
     avgDurationMs: 12,
+    avgCostUsd: null,
+    totalCostUsd: null,
     ...overrides,
   };
 }
@@ -45,6 +47,8 @@ const leaderboard: Leaderboard = {
       minGuesses: 2,
       maxGuesses: 8,
       progress: { completed: 4, active: 1, failed: 1, queued: 3 },
+      avgCostUsd: 0.1234,
+      totalCostUsd: 0.4936,
     }),
   ],
 };
@@ -89,39 +93,71 @@ describe("LeaderboardPage", () => {
 
     const tables = await screen.findAllByRole("table");
     expect(tables).toHaveLength(2);
-    expect(within(tables[0]!).getAllByRole("link")).toHaveLength(2);
-    expect(within(tables[1]!).getAllByRole("link")).toHaveLength(1);
+    // LLM table renders first, deterministic & shuffle second.
+    expect(within(tables[0]!).getAllByRole("link")).toHaveLength(1);
+    expect(within(tables[1]!).getAllByRole("link")).toHaveLength(2);
     expect(screen.getByText("Alphabetical")).toBeInTheDocument();
     expect(screen.getByText(/gpt-4\.1-nano-2025-04-14/)).toBeInTheDocument();
   });
 
-  it("shows the right column set per table: deterministic gets guesses/range, LLM gets success rate, both get avg speed", async () => {
+  it("shows the right column set per table: LLM gets success rate/avg duration/avg cost, deterministic gets avg speed/guesses/range", async () => {
     stubFetch(leaderboard);
     renderLeaderboard();
 
     const tables = await screen.findAllByRole("table");
 
-    // Deterministic table: Avg speed, Avg guesses, Range — no Success rate.
-    expect(within(tables[0]!).getByRole("columnheader", { name: "Avg speed" })).toBeInTheDocument();
-    expect(within(tables[0]!).getByRole("columnheader", { name: "Avg guesses" })).toBeInTheDocument();
-    expect(within(tables[0]!).getByRole("columnheader", { name: "Range" })).toBeInTheDocument();
+    // LLM table (first): Success rate, Avg duration, Avg cost — no Avg
+    // guesses, Range, or Avg speed (that's the deterministic table's
+    // solves/hr framing; LLM shows raw wall-clock duration instead).
+    expect(within(tables[0]!).getByRole("columnheader", { name: "Success rate" })).toBeInTheDocument();
+    expect(within(tables[0]!).getByRole("columnheader", { name: "Avg duration" })).toBeInTheDocument();
+    expect(within(tables[0]!).getByRole("columnheader", { name: "Avg cost" })).toBeInTheDocument();
     expect(
-      within(tables[0]!).queryByRole("columnheader", { name: "Success rate" }),
+      within(tables[0]!).queryByRole("columnheader", { name: "Avg guesses" }),
+    ).not.toBeInTheDocument();
+    expect(within(tables[0]!).queryByRole("columnheader", { name: "Range" })).not.toBeInTheDocument();
+    expect(within(tables[0]!).queryByRole("columnheader", { name: "Avg speed" })).not.toBeInTheDocument();
+    expect(within(tables[0]!).getByText("80%")).toBeInTheDocument();
+    expect(within(tables[0]!).getByText("$0.12")).toBeInTheDocument();
+    // gpt row: avgDurationMs 12 -> raw duration, not a derived solves/hr rate.
+    expect(firstRowIn(tables[0]!).textContent).toContain("12ms");
+
+    // Deterministic table (second): Avg speed, Avg guesses, Range — no
+    // Success rate, Avg cost, or Avg duration (deterministic strategies have
+    // no LLM cost concept, and their near-instant runs read better as a
+    // derived solves/hr rate than a raw millisecond duration).
+    expect(within(tables[1]!).getByRole("columnheader", { name: "Avg speed" })).toBeInTheDocument();
+    expect(within(tables[1]!).getByRole("columnheader", { name: "Avg guesses" })).toBeInTheDocument();
+    expect(within(tables[1]!).getByRole("columnheader", { name: "Range" })).toBeInTheDocument();
+    expect(
+      within(tables[1]!).queryByRole("columnheader", { name: "Success rate" }),
+    ).not.toBeInTheDocument();
+    expect(within(tables[1]!).queryByRole("columnheader", { name: "Avg cost" })).not.toBeInTheDocument();
+    expect(
+      within(tables[1]!).queryByRole("columnheader", { name: "Avg duration" }),
     ).not.toBeInTheDocument();
     // alphabetical row: avgDurationMs 12 -> 3,600,000 / 12 = 300,000 solves/hr,
     // shown as a value line plus a "solves/hr" unit caption underneath.
-    expect(firstRowIn(tables[0]!).textContent).toContain("300,000solves/hr");
-
-    // LLM table: Success rate, Avg speed — no Avg guesses or Range.
-    expect(within(tables[1]!).getByRole("columnheader", { name: "Success rate" })).toBeInTheDocument();
-    expect(within(tables[1]!).getByRole("columnheader", { name: "Avg speed" })).toBeInTheDocument();
-    expect(
-      within(tables[1]!).queryByRole("columnheader", { name: "Avg guesses" }),
-    ).not.toBeInTheDocument();
-    expect(within(tables[1]!).queryByRole("columnheader", { name: "Range" })).not.toBeInTheDocument();
-    expect(within(tables[1]!).getByText("80%")).toBeInTheDocument();
-    // gpt row: avgDurationMs 12 (default) -> same 300,000 solves/hr.
     expect(firstRowIn(tables[1]!).textContent).toContain("300,000solves/hr");
+  });
+
+  it("formats Progress column numbers over 999 with thousands separators", async () => {
+    stubFetch({
+      deterministic: [
+        makeRow({
+          id: "alphabetical",
+          puzzlesCovered: 1174,
+          totalPuzzles: 1174,
+          progress: { completed: 1174, active: 0, failed: 0, queued: 1500 },
+        }),
+      ],
+      llm: [],
+    });
+    renderLeaderboard();
+
+    const table = await screen.findByRole("table");
+    expect(firstRowIn(table).textContent).toContain("1,174 of 1,174 puzzles");
+    expect(within(table).getByText("Queued 1,500")).toBeInTheDocument();
   });
 
   it("summarizes in-flight work across both tables in the status strip", async () => {
@@ -141,9 +177,10 @@ describe("LeaderboardPage", () => {
     renderLeaderboard();
 
     const tables = await screen.findAllByRole("table");
-    // avgGuesses, fewest first: alphabetical (12) beats shuffle-foolish (30).
-    expect(firstRowIn(tables[0]!)).toHaveClass("bench-row--leading");
-    expect(firstRowIn(tables[0]!).textContent).toContain("Alphabetical");
+    // avgGuesses, fewest first: alphabetical (12) beats shuffle-foolish (30)
+    // in the deterministic table (second — LLM renders first).
+    expect(firstRowIn(tables[1]!)).toHaveClass("bench-row--leading");
+    expect(firstRowIn(tables[1]!).textContent).toContain("Alphabetical");
   });
 
   it("re-ranks the leading row when the metric changes", async () => {
@@ -156,8 +193,8 @@ describe("LeaderboardPage", () => {
 
     const tables = screen.getAllByRole("table");
     // success rate, best first: alphabetical (100%) still leads over
-    // shuffle-foolish (60%) in the deterministic table.
-    expect(firstRowIn(tables[0]!).textContent).toContain("Alphabetical");
+    // shuffle-foolish (60%) in the deterministic table (second).
+    expect(firstRowIn(tables[1]!).textContent).toContain("Alphabetical");
   });
 
   it("navigates to the row detail page on click", async () => {

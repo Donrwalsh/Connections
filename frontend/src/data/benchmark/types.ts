@@ -17,13 +17,6 @@ export type RunStatus =
 
 export type PuzzleRunStatus = "in_progress" | "completed" | "failed";
 
-export interface ProgressCounts {
-  completed: number;
-  queued: number;
-  active: number;
-  failed: number;
-}
-
 /** Static identity of a strategy (no per-puzzle performance data). For "llm"
  * kind rows, `id` is a *model* name (e.g. "gpt-4.1-nano-2025-04-14") rather
  * than a strategy name — each model benchmarked gets its own leaderboard row
@@ -38,41 +31,6 @@ export interface StrategyMeta {
   description: string;
   runsPerPuzzle: number;
   strategyName: string;
-}
-
-/** Row for the /leaderboard table: one strategy (or, for "llm" kind, one
- * model) across all puzzles. See StrategyMeta for the id/strategyName split. */
-export interface StrategyAggregate {
-  id: string;
-  name: string;
-  kind: StrategyKind;
-  description: string;
-  runsPerPuzzle: number;
-  strategyName: string;
-  totalPuzzles: number;
-  expectedRuns: number;
-  progress: ProgressCounts;
-  /** % of finished runs that solved, or null when nothing has finished. */
-  successRate: number | null;
-  /** Mean guesses over completed (solved) runs. */
-  avgGuessesToSolve: number | null;
-  minGuesses: number | null;
-  maxGuesses: number | null;
-  /** Mean solve duration over completed runs, in milliseconds. */
-  avgDurationMs: number | null;
-}
-
-/** Row for /leaderboard/:strategyId: one puzzle's results for a strategy. */
-export interface PuzzleBreakdown {
-  puzzleId: number;
-  date: string;
-  label: string;
-  runsPerPuzzle: number;
-  completedRuns: number;
-  status: PuzzleRunStatus;
-  avgGuessesToSolve: number | null;
-  minGuesses: number | null;
-  maxGuesses: number | null;
 }
 
 /** Row for /leaderboard/:strategyId/:puzzleId: an individual run. */
@@ -133,11 +91,52 @@ export interface LeaderboardRow {
   minGuesses: number | null;
   maxGuesses: number | null;
   avgDurationMs: number | null;
+  /** USD cost of this model's runs, from its configured per-million-token
+   * rates applied to actual token usage. Null for deterministic/shuffle rows
+   * and for LLM rows with no priceable runs yet. Unlike avgGuessesToSolve,
+   * this covers every run regardless of outcome — a failed run still spent
+   * tokens. */
+  avgCostUsd: number | null;
+  totalCostUsd: number | null;
 }
 
 export interface Leaderboard {
   deterministic: LeaderboardRow[];
   llm: LeaderboardRow[];
+}
+
+export type RunHistorySortBy = "puzzleDate" | "startedAt" | "guessCount" | "duration";
+export type RunHistorySortDir = "asc" | "desc";
+
+/** One row of GET /strategy/:strategyName/runs: a single StrategyRun (not a
+ * per-puzzle aggregate) — the /leaderboard/:strategyId page renders one of
+ * these per actual run, across every puzzle, instead of one row per puzzle. */
+export interface RunHistoryRow {
+  id: number;
+  puzzleId: number;
+  puzzleDate: string;
+  strategyName: string;
+  modelName: string | null;
+  trialNumber: number;
+  status: RunStatus;
+  startedAt: string;
+  finishedAt: string | null;
+  guessCount: number;
+  /** USD cost of this run's LLM calls, from the model's configured
+   * per-million-token rates. Null for non-LLM strategies and for a run whose
+   * model's rate can no longer be resolved. */
+  tokenCostUsd: number | null;
+}
+
+export interface RunHistoryMeta {
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface RunHistory {
+  rows: RunHistoryRow[];
+  meta: RunHistoryMeta;
 }
 
 /** One row from GET /strategy/models — the real allowlist of models a

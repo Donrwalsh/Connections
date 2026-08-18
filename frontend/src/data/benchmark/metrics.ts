@@ -3,8 +3,6 @@
 // format/sort the results. Kept framework-free so it is unit-testable without
 // rendering.
 
-import type { PuzzleBreakdown, PuzzleRunStatus } from "./types";
-
 export type LeaderboardMetricKey = "avgGuesses" | "successRate" | "speed";
 
 export interface MetricDefinition {
@@ -44,9 +42,8 @@ export function getMetricDefinition(key: LeaderboardMetricKey): MetricDefinition
 }
 
 /** Any row shape with the three metric-source fields the leaderboard sorts
- * by — both the live LeaderboardRow (see types.ts) and the mock
- * StrategyAggregate satisfy this structurally, so the metric helpers below
- * don't need to know which one they're given. */
+ * by (see the live LeaderboardRow in types.ts) — the metric helpers below
+ * don't need to know the concrete row type, just that it has these. */
 export interface MetricSource {
   avgGuessesToSolve: number | null;
   successRate: number | null;
@@ -81,23 +78,6 @@ export function sortStrategiesByMetric<T extends MetricSource>(
   });
 }
 
-export type GuessSortDirection = "asc" | "desc";
-
-/** Sorts puzzle rows by average guesses; nulls (nothing solved) sort last. */
-export function sortPuzzleBreakdowns(
-  puzzles: PuzzleBreakdown[],
-  direction: GuessSortDirection,
-): PuzzleBreakdown[] {
-  return [...puzzles].sort((a, b) => {
-    const aValue = a.avgGuessesToSolve;
-    const bValue = b.avgGuessesToSolve;
-    if (aValue === null && bValue === null) return 0;
-    if (aValue === null) return 1;
-    if (bValue === null) return -1;
-    return direction === "asc" ? aValue - bValue : bValue - aValue;
-  });
-}
-
 /** Guess-count formatter for the deterministic/shuffle table — unlike the
  * "Avg guesses" metric's own format() (tuned for LLM runs, which solve or
  * fail within single digits), brute-force strategies aren't capped by a
@@ -115,13 +95,23 @@ export function formatDuration(ms: number): string {
   return `${minutes}m ${seconds}s`;
 }
 
-export type PuzzleStatusFilter = "all" | PuzzleRunStatus;
+/** Run-timestamp formatter with an explicit locale/timezone (UTC) so output
+ * is deterministic regardless of the host's locale — same reasoning as
+ * Game.tsx's puzzle-date formatting. */
+export function formatTimestamp(iso: string): string {
+  return new Date(iso).toLocaleString("en-US", {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
-/** Filters puzzle rows by run status; "all" returns the input unchanged. */
-export function filterPuzzleBreakdowns(
-  puzzles: PuzzleBreakdown[],
-  filter: PuzzleStatusFilter,
-): PuzzleBreakdown[] {
-  if (filter === "all") return puzzles;
-  return puzzles.filter((puzzle) => puzzle.status === filter);
+/** USD token-cost formatter for LLM run rows: most runs cost fractions of a
+ * cent, so anything under a cent gets 4 decimal places instead of rounding
+ * away to "$0.00". */
+export function formatCostUsd(usd: number): string {
+  return usd > 0 && usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
