@@ -24,6 +24,16 @@ const GROUP_SIZE = 4;
 const MODEL_ERROR_RETRY_BASE_DELAY_MS = 1000;
 const MODEL_ERROR_RETRY_MAX_DELAY_MS = 300000;
 
+// Some models (Mistral especially) don't put their reasoning in the
+// scratchpad the prompt asks for — they append it straight onto the
+// "Words:" line instead, e.g. "LOOK, TOUCH, SIGHT, SMELL (these are all
+// senses)". Left in, that either glues onto the 4th word (breaking every
+// downstream comparison against the puzzle's real words) or, when the
+// aside itself contains commas, inflates the line past 4 tokens and gets
+// the whole group discarded. Stripping it before splitting on commas fixes
+// both cases at once, since either way what's left is the 4 bare words.
+const WORDS_PARENTHETICAL_RE = /\([^)]*\)/g;
+
 export function buildInitialPrompt(items: string[], N: number): string {
   const totalItems = N * 4;
 
@@ -221,6 +231,7 @@ export class LlmStrategyRunner {
           promptType,
           status: SolvePromptStatus.PARSED,
           rawResponseText: data.response,
+          wordsHadParenthetical: false,
           temperature,
           promptTokens: data.usage?.promptTokens ?? null,
           completionTokens: data.usage?.completionTokens ?? null,
@@ -268,7 +279,22 @@ export class LlmStrategyRunner {
             }
 
             if (wordsMatch) {
-              const wordsLine = wordsMatch[1]
+              const rawWordsLine = wordsMatch[1];
+              // .replace() with a global regex, not .test() — WORDS_PARENTHETICAL_RE
+              // is a shared module-level instance, and a global regex's .test()
+              // mutates its own lastIndex across calls, which would silently
+              // start missing matches on later prompts. Comparing before/after
+              // avoids that stateful pitfall entirely.
+              const strippedWordsLine = rawWordsLine.replace(WORDS_PARENTHETICAL_RE, "");
+              if (strippedWordsLine !== rawWordsLine) {
+                // currentPrompt is the same object already queued in
+                // pendingPrompts, so mutating it here still reflects at
+                // flush time (same pattern as the malformed-status mutation
+                // below).
+                currentPrompt.wordsHadParenthetical = true;
+              }
+
+              const wordsLine = strippedWordsLine
                 .split(",")
                 .map((w) => w.replace(/[`*]/g, "").trim())
                 .filter(Boolean);

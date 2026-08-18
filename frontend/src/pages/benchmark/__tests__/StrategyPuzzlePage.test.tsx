@@ -18,6 +18,7 @@ function makeRow(overrides: Partial<RunHistoryRow> = {}): RunHistoryRow {
     finishedAt: "2024-01-01T00:00:05Z",
     guessCount: 4,
     tokenCostUsd: null,
+    hadWordsParenthetical: false,
     ...overrides,
   };
 }
@@ -204,6 +205,30 @@ describe("StrategyPuzzlePage", () => {
     expect(cells[3]).toBe("5.0s");
     expect(cells[4]).toBe("Completed");
     expect(within(table).queryByRole("columnheader", { name: "Token cost" })).not.toBeInTheDocument();
+  });
+
+  it("flags a run whose model needed a parenthetical stripped from its words", async () => {
+    stubFetch({
+      history: {
+        rows: [makeRow({ hadWordsParenthetical: true })],
+        meta: { total: 1, page: 1, limit: 100 },
+      },
+    });
+
+    renderStrategy("alphabetical");
+
+    expect(await screen.findByText("Parenthetical stripped")).toBeInTheDocument();
+  });
+
+  it("does not flag a run with no parenthetical-stripping quirk", async () => {
+    stubFetch({
+      history: { rows: [makeRow()], meta: { total: 1, page: 1, limit: 100 } },
+    });
+
+    renderStrategy("alphabetical");
+
+    await screen.findByRole("table");
+    expect(screen.queryByText("Parenthetical stripped")).not.toBeInTheDocument();
   });
 
   it("shows the Token cost column for an LLM strategy, ordered before Status (the far-right column)", async () => {

@@ -126,6 +126,11 @@ export interface RunHistoryRow {
    * per-million-token rates. Null for non-LLM strategies and for a run whose
    * model's rate can no longer be resolved. */
   tokenCostUsd: number | null;
+  /** True if any solve step in this run hit the "Words:" trailing-
+   * parenthetical parsing quirk (see SolvePromptRecord.wordsHadParenthetical)
+   * — some models glue their reasoning onto the words line instead of
+   * keeping it in the scratchpad. Always false for non-LLM strategies. */
+  hadWordsParenthetical: boolean;
 }
 
 export interface RunHistoryMeta {
@@ -217,6 +222,11 @@ export interface SolvePromptRecord {
   latencyMs: number | null;
   temperature: number | null;
   createdAt: string;
+  /** True when this response's "Words:" line had a trailing parenthetical
+   * explanation (e.g. "LOOK, TOUCH, SIGHT, SMELL (these are all senses)")
+   * that had to be stripped before it would parse as 4 clean words.
+   * rawResponseText above is always the untouched original text. */
+  wordsHadParenthetical: boolean;
   reconstructedPrompt: string | null;
   proposals: LlmProposalRecord[];
 }

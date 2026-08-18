@@ -92,6 +92,11 @@ function PromptStep({ prompt }: { prompt: SolvePromptRecord }) {
         {prompt.status !== "parsed" ? (
           <StatusPill label={solvePromptStatusLabel(prompt.status)} tone="failed" />
         ) : null}
+        {prompt.wordsHadParenthetical ? (
+          <span title="This response tucked an explanation into the Words: line — the parser stripped it before guessing.">
+            <StatusPill label="Parenthetical stripped" tone="neutral" />
+          </span>
+        ) : null}
         {telemetry.length > 0 ? (
           <span className="bench-mono bench-step__telemetry">{telemetry.join(" · ")}</span>
         ) : null}

@@ -62,6 +62,16 @@ export class SolvePrompt {
   @Column({ type: "text", nullable: true })
   rawResponseText: string | null;
 
+  // True when at least one group's "Words:" line in this response had a
+  // trailing parenthetical explanation glued onto it (e.g. "LOOK, TOUCH,
+  // SIGHT, SMELL (these are all senses)") that the parser had to strip
+  // before splitting on commas. rawResponseText always keeps the untouched
+  // original text — this just flags that the parser had to work around it,
+  // so a run that got stuck on this can be found later. See
+  // llm-strategy-runner.service.ts's WORDS_PARENTHETICAL_RE.
+  @Column({ type: "boolean", default: false })
+  wordsHadParenthetical: boolean;
+
   // ── Per-prompt LLM telemetry ────────────────────────────────────────
 
   @Column({ type: "int", nullable: true })

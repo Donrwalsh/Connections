@@ -39,6 +39,7 @@ const llmDetail: StrategyRunDetail = {
       latencyMs: 1200,
       temperature: 0.2,
       createdAt: "2025-01-01T00:00:00Z",
+      wordsHadParenthetical: false,
       reconstructedPrompt: "You are an expert solver...",
       proposals: [
         {
@@ -133,6 +134,26 @@ describe("GuessChainVisualizer", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Raw response (50 tokens)")).toBeInTheDocument();
     expect(screen.getByText("You are an expert solver...")).toBeInTheDocument();
+  });
+
+  it("flags a step whose Words: line needed a parenthetical stripped", async () => {
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [{ ...llmDetail.solvePrompts[0]!, wordsHadParenthetical: true }],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Parenthetical stripped")).toBeInTheDocument();
+  });
+
+  it("does not flag a step whose Words: line had no parenthetical", async () => {
+    stubFetch(llmDetail);
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    await screen.findByText("Initial solve");
+    expect(screen.queryByText("Parenthetical stripped")).not.toBeInTheDocument();
   });
 
   it("falls back to a plain guess list for strategies with no solve-prompt chain", async () => {

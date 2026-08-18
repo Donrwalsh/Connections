@@ -804,6 +804,13 @@ export class StrategyService {
         '(SELECT COUNT(*)::int FROM "Guess" g WHERE g."strategyRunId" = run.id)',
         "guessCount",
       )
+      .addSelect(
+        `EXISTS (
+          SELECT 1 FROM "SolvePrompt" sp
+          WHERE sp."strategyRunId" = run.id AND sp."wordsHadParenthetical" = true
+        )`,
+        "hadWordsParenthetical",
+      )
       .orderBy(RUN_HISTORY_SORT_EXPR[sortBy], sortDir)
       // Stable tiebreaker: without one, ties on the chosen sort column can
       // shuffle rows between identical LIMIT/OFFSET pages.
@@ -826,6 +833,7 @@ export class StrategyService {
         startedAt: Date | string;
         finishedAt: Date | string | null;
         guessCount: number;
+        hadWordsParenthetical: boolean;
       }>();
 
     const tokenCostByRun = isLlmStrategy(strategyName)
@@ -847,6 +855,7 @@ export class StrategyService {
       finishedAt: row.finishedAt ? new Date(row.finishedAt) : null,
       guessCount: Number(row.guessCount),
       tokenCostUsd: tokenCostByRun.get(row.id) ?? null,
+      hadWordsParenthetical: row.hadWordsParenthetical,
     }));
 
     return { rows, meta: { total, page: safePage, limit: safeLimit } };

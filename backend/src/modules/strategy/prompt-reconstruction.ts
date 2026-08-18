@@ -142,6 +142,7 @@ export function reconstructSolvePrompts(
       latencyMs: prompt.latencyMs,
       temperature: prompt.temperature,
       createdAt: prompt.createdAt,
+      wordsHadParenthetical: prompt.wordsHadParenthetical,
       reconstructedPrompt,
       proposals: promptProposals,
     };

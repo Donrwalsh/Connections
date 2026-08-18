@@ -48,6 +48,11 @@ export interface SolvePromptDto {
   latencyMs: number | null;
   temperature: number | null;
   createdAt: Date;
+  // True when this response's "Words:" line had a trailing parenthetical
+  // explanation the parser had to strip before it would parse as 4 clean
+  // words (see llm-strategy-runner.service.ts's WORDS_PARENTHETICAL_RE).
+  // rawResponseText above always keeps the untouched original text.
+  wordsHadParenthetical: boolean;
   // Best-effort reconstruction of the *entire* chat payload actually sent —
   // every earlier step's prompt/response plus this step's own new prompt,
   // exactly as the runner's growing `messages` array would have looked. Not
@@ -165,6 +170,12 @@ export interface RunHistoryRowDto {
   // token usage. Null for non-LLM strategies, and for an LLM run whose
   // model's rate can no longer be resolved (e.g. since removed).
   tokenCostUsd: number | null;
+  // True if any SolvePrompt in this run had the trailing-parenthetical
+  // parsing issue (see SolvePromptDto.wordsHadParenthetical) — a run can hit
+  // it on some calls and not others, so this is an OR across every prompt,
+  // not a property of the run as a whole. Always false for non-LLM
+  // strategies (no SolvePrompt rows at all).
+  hadWordsParenthetical: boolean;
 }
 
 export interface RunHistoryMetaDto {

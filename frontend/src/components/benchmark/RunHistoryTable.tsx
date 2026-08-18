@@ -101,7 +101,14 @@ export function RunHistoryTable({
                 </td>
               ) : null}
               <td>
-                <StatusPill label={runStatusLabel(row.status)} tone={runStatusTone(row.status)} />
+                <span className="bench-badges">
+                  <StatusPill label={runStatusLabel(row.status)} tone={runStatusTone(row.status)} />
+                  {row.hadWordsParenthetical ? (
+                    <span title="At least one model response tucked an explanation into the Words: line — the parser stripped it before guessing.">
+                      <StatusPill label="Parenthetical stripped" tone="neutral" />
+                    </span>
+                  ) : null}
+                </span>
               </td>
             </tr>
           );

@@ -235,6 +235,82 @@ describe("LlmStrategyRunner", () => {
       );
     });
 
+    it("should strip a trailing parenthetical from a Words: line and flag the prompt", async () => {
+      // Mirrors a real Mistral response: explanatory asides glued onto the
+      // Words: line instead of kept in the scratchpad. Group 1's aside has
+      // no internal comma (contaminates just the last word if left in);
+      // Group 2's aside has several (would otherwise push the line past 4
+      // comma-separated tokens and get the whole group discarded). Both
+      // must still resolve to exactly 4 clean words.
+      const responseOne =
+        "### GROUPS\n#### Group 1\nCategory: Fruits\n" +
+        "Words: APPLE, BANANA, CHERRY, DATE (these are all fruits)\n\n" +
+        "### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
+      const responseTwo =
+        "### GROUPS\n#### Group 1\nCategory: Misc\n" +
+        "Words: EGGPLANT, FIG, GRAPE, HONEY (eggplant is purple, fig is sweet, " +
+        "grape is small, honey is sticky)\n\n" +
+        "### ANSWER\nEGGPLANT, FIG, GRAPE, HONEY";
+
+      mockOrchestratorService.solveAssist
+        .mockResolvedValueOnce(
+          makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]], responseOne),
+        )
+        .mockResolvedValueOnce(
+          makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]], responseTwo),
+        );
+
+      const result = await runner.runLlmStrategy(100, "llm-openai");
+
+      expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
+
+      // The contamination never reaches the guess — both submitted with
+      // exactly the 4 real puzzle words.
+      const inserted = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "Guess")
+        .flatMap((call) => call[1] as Array<{ words: string[]; result: GuessResult }>);
+      expect(inserted).toEqual([
+        expect.objectContaining({
+          words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+          result: GuessResult.SUCCESS,
+        }),
+        expect.objectContaining({
+          words: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+          result: GuessResult.SUCCESS,
+        }),
+      ]);
+
+      // Flagged so affected runs can be found later, and rawResponseText
+      // keeps the untouched original (parenthetical and all) — only the
+      // parser's internal word-extraction is fixed, not what's stored.
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows).toEqual([
+        expect.objectContaining({ wordsHadParenthetical: true, rawResponseText: responseOne }),
+        expect.objectContaining({ wordsHadParenthetical: true, rawResponseText: responseTwo }),
+      ]);
+    });
+
+    it("should not flag a Words: line with no parenthetical", async () => {
+      const response =
+        "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n\n" +
+        "### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]], response),
+      );
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      );
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(expect.objectContaining({ wordsHadParenthetical: false }));
+    });
+
     it("should send conversation history with prior guesses as RETRY prompts", async () => {
       // First call proposes a group that spans both answer categories, so
       // it fails and triggers a RETRY prompt on the next call.

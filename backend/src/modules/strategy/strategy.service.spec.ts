@@ -1323,6 +1323,7 @@ describe("StrategyService", () => {
         startedAt: new Date("2024-01-01T00:00:00Z"),
         finishedAt: new Date("2024-01-01T00:00:05Z"),
         guessCount: 4,
+        hadWordsParenthetical: false,
         ...overrides,
       };
     }
@@ -1342,6 +1343,10 @@ describe("StrategyService", () => {
       // as a full ISO datetime instead of a plain "YYYY-MM-DD" string (the
       // frontend's date parsing broke on this — see git history).
       expect(qb.addSelect).toHaveBeenCalledWith("puzzle.date::text", "puzzleDate");
+      expect(qb.addSelect).toHaveBeenCalledWith(
+        expect.stringContaining('"wordsHadParenthetical" = true'),
+        "hadWordsParenthetical",
+      );
       expect(qb.orderBy).toHaveBeenCalledWith('"puzzleDate"', "DESC");
       expect(qb.addOrderBy).toHaveBeenCalledWith("run.id", "DESC");
       // limit()/offset(), not skip()/take() — see the comment in
@@ -1364,8 +1369,17 @@ describe("StrategyService", () => {
           finishedAt: new Date("2024-01-01T00:00:05Z"),
           guessCount: 4,
           tokenCostUsd: null,
+          hadWordsParenthetical: false,
         },
       ]);
+    });
+
+    it("should surface hadWordsParenthetical from the row when true", async () => {
+      mockRunHistoryQuery(1, [rawRun({ hadWordsParenthetical: true })]);
+
+      const result = await service.getRunHistory("alphabetical", {});
+
+      expect(result.rows[0].hadWordsParenthetical).toBe(true);
     });
 
     it("should filter by model and honor a given sortBy/sortDir/page/limit", async () => {
