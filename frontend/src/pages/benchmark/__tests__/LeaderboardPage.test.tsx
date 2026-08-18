@@ -2,8 +2,36 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Leaderboard, LeaderboardRow } from "../../../data/benchmark/types";
+import type { FreeTierUsage, Leaderboard, LeaderboardRow } from "../../../data/benchmark/types";
 import { LeaderboardPage } from "../LeaderboardPage";
+
+const flagshipUsage: FreeTierUsage = {
+  tier: "flagship",
+  label: "Flagship models",
+  usedTokens: 12_000,
+  dailyLimitTokens: 250_000,
+  remainingTokens: 238_000,
+  models: ["gpt-5.4", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1", "gpt-4o", "o1", "o3"],
+};
+
+const miniUsage: FreeTierUsage = {
+  tier: "mini",
+  label: "Mini & nano models",
+  usedTokens: 500_000,
+  dailyLimitTokens: 2_500_000,
+  remainingTokens: 2_000_000,
+  models: [
+    "gpt-5.4-mini",
+    "gpt-5.4-nano",
+    "gpt-5-mini",
+    "gpt-4.1-mini",
+    "gpt-4.1-nano",
+    "gpt-4o-mini",
+    "o3-mini",
+    "o4-mini",
+    "gpt-5-nano",
+  ],
+};
 
 function makeRow(overrides: Partial<LeaderboardRow> = {}): LeaderboardRow {
   return {
@@ -56,11 +84,22 @@ const leaderboard: Leaderboard = {
 function stubFetch(data: Leaderboard, ok = true) {
   vi.stubGlobal(
     "fetch",
-    vi.fn(() =>
-      ok
+    vi.fn((url: unknown) => {
+      // The page's two FreeTierBudgetWidget instances each fetch
+      // independently of the leaderboard — give them real-shaped responses
+      // so neither renders an error state (or crashes on a mismatched
+      // shape) in tests that only care about the leaderboard tables.
+      const href = String(url);
+      if (href.includes("/strategy/free-tier-usage/flagship")) {
+        return Promise.resolve({ ok: true, json: async () => flagshipUsage });
+      }
+      if (href.includes("/strategy/free-tier-usage/mini")) {
+        return Promise.resolve({ ok: true, json: async () => miniUsage });
+      }
+      return ok
         ? Promise.resolve({ ok: true, json: async () => data })
-        : Promise.resolve({ ok: false, status: 500, json: async () => ({ message: "boom" }) }),
-    ),
+        : Promise.resolve({ ok: false, status: 500, json: async () => ({ message: "boom" }) });
+    }),
   );
 }
 
@@ -84,6 +123,18 @@ afterEach(() => {
 });
 
 describe("LeaderboardPage", () => {
+  it("renders both free-tier budget widgets alongside the leaderboard", async () => {
+    stubFetch(leaderboard);
+    renderLeaderboard();
+
+    expect(await screen.findByText("12,000 / 250,000 used")).toBeInTheDocument();
+    expect(screen.getByText("238,000 tokens remaining today")).toBeInTheDocument();
+    expect(screen.getByText("500,000 / 2,500,000 used")).toBeInTheDocument();
+    expect(screen.getByText("2,000,000 tokens remaining today")).toBeInTheDocument();
+    expect(screen.getByText("Flagship daily tokens")).toBeInTheDocument();
+    expect(screen.getByText("Mini & nano daily tokens")).toBeInTheDocument();
+  });
+
   it("renders the hero, status strip, and both tables split by kind", async () => {
     stubFetch(leaderboard);
     renderLeaderboard();

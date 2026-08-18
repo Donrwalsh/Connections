@@ -11,6 +11,7 @@ import { StrategyService } from "./strategy.service";
 import { LlmStrategyRunner } from "./llm-strategy-runner.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { OrchestratorService } from "./orchestrator.service";
+import { FreeTierUsageService } from "./free-tier-usage.service";
 import { GameModule } from "../game/game.module";
 import { SupportedModelModule } from "../supported-model/supported-model.module";
 
@@ -22,7 +23,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     SupportedModelModule,
   ],
   controllers: [StrategyController],
-  providers: [StrategyService, StrategyRunStore, LlmStrategyRunner, OrchestratorService],
+  providers: [StrategyService, StrategyRunStore, LlmStrategyRunner, OrchestratorService, FreeTierUsageService],
   exports: [StrategyService, LlmStrategyRunner],
 })
 export class StrategyModule {}

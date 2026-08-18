@@ -4,6 +4,8 @@
 // which parts of the benchmark UI are still mock-driven.
 
 import type {
+  FreeTierId,
+  FreeTierUsage,
   Leaderboard,
   RunHistory,
   RunHistorySortBy,
@@ -89,6 +91,13 @@ export function fetchRunHistory(
  * last updated — rather than treating it as an unknown strategy outright. */
 export function fetchSupportedModels(signal?: AbortSignal): Promise<SupportedModelRecord[]> {
   return fetchJson("/strategy/models", signal);
+}
+
+/** Today's spend against one of the two free-token programs — see
+ * FreeTierId/FreeTierUsage. Backs the leaderboard page's budget widgets,
+ * one instance per tier. */
+export function fetchFreeTierUsage(tier: FreeTierId, signal?: AbortSignal): Promise<FreeTierUsage> {
+  return fetchJson(`/strategy/free-tier-usage/${tier}`, signal);
 }
 
 const DETAIL_PAGE_SIZE = 200;

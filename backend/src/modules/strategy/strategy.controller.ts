@@ -11,6 +11,7 @@ import {
 import { ApiParam, ApiQuery } from "@nestjs/swagger";
 import { StrategyService } from "./strategy.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
+import { FreeTierUsageService } from "./free-tier-usage.service";
 import { STRATEGY_SET } from "../../strategies";
 
 @Controller("strategy")
@@ -18,6 +19,7 @@ export class StrategyController {
   constructor(
     @Inject(StrategyService) private readonly strategyService: StrategyService,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
+    @Inject(FreeTierUsageService) private readonly freeTierUsageService: FreeTierUsageService,
   ) {}
 
   // Listed before the more specific :strategyName/... routes only for
@@ -33,6 +35,20 @@ export class StrategyController {
   @Get("leaderboard")
   async getLeaderboard() {
     return this.strategyService.getLeaderboard();
+  }
+
+  // Same reasoning as "models"/"leaderboard" above. Two distinct routes
+  // (not one route with a :tier param) so each free-tier program is a
+  // fixed, self-documenting endpoint rather than an arbitrary string the
+  // caller has to already know the valid values for.
+  @Get("free-tier-usage/flagship")
+  async getFlagshipFreeTierUsage() {
+    return this.freeTierUsageService.getFlagshipUsage();
+  }
+
+  @Get("free-tier-usage/mini")
+  async getMiniFreeTierUsage() {
+    return this.freeTierUsageService.getMiniUsage();
   }
 
   @Get(":strategyName/puzzle/:date")

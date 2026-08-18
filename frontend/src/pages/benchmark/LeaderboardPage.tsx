@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { FreeTierBudgetWidget } from "../../components/benchmark/FreeTierBudgetWidget";
 import { HeroHeader } from "../../components/benchmark/HeroHeader";
 import { MetricSelector } from "../../components/benchmark/MetricSelector";
 import { StatusStrip } from "../../components/benchmark/StatusStrip";
@@ -45,6 +46,10 @@ export function LeaderboardPage() {
     <div className="bench-page">
       <HeroHeader />
       <StatusStrip running={active} queued={queued} />
+      <div className="bench-free-tiers" aria-label="Daily free-token budgets">
+        <FreeTierBudgetWidget tier="flagship" />
+        <FreeTierBudgetWidget tier="mini" />
+      </div>
 
       {isLoading ? <p className="bench-muted">Loading leaderboard…</p> : null}
       {error && !isLoading ? <p className="bench-error">{error}</p> : null}

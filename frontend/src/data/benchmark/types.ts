@@ -159,6 +159,27 @@ export interface SupportedModelRecord {
   supported: boolean;
 }
 
+/** The backend tracks two separate, non-overlapping free-token programs —
+ * see FreeTierUsageService.FLAGSHIP_FREE_TIER / MINI_FREE_TIER — each with
+ * its own daily limit and model list. "flagship" covers the full-size
+ * models (gpt-5.4, gpt-4o, o1, ...); "mini" covers the mini/nano variants
+ * plus gpt-5-nano. Kept as a union (not a free-form string) so a caller
+ * can't accidentally ask for a tier that doesn't exist. */
+export type FreeTierId = "flagship" | "mini";
+
+/** GET /strategy/free-tier-usage/:tier — today's (UTC) token spend against
+ * one of the two free-token programs above (see FreeTierId), tracked
+ * server-side. `label` is the backend's own description of which models
+ * `tier` covers; `models` lists them explicitly. */
+export interface FreeTierUsage {
+  tier: FreeTierId;
+  label: string;
+  usedTokens: number;
+  dailyLimitTokens: number;
+  remainingTokens: number;
+  models: string[];
+}
+
 /** A run row from GET /strategy/:strategyName/puzzle-id/:puzzleId. The
  * backend never returns "queued" (a StrategyRun row only exists once a job
  * has actually started), so this is always one of the other RunStatus

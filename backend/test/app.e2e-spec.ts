@@ -207,6 +207,43 @@ describe("App (e2e)", () => {
     expect(res.body[0]).not.toHaveProperty("cachedInputCostPerMillionTokens");
   });
 
+  it("GET /strategy/free-tier-usage/flagship reports today's usage against the 250k flagship budget", async () => {
+    const res = await request(app.getHttpServer()).get("/strategy/free-tier-usage/flagship");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      tier: "flagship",
+      usedTokens: expect.any(Number),
+      dailyLimitTokens: 250_000,
+      remainingTokens: expect.any(Number),
+      models: expect.arrayContaining(["gpt-5.4", "gpt-4.1", "gpt-4o", "o1", "o3"]),
+    });
+    expect(res.body.remainingTokens).toBe(
+      Math.max(0, res.body.dailyLimitTokens - res.body.usedTokens),
+    );
+  });
+
+  it("GET /strategy/free-tier-usage/mini reports today's usage against the 2.5M mini-tier budget", async () => {
+    const res = await request(app.getHttpServer()).get("/strategy/free-tier-usage/mini");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      tier: "mini",
+      usedTokens: expect.any(Number),
+      dailyLimitTokens: 2_500_000,
+      remainingTokens: expect.any(Number),
+      models: expect.arrayContaining(["gpt-4.1-mini", "gpt-4o-mini", "o3-mini", "o4-mini", "gpt-5-nano"]),
+    });
+    expect(res.body.remainingTokens).toBe(
+      Math.max(0, res.body.dailyLimitTokens - res.body.usedTokens),
+    );
+    // The two programs are disjoint — a flagship-only model name must never
+    // show up under the mini budget's model list.
+    expect(res.body.models).not.toContain("gpt-5.4");
+    expect(res.body.models).not.toContain("gpt-4.1");
+    expect(res.body.models).not.toContain("o3");
+  });
+
   it("POST /dispatch/strategy/:strategy/:date queues a deterministic strategy", async () => {
     const res = await request(app.getHttpServer()).post(
       `/dispatch/strategy/alphabetical/${TEST_DATE}`,

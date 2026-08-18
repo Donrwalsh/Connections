@@ -100,8 +100,27 @@ describe("App leaderboard routes", () => {
   it("renders the leaderboard homepage at /leaderboard", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(() =>
-        Promise.resolve({
+      vi.fn((url: unknown) => {
+        // The page's two FreeTierBudgetWidget instances (flagship + mini)
+        // each fetch independently of the leaderboard — give both a
+        // real-shaped response so neither crashes on a mismatched shape.
+        // One stub covers both, since the two routes only differ by suffix
+        // and the widget doesn't validate the response's tier against its
+        // own prop.
+        if (String(url).includes("/strategy/free-tier-usage/")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              tier: "flagship",
+              label: "Flagship models",
+              usedTokens: 0,
+              dailyLimitTokens: 250_000,
+              remainingTokens: 250_000,
+              models: [],
+            }),
+          });
+        }
+        return Promise.resolve({
           ok: true,
           json: async () => ({
             deterministic: [
@@ -122,8 +141,8 @@ describe("App leaderboard routes", () => {
             ],
             llm: [],
           }),
-        }),
-      ),
+        });
+      }),
     );
 
     render(

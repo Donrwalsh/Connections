@@ -65,6 +65,62 @@
   border-color: #d9bcb7;
 }
 
+/* Daily free-token budget widgets (leaderboard page) — one per program
+ * (flagship/mini), laid out side by side. */
+.bench-free-tiers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}
+
+.bench-free-tier {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-width: 26rem;
+  flex: 1 1 20rem;
+}
+
+.bench-free-tier__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.bench-free-tier__title {
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.bench-free-tier__figures {
+  font-size: 0.85rem;
+}
+
+.bench-free-tier__bar {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.bench-free-tier__bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+  transition: width 0.2s ease;
+}
+
+.bench-free-tier__bar-fill--warning {
+  background: #b04a3f;
+}
+
+.bench-free-tier__remaining {
+  font-size: 0.8rem;
+}
+
 /* Metric selector — pill group on desktop, native select on narrow screens. */
 .bench-metric-selector__pills {
   display: flex;
