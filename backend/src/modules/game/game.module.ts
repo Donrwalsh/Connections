@@ -8,14 +8,9 @@ import { GroupMember } from "./entities/group-member.entity";
 import { Puzzle } from "./entities/puzzle.entity";
 import { PuzzleIngestionService } from "./puzzle-ingestion.service";
 import { PuzzleQueueBootstrap } from "./puzzle-queue.bootstrap";
-import { SupportedModelModule } from "../supported-model/supported-model.module";
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Puzzle, AnswerGroup, GroupMember]),
-    QueueModule,
-    SupportedModelModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Puzzle, AnswerGroup, GroupMember]), QueueModule],
   controllers: [GameController],
   providers: [GameService, PuzzleIngestionService, PuzzleQueueBootstrap],
   exports: [GameService, PuzzleIngestionService],

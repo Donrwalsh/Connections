@@ -98,6 +98,34 @@ describe("App Component", () => {
 
 describe("App leaderboard routes", () => {
   it("renders the leaderboard homepage at /leaderboard", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({
+            deterministic: [
+              {
+                id: "alphabetical",
+                strategyName: "alphabetical",
+                modelName: null,
+                kind: "deterministic",
+                puzzlesCovered: 1,
+                totalPuzzles: 1,
+                progress: { completed: 1, active: 0, failed: 0, queued: 0 },
+                successRate: 100,
+                avgGuessesToSolve: 4,
+                minGuesses: 4,
+                maxGuesses: 4,
+                avgDurationMs: 10,
+              },
+            ],
+            llm: [],
+          }),
+        }),
+      ),
+    );
+
     render(
       <MemoryRouter initialEntries={["/leaderboard"]}>
         <App />
@@ -105,7 +133,7 @@ describe("App leaderboard routes", () => {
     );
 
     expect((await screen.findAllByText("Connections Lab")).length).toBeGreaterThan(0);
-    expect(screen.getByRole("heading", { name: "Leaderboard" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Deterministic & Shuffle" })).toBeInTheDocument();
   });
 
   it("renders a strategy's puzzle list at /leaderboard/:strategyId", () => {

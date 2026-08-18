@@ -4,6 +4,7 @@
 // which parts of the benchmark UI are still mock-driven.
 
 import type {
+  Leaderboard,
   RunRecord,
   StrategyRunDetail,
   StrategyRunListItem,
@@ -40,6 +41,14 @@ export async function fetchPuzzleDate(puzzleId: number, signal?: AbortSignal): P
     signal,
   );
   return date;
+}
+
+/** DB-driven leaderboard rows, split deterministic/shuffle vs LLM — only
+ * strategies/models with at least one real run appear (see LeaderboardRow).
+ * `progress.queued` on each row is read live from Redis by the backend, so
+ * this is never cached client-side beyond the single fetch. */
+export function fetchLeaderboard(signal?: AbortSignal): Promise<Leaderboard> {
+  return fetchJson("/strategy/leaderboard", signal);
 }
 
 /** The real model allowlist (every configured model, any strategy). Used to

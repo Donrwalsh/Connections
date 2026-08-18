@@ -170,6 +170,16 @@
   color: var(--text);
 }
 
+.bench-metric-value {
+  display: block;
+}
+
+.bench-metric-unit {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
 .bench-progress {
   display: inline-flex;
   flex-direction: column;

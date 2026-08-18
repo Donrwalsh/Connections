@@ -10,13 +10,18 @@ import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { LlmProposal } from "./entities/llm-proposal.entity";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { GameService } from "../game/game.service";
-import { StrategyRunDetailDto, StrategyRunListItemDto, GuessDetailDto } from "./dto/strategy.dto";
+import {
+  StrategyRunDetailDto,
+  StrategyRunListItemDto,
+  GuessDetailDto,
+  LeaderboardDto,
+  LeaderboardRowDto,
+} from "./dto/strategy.dto";
 import {
   SHUFFLE_SMART,
   SHUFFLE_FOOLISH,
   isLlmStrategy,
   llmMaxTrialsPerModel,
-  shuffleFoolishDuplicateLimit,
   strategyTrialNumbers,
 } from "../../strategies";
 import { runStrategyJobId, queueForStrategy } from "../queue/strategy.queue";
@@ -26,6 +31,34 @@ import { SupportedModelService } from "../supported-model/supported-model.servic
 
 const GROUP_SIZE = 4;
 const BATCH_SIZE = 50;
+
+// How many waiting/delayed BullMQ jobs to fetch per page when tallying
+// queued counts — see StrategyService.queuedCountsByKey.
+const QUEUE_PAGE_SIZE = 1000;
+
+/**
+ * Groups a leaderboard row by strategy + model — the same pair a StrategyRun
+ * row and a queued BullMQ job both carry, so DB aggregates and live queue
+ * counts can be merged onto the same row. `modelName` is always null for
+ * non-LLM strategies.
+ */
+function leaderboardKey(strategyName: string, modelName: string | null): string {
+  return `${strategyName}::${modelName ?? ""}`;
+}
+
+interface LeaderboardAccumulator {
+  strategyName: string;
+  modelName: string | null;
+  puzzleIds: Set<number>;
+  completed: number;
+  active: number;
+  failed: number;
+  // Guess counts and durations of COMPLETED runs only — the metrics a
+  // leaderboard row surfaces (avg/min/max guesses, avg duration) are only
+  // meaningful for runs that actually solved the puzzle.
+  guessCounts: number[];
+  durationsMs: number[];
+}
 
 @Injectable()
 export class StrategyService {
@@ -151,6 +184,157 @@ export class StrategyService {
       { puzzleId, strategyName, date, trialNumber: nextTrialNumber, model },
       { jobId: runStrategyJobId(puzzleId, strategyName, nextTrialNumber) },
     );
+  }
+
+  /**
+   * Leaderboard rows, split deterministic/shuffle vs LLM (see LeaderboardDto).
+   * The row set itself is entirely DB-driven — only a (strategyName, model)
+   * pair with at least one real StrategyRun gets a row at all, never every
+   * SUPPORTED_STRATEGIES entry or every SupportedModel — so a strategy or
+   * model nobody has actually run yet simply doesn't appear.
+   *
+   * `progress.queued` is the one field that can't come from Postgres: a
+   * queued BullMQ job has no StrategyRun row yet (that's only inserted once
+   * a worker starts processing it — see StrategyRunStore.loadOrCreateRun), so
+   * it's read live from the queues instead (queuedCountsByKey) and merged
+   * onto whichever row already exists for that (strategyName, model) pair.
+   * A pair with only queued jobs and zero started runs stays absent from the
+   * response entirely, consistent with "DB-driven row set" above.
+   *
+   * Loads every StrategyRun row into memory to aggregate — fine at this
+   * project's scale (a handful of strategies/models across a growing but
+   * modest puzzle history); if that ever gets big enough to matter, this
+   * should move to a grouped SQL aggregate instead.
+   */
+  async getLeaderboard(): Promise<LeaderboardDto> {
+    const [runs, guessCountRows, queuedCounts, totalPuzzles] = await Promise.all([
+      this.strategyRunRepo.find({
+        select: {
+          id: true,
+          strategyName: true,
+          modelName: true,
+          status: true,
+          puzzleId: true,
+          startedAt: true,
+          finishedAt: true,
+        },
+      }),
+      this.guessRepo
+        .createQueryBuilder("guess")
+        .select("guess.strategyRunId", "strategyRunId")
+        .addSelect("COUNT(guess.id)", "count")
+        .groupBy("guess.strategyRunId")
+        .getRawMany<{ strategyRunId: number; count: string }>(),
+      this.queuedCountsByKey(),
+      this.puzzleRepo.count(),
+    ]);
+
+    const guessCountByRun = new Map<number, number>();
+    for (const row of guessCountRows) {
+      guessCountByRun.set(Number(row.strategyRunId), Number(row.count));
+    }
+
+    const aggregates = new Map<string, LeaderboardAccumulator>();
+    for (const run of runs) {
+      const key = leaderboardKey(run.strategyName, run.modelName);
+      let acc = aggregates.get(key);
+      if (!acc) {
+        acc = {
+          strategyName: run.strategyName,
+          modelName: run.modelName,
+          puzzleIds: new Set(),
+          completed: 0,
+          active: 0,
+          failed: 0,
+          guessCounts: [],
+          durationsMs: [],
+        };
+        aggregates.set(key, acc);
+      }
+
+      acc.puzzleIds.add(run.puzzleId);
+
+      if (run.status === StrategyRunStatus.COMPLETED) {
+        acc.completed++;
+        acc.guessCounts.push(guessCountByRun.get(run.id) ?? 0);
+        if (run.finishedAt) {
+          acc.durationsMs.push(run.finishedAt.getTime() - run.startedAt.getTime());
+        }
+      } else if (run.status === StrategyRunStatus.RUNNING) {
+        acc.active++;
+      } else {
+        acc.failed++;
+      }
+    }
+
+    const rows: LeaderboardRowDto[] = [...aggregates.values()].map((acc) => {
+      const finished = acc.completed + acc.failed;
+      const sortedGuesses = [...acc.guessCounts].sort((a, b) => a - b);
+
+      return {
+        id: acc.modelName ?? acc.strategyName,
+        strategyName: acc.strategyName,
+        modelName: acc.modelName,
+        kind: isLlmStrategy(acc.strategyName) ? "llm" : "deterministic",
+        puzzlesCovered: acc.puzzleIds.size,
+        totalPuzzles,
+        progress: {
+          completed: acc.completed,
+          active: acc.active,
+          failed: acc.failed,
+          queued: queuedCounts.get(leaderboardKey(acc.strategyName, acc.modelName)) ?? 0,
+        },
+        successRate: finished === 0 ? null : (acc.completed / finished) * 100,
+        avgGuessesToSolve:
+          acc.guessCounts.length === 0
+            ? null
+            : acc.guessCounts.reduce((a, b) => a + b, 0) / acc.guessCounts.length,
+        minGuesses: sortedGuesses[0] ?? null,
+        maxGuesses: sortedGuesses[sortedGuesses.length - 1] ?? null,
+        avgDurationMs:
+          acc.durationsMs.length === 0
+            ? null
+            : acc.durationsMs.reduce((a, b) => a + b, 0) / acc.durationsMs.length,
+      };
+    });
+
+    rows.sort((a, b) => a.id.localeCompare(b.id));
+
+    return {
+      deterministic: rows.filter((row) => row.kind === "deterministic"),
+      llm: rows.filter((row) => row.kind === "llm"),
+    };
+  }
+
+  /**
+   * Tallies waiting/delayed BullMQ jobs across the strategy-runs and both
+   * per-provider LLM queues, grouped by (strategyName, model) — the counts
+   * getLeaderboard merges in as `progress.queued`. Deliberately excludes
+   * 'active' jobs: by the time BullMQ marks a job active, the worker has
+   * already inserted its StrategyRun row, so that job is already counted via
+   * Postgres as 'running' — counting it here too would double it up.
+   * Paginated since puzzle-ingestion can enqueue a large backlog in one shot.
+   */
+  private async queuedCountsByKey(): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    const queues = [this.queue, this.llmOpenAIQueue, this.llmOllamaQueue];
+
+    for (const queue of queues) {
+      for (let start = 0; ; start += QUEUE_PAGE_SIZE) {
+        const jobs = await queue.getJobs(["waiting", "delayed"], start, start + QUEUE_PAGE_SIZE - 1);
+
+        for (const job of jobs) {
+          const data = job.data as { strategyName?: string; model?: string | null };
+          if (!data.strategyName) continue;
+          const key = leaderboardKey(data.strategyName, data.model ?? null);
+          counts.set(key, (counts.get(key) ?? 0) + 1);
+        }
+
+        if (jobs.length < QUEUE_PAGE_SIZE) break;
+      }
+    }
+
+    return counts;
   }
 
   async getRunDetail(
@@ -406,15 +590,14 @@ export class StrategyService {
 
     let guessCount: number;
     const triedGroups = new Set<string>();
-    let duplicateCount = 0;
     const tracksDuplicates = strategyName === SHUFFLE_SMART || strategyName === SHUFFLE_FOOLISH;
     if (tracksDuplicates) {
       // Shuffle-smart re-rolls until it finds a group it hasn't already
       // proposed; shuffle-foolish records repeated groups as 'duplicate'
-      // guesses so the run can be terminated once the duplicate limit is hit.
-      // Both rebuild their tried set from guesses flushed to the DB (e.g.
-      // after a worker restart mid-run). The single query below doubles as
-      // the guess count.
+      // guesses but keeps sampling regardless — it has no duplicate limit, so
+      // the only way it stops is by actually solving the puzzle. Both rebuild
+      // their tried set from guesses flushed to the DB (e.g. after a worker
+      // restart mid-run). The single query below doubles as the guess count.
       const priorGuesses = await this.loadGuessesForRun(run.id);
       guessCount = priorGuesses.length;
       for (const guess of priorGuesses) {
@@ -450,10 +633,10 @@ export class StrategyService {
           break;
         }
         case SHUFFLE_FOOLISH:
-          // Pure random picks. Unlike shuffle-smart, repeats are NOT re-rolled
-          // — they are recorded as 'duplicate' guesses, so an unlucky run
-          // terminates once it repeats the same group
-          // SHUFFLE_FOOLISH_DUPLICATE_LIMIT times instead of grinding forever.
+          // Pure random picks. Unlike shuffle-smart, repeats are NOT
+          // re-rolled — they're recorded as 'duplicate' guesses, but there's
+          // no limit on how many pile up; the run just keeps sampling until
+          // it actually solves the puzzle.
           words = this.sampleRandom(run.availableWords, GROUP_SIZE);
           isDuplicate = triedGroups.has(this.groupKey(words));
           break;
@@ -465,7 +648,6 @@ export class StrategyService {
         guessCount++;
 
         if (isDuplicate) {
-          duplicateCount++;
           pendingGuesses.push({
             puzzle: { id: puzzleId } as Puzzle,
             strategyRun: { id: run.id } as StrategyRun,
@@ -474,11 +656,6 @@ export class StrategyService {
             sequenceNumber: guessCount,
             source: GuessSource.STRATEGY,
           });
-
-          if (duplicateCount >= shuffleFoolishDuplicateLimit()) {
-            run.status = StrategyRunStatus.DUPLICATE;
-            run.finishedAt = new Date();
-          }
         } else {
           const evaluation = GameService.evaluateGuessOnPuzzle(puzzle, words);
 

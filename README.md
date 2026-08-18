@@ -14,7 +14,7 @@ A multi-service application for playing and solving [NYT Connections](https://ww
 - **Date navigation** — browse any puzzle from 2023-06-12 to today, plus a random picker
 - **Deterministic strategies** — four brute-force strategies (`alphabetical`, `reverse-alphabetical`, `order`, `reverse-order`) run automatically on every puzzle, with full guess-by-guess results viewable in a side panel
 - **Shuffle strategies** — `shuffle-smart` guesses random groups without repeating, `shuffle-foolish` guesses random groups and may repeat them
-- **Automatic puzzle ingestion** — a daily cron fetches new puzzles from NYT and queues all strategies
+- **Automatic puzzle ingestion** — a daily cron fetches new puzzles from NYT and queues the deterministic and shuffle strategies (LLM strategies are dispatched by hand, to control token spend)
 - **Share results** — copy an NYT-style emoji grid to your clipboard
 
 ## Architecture
@@ -37,11 +37,8 @@ The worker runs as a separate process from the NestJS server (started via `npx t
 Daily cron (06:00 UTC)
   └─ puzzle-population queue ──► worker ──► fetches NYT puzzle ──► Postgres
        └─ queues strategy runs ──► strategy-runs queue ──► worker ──► solve
-            (4 deterministic + SHUFFLE_SMART_TRIALS shuffle-smart trials + SHUFFLE_FOOLISH_TRIALS shuffle-foolish trials)
-       └─ queues LLM runs ──► llm-openai-runs queue ──► worker ──► OpenAI
-            (up to LLM_TRIALS_PER_MODEL llm-openai trials of the default model; LLM_OPENAI_CONCURRENCY at once)
-       └─ queues LLM runs ──► llm-ollama-runs queue ──► worker ──► Ollama
-            (up to LLM_TRIALS_PER_MODEL llm-ollama trials of the default model; LLM_OLLAMA_CONCURRENCY at once)
+            (4 deterministic + SHUFFLE_TRIALS shuffle-smart trials + SHUFFLE_TRIALS shuffle-foolish trials)
+            (LLM strategies are never queued automatically — dispatch them by hand, below)
 
 Frontend "AI Assist" button
   └─ POST /api/diagnose ──► backend ──► POST /diagnose ──► orchestrator ──► default provider (openai)
@@ -82,7 +79,7 @@ docker compose up
 | `http://localhost:4000/api/docs` | Swagger API docs |
 | `http://localhost:4000/admin/queues` | Bull Board queue dashboard (basic auth — `BULL_BOARD_USER` / `BULL_BOARD_PASS`, defaults `admin` / `bullboard`) |
 
-On first startup the worker fetches all historical puzzles and runs all strategies on each (four deterministic runs plus `SHUFFLE_SMART_TRIALS` shuffle-smart trials, `SHUFFLE_FOOLISH_TRIALS` shuffle-foolish trials, and up to `LLM_TRIALS_PER_MODEL` trials each of the default `llm-openai` and `llm-ollama` model). This can take a while for large backlogs.
+On first startup the worker fetches all historical puzzles and runs every deterministic and shuffle strategy on each (four deterministic runs plus `SHUFFLE_TRIALS` shuffle-smart trials and `SHUFFLE_TRIALS` shuffle-foolish trials). This can take a while for large backlogs. LLM strategies are never dispatched automatically — queue `llm-openai`/`llm-ollama` explicitly via `/strategy/queue` when you want to spend tokens.
 
 ## Configuration
 
@@ -104,10 +101,7 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `PUZZLE_POPULATION_CRON` | `0 6 * * *` | Cron pattern for daily puzzle fetch (UTC by default) |
 | `PUZZLE_POPULATION_TZ` | `UTC` | Timezone for the puzzle population cron |
 | `PUZZLE_CACHE_DIR` | `/app/.puzzle-cache` | Directory used as a local cache of raw NYT puzzle payloads (bound to `./.puzzle-cache` on the host) |
-| `PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS` | `true` | Whether puzzle ingestion enqueues strategy-run jobs for each puzzle it inserts. Set to `false` to insert puzzles without dispatching any solution runs (e.g. backfills that shouldn't burn LLM tokens, or when runs are triggered separately via `/strategy/queue`) |
-| `SHUFFLE_SMART_TRIALS` | `3` | Number of shuffle-smart trials run per puzzle |
-| `SHUFFLE_FOOLISH_TRIALS` | `3` | Number of shuffle-foolish trials run per puzzle |
-| `SHUFFLE_FOOLISH_DUPLICATE_LIMIT` | `3` | Maximum repeated groups a shuffle-foolish run may propose before it ends with a `duplicate` status |
+| `SHUFFLE_TRIALS` | `3` | Number of trials run per puzzle for each shuffle strategy — shuffle-smart and shuffle-foolish share this one value. shuffle-foolish keeps sampling (repeats included) with no duplicate limit until it solves |
 | `LLM_TRIALS_PER_MODEL` | `3` | Maximum number of independent trials a single LLM model may accumulate per puzzle. Applies per model, not per strategy run — `POST /strategy/queue/:strategy/:date` queues one new trial per call (rejecting once a model hits this cap), and a different model gets its own independent budget |
 | `LLM_MAX_DUPLICATE_GUESSES` | `10` | Maximum repeated groups an LLM run may propose before it ends with a `duplicate` status (applies to both `llm-openai` and `llm-ollama`) |
 | `LLM_MAX_MALFORMED_RESPONSES` | `3` | Maximum consecutive malformed LLM responses before a run ends with a `malformedResponse` status |

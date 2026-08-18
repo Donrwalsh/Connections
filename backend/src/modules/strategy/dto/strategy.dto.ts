@@ -90,6 +90,50 @@ export interface StrategyRunListItemDto {
   guessCount: number;
 }
 
+// Per-status run counts for one leaderboard row. `queued` is the only field
+// not sourced from StrategyRun — a queued job has no row yet (see
+// StrategyService.getLeaderboard), so it's read live from the BullMQ queues
+// instead and merged in.
+export interface LeaderboardProgressDto {
+  completed: number;
+  active: number;
+  failed: number;
+  queued: number;
+}
+
+// One row of the /strategy/leaderboard response: a strategy (deterministic,
+// shuffle-smart, shuffle-foolish) or, for LLM strategies, one model —
+// aggregated across every puzzle it has ever run against. Only strategies/
+// models with at least one real StrategyRun appear at all; see
+// StrategyService.getLeaderboard for how the row set and `progress.queued`
+// are assembled.
+export interface LeaderboardRowDto {
+  // modelName for LLM rows (several models can share one strategyName), the
+  // strategyName itself for everything else.
+  id: string;
+  strategyName: string;
+  modelName: string | null;
+  // shuffle-smart/shuffle-foolish are grouped with 'deterministic' here —
+  // neither is bound by the LLM's 4-mistake failure cap, so they belong on
+  // the same table.
+  kind: "deterministic" | "llm";
+  puzzlesCovered: number;
+  totalPuzzles: number;
+  progress: LeaderboardProgressDto;
+  // % of finished (completed + failed) runs that solved, or null when none
+  // have finished yet.
+  successRate: number | null;
+  avgGuessesToSolve: number | null;
+  minGuesses: number | null;
+  maxGuesses: number | null;
+  avgDurationMs: number | null;
+}
+
+export interface LeaderboardDto {
+  deterministic: LeaderboardRowDto[];
+  llm: LeaderboardRowDto[];
+}
+
 // The full allowlist entry for one model — lets a caller (e.g. the
 // leaderboard's per-model run page) recognize a real model it doesn't
 // otherwise know about and resolve which backend strategy it belongs to.

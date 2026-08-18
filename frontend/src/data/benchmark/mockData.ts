@@ -7,6 +7,7 @@
 // component layer should not need to change shape.
 
 import type {
+  LeaderboardRow,
   ProgressCounts,
   PuzzleBreakdown,
   RunRecord,
@@ -301,6 +302,39 @@ export function getStrategyMeta(strategyId: string): StrategyMeta | undefined {
   };
 }
 
+function humanizeStrategyName(strategyName: string): string {
+  return strategyName
+    .split("-")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join("-");
+}
+
+/** Resolves display name/description for a live GET /strategy/leaderboard
+ * row. The backend has no strategy-catalog concept — a LeaderboardRow is
+ * pure run data — so this prefers the static mock catalog (matched by
+ * row.id, same id convention as StrategyMeta: a model name for LLM rows, the
+ * strategy name otherwise) and falls back to a synthesized label for
+ * anything the mock list doesn't recognize yet (e.g. a model added to the
+ * backend after the mock list was last updated), mirroring PuzzleRunsPage's
+ * buildDynamicMeta fallback for that same gap. */
+export function describeLeaderboardRow(row: LeaderboardRow): { name: string; description: string } {
+  const meta = getStrategyMeta(row.id);
+  if (meta) return { name: meta.name, description: meta.description };
+
+  if (row.kind === "llm") {
+    const providerLabel = row.strategyName === "llm-ollama" ? "Ollama" : "OpenAI";
+    return {
+      name: `LLM · ${row.modelName}`,
+      description: `LLM-based · ${providerLabel} model proposes candidate groups`,
+    };
+  }
+
+  return {
+    name: humanizeStrategyName(row.strategyName),
+    description: `Strategy · ${row.strategyName}`,
+  };
+}
+
 export function getAllStrategyMeta(): StrategyMeta[] {
   return STRATEGY_DEFS.map((def) => ({
     id: def.id,
@@ -425,20 +459,4 @@ export function getPuzzleRuns(strategyId: string, puzzleId: number): RunRecord[]
       modelName: run.modelName,
     };
   });
-}
-
-export interface ProgressTotals {
-  active: number;
-  queued: number;
-}
-
-/** Totals for the leaderboard status strip (currently running / queued). */
-export function summarizeProgress(strategies: StrategyAggregate[]): ProgressTotals {
-  return strategies.reduce<ProgressTotals>(
-    (totals, strategy) => ({
-      active: totals.active + strategy.progress.active,
-      queued: totals.queued + strategy.progress.queued,
-    }),
-    { active: 0, queued: 0 },
-  );
 }

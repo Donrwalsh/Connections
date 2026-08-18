@@ -96,6 +96,50 @@ export interface RunRecord {
 
 export type GuessResultValue = "success" | "failure" | "offBy1" | "duplicate";
 
+/** Per-status run counts for one leaderboard row. `queued` is read live from
+ * BullMQ (a queued job has no StrategyRun row yet), everything else from
+ * Postgres. See LeaderboardRow. */
+export interface LeaderboardProgress {
+  completed: number;
+  active: number;
+  failed: number;
+  queued: number;
+}
+
+/** One row of GET /strategy/leaderboard: a strategy (deterministic,
+ * shuffle-smart, shuffle-foolish) or, for LLM strategies, one model —
+ * aggregated across every puzzle it has ever actually run against. Only
+ * strategies/models with at least one real run appear at all — there's no
+ * static catalog backing this the way StrategyMeta's mock list does, so a
+ * strategy nobody has run yet simply has no row. `name`/`description` aren't
+ * included (the backend has no strategy-catalog concept, only run data) —
+ * callers resolve display copy via getStrategyMeta/buildDynamicMeta, same as
+ * the rest of this page already does for unknown models. */
+export interface LeaderboardRow {
+  /** modelName for LLM rows (several models can share one strategyName), the
+   * strategyName itself otherwise — matches StrategyMeta.id/RunRecord
+   * conventions used elsewhere on this page. */
+  id: string;
+  strategyName: string;
+  modelName: string | null;
+  /** shuffle-smart/shuffle-foolish are grouped under 'deterministic' here —
+   * neither is bound by the LLM's 4-mistake failure cap. */
+  kind: "deterministic" | "llm";
+  puzzlesCovered: number;
+  totalPuzzles: number;
+  progress: LeaderboardProgress;
+  successRate: number | null;
+  avgGuessesToSolve: number | null;
+  minGuesses: number | null;
+  maxGuesses: number | null;
+  avgDurationMs: number | null;
+}
+
+export interface Leaderboard {
+  deterministic: LeaderboardRow[];
+  llm: LeaderboardRow[];
+}
+
 /** One row from GET /strategy/models — the real allowlist of models a
  * strategy may dispatch runs against. Used to recognize a model the static
  * mock catalog (mockData.ts) doesn't know about, e.g. one added to the

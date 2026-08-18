@@ -10,9 +10,7 @@ import {
   DEFAULT_LLM_TRIALS_PER_MODEL,
   DEFAULT_LLM_OPENAI_CONCURRENCY,
   DEFAULT_LLM_OLLAMA_CONCURRENCY,
-  DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT,
-  DEFAULT_SHUFFLE_FOOLISH_TRIALS,
-  DEFAULT_SHUFFLE_SMART_TRIALS,
+  DEFAULT_SHUFFLE_TRIALS,
   isLlmStrategy,
   LLM_OPENAI,
   LLM_OLLAMA,
@@ -27,51 +25,26 @@ import {
   llmOpenAIConcurrency,
   llmTemperature,
   llmMaxTrialsPerModel,
-  dispatchStrategyJobsOnIngestion,
-  shuffleFoolishDuplicateLimit,
-  shuffleFoolishTrialCount,
-  shuffleSmartTrialCount,
+  shuffleTrialCount,
   strategyTrialNumbers,
   SUPPORTED_STRATEGIES,
   STRATEGY_SET,
 } from "./strategies";
 
 describe("strategies", () => {
-  describe("shuffleSmartTrialCount", () => {
+  describe("shuffleTrialCount", () => {
     it("should default when the env var is missing", () => {
-      expect(shuffleSmartTrialCount({})).toBe(DEFAULT_SHUFFLE_SMART_TRIALS);
+      expect(shuffleTrialCount({})).toBe(DEFAULT_SHUFFLE_TRIALS);
     });
 
     it("should default when the env var is invalid", () => {
-      expect(shuffleSmartTrialCount({ SHUFFLE_SMART_TRIALS: "abc" })).toBe(
-        DEFAULT_SHUFFLE_SMART_TRIALS,
-      );
-      expect(shuffleSmartTrialCount({ SHUFFLE_SMART_TRIALS: "0" })).toBe(
-        DEFAULT_SHUFFLE_SMART_TRIALS,
-      );
-      expect(shuffleSmartTrialCount({ SHUFFLE_SMART_TRIALS: "-2" })).toBe(
-        DEFAULT_SHUFFLE_SMART_TRIALS,
-      );
+      expect(shuffleTrialCount({ SHUFFLE_TRIALS: "abc" })).toBe(DEFAULT_SHUFFLE_TRIALS);
+      expect(shuffleTrialCount({ SHUFFLE_TRIALS: "0" })).toBe(DEFAULT_SHUFFLE_TRIALS);
+      expect(shuffleTrialCount({ SHUFFLE_TRIALS: "-2" })).toBe(DEFAULT_SHUFFLE_TRIALS);
     });
 
     it("should read a valid positive integer", () => {
-      expect(shuffleSmartTrialCount({ SHUFFLE_SMART_TRIALS: "7" })).toBe(7);
-    });
-  });
-
-  describe("shuffleFoolishTrialCount", () => {
-    it("should default when the env var is missing", () => {
-      expect(shuffleFoolishTrialCount({})).toBe(DEFAULT_SHUFFLE_FOOLISH_TRIALS);
-    });
-
-    it("should default when the env var is invalid", () => {
-      expect(shuffleFoolishTrialCount({ SHUFFLE_FOOLISH_TRIALS: "abc" })).toBe(
-        DEFAULT_SHUFFLE_FOOLISH_TRIALS,
-      );
-    });
-
-    it("should read a valid positive integer", () => {
-      expect(shuffleFoolishTrialCount({ SHUFFLE_FOOLISH_TRIALS: "4" })).toBe(4);
+      expect(shuffleTrialCount({ SHUFFLE_TRIALS: "7" })).toBe(7);
     });
   });
 
@@ -220,19 +193,6 @@ describe("strategies", () => {
     });
   });
 
-  describe("shuffleFoolishDuplicateLimit", () => {
-    it("should default when the env var is missing or invalid", () => {
-      expect(shuffleFoolishDuplicateLimit({})).toBe(DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT);
-      expect(shuffleFoolishDuplicateLimit({ SHUFFLE_FOOLISH_DUPLICATE_LIMIT: "-1" })).toBe(
-        DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT,
-      );
-    });
-
-    it("should read a valid positive integer", () => {
-      expect(shuffleFoolishDuplicateLimit({ SHUFFLE_FOOLISH_DUPLICATE_LIMIT: "4" })).toBe(4);
-    });
-  });
-
   describe("llmTemperature", () => {
     it("should default when the env var is missing or invalid", () => {
       expect(llmTemperature({})).toBe(DEFAULT_LLM_TEMPERATURE);
@@ -245,48 +205,6 @@ describe("strategies", () => {
     });
   });
 
-  describe("dispatchStrategyJobsOnIngestion", () => {
-    it("should default to enabled when the env var is missing", () => {
-      expect(dispatchStrategyJobsOnIngestion({})).toBe(true);
-    });
-
-    it("should disable on falsey values", () => {
-      expect(
-        dispatchStrategyJobsOnIngestion({ PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: "false" }),
-      ).toBe(false);
-      expect(
-        dispatchStrategyJobsOnIngestion({ PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: "0" }),
-      ).toBe(false);
-      expect(
-        dispatchStrategyJobsOnIngestion({ PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: "off" }),
-      ).toBe(false);
-      expect(
-        dispatchStrategyJobsOnIngestion({ PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: "no" }),
-      ).toBe(false);
-    });
-
-    it("should ignore case and surrounding whitespace", () => {
-      expect(
-        dispatchStrategyJobsOnIngestion({ PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: "FALSE" }),
-      ).toBe(false);
-      expect(
-        dispatchStrategyJobsOnIngestion({ PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: " false " }),
-      ).toBe(false);
-    });
-
-    it("should stay enabled for any other value", () => {
-      expect(
-        dispatchStrategyJobsOnIngestion({ PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: "true" }),
-      ).toBe(true);
-      expect(
-        dispatchStrategyJobsOnIngestion({ PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: "1" }),
-      ).toBe(true);
-      expect(
-        dispatchStrategyJobsOnIngestion({ PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS: "garbage" }),
-      ).toBe(true);
-    });
-  });
-
   describe("strategyTrialNumbers", () => {
     it("should return a single trial 0 for deterministic strategies", () => {
       for (const strategyName of SUPPORTED_STRATEGIES.filter(
@@ -296,20 +214,11 @@ describe("strategies", () => {
       }
     });
 
-    it("should return 1..N for shuffle-smart", () => {
-      expect(strategyTrialNumbers("shuffle-smart", { SHUFFLE_SMART_TRIALS: "3" })).toEqual([
-        1, 2, 3,
-      ]);
-      expect(strategyTrialNumbers("shuffle-smart", {})).toEqual([1, 2, 3]);
-    });
-
-    it("should return 1..N for shuffle-foolish", () => {
-      expect(
-        strategyTrialNumbers("shuffle-foolish", {
-          SHUFFLE_FOOLISH_TRIALS: "2",
-        }),
-      ).toEqual([1, 2]);
-      expect(strategyTrialNumbers("shuffle-foolish", {})).toEqual([1, 2, 3]);
+    it("should return 1..N for each shuffle strategy, sharing the one SHUFFLE_TRIALS value", () => {
+      for (const strategyName of ["shuffle-smart", "shuffle-foolish"]) {
+        expect(strategyTrialNumbers(strategyName, { SHUFFLE_TRIALS: "2" })).toEqual([1, 2]);
+        expect(strategyTrialNumbers(strategyName, {})).toEqual([1, 2, 3]);
+      }
     });
 
     it("should return 1..N for each LLM strategy", () => {

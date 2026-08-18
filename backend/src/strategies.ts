@@ -25,24 +25,20 @@ export function isLlmStrategy(strategyName: string): boolean {
 }
 
 /**
- * Strategies queued by the bulk 'all' queue endpoint. Deliberately excludes
- * the LLM strategies — the bulk endpoint keeps LLM runs (which cost real
- * tokens) behind an explicit /strategy/queue/:name/:date trigger. Puzzle
- * ingestion dispatches the full SUPPORTED_STRATEGIES list, including both
- * LLM strategies.
+ * Strategies queued by the bulk 'all' queue endpoint and by puzzle ingestion.
+ * Deliberately excludes the LLM strategies, which cost real tokens — those
+ * are only ever dispatched by hand via /strategy/queue/:name/:date.
  */
 export const AUTOMATIC_STRATEGIES: readonly string[] = SUPPORTED_STRATEGIES.filter(
   (strategyName) => !isLlmStrategy(strategyName),
 );
 
-export const DEFAULT_SHUFFLE_SMART_TRIALS = 3;
-export const DEFAULT_SHUFFLE_FOOLISH_TRIALS = 3;
+export const DEFAULT_SHUFFLE_TRIALS = 3;
 export const DEFAULT_LLM_TRIALS_PER_MODEL = 3;
 export const DEFAULT_LLM_MAX_DUPLICATE_GUESSES = 10;
 export const DEFAULT_LLM_MAX_MALFORMED_RESPONSES = 3;
 export const DEFAULT_LLM_MAX_MODEL_ERRORS = 5;
 export const DEFAULT_LLM_MAX_FAILED_GUESSES = 4;
-export const DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT = 3;
 
 // Starting candidate count per LLM solve step: the model is tasked with
 // producing a single answer. When every candidate repeats a previous guess,
@@ -82,19 +78,13 @@ function nonNegativeFloat(raw: string | undefined, fallback: number): number {
 }
 
 /**
- * Number of shuffle-smart trials to run per puzzle, from SHUFFLE_SMART_TRIALS.
- * Falls back to DEFAULT_SHUFFLE_SMART_TRIALS for missing/invalid values.
+ * Number of trials to run per puzzle for each shuffle strategy
+ * (shuffle-smart and shuffle-foolish share this one value), from
+ * SHUFFLE_TRIALS. Falls back to DEFAULT_SHUFFLE_TRIALS for missing/invalid
+ * values.
  */
-export function shuffleSmartTrialCount(env: NodeJS.ProcessEnv = process.env): number {
-  return positiveTrialCount(env.SHUFFLE_SMART_TRIALS, DEFAULT_SHUFFLE_SMART_TRIALS);
-}
-
-/**
- * Number of shuffle-foolish trials to run per puzzle, from SHUFFLE_FOOLISH_TRIALS.
- * Falls back to DEFAULT_SHUFFLE_FOOLISH_TRIALS for missing/invalid values.
- */
-export function shuffleFoolishTrialCount(env: NodeJS.ProcessEnv = process.env): number {
-  return positiveTrialCount(env.SHUFFLE_FOOLISH_TRIALS, DEFAULT_SHUFFLE_FOOLISH_TRIALS);
+export function shuffleTrialCount(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.SHUFFLE_TRIALS, DEFAULT_SHUFFLE_TRIALS);
 }
 
 /**
@@ -202,56 +192,31 @@ export function llmTemperature(env: NodeJS.ProcessEnv = process.env): number {
 }
 
 /**
- * Maximum duplicate guesses before a shuffle-foolish trial is terminated
- * with a 'duplicate' status, from SHUFFLE_FOOLISH_DUPLICATE_LIMIT.
- */
-export function shuffleFoolishDuplicateLimit(env: NodeJS.ProcessEnv = process.env): number {
-  return positiveTrialCount(
-    env.SHUFFLE_FOOLISH_DUPLICATE_LIMIT,
-    DEFAULT_SHUFFLE_FOOLISH_DUPLICATE_LIMIT,
-  );
-}
-
-/**
  * Trial numbers to create for a strategy in one bulk dispatch. Deterministic
  * strategies run a single trial (0); shuffle strategies run their configured
- * trial count (1..N) so the runs can be compared against each other.
+ * trial count (1..N) so the runs can be compared against each other. Puzzle
+ * ingestion (see PuzzleIngestionService) only ever calls this for the
+ * automatic (deterministic/shuffle) strategies — LLM runs are dispatched by
+ * hand, never automatically.
  *
- * For LLM strategies this bulk-creates 1..llmMaxTrialsPerModel() trials for a
- * single model in one shot — the shape puzzle ingestion needs, since it
- * dispatches every strategy against one default model per provider with no
- * human caller to ask. It's the per-model cap in full, not a partial slice,
- * so it's only correct for a single model at a time; the /strategy/queue
- * endpoint, where callers can name a different model per request, instead
- * dispatches one trial per call and tracks each model's count separately
- * (see StrategyService.triggerStrategyRuns).
+ * For LLM strategies this would bulk-create 1..llmMaxTrialsPerModel() trials
+ * for a single model in one shot — the per-model cap in full, not a partial
+ * slice, so it's only correct for a single model at a time. The
+ * /strategy/queue endpoint, where callers can name a different model per
+ * request, instead dispatches one trial per call and tracks each model's
+ * count separately (see StrategyService.triggerStrategyRuns).
  */
 export function strategyTrialNumbers(
   strategyName: string,
   env: NodeJS.ProcessEnv = process.env,
 ): number[] {
   const count =
-    strategyName === SHUFFLE_SMART
-      ? shuffleSmartTrialCount(env)
-      : strategyName === SHUFFLE_FOOLISH
-        ? shuffleFoolishTrialCount(env)
-        : isLlmStrategy(strategyName)
-          ? llmMaxTrialsPerModel(env)
-          : 0;
+    strategyName === SHUFFLE_SMART || strategyName === SHUFFLE_FOOLISH
+      ? shuffleTrialCount(env)
+      : isLlmStrategy(strategyName)
+        ? llmMaxTrialsPerModel(env)
+        : 0;
 
   if (count === 0) return [0];
   return Array.from({ length: count }, (_, i) => i + 1);
-}
-
-/**
- * Whether puzzle ingestion enqueues strategy-run jobs for each puzzle it
- * inserts, from PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS (default: true).
- * Set to "false" (or "0"/"off"/"no", case-insensitive) to insert puzzles into
- * the database without dispatching any solution runs — e.g. for a bulk
- * backfill where the LLM strategies should not burn tokens, or when runs are
- * triggered separately via the /strategy/queue endpoints.
- */
-export function dispatchStrategyJobsOnIngestion(env: NodeJS.ProcessEnv = process.env): boolean {
-  const value = (env.PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS ?? "").trim().toLowerCase();
-  return !["false", "0", "off", "no"].includes(value);
 }

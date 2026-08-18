@@ -31,6 +31,13 @@ export class StrategyController {
     return this.supportedModelService.findAll();
   }
 
+  // Same reasoning as "models" above — "leaderboard" as a literal first
+  // segment is unambiguous with :strategyName/... regardless of order.
+  @Get("leaderboard")
+  async getLeaderboard() {
+    return this.strategyService.getLeaderboard();
+  }
+
   @Post("queue/:strategyName/:date")
   @ApiParam({
     name: "strategyName",

@@ -3,7 +3,7 @@
 // format/sort the results. Kept framework-free so it is unit-testable without
 // rendering.
 
-import type { PuzzleBreakdown, PuzzleRunStatus, StrategyAggregate } from "./types";
+import type { PuzzleBreakdown, PuzzleRunStatus } from "./types";
 
 export type LeaderboardMetricKey = "avgGuesses" | "successRate" | "speed";
 
@@ -43,7 +43,17 @@ export function getMetricDefinition(key: LeaderboardMetricKey): MetricDefinition
   return LEADERBOARD_METRICS.find((metric) => metric.key === key) ?? LEADERBOARD_METRICS[0]!;
 }
 
-export function metricValue(strategy: StrategyAggregate, key: LeaderboardMetricKey): number | null {
+/** Any row shape with the three metric-source fields the leaderboard sorts
+ * by — both the live LeaderboardRow (see types.ts) and the mock
+ * StrategyAggregate satisfy this structurally, so the metric helpers below
+ * don't need to know which one they're given. */
+export interface MetricSource {
+  avgGuessesToSolve: number | null;
+  successRate: number | null;
+  avgDurationMs: number | null;
+}
+
+export function metricValue(strategy: MetricSource, key: LeaderboardMetricKey): number | null {
   switch (key) {
     case "avgGuesses":
       return strategy.avgGuessesToSolve;
@@ -55,10 +65,10 @@ export function metricValue(strategy: StrategyAggregate, key: LeaderboardMetricK
 }
 
 /** Sorts leaderboard rows by metric; best first, nulls last. */
-export function sortStrategiesByMetric(
-  strategies: StrategyAggregate[],
+export function sortStrategiesByMetric<T extends MetricSource>(
+  strategies: T[],
   key: LeaderboardMetricKey,
-): StrategyAggregate[] {
+): T[] {
   const metric = getMetricDefinition(key);
   return [...strategies].sort((a, b) => {
     const aValue = metricValue(a, key);
@@ -86,6 +96,15 @@ export function sortPuzzleBreakdowns(
     if (bValue === null) return -1;
     return direction === "asc" ? aValue - bValue : bValue - aValue;
   });
+}
+
+/** Guess-count formatter for the deterministic/shuffle table — unlike the
+ * "Avg guesses" metric's own format() (tuned for LLM runs, which solve or
+ * fail within single digits), brute-force strategies aren't capped by a
+ * mistake limit and can run into the hundreds or thousands of guesses, so
+ * this always rounds to a whole number with thousands separators. */
+export function formatGuessCount(value: number): string {
+  return Math.round(value).toLocaleString();
 }
 
 export function formatDuration(ms: number): string {

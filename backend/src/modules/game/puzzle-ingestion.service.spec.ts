@@ -4,9 +4,8 @@ import * as os from "os";
 import * as path from "path";
 import * as fs from "fs";
 import { PuzzleIngestionService } from "./puzzle-ingestion.service";
-import { STRATEGY_QUEUE, LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE } from "../queue/queue.module";
-import { SUPPORTED_STRATEGIES } from "../../strategies";
-import { SupportedModelService } from "../supported-model/supported-model.service";
+import { STRATEGY_QUEUE } from "../queue/queue.module";
+import { AUTOMATIC_STRATEGIES } from "../../strategies";
 
 const PUZZLE_DATA = {
   categories: [
@@ -57,9 +56,6 @@ describe("PuzzleIngestionService", () => {
   };
   let mockExecute: jest.Mock;
   let mockStrategyQueue: { addBulk: jest.Mock };
-  let mockOpenAIQueue: { addBulk: jest.Mock };
-  let mockOllamaQueue: { addBulk: jest.Mock };
-  let mockSupportedModelService: { getDefaultModel: jest.Mock };
 
   beforeEach(async () => {
     process.env.PUZZLE_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "puzzle-cache-"));
@@ -73,19 +69,6 @@ describe("PuzzleIngestionService", () => {
 
     mockStrategyQueue = {
       addBulk: jest.fn().mockResolvedValue(undefined),
-    };
-    mockOpenAIQueue = {
-      addBulk: jest.fn().mockResolvedValue(undefined),
-    };
-    mockOllamaQueue = {
-      addBulk: jest.fn().mockResolvedValue(undefined),
-    };
-    // Default: every LLM strategy has a supported model, so existing tests
-    // that don't care about model resolution keep dispatching every strategy
-    // exactly as before. Tests of the "no model configured" behavior
-    // override this per-test.
-    mockSupportedModelService = {
-      getDefaultModel: jest.fn().mockResolvedValue("test-model"),
     };
 
     mockRepo = {
@@ -114,9 +97,6 @@ describe("PuzzleIngestionService", () => {
         PuzzleIngestionService,
         { provide: DataSource, useValue: mockDataSource },
         { provide: STRATEGY_QUEUE, useValue: mockStrategyQueue },
-        { provide: LLM_OPENAI_QUEUE, useValue: mockOpenAIQueue },
-        { provide: LLM_OLLAMA_QUEUE, useValue: mockOllamaQueue },
-        { provide: SupportedModelService, useValue: mockSupportedModelService },
       ],
     }).compile();
 
@@ -184,7 +164,7 @@ describe("PuzzleIngestionService", () => {
       expect(result).toEqual({ inserted: 0, upToDate: "2024-01-02" });
     });
 
-    it("should dispatch strategy runs for every supported strategy, including llm, when a puzzle is inserted", async () => {
+    it("should dispatch strategy runs for every automatic strategy, and never an LLM strategy, when a puzzle is inserted", async () => {
       mockLatestDate(2024, 0, 1);
       jest
         .spyOn(service as unknown as { delay(ms: number): Promise<void> }, "delay")
@@ -196,73 +176,31 @@ describe("PuzzleIngestionService", () => {
 
       await service.populateUntilCaughtUp();
 
-      // Deterministic + shuffle strategies go to the shared strategy-runs
-      // queue; each LLM provider gets its own queue.
+      // Everything goes to the single shared strategy-runs queue — LLM
+      // strategies are never dispatched automatically, so there's no
+      // per-provider queue traffic to check at all.
       expect(mockStrategyQueue.addBulk).toHaveBeenCalledTimes(1);
-      expect(mockOpenAIQueue.addBulk).toHaveBeenCalledTimes(1);
-      expect(mockOllamaQueue.addBulk).toHaveBeenCalledTimes(1);
 
-      const strategyJobs = mockStrategyQueue.addBulk.mock.calls[0][0] as JobShape[];
-      const openAIJobs = mockOpenAIQueue.addBulk.mock.calls[0][0] as JobShape[];
-      const ollamaJobs = mockOllamaQueue.addBulk.mock.calls[0][0] as JobShape[];
-      const jobs = [...strategyJobs, ...openAIJobs, ...ollamaJobs];
-
+      const jobs = mockStrategyQueue.addBulk.mock.calls[0][0] as JobShape[];
       const strategies = new Set(jobs.map((job) => job.data.strategyName));
-      expect(strategies).toEqual(new Set(SUPPORTED_STRATEGIES));
+      expect(strategies).toEqual(new Set(AUTOMATIC_STRATEGIES));
+      expect(strategies.has("llm-openai")).toBe(false);
+      expect(strategies.has("llm-ollama")).toBe(false);
 
-      // The LLM providers land only on their own queues, and the shared queue
-      // only carries non-LLM strategies.
-      expect(openAIJobs.every((job) => job.data.strategyName === "llm-openai")).toBe(true);
-      expect(ollamaJobs.every((job) => job.data.strategyName === "llm-ollama")).toBe(true);
-      expect(strategyJobs.some((job) => job.data.strategyName === "llm-openai")).toBe(false);
-      expect(strategyJobs.some((job) => job.data.strategyName === "llm-ollama")).toBe(false);
-
-      // Deterministic strategies have one trial; shuffle and LLM strategies
-      // expand to their configured trial counts, so there is more than one job
-      // per strategy.
-      expect(jobs.length).toBeGreaterThan(SUPPORTED_STRATEGIES.length);
+      // Deterministic strategies have one trial; shuffle strategies expand to
+      // their configured trial counts, so there is more than one job per
+      // strategy.
+      expect(jobs.length).toBeGreaterThan(AUTOMATIC_STRATEGIES.length);
 
       for (const job of jobs) {
         expect(job.name).toBe("run-strategy");
         expect(job.data.puzzleId).toBe(42);
         expect(job.data.date).toBe("2024-01-02");
+        expect(job.data.model).toBeNull();
         expect(job.opts.jobId).toBe(
           `run-${job.data.puzzleId}-${job.data.strategyName}-${job.data.trialNumber}`,
         );
       }
-
-      // LLM jobs carry the resolved default model; non-LLM strategies have none.
-      expect(openAIJobs.every((job) => job.data.model === "test-model")).toBe(true);
-      expect(ollamaJobs.every((job) => job.data.model === "test-model")).toBe(true);
-      expect(strategyJobs.every((job) => job.data.model === null)).toBe(true);
-    });
-
-    it("should skip dispatching an LLM strategy with no supported model configured", async () => {
-      mockLatestDate(2024, 0, 1);
-      jest
-        .spyOn(service as unknown as { delay(ms: number): Promise<void> }, "delay")
-        .mockResolvedValue(undefined);
-      jest
-        .spyOn(global, "fetch")
-        .mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA))
-        .mockResolvedValueOnce(fetchResponse(404));
-      mockSupportedModelService.getDefaultModel.mockImplementation((strategyName: string) =>
-        Promise.resolve(strategyName === "llm-ollama" ? null : "test-model"),
-      );
-      const warnSpy = jest.spyOn(
-        (service as unknown as { logger: { warn: jest.Mock } }).logger,
-        "warn",
-      );
-
-      await service.populateUntilCaughtUp();
-
-      expect(mockOllamaQueue.addBulk).not.toHaveBeenCalled();
-      expect(mockOpenAIQueue.addBulk).toHaveBeenCalledTimes(1);
-      const openAIJobs = mockOpenAIQueue.addBulk.mock.calls[0][0] as JobShape[];
-      expect(openAIJobs.every((job) => job.data.model === "test-model")).toBe(true);
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Skipping automatic dispatch of 'llm-ollama'"),
-      );
     });
 
     it("should not dispatch strategy runs when the puzzle already exists", async () => {
@@ -279,29 +217,6 @@ describe("PuzzleIngestionService", () => {
       await service.populateUntilCaughtUp();
 
       expect(mockStrategyQueue.addBulk).not.toHaveBeenCalled();
-    });
-
-    it("should not dispatch strategy runs when PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS is disabled", async () => {
-      process.env.PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS = "false";
-      mockLatestDate(2024, 0, 1);
-      jest
-        .spyOn(service as unknown as { delay(ms: number): Promise<void> }, "delay")
-        .mockResolvedValue(undefined);
-      jest
-        .spyOn(global, "fetch")
-        .mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA))
-        .mockResolvedValueOnce(fetchResponse(404));
-
-      const result = await service.populateUntilCaughtUp();
-      delete process.env.PUZZLE_INGESTION_DISPATCH_STRATEGY_JOBS;
-
-      // The puzzle is still inserted...
-      expect(result).toEqual({ inserted: 1, upToDate: "2024-01-02" });
-      expect(mockDataSource.transaction).toHaveBeenCalledTimes(1);
-      // ...but no solution jobs are enqueued on any queue.
-      expect(mockStrategyQueue.addBulk).not.toHaveBeenCalled();
-      expect(mockOpenAIQueue.addBulk).not.toHaveBeenCalled();
-      expect(mockOllamaQueue.addBulk).not.toHaveBeenCalled();
     });
 
     it("should not fail the ingestion run when dispatching strategy runs fails", async () => {
