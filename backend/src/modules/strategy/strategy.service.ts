@@ -7,16 +7,20 @@ import { Repository } from "typeorm";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { combinationToWords, firstCombination, nextCombination } from "./combinatorics";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
+import { LlmProposal } from "./entities/llm-proposal.entity";
+import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { GameService } from "../game/game.service";
 import { StrategyRunDetailDto, StrategyRunListItemDto, GuessDetailDto } from "./dto/strategy.dto";
 import {
   SHUFFLE_SMART,
   SHUFFLE_FOOLISH,
+  isLlmStrategy,
   shuffleFoolishDuplicateLimit,
   strategyTrialNumbers,
 } from "../../strategies";
 import { runStrategyJobId, queueForStrategy } from "../queue/strategy.queue";
-import { StrategyRunStore } from "./strategy-run-store.service";
+import { StrategyRunStore, computeInitialWordOrder } from "./strategy-run-store.service";
+import { reconstructSolvePrompts } from "./prompt-reconstruction";
 
 const GROUP_SIZE = 4;
 const BATCH_SIZE = 50;
@@ -31,6 +35,8 @@ export class StrategyService {
     private readonly strategyRunRepo: Repository<StrategyRun>,
     @InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>,
     @InjectRepository(Guess) private readonly guessRepo: Repository<Guess>,
+    @InjectRepository(SolvePrompt) private readonly solvePromptRepo: Repository<SolvePrompt>,
+    @InjectRepository(LlmProposal) private readonly llmProposalRepo: Repository<LlmProposal>,
     @Inject(GameService) private readonly gameService: GameService,
     @Inject(StrategyRunStore) private readonly store: StrategyRunStore,
   ) {}
@@ -95,6 +101,31 @@ export class StrategyService {
       );
     }
 
+    return this.buildRunDetail(run, page, limit);
+  }
+
+  /**
+   * Same detail payload as getRunDetail, looked up directly by the run's
+   * primary key instead of (date, strategyName, trialNumber). The
+   * leaderboard's individual-run page already knows the runId (from the runs
+   * list below), so this skips the date->puzzleId resolution and the
+   * strategyName/trialNumber round-trip entirely.
+   */
+  async getRunDetailByRunId(runId: number, page = 1, limit = 200): Promise<StrategyRunDetailDto> {
+    const run = await this.strategyRunRepo.findOne({ where: { id: runId } });
+
+    if (!run) {
+      throw new NotFoundException(`No strategy run with id: ${runId}`);
+    }
+
+    return this.buildRunDetail(run, page, limit);
+  }
+
+  private async buildRunDetail(
+    run: StrategyRun,
+    page: number,
+    limit: number,
+  ): Promise<StrategyRunDetailDto> {
     // A deterministic run can hold ~2,400 guesses, so detail is paginated.
     // Clamp inputs to keep a single response bounded.
     const safePage = Math.max(1, Math.floor(page));
@@ -117,10 +148,52 @@ export class StrategyService {
       },
     });
 
+    // Proposals/prompts only ever exist for LLM strategies — skip the extra
+    // queries entirely for everything else.
+    const solvePrompts = isLlmStrategy(run.strategyName) ? await this.buildSolvePromptDtos(run) : [];
+
     return {
       ...this.mapRunDetail(run, guesses),
+      solvePrompts,
       meta: { total, page: safePage, limit: safeLimit },
     };
+  }
+
+  /**
+   * Assembles the reconstructed guess-chain-of-proposals for an LLM run: every
+   * SolvePrompt (one per model call) alongside the candidate groups it parsed
+   * out and the best-effort reconstructed prompt text (see
+   * prompt-reconstruction.ts — prompt text itself isn't persisted). Guesses
+   * are fetched unpaginated here (unlike the DTO's main `guesses` field)
+   * because reconstruction needs the full sequence regardless of which page
+   * of guesses was requested; LLM run guess counts are small (bounded by the
+   * duplicate/failure/malformed limits), so this stays cheap.
+   */
+  private async buildSolvePromptDtos(run: StrategyRun) {
+    const [solvePrompts, proposals, allGuesses, puzzle] = await Promise.all([
+      this.solvePromptRepo.find({
+        where: { strategyRunId: run.id },
+        order: { promptNumber: "ASC" },
+      }),
+      this.llmProposalRepo.find({ where: { strategyRunId: run.id } }),
+      this.guessRepo.find({
+        where: { strategyRunId: run.id },
+        select: { id: true, sequenceNumber: true, words: true, result: true, guessedAt: true },
+      }),
+      this.puzzleRepo.findOne({
+        where: { id: run.puzzleId },
+        relations: { answerGroups: { members: true } },
+      }),
+    ]);
+
+    if (solvePrompts.length === 0 || !puzzle) {
+      return [];
+    }
+
+    const guessesById = new Map(allGuesses.map((guess) => [guess.id, guess]));
+    const originalWords = computeInitialWordOrder(puzzle, run.strategyName);
+
+    return reconstructSolvePrompts(originalWords, solvePrompts, proposals, guessesById);
   }
 
   /**
@@ -173,7 +246,19 @@ export class StrategyService {
    */
   async getRunsForPuzzle(date: string, strategyName: string): Promise<StrategyRunListItemDto[]> {
     const puzzleId = await this.gameService.resolveDateToPuzzleId(date);
+    return this.getRunsForPuzzleId(puzzleId, strategyName);
+  }
 
+  /**
+   * Same as getRunsForPuzzle, keyed directly by the puzzle's numeric id
+   * instead of its date — the leaderboard's puzzle-run page routes on
+   * puzzleId (matching how Guess/StrategyRun already key off it), so this
+   * skips the date->puzzleId resolution.
+   */
+  async getRunsForPuzzleId(
+    puzzleId: number,
+    strategyName: string,
+  ): Promise<StrategyRunListItemDto[]> {
     const runs = await this.strategyRunRepo.find({
       where: { puzzleId, strategyName },
       order: { trialNumber: "ASC" },
@@ -213,7 +298,10 @@ export class StrategyService {
     }));
   }
 
-  private mapRunDetail(run: StrategyRun, guesses: Guess[]): Omit<StrategyRunDetailDto, "meta"> {
+  private mapRunDetail(
+    run: StrategyRun,
+    guesses: Guess[],
+  ): Omit<StrategyRunDetailDto, "meta" | "solvePrompts"> {
     return {
       id: run.id,
       strategyName: run.strategyName,

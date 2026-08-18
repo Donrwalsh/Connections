@@ -68,9 +68,9 @@ describe("StrategyPuzzlePage", () => {
 
   it("filters by run status", async () => {
     const user = userEvent.setup();
-    const puzzles = getStrategyPuzzleBreakdown("llm-openai");
+    const puzzles = getStrategyPuzzleBreakdown("gpt-4.1-nano-2025-04-14");
 
-    renderStrategy("llm-openai");
+    renderStrategy("gpt-4.1-nano-2025-04-14");
     await user.selectOptions(screen.getByLabelText("Status"), "failed");
 
     expect(bodyRows().length).toBe(filterPuzzleBreakdowns(puzzles, "failed").length);

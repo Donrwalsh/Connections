@@ -32,6 +32,7 @@ const categories: Category[] = [
 ];
 
 const puzzleResponse = {
+  id: 1,
   date: "2024-01-15",
   categories,
   wordOrder: categories.flatMap((c) => c.words),
@@ -117,13 +118,55 @@ describe("App leaderboard routes", () => {
     expect(screen.getByRole("heading", { name: "Alphabetical" })).toBeInTheDocument();
   });
 
-  it("renders the single-run visualizer at /leaderboard/:strategyId/:puzzleId", () => {
+  it("renders the single-run visualizer at /leaderboard/:strategyId/:puzzleId", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        const href = String(url);
+        if (href.includes("/puzzle-id/")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => [
+              {
+                id: 501,
+                strategyName: "alphabetical",
+                trialNumber: 0,
+                status: "completed",
+                modelName: null,
+                contextWindow: null,
+                startedAt: "2024-01-15T00:00:00Z",
+                finishedAt: "2024-01-15T00:00:02Z",
+                guessCount: 4,
+              },
+            ],
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: 501,
+            strategyName: "alphabetical",
+            trialNumber: 0,
+            status: "completed",
+            modelName: null,
+            contextWindow: null,
+            startedAt: "2024-01-15T00:00:00Z",
+            finishedAt: "2024-01-15T00:00:02Z",
+            guessCount: 0,
+            guesses: [],
+            solvePrompts: [],
+            meta: { total: 0, page: 1, limit: 200 },
+          }),
+        });
+      }),
+    );
+
     render(
       <MemoryRouter initialEntries={["/leaderboard/alphabetical/1"]}>
         <App />
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("heading", { name: "Guess chain" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Guess chain" })).toBeInTheDocument();
   });
 });

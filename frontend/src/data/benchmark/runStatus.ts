@@ -1,7 +1,7 @@
 // Shared display helpers for run statuses. Kept out of the component files so
 // the components stay presentational and the helpers stay unit-testable.
 
-import type { PuzzleRunStatus, RunStatus } from "./types";
+import type { GuessResultValue, PuzzleRunStatus, RunStatus } from "./types";
 
 export type PillTone = "queued" | "active" | "completed" | "failed" | "neutral";
 
@@ -52,4 +52,23 @@ export function puzzleStatusTone(status: PuzzleRunStatus): PillTone {
     case "in_progress":
       return "active";
   }
+}
+
+/** Display labels/tones for an individual guess's outcome — used by the
+ * guess-chain visualizer for both LLM proposals and plain guess lists. */
+export function guessResultLabel(result: GuessResultValue): string {
+  switch (result) {
+    case "success":
+      return "Correct";
+    case "offBy1":
+      return "One away";
+    case "duplicate":
+      return "Duplicate";
+    case "failure":
+      return "Incorrect";
+  }
+}
+
+export function guessResultTone(result: GuessResultValue): PillTone {
+  return result === "success" ? "completed" : "failed";
 }

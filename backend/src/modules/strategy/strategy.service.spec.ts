@@ -9,6 +9,7 @@ import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
+import { LlmProposal } from "./entities/llm-proposal.entity";
 import { GameService } from "../game/game.service";
 
 describe("StrategyService", () => {
@@ -31,6 +32,10 @@ describe("StrategyService", () => {
   };
   let mockSolvePromptRepo: {
     count: jest.Mock;
+    find: jest.Mock;
+  };
+  let mockLlmProposalRepo: {
+    find: jest.Mock;
   };
   let mockGameService: {
     resolveDateToPuzzleId: jest.Mock;
@@ -107,6 +112,10 @@ describe("StrategyService", () => {
     };
     mockSolvePromptRepo = {
       count: jest.fn().mockResolvedValue(0),
+      find: jest.fn().mockResolvedValue([]),
+    };
+    mockLlmProposalRepo = {
+      find: jest.fn().mockResolvedValue([]),
     };
     mockManager = {
       insert: jest.fn().mockResolvedValue({ identifiers: [{ id: 1 }] }),
@@ -128,6 +137,7 @@ describe("StrategyService", () => {
         { provide: getRepositoryToken(Puzzle), useValue: mockPuzzleRepo },
         { provide: getRepositoryToken(Guess), useValue: mockGuessRepo },
         { provide: getRepositoryToken(SolvePrompt), useValue: mockSolvePromptRepo },
+        { provide: getRepositoryToken(LlmProposal), useValue: mockLlmProposalRepo },
         { provide: GameService, useValue: mockGameService },
       ],
     }).compile();
@@ -292,6 +302,7 @@ describe("StrategyService", () => {
             guessedAt,
           },
         ],
+        solvePrompts: [],
         meta: { total: 2, page: 1, limit: 200 },
       });
       expect(mockGuessRepo.find).toHaveBeenCalledWith({
@@ -333,6 +344,117 @@ describe("StrategyService", () => {
       expect(mockGuessRepo.find).toHaveBeenCalledWith(
         expect.objectContaining({ skip: 0, take: 500 }),
       );
+    });
+  });
+
+  describe("getRunDetailByRunId", () => {
+    it("should throw NotFoundException when the run does not exist", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.getRunDetailByRunId(999)).rejects.toThrow(NotFoundException);
+      expect(mockStrategyRunRepo.findOne).toHaveBeenCalledWith({ where: { id: 999 } });
+    });
+
+    it("should look the run up directly by id, without any date resolution", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ id: 42, trialNumber: 0 }));
+      mockGuessRepo.count.mockResolvedValueOnce(0);
+      mockGuessRepo.find.mockResolvedValueOnce([]);
+
+      const result = await service.getRunDetailByRunId(42);
+
+      expect(result.id).toBe(42);
+      expect(result.solvePrompts).toEqual([]);
+      expect(mockGameService.resolveDateToPuzzleId).not.toHaveBeenCalled();
+    });
+
+    it("should assemble the reconstructed guess chain for an LLM run", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ id: 7, strategyName: "llm-openai", availableWords: [] }),
+      );
+      mockGuessRepo.count.mockResolvedValueOnce(1);
+      mockGuessRepo.find
+        // First call: the paginated `guesses` field.
+        .mockResolvedValueOnce([
+          {
+            sequenceNumber: 1,
+            words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+            result: GuessResult.SUCCESS,
+            guessedAt: new Date("2024-01-02T00:00:00Z"),
+          },
+        ])
+        // Second call: the unpaginated guesses used for reconstruction.
+        .mockResolvedValueOnce([
+          {
+            id: 1,
+            sequenceNumber: 1,
+            words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+            result: GuessResult.SUCCESS,
+            guessedAt: new Date("2024-01-02T00:00:00Z"),
+          },
+        ]);
+      mockPuzzleRepo.findOne.mockResolvedValueOnce(solvePuzzle);
+      mockSolvePromptRepo.find.mockResolvedValueOnce([
+        {
+          id: 501,
+          strategyRunId: 7,
+          promptNumber: 1,
+          promptType: "initialSolve",
+          status: "parsed",
+          rawResponseText: "raw",
+          promptTokens: 10,
+          completionTokens: 20,
+          totalTokens: 30,
+          latencyMs: 500,
+          temperature: 0.2,
+          createdAt: new Date("2024-01-02T00:00:00Z"),
+        },
+      ]);
+      mockLlmProposalRepo.find.mockResolvedValueOnce([
+        {
+          id: 1,
+          strategyRunId: 7,
+          guessId: 1,
+          solvePromptId: 501,
+          words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+          category: "Fruit",
+          status: "used",
+          createdAt: new Date("2024-01-02T00:00:00Z"),
+        },
+      ]);
+
+      const result = await service.getRunDetailByRunId(7);
+
+      expect(result.solvePrompts).toHaveLength(1);
+      expect(result.solvePrompts[0]!.proposals).toEqual([
+        {
+          id: 1,
+          words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+          category: "Fruit",
+          status: "used",
+          guess: {
+            sequenceNumber: 1,
+            result: GuessResult.SUCCESS,
+            guessedAt: new Date("2024-01-02T00:00:00Z"),
+          },
+        },
+      ]);
+      expect(typeof result.solvePrompts[0]!.reconstructedPrompt).toBe("string");
+      expect(result.solvePrompts[0]!.reconstructedPrompt).toContain("APPLE");
+    });
+  });
+
+  describe("getRunsForPuzzleId", () => {
+    it("should look runs up directly by puzzleId, without any date resolution", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([]);
+
+      const result = await service.getRunsForPuzzleId(5, "shuffle-smart");
+
+      expect(result).toEqual([]);
+      expect(mockStrategyRunRepo.find).toHaveBeenCalledWith({
+        where: { puzzleId: 5, strategyName: "shuffle-smart" },
+        order: { trialNumber: "ASC" },
+      });
+      expect(mockGameService.resolveDateToPuzzleId).not.toHaveBeenCalled();
     });
   });
 

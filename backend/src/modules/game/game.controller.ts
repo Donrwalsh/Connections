@@ -1,4 +1,4 @@
-import { Controller, Get, Header, Inject, Param, Res } from "@nestjs/common";
+import { Controller, Get, Header, Inject, Param, ParseIntPipe, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { ApiParam } from "@nestjs/swagger";
 import { GameService } from "./game.service";
@@ -10,6 +10,21 @@ export class GameController {
   @Get("data/latest_date")
   getLatestDate() {
     return this.gameService.getLatestDate();
+  }
+
+  // Puzzles are immutable once ingested, so their date never changes —
+  // cacheable indefinitely, same as puzzle/:date below.
+  @Get("puzzle-id/:id")
+  @Header("Cache-Control", "public, max-age=86400, immutable")
+  @ApiParam({
+    name: "id",
+    type: Number,
+    description: "The puzzle's numeric id (as opposed to its date)",
+    example: 42,
+  })
+  async getPuzzleDateById(@Param("id", ParseIntPipe) id: number) {
+    const date = await this.gameService.puzzleIdToDate(id);
+    return { id, date };
   }
 
   // Puzzles are immutable once ingested, so a short browser cache here

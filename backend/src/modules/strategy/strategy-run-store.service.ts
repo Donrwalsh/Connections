@@ -12,6 +12,43 @@ import { SHUFFLE_SMART, SHUFFLE_FOOLISH, LLM_OPENAI, LLM_OLLAMA } from "../../st
 const GROUP_SIZE = 4;
 
 /**
+ * The word order a fresh run starts with, keyed by strategy. Extracted out of
+ * loadOrCreateRun so the prompt-reconstruction path (strategy.service.ts) can
+ * recompute the exact same starting order for an LLM run without duplicating
+ * this switch and risking drift.
+ */
+export function computeInitialWordOrder(puzzle: Puzzle, strategyName: string): string[] {
+  switch (strategyName) {
+    case "order":
+    case SHUFFLE_SMART:
+    case SHUFFLE_FOOLISH:
+    case LLM_OPENAI:
+    case LLM_OLLAMA:
+      return puzzle.answerGroups
+        .flatMap((group) => group.members)
+        .sort((a, b) => a.position - b.position)
+        .map((m) => m.word);
+
+    case "reverse-order":
+      return puzzle.answerGroups
+        .flatMap((group) => group.members)
+        .sort((a, b) => b.position - a.position)
+        .map((m) => m.word);
+
+    case "reverse-alphabetical":
+      return puzzle.answerGroups
+        .flatMap((group) => group.members.map((m) => m.word))
+        .sort((a, b) => b.localeCompare(a));
+
+    case "alphabetical":
+    default:
+      return puzzle.answerGroups
+        .flatMap((group) => group.members.map((m) => m.word))
+        .sort((a, b) => a.localeCompare(b));
+  }
+}
+
+/**
  * Shared persistence helpers used by both the deterministic/shuffle and LLM
  * strategy run loops: run load-or-create, guess counting, and batched DB
  * flushing (guesses plus LLM proposals) live here so neither service owns a
@@ -49,40 +86,7 @@ export class StrategyRunStore {
       return { run: existing, puzzle };
     }
 
-    let allWords: string[];
-
-    switch (strategyName) {
-      case "order":
-      case SHUFFLE_SMART:
-      case SHUFFLE_FOOLISH:
-      case LLM_OPENAI:
-      case LLM_OLLAMA:
-        allWords = puzzle.answerGroups
-          .flatMap((group) => group.members)
-          .sort((a, b) => a.position - b.position)
-          .map((m) => m.word);
-        break;
-
-      case "reverse-order":
-        allWords = puzzle.answerGroups
-          .flatMap((group) => group.members)
-          .sort((a, b) => b.position - a.position)
-          .map((m) => m.word);
-        break;
-
-      case "reverse-alphabetical":
-        allWords = puzzle.answerGroups
-          .flatMap((group) => group.members.map((m) => m.word))
-          .sort((a, b) => b.localeCompare(a));
-        break;
-
-      case "alphabetical":
-      default:
-        allWords = puzzle.answerGroups
-          .flatMap((group) => group.members.map((m) => m.word))
-          .sort((a, b) => a.localeCompare(b));
-        break;
-    }
+    const allWords = computeInitialWordOrder(puzzle, strategyName);
 
     const run = this.strategyRunRepo.create({
       puzzle,

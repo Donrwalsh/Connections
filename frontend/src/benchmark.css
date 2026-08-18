@@ -211,13 +211,45 @@
   color: var(--text);
 }
 
-/* Strategy detail header. */
-.bench-page-header__title {
-  margin: 0.25rem 0;
+/* Strategy/run detail header. Flex column with a gap so every child
+ * (nav row, title, meta line, description, badges) gets consistent spacing
+ * from layout alone — previously the title relied on the global `h1` rule's
+ * 56px size with only a small margin override, which visually overlapped
+ * the back-link sitting right above it. */
+.bench-page-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 
-.bench-page-header__back {
+.bench-page-header__nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 1rem;
+  row-gap: 0.35rem;
+}
+
+.bench-page-header__title {
+  margin: 0.15rem 0 0;
+  font-size: 1.75rem;
+  line-height: 1.2;
+}
+
+.bench-page-header__back,
+.bench-page-header__puzzle-link {
   font-size: 0.85rem;
+}
+
+.bench-page-header__puzzle-link {
+  color: var(--text);
+  margin-left: auto;
+}
+
+.bench-page-header__meta {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.9rem;
 }
 
 .bench-summary {
@@ -261,6 +293,149 @@
 
 .bench-visualizer__body {
   color: var(--text);
+}
+
+.bench-visualizer__runid {
+  margin: 0 0 0.75rem;
+}
+
+.bench-error {
+  color: #b04a3f;
+}
+
+/* Guess chain — LLM prompt/proposal steps. Structural pass like the rest of
+ * this file (see the header comment): the "used" proposal gets the
+ * accent-border "selected" treatment (the one convention DESIGN.md allows for
+ * that meaning), unused proposals are included but visually de-emphasized. */
+.bench-chain {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bench-step {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+}
+
+.bench-step__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.bench-step__type {
+  font-size: 0.85rem;
+  color: var(--text-h);
+}
+
+.bench-step__telemetry {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.bench-step__detail {
+  margin: 0.4rem 0;
+  font-size: 0.85rem;
+}
+
+.bench-step__detail summary {
+  cursor: pointer;
+  color: var(--text);
+}
+
+.bench-step__pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--code-bg);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  margin: 0.4rem 0 0;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  max-height: 24rem;
+  overflow-y: auto;
+}
+
+.bench-proposals {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bench-proposal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+
+.bench-proposal--used {
+  border-left: 2px solid var(--accent-border);
+  background: var(--code-bg);
+}
+
+.bench-proposal--unused {
+  opacity: 0.65;
+}
+
+.bench-proposal__category {
+  font-size: 0.85rem;
+  color: var(--text-h);
+}
+
+.bench-proposal--unused .bench-proposal__category {
+  color: var(--text);
+}
+
+.bench-proposal__words {
+  font-size: 0.85rem;
+}
+
+.bench-proposal__unused-label {
+  font-size: 0.75rem;
+  color: var(--text);
+  margin-left: auto;
+}
+
+.bench-proposals__empty {
+  font-size: 0.85rem;
+}
+
+/* Plain guess list — non-LLM strategies (no prompt/proposal chain to show). */
+.bench-guess-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bench-guess-list__item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.bench-guess-list__words {
+  flex: 1;
 }
 
 /* Coverage-calendar placeholder. */

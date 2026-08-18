@@ -1,9 +1,97 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GuessChainVisualizer } from "../GuessChainVisualizer";
+import type { StrategyRunDetail } from "../../../data/benchmark/types";
+
+const baseDetail: Omit<StrategyRunDetail, "solvePrompts" | "guesses"> = {
+  id: 12345,
+  strategyName: "llm-openai",
+  trialNumber: 1,
+  status: "completed",
+  modelName: "gpt-4o",
+  contextWindow: 128_000,
+  startedAt: "2025-01-01T00:00:00Z",
+  finishedAt: "2025-01-01T00:00:05Z",
+  guessCount: 2,
+  meta: { total: 2, page: 1, limit: 200 },
+};
+
+const llmDetail: StrategyRunDetail = {
+  ...baseDetail,
+  guesses: [
+    {
+      sequenceNumber: 1,
+      words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+      result: "success",
+      guessedAt: "2025-01-01T00:00:01Z",
+    },
+  ],
+  solvePrompts: [
+    {
+      id: 1,
+      promptNumber: 1,
+      promptType: "initialSolve",
+      status: "parsed",
+      rawResponseText: "### ANSWER\nAPPLE, BANANA, CHERRY, DATE",
+      promptTokens: 100,
+      completionTokens: 50,
+      totalTokens: 150,
+      latencyMs: 1200,
+      temperature: 0.2,
+      createdAt: "2025-01-01T00:00:00Z",
+      reconstructedPrompt: "You are an expert solver...",
+      proposals: [
+        {
+          id: 1,
+          words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+          category: "Fruit",
+          status: "used",
+          guess: { sequenceNumber: 1, result: "success", guessedAt: "2025-01-01T00:00:01Z" },
+        },
+        {
+          id: 2,
+          words: ["EGG", "FIG", "GRAPE", "HONEY"],
+          category: "Uncertain",
+          status: "not_selected",
+          guess: null,
+        },
+      ],
+    },
+  ],
+};
+
+const plainDetail: StrategyRunDetail = {
+  ...baseDetail,
+  strategyName: "alphabetical",
+  guesses: [
+    {
+      sequenceNumber: 1,
+      words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+      result: "success",
+      guessedAt: "2025-01-01T00:00:01Z",
+    },
+  ],
+  solvePrompts: [],
+};
+
+function stubFetch(detail: StrategyRunDetail) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => detail,
+    }),
+  );
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("GuessChainVisualizer", () => {
-  it("surfaces the runId it is asked to visualize", () => {
+  it("surfaces the runId it is asked to visualize immediately, before the fetch resolves", () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+
     render(<GuessChainVisualizer runId={12345} />);
 
     expect(screen.getByRole("heading", { name: "Guess chain" })).toBeInTheDocument();
@@ -11,8 +99,65 @@ describe("GuessChainVisualizer", () => {
   });
 
   it("labels the section with the run id", () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+
     render(<GuessChainVisualizer runId={99} />);
 
     expect(screen.getByLabelText("Guess chain for run 99")).toBeInTheDocument();
+  });
+
+  it("renders the LLM prompt/proposal chain, distinguishing used from unused proposals", async () => {
+    stubFetch(llmDetail);
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Initial solve")).toBeInTheDocument();
+    expect(screen.getByText("Fruit")).toBeInTheDocument();
+    expect(screen.getByText("Uncertain")).toBeInTheDocument();
+    expect(screen.getByText("Correct")).toBeInTheDocument();
+    expect(screen.getByText("Not submitted")).toBeInTheDocument();
+
+    const usedItem = screen.getByText("Fruit").closest("li");
+    const unusedItem = screen.getByText("Uncertain").closest("li");
+    expect(usedItem).toHaveClass("bench-proposal--used");
+    expect(unusedItem).toHaveClass("bench-proposal--unused");
+  });
+
+  it("exposes the reconstructed prompt and raw response behind disclosure widgets, each labeled with its own token count", async () => {
+    stubFetch(llmDetail);
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(
+      await screen.findByText("Prompt sent to the model (100 tokens)"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Raw response (50 tokens)")).toBeInTheDocument();
+    expect(screen.getByText("You are an expert solver...")).toBeInTheDocument();
+  });
+
+  it("falls back to a plain guess list for strategies with no solve-prompt chain", async () => {
+    stubFetch(plainDetail);
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    const guessList = await screen.findByText("APPLE, BANANA, CHERRY, DATE");
+    expect(guessList).toBeInTheDocument();
+    expect(screen.queryByText("Initial solve")).not.toBeInTheDocument();
+  });
+
+  it("shows an error message when the fetch fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("boom")));
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("boom")).toBeInTheDocument();
+  });
+
+  it("shows an empty state when a run has no guesses at all", async () => {
+    stubFetch({ ...plainDetail, guesses: [] });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("No guesses recorded for this run.")).toBeInTheDocument();
   });
 });

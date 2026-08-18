@@ -69,6 +69,7 @@ export function PuzzlePage() {
       <div className="puzzle-page__panel">
         <GuessSequencePanel
           date={puzzleData.date}
+          puzzleId={puzzleData.id}
           isOpen={isGuessPanelOpen}
           onToggle={() => setIsGuessPanelOpen((open) => !open)}
         />

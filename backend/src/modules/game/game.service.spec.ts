@@ -66,6 +66,7 @@ describe("GameService", () => {
       const result = await service.getDatesPuzzle(validDate);
 
       expect(result).toEqual({
+        id: 1,
         date: validDate,
         categories: [
           {
@@ -137,6 +138,7 @@ describe("GameService", () => {
       const result = await service.getPuzzleByDate("2026-07-30");
 
       expect(result).toEqual({
+        id: 100,
         date: "2026-07-30",
         categories: [
           {
@@ -182,6 +184,7 @@ describe("GameService", () => {
       const expectedToday = new Date().toISOString().split("T")[0];
 
       const spy = jest.spyOn(service, "getPuzzleByDate").mockResolvedValue({
+        id: 1,
         date: expectedToday,
         categories: [],
         wordOrder: [],
@@ -226,6 +229,25 @@ describe("GameService", () => {
 
       await expect(service.puzzleDateToId("2024-01-02")).rejects.toThrow(
         new NotFoundException("No puzzle for date: 2024-01-02"),
+      );
+    });
+  });
+
+  describe("puzzleIdToDate", () => {
+    it("should return the date for an existing puzzle id", async () => {
+      mockPuzzleRepo.findOne.mockResolvedValueOnce({ id: 42, date: "2024-01-02" });
+
+      await expect(service.puzzleIdToDate(42)).resolves.toBe("2024-01-02");
+      expect(mockPuzzleRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 42 },
+      });
+    });
+
+    it("should throw NotFoundException when no puzzle exists for the id", async () => {
+      mockPuzzleRepo.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.puzzleIdToDate(999)).rejects.toThrow(
+        new NotFoundException("No puzzle with id: 999"),
       );
     });
   });

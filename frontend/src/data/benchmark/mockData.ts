@@ -35,6 +35,7 @@ const STRATEGY_DEFS: StrategyDef[] = [
     kind: "deterministic",
     description: "Deterministic · tries words in alphabetical order",
     runsPerPuzzle: 1,
+    strategyName: "alphabetical",
     guessMean: 3.2,
     guessSpread: 2.0,
     failMultiplier: 0,
@@ -46,6 +47,7 @@ const STRATEGY_DEFS: StrategyDef[] = [
     kind: "deterministic",
     description: "Deterministic · tries words in reverse alphabetical order",
     runsPerPuzzle: 1,
+    strategyName: "reverse-alphabetical",
     guessMean: 3.6,
     guessSpread: 2.2,
     failMultiplier: 0,
@@ -57,6 +59,7 @@ const STRATEGY_DEFS: StrategyDef[] = [
     kind: "deterministic",
     description: "Deterministic · follows the board's original order",
     runsPerPuzzle: 1,
+    strategyName: "order",
     guessMean: 2.4,
     guessSpread: 1.4,
     failMultiplier: 0,
@@ -68,6 +71,7 @@ const STRATEGY_DEFS: StrategyDef[] = [
     kind: "deterministic",
     description: "Deterministic · walks the board order backwards",
     runsPerPuzzle: 1,
+    strategyName: "reverse-order",
     guessMean: 2.8,
     guessSpread: 1.6,
     failMultiplier: 0,
@@ -79,6 +83,7 @@ const STRATEGY_DEFS: StrategyDef[] = [
     kind: "shuffle",
     description: "Shuffle · seeded smart re-ordering with pruning",
     runsPerPuzzle: 3,
+    strategyName: "shuffle-smart",
     guessMean: 4.8,
     guessSpread: 2.4,
     failMultiplier: 0.7,
@@ -90,32 +95,64 @@ const STRATEGY_DEFS: StrategyDef[] = [
     kind: "shuffle",
     description: "Shuffle · naive randomized re-ordering",
     runsPerPuzzle: 3,
+    strategyName: "shuffle-foolish",
     guessMean: 6.8,
     guessSpread: 3.0,
     failMultiplier: 1.6,
     durationMeanMs: 42,
   },
+  // LLM rows are keyed by *model*, not by the backend strategy that ran
+  // them — several models can (and here, do) share the same underlying
+  // "llm-openai"/"llm-ollama" strategy, so each gets its own leaderboard row
+  // and /leaderboard/:id URL while `strategyName` still points at the
+  // shared backend strategy for API calls (see StrategyMeta).
   {
-    id: "llm-openai",
-    name: "LLM · OpenAI",
+    id: "gpt-4.1-nano-2025-04-14",
+    name: "LLM · gpt-4.1-nano-2025-04-14",
     kind: "llm",
-    description: "LLM-based · OpenAI model proposes candidate groups",
+    description: "LLM-based · OpenAI gpt-4.1-nano proposes candidate groups",
     runsPerPuzzle: 3,
+    strategyName: "llm-openai",
     guessMean: 4.2,
     guessSpread: 2.2,
     failMultiplier: 0.8,
     durationMeanMs: 26_000,
   },
   {
-    id: "llm-ollama",
-    name: "LLM · Ollama",
+    id: "gpt-4o-mini",
+    name: "LLM · gpt-4o-mini",
     kind: "llm",
-    description: "LLM-based · Ollama model proposes candidate groups",
+    description: "LLM-based · OpenAI gpt-4o-mini proposes candidate groups",
     runsPerPuzzle: 3,
+    strategyName: "llm-openai",
+    guessMean: 3.8,
+    guessSpread: 1.8,
+    failMultiplier: 0.6,
+    durationMeanMs: 18_000,
+  },
+  {
+    id: "mistral",
+    name: "LLM · mistral",
+    kind: "llm",
+    description: "LLM-based · Ollama mistral proposes candidate groups",
+    runsPerPuzzle: 3,
+    strategyName: "llm-ollama",
     guessMean: 4.6,
     guessSpread: 2.4,
     failMultiplier: 1.0,
     durationMeanMs: 30_000,
+  },
+  {
+    id: "llama3.1-8b",
+    name: "LLM · llama3.1:8b",
+    kind: "llm",
+    description: "LLM-based · Ollama llama3.1:8b proposes candidate groups",
+    runsPerPuzzle: 3,
+    strategyName: "llm-ollama",
+    guessMean: 5.4,
+    guessSpread: 2.6,
+    failMultiplier: 1.3,
+    durationMeanMs: 34_000,
   },
 ];
 
@@ -160,8 +197,8 @@ export function formatDateLabel(date: string): string {
 }
 
 function modelFor(def: StrategyDef): string | null {
-  if (def.kind !== "llm") return null;
-  return def.id === "llm-openai" ? "gpt-4o" : "mistral";
+  // For "llm" kind rows, `id` already *is* the model name (see STRATEGY_DEFS).
+  return def.kind === "llm" ? def.id : null;
 }
 
 interface GeneratedRun {
@@ -260,6 +297,7 @@ export function getStrategyMeta(strategyId: string): StrategyMeta | undefined {
     kind: def.kind,
     description: def.description,
     runsPerPuzzle: def.runsPerPuzzle,
+    strategyName: def.strategyName,
   };
 }
 
@@ -270,6 +308,7 @@ export function getAllStrategyMeta(): StrategyMeta[] {
     kind: def.kind,
     description: def.description,
     runsPerPuzzle: def.runsPerPuzzle,
+    strategyName: def.strategyName,
   }));
 }
 
@@ -308,6 +347,7 @@ export function getStrategyAggregates(): StrategyAggregate[] {
       kind: def.kind,
       description: def.description,
       runsPerPuzzle: def.runsPerPuzzle,
+      strategyName: def.strategyName,
       totalPuzzles: PUZZLE_COUNT,
       expectedRuns: PUZZLE_COUNT * def.runsPerPuzzle,
       progress,

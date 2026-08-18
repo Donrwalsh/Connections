@@ -13,6 +13,7 @@ export interface PuzzleCategoryDto {
 }
 
 export interface PuzzleResponseDto {
+  id: number;
   date: string;
   categories: PuzzleCategoryDto[];
   wordOrder: string[];
@@ -33,6 +34,19 @@ export class GameService {
       throw new NotFoundException(`No puzzle for date: ${date}`);
     }
     return puzzle.id;
+  }
+
+  /**
+   * Reverse of puzzleDateToId — used by pages that only know a puzzle's
+   * numeric id (e.g. the leaderboard's per-run page, which routes on
+   * puzzleId) and need its date to link back to the actual puzzle.
+   */
+  async puzzleIdToDate(id: number): Promise<string> {
+    const puzzle = await this.puzzleRepo.findOne({ where: { id } });
+    if (!puzzle) {
+      throw new NotFoundException(`No puzzle with id: ${id}`);
+    }
+    return puzzle.date;
   }
 
   /**
@@ -134,6 +148,7 @@ export class GameService {
 
     // 3. Map relations to your response DTO/format
     const value: PuzzleResponseDto = {
+      id: puzzle.id,
       date: puzzle.date,
       categories: puzzle.answerGroups.map((group) => ({
         id: `cat-${group.id}`,

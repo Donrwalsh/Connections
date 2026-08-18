@@ -23,7 +23,7 @@ const GROUP_SIZE = 4;
 const MODEL_ERROR_RETRY_BASE_DELAY_MS = 1000;
 const MODEL_ERROR_RETRY_MAX_DELAY_MS = 300000;
 
-function buildInitialPrompt(items: string[], N: number): string {
+export function buildInitialPrompt(items: string[], N: number): string {
   const totalItems = N * 4;
 
   return [
@@ -53,7 +53,7 @@ function buildInitialPrompt(items: string[], N: number): string {
   ].join("\n");
 }
 
-function buildRetryPrompt(
+export function buildRetryPrompt(
   remainingItems: string[],
   lockedInGroups: string[][],
   lastFailedGuess: { items: string[]; result: string },

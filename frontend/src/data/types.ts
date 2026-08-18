@@ -8,6 +8,7 @@ export interface Category {
 }
 
 export interface Puzzle {
+  id: number;
   date: string;
   categories: Category[];
   wordOrder: string[];

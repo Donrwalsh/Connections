@@ -37,6 +37,7 @@ const categories: Category[] = [
 ];
 
 const puzzle: Puzzle = {
+  id: 1,
   date: "2024-01-15",
   categories,
   wordOrder: [

@@ -136,6 +136,53 @@ export class StrategyController {
     return this.strategyService.getRunDetail(date, strategyName, trialNumber, page, limit);
   }
 
+  @Get(":strategyName/puzzle-id/:puzzleId")
+  @ApiParam({
+    name: "strategyName",
+    type: String,
+    description:
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', or 'llm-ollama'",
+    example: "llm-openai",
+  })
+  @ApiParam({
+    name: "puzzleId",
+    type: Number,
+    description: "The puzzle's numeric id (as opposed to its date)",
+    example: 42,
+  })
+  async getRunsForPuzzleId(
+    @Param("strategyName") strategyName: string,
+    @Param("puzzleId", ParseIntPipe) puzzleId: number,
+  ) {
+    if (!STRATEGY_SET.has(strategyName)) {
+      throw new BadRequestException(
+        `Invalid strategy: '${strategyName}'. Expected one of: ${[...STRATEGY_SET].join(", ")}.`,
+      );
+    }
+
+    return this.strategyService.getRunsForPuzzleId(puzzleId, strategyName);
+  }
+
+  // Looked up directly by the run's primary key rather than nested under
+  // :strategyName/puzzle/:date/run/:trialNumber — the leaderboard's
+  // individual-run page already has the runId (from getRunsForPuzzleId
+  // above) and this way doesn't need to also carry the date/trialNumber
+  // around just to re-derive it.
+  @Get("run/:runId")
+  @ApiParam({
+    name: "runId",
+    type: Number,
+    description: "The strategy run's numeric id",
+    example: 4200,
+  })
+  async getRunDetailByRunId(
+    @Param("runId", ParseIntPipe) runId: number,
+    @Query("page", new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query("limit", new DefaultValuePipe(200), ParseIntPipe) limit: number,
+  ) {
+    return this.strategyService.getRunDetailByRunId(runId, page, limit);
+  }
+
   @Get(":strategyName/puzzle/:date/run/:trialNumber/guess/:sequenceNumber")
   @ApiParam({
     name: "strategyName",
