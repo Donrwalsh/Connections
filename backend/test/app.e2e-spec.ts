@@ -199,45 +199,88 @@ describe("App (e2e)", () => {
     );
   });
 
-  it("POST /strategy/queue/llm-openai/:date queues one trial job per configured trial for a supported model", async () => {
+  it("POST /dispatch/strategy/:strategy/:date queues a deterministic strategy", async () => {
     const res = await request(app.getHttpServer()).post(
-      `/strategy/queue/llm-openai/${TEST_DATE}?model=gpt-4.1-nano-2025-04-14`,
+      `/dispatch/strategy/alphabetical/${TEST_DATE}`,
     );
 
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({
-      message: `Jobs queued for strategy 'llm-openai' on puzzle date ${TEST_DATE}`,
+      message: `Jobs queued for strategy 'alphabetical' on puzzle date ${TEST_DATE}`,
+      puzzleId: expect.any(Number),
+      date: TEST_DATE,
+      strategyName: "alphabetical",
+    });
+  });
+
+  it("POST /dispatch/strategy/llm-openai/:date rejects the LLM strategies", async () => {
+    const res = await request(app.getHttpServer()).post(
+      `/dispatch/strategy/llm-openai/${TEST_DATE}`,
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain("does not accept the LLM strategies");
+  });
+
+  it("POST /dispatch/model/:modelName/:date resolves the strategy from SupportedModel and queues a trial", async () => {
+    const res = await request(app.getHttpServer()).post(
+      `/dispatch/model/gpt-4.1-nano-2025-04-14/${TEST_DATE}`,
+    );
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({
+      message:
+        "Jobs queued for model 'gpt-4.1-nano-2025-04-14' (strategy 'llm-openai')" +
+        ` on puzzle date ${TEST_DATE}`,
       puzzleId: expect.any(Number),
       date: TEST_DATE,
       strategyName: "llm-openai",
-      model: "gpt-4.1-nano-2025-04-14",
+      modelName: "gpt-4.1-nano-2025-04-14",
     });
 
-    for (const trialNumber of res.body.trialNumbers ?? [1, 2, 3]) {
+    for (const trialNumber of [1, 2, 3]) {
       await llmOpenAIQueue.remove(`run-${res.body.puzzleId}-llm-openai-${trialNumber}`);
     }
   });
 
-  // "Nothing gets queued when the model is rejected" is already covered
-  // precisely by strategy.service.spec.ts against a mocked queue — this
-  // Redis instance is shared with the live dev stack (a real worker
-  // container polls it too), so asserting queue emptiness here would be
-  // racing that worker rather than testing this endpoint. These e2e tests
-  // own the HTTP contract: an invalid model is rejected with 400.
-  it("POST /strategy/queue/llm-openai/:date rejects dispatch with no model", async () => {
-    const res = await request(app.getHttpServer()).post(`/strategy/queue/llm-openai/${TEST_DATE}`);
-
-    expect(res.status).toBe(400);
-    expect(res.body.message).toContain("A 'model' is required");
-  });
-
-  it("POST /strategy/queue/llm-openai/:date rejects dispatch with an unsupported model", async () => {
+  it("POST /dispatch/model/:modelName/:date rejects an unknown or unsupported model", async () => {
     const res = await request(app.getHttpServer()).post(
-      `/strategy/queue/llm-openai/${TEST_DATE}?model=gpt-3.5-turbo`,
+      `/dispatch/model/gpt-3.5-turbo/${TEST_DATE}`,
     );
 
     expect(res.status).toBe(400);
     expect(res.body.message).toContain("is not a supported model");
+  });
+
+  it("POST /dispatch/model/:modelName/runs/:n queues n randomly chosen unrun puzzle dates for the model", async () => {
+    // gpt-5-nano is a real supported model (see the catalog test above) but
+    // hasn't been dispatched anywhere else in this suite, so any puzzle date
+    // it comes back with is fair game — selection is random, so the test
+    // can't assume which date gets picked, only that exactly one does.
+    const res = await request(app.getHttpServer()).post("/dispatch/model/gpt-5-nano/runs/1");
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({
+      strategyName: "llm-openai",
+      modelName: "gpt-5-nano",
+    });
+    expect(res.body.dates).toHaveLength(1);
+
+    const puzzle = await dataSource
+      .getRepository(Puzzle)
+      .findOneByOrFail({ date: res.body.dates[0] });
+    for (const trialNumber of [1, 2, 3, 4]) {
+      await llmOpenAIQueue.remove(`run-${puzzle.id}-llm-openai-${trialNumber}`);
+    }
+  });
+
+  it("POST /dispatch/model/:modelName/runs/:n rejects when fewer than n unrun dates exist", async () => {
+    const res = await request(app.getHttpServer()).post(
+      "/dispatch/model/gpt-5-nano/runs/1000000",
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain("puzzle date(s) exist");
   });
 
   it("GET /strategy/:strategy/puzzle/:date returns an empty run list", async () => {

@@ -44,8 +44,9 @@ Frontend "AI Assist" button
   └─ POST /api/diagnose ──► backend ──► POST /diagnose ──► orchestrator ──► default provider (openai)
 
 Frontend strategy panel (llm-openai / llm-ollama buttons)
-  └─ POST /strategy/queue/:strategy/:date?model=... ──► worker ──► POST /solve-assist ──► orchestrator ──► OpenAI or Ollama
-       (queues one new trial of `model` per call, up to LLM_TRIALS_PER_MODEL trials for that model)
+  └─ POST /dispatch/model/:model/:date ──► worker ──► POST /solve-assist ──► orchestrator ──► OpenAI or Ollama
+       (strategy is resolved from the model's SupportedModel row; queues one new trial of
+       `model` per call, up to LLM_TRIALS_PER_MODEL trials for that model)
 ```
 
 ## Getting Started
@@ -79,7 +80,7 @@ docker compose up
 | `http://localhost:4000/api/docs` | Swagger API docs |
 | `http://localhost:4000/admin/queues` | Bull Board queue dashboard (basic auth — `BULL_BOARD_USER` / `BULL_BOARD_PASS`, defaults `admin` / `bullboard`) |
 
-On first startup the worker fetches all historical puzzles and runs every deterministic and shuffle strategy on each (four deterministic runs plus `SHUFFLE_TRIALS` shuffle-smart trials and `SHUFFLE_TRIALS` shuffle-foolish trials). This can take a while for large backlogs. LLM strategies are never dispatched automatically — queue `llm-openai`/`llm-ollama` explicitly via `/strategy/queue` when you want to spend tokens.
+On first startup the worker fetches all historical puzzles and runs every deterministic and shuffle strategy on each (four deterministic runs plus `SHUFFLE_TRIALS` shuffle-smart trials and `SHUFFLE_TRIALS` shuffle-foolish trials). This can take a while for large backlogs. LLM strategies are never dispatched automatically, and `/dispatch/strategy` does not accept them either — dispatch a supported model explicitly via `/dispatch/model/:modelName/:date` when you want to spend tokens.
 
 ## Configuration
 
@@ -102,7 +103,7 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `PUZZLE_POPULATION_TZ` | `UTC` | Timezone for the puzzle population cron |
 | `PUZZLE_CACHE_DIR` | `/app/.puzzle-cache` | Directory used as a local cache of raw NYT puzzle payloads (bound to `./.puzzle-cache` on the host) |
 | `SHUFFLE_TRIALS` | `3` | Number of trials run per puzzle for each shuffle strategy — shuffle-smart and shuffle-foolish share this one value. shuffle-foolish keeps sampling (repeats included) with no duplicate limit until it solves |
-| `LLM_TRIALS_PER_MODEL` | `3` | Maximum number of independent trials a single LLM model may accumulate per puzzle. Applies per model, not per strategy run — `POST /strategy/queue/:strategy/:date` queues one new trial per call (rejecting once a model hits this cap), and a different model gets its own independent budget |
+| `LLM_TRIALS_PER_MODEL` | `3` | Maximum number of independent trials a single LLM model may accumulate per puzzle. Applies per model, not per strategy run — each LLM dispatch queues one new trial (rejecting once a model hits this cap), and a different model gets its own independent budget |
 | `LLM_MAX_DUPLICATE_GUESSES` | `10` | Maximum repeated groups an LLM run may propose before it ends with a `duplicate` status (applies to both `llm-openai` and `llm-ollama`) |
 | `LLM_MAX_MALFORMED_RESPONSES` | `3` | Maximum consecutive malformed LLM responses before a run ends with a `malformedResponse` status |
 | `LLM_MAX_MODEL_ERRORS` | `5` | Maximum consecutive transient model failures before a run ends with an `error` status |
@@ -125,7 +126,9 @@ Postgres and Redis connection settings (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PAS
 | `GET` | `/game/puzzle/today` | Today's puzzle |
 | `GET` | `/game/puzzle/:date` | Puzzle for a `YYYY-MM-DD` date |
 | `GET` | `/game/data/latest_date` | Most recent puzzle date |
-| `POST` | `/strategy/queue/:strategyName/:date` | Enqueue a strategy run (or `all`; `all` excludes the LLM strategies) |
+| `POST` | `/dispatch/strategy/:strategyName/:date` | Enqueue a strategy run (or `all`; the LLM strategies are not accepted) |
+| `POST` | `/dispatch/model/:modelName/:date` | Enqueue an LLM trial for a supported model — strategy is resolved from the model's `SupportedModel` row |
+| `POST` | `/dispatch/model/:modelName/runs/:n` | Enqueue `n` trials for a supported model, one on each of `n` randomly chosen puzzle dates that model hasn't run yet — rejects if fewer than `n` such dates exist |
 | `GET` | `/strategy/:strategyName/puzzle/:date` | All runs for a strategy — ordered guesses per trial |
 | `POST` | `/api/diagnose` | AI Assist — proxy to orchestrator (throttled to 5/min/IP) |
 | `GET` | `/health` | Liveness/readiness probe (503 when the DB is down) |

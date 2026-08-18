@@ -896,6 +896,64 @@ describe("StrategyService", () => {
     });
   });
 
+  describe("findUnrunPuzzleDatesForModel", () => {
+    function mockUnrunPuzzleQuery(rawRows: unknown[]) {
+      const qb = {
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue(rawRows),
+      };
+      mockPuzzleRepo.createQueryBuilder.mockReturnValue(qb);
+      return qb;
+    }
+
+    it("should return randomly ordered unrun puzzle dates for the strategy/model pair", async () => {
+      const qb = mockUnrunPuzzleQuery([
+        { puzzleId: 10, date: "2024-01-01" },
+        { puzzleId: 11, date: "2024-01-02" },
+      ]);
+
+      const result = await service.findUnrunPuzzleDatesForModel(
+        "llm-openai",
+        "gpt-4.1-nano-2025-04-14",
+        2,
+      );
+
+      expect(result).toEqual([
+        { puzzleId: 10, date: "2024-01-01" },
+        { puzzleId: 11, date: "2024-01-02" },
+      ]);
+      expect(mockPuzzleRepo.createQueryBuilder).toHaveBeenCalledWith("puzzle");
+      // Cast to text for the same reason as getRunHistory's puzzle.date cast.
+      expect(qb.addSelect).toHaveBeenCalledWith("puzzle.date::text", "date");
+      expect(qb.where).toHaveBeenCalledWith(expect.stringContaining("NOT EXISTS"), {
+        strategyName: "llm-openai",
+        modelName: "gpt-4.1-nano-2025-04-14",
+      });
+      expect(qb.orderBy).toHaveBeenCalledWith("RANDOM()");
+      expect(qb.limit).toHaveBeenCalledWith(2);
+    });
+
+    it("should return fewer rows than requested when fewer eligible puzzles exist", async () => {
+      mockUnrunPuzzleQuery([{ puzzleId: 10, date: "2024-01-01" }]);
+
+      const result = await service.findUnrunPuzzleDatesForModel("llm-openai", "gpt-5-nano", 5);
+
+      expect(result).toEqual([{ puzzleId: 10, date: "2024-01-01" }]);
+    });
+
+    it("should return an empty array when every puzzle has already been run by this model", async () => {
+      mockUnrunPuzzleQuery([]);
+
+      const result = await service.findUnrunPuzzleDatesForModel("llm-openai", "gpt-5-nano", 3);
+
+      expect(result).toEqual([]);
+    });
+  });
+
   describe("getLeaderboard", () => {
     function mockGuessCounts(rows: { strategyRunId: number; count: string }[]) {
       mockGuessRepo.createQueryBuilder.mockReturnValue({

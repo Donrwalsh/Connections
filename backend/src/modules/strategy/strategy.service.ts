@@ -197,6 +197,48 @@ export class StrategyService {
   }
 
   /**
+   * `limit` randomly chosen puzzle dates that have no StrategyRun row at all
+   * for (strategyName, modelName) — i.e. this model has never been
+   * dispatched against them. Backs the bulk /dispatch/model/:modelName/runs/:n
+   * endpoint, which needs to pick fresh puzzles for a model without the
+   * caller naming dates by hand. Random rather than oldest/newest-first so
+   * repeated bulk-dispatch calls sample coverage across the whole puzzle
+   * history instead of always advancing through it in the same order.
+   *
+   * A puzzle with only a *queued* (not yet started) job for this model still
+   * counts as unrun here, since no StrategyRun row exists for it yet — two
+   * bulk-dispatch calls made before a worker drains the queue can therefore
+   * both select the same puzzle. That mirrors the existing race in
+   * triggerNextLlmTrial/triggerStrategyRuns and isn't specific to this query.
+   */
+  async findUnrunPuzzleDatesForModel(
+    strategyName: string,
+    modelName: string,
+    limit: number,
+  ): Promise<{ puzzleId: number; date: string }[]> {
+    const rows = await this.puzzleRepo
+      .createQueryBuilder("puzzle")
+      .select("puzzle.id", "puzzleId")
+      // Cast to text — see the identical cast in getRunHistory: getRawMany()
+      // bypasses Puzzle.date's entity-level string transformer.
+      .addSelect("puzzle.date::text", "date")
+      .where(
+        `NOT EXISTS (
+          SELECT 1 FROM "StrategyRun" run
+          WHERE run."puzzleId" = puzzle.id
+            AND run."strategyName" = :strategyName
+            AND run."modelName" = :modelName
+        )`,
+        { strategyName, modelName },
+      )
+      .orderBy("RANDOM()")
+      .limit(limit)
+      .getRawMany<{ puzzleId: number; date: string }>();
+
+    return rows.map((row) => ({ puzzleId: Number(row.puzzleId), date: row.date }));
+  }
+
+  /**
    * Queues a single new trial for an LLM strategy + model. The
    * LLM_TRIALS_PER_MODEL cap (llmMaxTrialsPerModel) applies per model, not
    * per strategy run as a whole — so 'llm-openai' can accumulate up to the

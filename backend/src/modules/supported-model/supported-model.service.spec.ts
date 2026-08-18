@@ -93,6 +93,40 @@ describe("SupportedModelService", () => {
     });
   });
 
+  describe("resolveSupportedStrategy", () => {
+    it("should return the strategy name for a model supported under exactly one strategy", async () => {
+      mockRepo.find.mockResolvedValueOnce([
+        { strategyName: "llm-openai", modelName: "gpt-4.1-nano-2025-04-14", supported: true },
+      ]);
+
+      const result = await service.resolveSupportedStrategy("gpt-4.1-nano-2025-04-14");
+
+      expect(result).toBe("llm-openai");
+      expect(mockRepo.find).toHaveBeenCalledWith({
+        where: { modelName: "gpt-4.1-nano-2025-04-14", supported: true },
+      });
+    });
+
+    it("should throw when no supported row exists for the model", async () => {
+      mockRepo.find.mockResolvedValueOnce([]);
+
+      await expect(service.resolveSupportedStrategy("gpt-3.5-turbo")).rejects.toThrow(
+        new BadRequestException("Model 'gpt-3.5-turbo' is not a supported model."),
+      );
+    });
+
+    it("should throw when the model is supported under more than one strategy", async () => {
+      mockRepo.find.mockResolvedValueOnce([
+        { strategyName: "llm-openai", modelName: "shared-model", supported: true },
+        { strategyName: "llm-ollama", modelName: "shared-model", supported: true },
+      ]);
+
+      await expect(service.resolveSupportedStrategy("shared-model")).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+  });
+
   describe("findAll", () => {
     it("should return every row, ordered by id, regardless of supported status", async () => {
       const rows = [

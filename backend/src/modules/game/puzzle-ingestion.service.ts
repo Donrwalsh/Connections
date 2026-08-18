@@ -237,12 +237,11 @@ export class PuzzleIngestionService {
   /**
    * Queues one job per (strategy, trial) for every automatic strategy — the
    * deterministic ones plus shuffle-smart/shuffle-foolish — on the freshly
-   * inserted puzzle. LLM strategies are deliberately never dispatched here:
-   * they're triggered by hand via /strategy/queue, so ingestion never spends
-   * LLM tokens or needs a SupportedModel to guess a default from. Uses the
-   * same deterministic job ids as the /strategy/queue endpoints, so a re-run
-   * of ingestion collapses onto the existing jobs instead of duplicating
-   * them.
+   * inserted puzzle. LLM strategies are deliberately never dispatched here,
+   * so ingestion never spends LLM tokens or needs a SupportedModel to guess
+   * a default from. Uses the same deterministic job ids as the
+   * /dispatch/strategy endpoint, so a re-run of ingestion collapses onto the
+   * existing jobs instead of duplicating them.
    *
    * Best-effort: a transient queue failure must not abort the multi-day
    * ingestion loop (the loop would be retried by BullMQ, and the already-

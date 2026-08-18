@@ -25,9 +25,9 @@ export function isLlmStrategy(strategyName: string): boolean {
 }
 
 /**
- * Strategies queued by the bulk 'all' queue endpoint and by puzzle ingestion.
- * Deliberately excludes the LLM strategies, which cost real tokens — those
- * are only ever dispatched by hand via /strategy/queue/:name/:date.
+ * Strategies queued by the bulk 'all' dispatch endpoint and by puzzle
+ * ingestion. Deliberately excludes the LLM strategies, which cost real
+ * tokens and are not dispatched by /dispatch/strategy/:name/:date.
  */
 export const AUTOMATIC_STRATEGIES: readonly string[] = SUPPORTED_STRATEGIES.filter(
   (strategyName) => !isLlmStrategy(strategyName),
@@ -201,10 +201,10 @@ export function llmTemperature(env: NodeJS.ProcessEnv = process.env): number {
  *
  * For LLM strategies this would bulk-create 1..llmMaxTrialsPerModel() trials
  * for a single model in one shot — the per-model cap in full, not a partial
- * slice, so it's only correct for a single model at a time. The
- * /strategy/queue endpoint, where callers can name a different model per
- * request, instead dispatches one trial per call and tracks each model's
- * count separately (see StrategyService.triggerStrategyRuns).
+ * slice, so it's only correct for a single model at a time. LLM dispatch
+ * instead goes through StrategyService.triggerStrategyRuns one call per
+ * trial, naming a model each time and tracking each model's count
+ * separately.
  */
 export function strategyTrialNumbers(
   strategyName: string,

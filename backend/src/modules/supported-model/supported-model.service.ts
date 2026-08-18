@@ -48,6 +48,31 @@ export class SupportedModelService {
   }
 
   /**
+   * Resolves a bare model name to the one strategy it's configured and
+   * currently supported under — used by dispatch routes that take only a
+   * model name (see DispatchController) and need to know which strategy
+   * queue to dispatch it on. Throws if the model is unknown/unsupported, or
+   * if it's configured as supported under more than one strategy, since
+   * there'd then be no single correct queue to pick.
+   */
+  async resolveSupportedStrategy(modelName: string): Promise<string> {
+    const rows = await this.repo.find({ where: { modelName, supported: true } });
+
+    if (rows.length === 0) {
+      throw new BadRequestException(`Model '${modelName}' is not a supported model.`);
+    }
+
+    if (rows.length > 1) {
+      throw new BadRequestException(
+        `Model '${modelName}' is ambiguous — it is configured as supported under multiple` +
+          ` strategies (${rows.map((row) => row.strategyName).join(", ")}).`,
+      );
+    }
+
+    return rows[0].strategyName;
+  }
+
+  /**
    * The full model catalog, every row regardless of `supported` — a model
    * that's since been marked unsupported can still have real historical runs
    * that need to resolve to *something* (e.g. the leaderboard's per-model
