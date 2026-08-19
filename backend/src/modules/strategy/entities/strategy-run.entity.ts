@@ -5,6 +5,7 @@ import {
   ManyToOne,
   OneToMany,
   Unique,
+  Index,
   CreateDateColumn,
   UpdateDateColumn,
   JoinColumn,
@@ -37,6 +38,11 @@ export const TERMINAL_STATUSES: ReadonlySet<StrategyRunStatus> = new Set([
   "strategyName",
   "trialNumber",
 ])
+// Backs countTodayDispatchByModel / countInFlightByModel's
+// (strategyName, modelName [, startedAt]) filters, which run on every
+// free-tier dispatch tick and would otherwise scan the whole table.
+@Index("IDX_StrategyRun_strategyName_modelName", ["strategyName", "modelName"])
+@Index("IDX_StrategyRun_strategyName_startedAt", ["strategyName", "startedAt"])
 export class StrategyRun {
   @PrimaryGeneratedColumn()
   id: number;
