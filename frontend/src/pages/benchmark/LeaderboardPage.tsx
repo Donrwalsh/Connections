@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery, useQueries } from "@tanstack/react-query";
 import { FreeTierBudgetWidget } from "../../components/benchmark/FreeTierBudgetWidget";
 import { HeroHeader } from "../../components/benchmark/HeroHeader";
 import { MetricSelector } from "../../components/benchmark/MetricSelector";
@@ -6,9 +7,7 @@ import { StatusStrip } from "../../components/benchmark/StatusStrip";
 import { StrategyTable, type FreeTierModelSets } from "../../components/benchmark/StrategyTable";
 import { fetchFreeTierUsage, fetchLeaderboard } from "../../data/benchmark/api";
 import type { LeaderboardMetricKey } from "../../data/benchmark/metrics";
-import type { Leaderboard, LeaderboardRow } from "../../data/benchmark/types";
-
-const EMPTY_FREE_TIER_MODELS: FreeTierModelSets = { flagship: new Set(), mini: new Set() };
+import type { LeaderboardRow } from "../../data/benchmark/types";
 
 /** Total USD cost (row.totalCostUsd, which is already all-time — not
  * today-scoped like the token budget) across every LLM row whose model
@@ -28,48 +27,31 @@ function sumSpendUsd(llmRows: LeaderboardRow[] | null, models: Set<string>): num
  * gets a row once it has an actual run — see GET /strategy/leaderboard.
  * Rows navigate to /leaderboard/:id. */
 export function LeaderboardPage() {
-  const [leaderboard, setLeaderboard] = useState<Leaderboard | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [metricKey, setMetricKey] = useState<LeaderboardMetricKey>("successRate");
-  const [freeTierModels, setFreeTierModels] = useState<FreeTierModelSets>(EMPTY_FREE_TIER_MODELS);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    setIsLoading(true);
-    setError(null);
+  const {
+    data: leaderboard,
+    isLoading,
+    error: queryError,
+  } = useQuery({
+    queryKey: ["leaderboard"],
+    queryFn: ({ signal }) => fetchLeaderboard(signal),
+  });
+  const error = queryError instanceof Error ? queryError.message : null;
 
-    fetchLeaderboard(controller.signal)
-      .then((data) => {
-        setLeaderboard(data);
-        setIsLoading(false);
-      })
-      .catch((err: unknown) => {
-        if (err instanceof Error && err.name === "AbortError") return;
-        setError(err instanceof Error ? err.message : "Failed to load leaderboard");
-        setIsLoading(false);
-      });
-
-    return () => controller.abort();
-  }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-
-    // Best-effort: which models belong to which free tier is only used for
-    // a small badge, so a failed fetch here just leaves rows unbadged rather
-    // than surfacing a page-level error.
-    Promise.all([
-      fetchFreeTierUsage("flagship", controller.signal),
-      fetchFreeTierUsage("mini", controller.signal),
-    ])
-      .then(([flagship, mini]) => {
-        setFreeTierModels({ flagship: new Set(flagship.models), mini: new Set(mini.models) });
-      })
-      .catch(() => {});
-
-    return () => controller.abort();
-  }, []);
+  // Best-effort: which models belong to which free tier is only used for a
+  // small badge, so a failed fetch here just leaves rows unbadged rather
+  // than surfacing a page-level error (see combine below).
+  const freeTierModels = useQueries({
+    queries: (["flagship", "mini"] as const).map((tier) => ({
+      queryKey: ["free-tier-usage", tier],
+      queryFn: ({ signal }: { signal: AbortSignal }) => fetchFreeTierUsage(tier, signal),
+    })),
+    combine: (results): FreeTierModelSets => ({
+      flagship: new Set(results[0].data?.models ?? []),
+      mini: new Set(results[1].data?.models ?? []),
+    }),
+  });
 
   const allRows = leaderboard ? [...leaderboard.deterministic, ...leaderboard.llm] : [];
   const active = allRows.reduce((sum, row) => sum + row.progress.active, 0);
