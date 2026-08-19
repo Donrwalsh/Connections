@@ -21,10 +21,10 @@ export class SupportedModel {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ type: "varchar" })
+  @Column({ type: "text" })
   strategyName: string;
 
-  @Column({ type: "varchar" })
+  @Column({ type: "text" })
   modelName: string;
 
   @Column({ type: "boolean", default: true })
