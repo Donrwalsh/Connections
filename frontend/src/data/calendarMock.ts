@@ -6,7 +6,30 @@
 // Swap isDateInRange / the month helpers for a real coverage lookup when the
 // endpoint lands — the popover component should not need to change shape.
 
-export const CALENDAR_MIN_DATE = "2023-06-12";
+// Matches the backend's NYT_CONNECTIONS_ORIGIN_DATE fallback, but nothing
+// enforced that agreement — see initCalendarRange, which fetches the real
+// value from GET /game/data/earliest_date and keeps this in sync going
+// forward. `let` (not `const`) so that reassignment is visible to every
+// importer via ES module live bindings, without threading async state
+// through CalendarPopover/Header.
+export let CALENDAR_MIN_DATE = "2023-06-12";
+
+/** Fetches the backend's actual earliest-puzzle date once and updates
+ * CALENDAR_MIN_DATE to match. Fire-and-forget, called once at app startup
+ * (see main.tsx): best-effort, so a failed fetch just leaves the fallback
+ * above in place rather than blocking the calendar on it. */
+export async function initCalendarRange(): Promise<void> {
+  try {
+    const res = await fetch(`${import.meta.env.VITE_API_URL}/game/data/earliest_date`);
+    if (!res.ok) return;
+    const date: unknown = await res.json();
+    if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      CALENDAR_MIN_DATE = date;
+    }
+  } catch {
+    // Best-effort — keep the fallback.
+  }
+}
 
 /** Today's date as a UTC ISO string — matches the backend's getTodaysPuzzle. */
 export function todayUtcString(): string {

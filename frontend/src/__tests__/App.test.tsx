@@ -1,8 +1,25 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import type { Category } from "../data/types";
+
+function renderApp(initialEntries: string[]) {
+  // Fresh, retry-disabled client per render — matches the app's own
+  // QueryClientProvider setup in main.tsx without cross-test cache bleed.
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={initialEntries}>
+        <App />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
 
 const categories: Category[] = [
   {
@@ -74,11 +91,7 @@ describe("App Component", () => {
   it("renders today's puzzle on the index route", async () => {
     setupFetch();
 
-    render(
-      <MemoryRouter initialEntries={["/"]}>
-        <App />
-      </MemoryRouter>,
-    );
+    renderApp(["/"]);
 
     expect(await screen.findByText("Monday, January 15, 2024")).toBeInTheDocument();
   });
@@ -86,11 +99,7 @@ describe("App Component", () => {
   it("renders the puzzle for a specific date route", async () => {
     setupFetch();
 
-    render(
-      <MemoryRouter initialEntries={["/puzzle/2024-01-15"]}>
-        <App />
-      </MemoryRouter>,
-    );
+    renderApp(["/puzzle/2024-01-15"]);
 
     expect(await screen.findByText("Monday, January 15, 2024")).toBeInTheDocument();
   });
@@ -145,24 +154,18 @@ describe("App leaderboard routes", () => {
       }),
     );
 
-    render(
-      <MemoryRouter initialEntries={["/leaderboard"]}>
-        <App />
-      </MemoryRouter>,
-    );
+    renderApp(["/leaderboard"]);
 
     expect((await screen.findAllByText("Connections Lab")).length).toBeGreaterThan(0);
     expect(await screen.findByRole("heading", { name: "Deterministic & Shuffle" })).toBeInTheDocument();
   });
 
-  it("renders a strategy's puzzle list at /leaderboard/:strategyId", () => {
-    render(
-      <MemoryRouter initialEntries={["/leaderboard/alphabetical"]}>
-        <App />
-      </MemoryRouter>,
-    );
+  it("renders a strategy's puzzle list at /leaderboard/:strategyId", async () => {
+    renderApp(["/leaderboard/alphabetical"]);
 
-    expect(screen.getByRole("heading", { name: "Alphabetical" })).toBeInTheDocument();
+    // StrategyPuzzlePage is lazy-loaded (see App.tsx), so it's only present
+    // after Suspense resolves the dynamic import — not synchronously.
+    expect(await screen.findByRole("heading", { name: "Alphabetical" })).toBeInTheDocument();
   });
 
   it("renders the single-run visualizer at /leaderboard/:strategyId/:puzzleId", async () => {
@@ -208,11 +211,7 @@ describe("App leaderboard routes", () => {
       }),
     );
 
-    render(
-      <MemoryRouter initialEntries={["/leaderboard/alphabetical/1"]}>
-        <App />
-      </MemoryRouter>,
-    );
+    renderApp(["/leaderboard/alphabetical/1"]);
 
     expect(await screen.findByRole("heading", { name: "Guess chain" })).toBeInTheDocument();
   });

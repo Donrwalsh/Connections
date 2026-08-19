@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FreeTierUsage, Leaderboard, LeaderboardRow } from "../../../data/benchmark/types";
 import { LeaderboardPage } from "../LeaderboardPage";
@@ -104,13 +105,22 @@ function stubFetch(data: Leaderboard, ok = true) {
 }
 
 function renderLeaderboard() {
+  // A fresh, retry-disabled client per test: react-query's default retry
+  // behavior would otherwise keep the "fetch fails" test's error hidden
+  // behind several rounds of exponential-backoff retries.
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+
   render(
-    <MemoryRouter initialEntries={["/leaderboard"]}>
-      <Routes>
-        <Route path="/leaderboard" element={<LeaderboardPage />} />
-        <Route path="/leaderboard/:strategyId" element={<div>strategy-details</div>} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={["/leaderboard"]}>
+        <Routes>
+          <Route path="/leaderboard" element={<LeaderboardPage />} />
+          <Route path="/leaderboard/:strategyId" element={<div>strategy-details</div>} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 

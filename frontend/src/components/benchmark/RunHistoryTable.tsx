@@ -1,5 +1,11 @@
 import { useNavigate } from "react-router-dom";
-import { formatCostUsd, formatDuration, formatGuessCount, formatTimestamp } from "../../data/benchmark/metrics";
+import {
+  computeDurationMs,
+  formatCostUsd,
+  formatDuration,
+  formatGuessCount,
+  formatTimestamp,
+} from "../../data/benchmark/metrics";
 import { formatDateLabel } from "../../data/benchmark/mockData";
 import { runStatusLabel, runStatusTone } from "../../data/benchmark/runStatus";
 import type { RunHistoryRow, RunHistorySortBy, RunHistorySortDir } from "../../data/benchmark/types";
@@ -71,10 +77,7 @@ export function RunHistoryTable({
       </thead>
       <tbody>
         {rows.map((row) => {
-          const durationMs =
-            row.finishedAt === null
-              ? null
-              : new Date(row.finishedAt).getTime() - new Date(row.startedAt).getTime();
+          const durationMs = computeDurationMs(row.startedAt, row.finishedAt);
 
           return (
             <tr

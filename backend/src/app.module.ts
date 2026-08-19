@@ -1,11 +1,13 @@
 import { Module } from "@nestjs/common";
-import { APP_GUARD } from "@nestjs/core";
-import { ConfigModule } from "@nestjs/config";
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
+import { ConfigModule, ConfigService } from "@nestjs/config";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
-import { loadEnv } from "./config/env";
+import { AppEnv, loadEnv } from "./config/env";
+import { AllExceptionsFilter } from "./common/all-exceptions.filter";
+import { LoggingInterceptor } from "./common/logging.interceptor";
 import { GameModule } from "./modules/game/game.module";
 import { AnswerGroup } from "./modules/game/entities/answer-group.entity";
 import { GroupMember } from "./modules/game/entities/group-member.entity";
@@ -28,28 +30,36 @@ import { FreeTierDispatchState } from "./modules/free-tier-dispatch/entities/fre
       validate: loadEnv,
     }),
 
-    TypeOrmModule.forRoot({
-      type: "postgres",
-      host: process.env.DB_HOST,
-      port: Number(process.env.DB_PORT),
-      username: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME,
-      entities: [
-        Puzzle,
-        AnswerGroup,
-        GroupMember,
-        StrategyRun,
-        Guess,
-        LlmProposal,
-        SolvePrompt,
-        SupportedModel,
-        ModelPrice,
-        FreeTierDispatchState,
-      ],
-      synchronize: false,
-      migrations: [__dirname + "/migrations/*{.ts,.js}"],
-      migrationsRun: true,
+    // forRootAsync + ConfigService (not forRoot reading process.env
+    // directly) so the DB connection uses the same validated/defaulted
+    // values as everywhere else — loadEnv above is the one place those
+    // defaults (e.g. DB_HOST ?? "localhost") are defined.
+    TypeOrmModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService<AppEnv, true>) => ({
+        type: "postgres",
+        host: config.get("DB_HOST", { infer: true }),
+        port: config.get("DB_PORT", { infer: true }),
+        username: config.get("DB_USER", { infer: true }),
+        password: config.get("DB_PASSWORD", { infer: true }),
+        database: config.get("DB_NAME", { infer: true }),
+        entities: [
+          Puzzle,
+          AnswerGroup,
+          GroupMember,
+          StrategyRun,
+          Guess,
+          LlmProposal,
+          SolvePrompt,
+          SupportedModel,
+          ModelPrice,
+          FreeTierDispatchState,
+        ],
+        synchronize: false,
+        migrations: [__dirname + "/migrations/*{.ts,.js}"],
+        migrationsRun: true,
+      }),
     }),
 
     // Sensible global default; the OpenAI-backed /api/diagnose route is
@@ -67,6 +77,14 @@ import { FreeTierDispatchState } from "./modules/free-tier-dispatch/entities/fre
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_FILTER,
+      useClass: AllExceptionsFilter,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: LoggingInterceptor,
     },
   ],
 })

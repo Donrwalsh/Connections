@@ -288,20 +288,26 @@ export class PuzzleIngestionService {
       }
       const puzzleId = puzzle.identifiers[0].id;
 
-      for (const [level, category] of data.categories.entries()) {
-        const group = await manager.getRepository(AnswerGroup).save({
+      // One batched insert for all 4 groups (save() returns them in input
+      // order, with generated ids populated), then one batched insert for
+      // every group's members across all 4 groups — 2 round trips instead
+      // of 8 (a save() per category, plus a members save() per category).
+      const groups = await manager.getRepository(AnswerGroup).save(
+        data.categories.map((category, level) => ({
           puzzle: { id: puzzleId } as Puzzle,
           level,
           group_name: category.title,
-        });
+        })),
+      );
 
-        const members = category.cards.map((card) => ({
-          group: { id: group.id } as AnswerGroup,
+      const members = data.categories.flatMap((category, level) =>
+        category.cards.map((card) => ({
+          group: { id: groups[level]!.id } as AnswerGroup,
           word: card.content,
           position: card.position,
-        }));
-        await manager.getRepository(GroupMember).save(members);
-      }
+        })),
+      );
+      await manager.getRepository(GroupMember).save(members);
 
       this.logger.log(`Inserted puzzle for ${formattedDate}`);
       return puzzleId;

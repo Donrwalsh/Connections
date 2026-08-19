@@ -316,6 +316,31 @@ describe("GameService", () => {
     });
   });
 
+  describe("getEarliestDate", () => {
+    it("should return the earliest puzzle date from the raw query result", async () => {
+      mockPuzzleRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValueOnce({
+          earliest_date: "2023-06-12",
+        }),
+      });
+
+      await expect(service.getEarliestDate()).resolves.toBe("2023-06-12");
+      expect(mockPuzzleRepo.createQueryBuilder).toHaveBeenCalledWith("puzzle");
+    });
+
+    it("should fall back to the NYT origin date when no puzzles exist", async () => {
+      mockPuzzleRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValueOnce({
+          earliest_date: null,
+        }),
+      });
+
+      await expect(service.getEarliestDate()).resolves.toBe("2023-06-12");
+    });
+  });
+
   describe("isValidYYYYMMDD", () => {
     it("should accept valid calendar dates", () => {
       expect(service.isValidYYYYMMDD("2024-02-29")).toBe(true); // leap year

@@ -87,6 +87,13 @@ export function formatGuessCount(value: number): string {
   return Math.round(value).toLocaleString();
 }
 
+/** Wall-clock run duration, or null if the run hasn't finished yet — shared
+ * by RunHistoryTable and toRunRecord (api.ts) so the same finishedAt/
+ * startedAt diff isn't reimplemented in both places. */
+export function computeDurationMs(startedAt: string, finishedAt: string | null): number | null {
+  return finishedAt === null ? null : new Date(finishedAt).getTime() - new Date(startedAt).getTime();
+}
+
 export function formatDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;

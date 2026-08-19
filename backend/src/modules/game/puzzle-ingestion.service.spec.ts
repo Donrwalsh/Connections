@@ -80,7 +80,18 @@ describe("PuzzleIngestionService", () => {
         returning: jest.fn().mockReturnThis(),
         execute: mockExecute,
       }),
-      save: jest.fn().mockResolvedValue({ id: 1 }),
+      // insertPuzzle now saves groups/members as batched arrays (one save()
+      // call each, instead of one per category) — mirror TypeORM's real
+      // save() behavior of returning saved rows in input order with
+      // generated ids populated, so groups[level].id resolves in the
+      // service under test.
+      save: jest.fn((input: unknown) =>
+        Promise.resolve(
+          Array.isArray(input)
+            ? input.map((item, i) => ({ ...(item as object), id: i + 1 }))
+            : { ...(input as object), id: 1 },
+        ),
+      ),
     };
 
     const mockManager = {
@@ -358,11 +369,13 @@ describe("PuzzleIngestionService", () => {
       ).insertPuzzle("2024-01-02", PUZZLE_DATA);
 
       expect(result).toBe(42);
-      expect(mockRepo.save).toHaveBeenNthCalledWith(1, {
-        puzzle: { id: 42 },
-        level: 0,
-        group_name: "Fruits",
-      });
+      expect(mockRepo.save).toHaveBeenNthCalledWith(1, [
+        {
+          puzzle: { id: 42 },
+          level: 0,
+          group_name: "Fruits",
+        },
+      ]);
       expect(mockRepo.save).toHaveBeenNthCalledWith(2, [
         { group: { id: 1 }, word: "APPLE", position: 0 },
         { group: { id: 1 }, word: "BANANA", position: 1 },

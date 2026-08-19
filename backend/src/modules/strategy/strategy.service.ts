@@ -133,6 +133,15 @@ interface LeaderboardAccumulator {
 
 @Injectable()
 export class StrategyService {
+  // getLeaderboard aggregates the entire StrategyRun table in JS on every
+  // call (see its doc comment); a short TTL cache turns the common case
+  // (LeaderboardPage polled/reloaded repeatedly while dispatch cycles run in
+  // the background) into a single DB round trip per window instead of one
+  // per request, without needing explicit invalidation — a few seconds of
+  // staleness is fine for a dashboard.
+  private static readonly LEADERBOARD_CACHE_TTL_MS = 15_000;
+  private leaderboardCache: { expiresAt: number; value: LeaderboardDto } | null = null;
+
   constructor(
     @Inject(STRATEGY_QUEUE) private queue: Queue,
     @Inject(LLM_OPENAI_QUEUE) private readonly llmOpenAIQueue: Queue,
@@ -422,6 +431,11 @@ export class StrategyService {
    * should move to a grouped SQL aggregate instead.
    */
   async getLeaderboard(): Promise<LeaderboardDto> {
+    const cached = this.leaderboardCache;
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+
     const [runs, guessCountRows, tokenRows, models, queuedCounts, totalPuzzles] = await Promise.all([
       this.strategyRunRepo.find({
         select: {
@@ -586,10 +600,17 @@ export class StrategyService {
 
     rows.sort((a, b) => a.id.localeCompare(b.id));
 
-    return {
+    const result: LeaderboardDto = {
       deterministic: rows.filter((row) => row.kind === "deterministic"),
       llm: rows.filter((row) => row.kind === "llm"),
     };
+
+    this.leaderboardCache = {
+      expiresAt: Date.now() + StrategyService.LEADERBOARD_CACHE_TTL_MS,
+      value: result,
+    };
+
+    return result;
   }
 
   /**

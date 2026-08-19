@@ -24,10 +24,21 @@ export interface SolveAssistResult {
 const SOLVE_ASSIST_TEMPERATURE = 0.7;
 const GROUP_SIZE = 4;
 
+// Some models (Mistral especially) don't put their reasoning in the
+// scratchpad the prompt asks for — they append it straight onto the
+// "Words:" line instead, e.g. "LOOK, TOUCH, SIGHT, SMELL (these are all
+// senses)". Left in, that either glues onto the 4th word or, when the aside
+// itself contains commas, inflates the line past 4 tokens and gets the
+// whole group discarded. Stripping it before splitting on commas fixes both
+// cases — mirrors llm-strategy-runner.service.ts's WORDS_PARENTHETICAL_RE
+// on the backend, which had this same fix (see commit cdd6b22) but this
+// parser didn't.
+const WORDS_PARENTHETICAL_RE = /\([^)]*\)/g;
+
 /**
  * Extracts structured group proposals (category + word list) from the ### GROUPS section.
  */
-function parseGroupProposals(responseText: string): ParsedGroupProposal[] {
+export function parseGroupProposals(responseText: string): ParsedGroupProposal[] {
   const proposals: ParsedGroupProposal[] = [];
   const groupBlockRegex =
     /Group\s+(\d+)[\s\S]*?Category:\s*([^\n]+)[\s\S]*?Words:\s*([^\n]+)/gi;
@@ -36,6 +47,7 @@ function parseGroupProposals(responseText: string): ParsedGroupProposal[] {
   while ((match = groupBlockRegex.exec(responseText)) !== null) {
     const category = match[2].trim();
     const words = match[3]
+      .replace(WORDS_PARENTHETICAL_RE, "")
       .split(",")
       .map((w) => w.replace(/[`*#-]/g, "").trim())
       .filter(Boolean);

@@ -89,7 +89,6 @@ export function Game({ puzzle }: GameProps) {
         }
 
         const result = await response.json();
-        console.log("Raw AI response:", result);
 
         // The backend responds with HTTP 200 even when the orchestrator
         // call failed or timed out — it reports that as

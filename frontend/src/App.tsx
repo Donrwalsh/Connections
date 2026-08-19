@@ -1,10 +1,25 @@
+import { lazy, Suspense } from "react";
 import { Routes, Route } from "react-router-dom";
 import { SiteLayout } from "./components/SiteLayout";
 import { PuzzlePage } from "./pages/PuzzlePage";
-import { LeaderboardPage } from "./pages/benchmark/LeaderboardPage";
-import { StrategyPuzzlePage } from "./pages/benchmark/StrategyPuzzlePage";
-import { PuzzleRunsPage } from "./pages/benchmark/PuzzleRunsPage";
 import "./App.css";
+
+// Lazy-loaded: the benchmark dashboard (and everything it pulls in —
+// tables, the guess-chain visualizer, budget widgets) is dead weight for a
+// player who just wants today's puzzle at "/", which needs PuzzlePage alone.
+const LeaderboardPage = lazy(() =>
+  import("./pages/benchmark/LeaderboardPage").then((m) => ({ default: m.LeaderboardPage })),
+);
+const StrategyPuzzlePage = lazy(() =>
+  import("./pages/benchmark/StrategyPuzzlePage").then((m) => ({ default: m.StrategyPuzzlePage })),
+);
+const PuzzleRunsPage = lazy(() =>
+  import("./pages/benchmark/PuzzleRunsPage").then((m) => ({ default: m.PuzzleRunsPage })),
+);
+
+function RouteFallback() {
+  return <p className="bench-muted">Loading…</p>;
+}
 
 function App() {
   return (
@@ -12,9 +27,30 @@ function App() {
       <Route element={<SiteLayout />}>
         <Route index element={<PuzzlePage />} />
         <Route path="puzzle/:date" element={<PuzzlePage />} />
-        <Route path="leaderboard" element={<LeaderboardPage />} />
-        <Route path="leaderboard/:strategyId" element={<StrategyPuzzlePage />} />
-        <Route path="leaderboard/:strategyId/:puzzleId" element={<PuzzleRunsPage />} />
+        <Route
+          path="leaderboard"
+          element={
+            <Suspense fallback={<RouteFallback />}>
+              <LeaderboardPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="leaderboard/:strategyId"
+          element={
+            <Suspense fallback={<RouteFallback />}>
+              <StrategyPuzzlePage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="leaderboard/:strategyId/:puzzleId"
+          element={
+            <Suspense fallback={<RouteFallback />}>
+              <PuzzleRunsPage />
+            </Suspense>
+          }
+        />
       </Route>
     </Routes>
   );

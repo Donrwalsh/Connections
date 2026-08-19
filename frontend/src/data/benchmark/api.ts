@@ -16,6 +16,7 @@ import type {
   StrategyRunListItem,
   SupportedModelRecord,
 } from "./types";
+import { computeDurationMs } from "./metrics";
 
 const apiUrl = (path: string) => `${import.meta.env.VITE_API_URL}${path}`;
 
@@ -37,6 +38,17 @@ export function fetchRunsForPuzzle(
   signal?: AbortSignal,
 ): Promise<StrategyRunListItem[]> {
   return fetchJson(`/strategy/${strategyName}/puzzle-id/${puzzleId}`, signal);
+}
+
+/** Same run list as fetchRunsForPuzzle, keyed by the puzzle's date instead of
+ * its numeric id — for callers (GuessSequencePanel) that only know the date
+ * at fetch time. */
+export function fetchRunsForStrategyDate(
+  strategyName: string,
+  date: string,
+  signal?: AbortSignal,
+): Promise<StrategyRunListItem[]> {
+  return fetchJson(`/strategy/${strategyName}/puzzle/${date}`, signal);
 }
 
 /** The puzzle's date, keyed by its numeric id — lets pages that only know a
@@ -113,33 +125,49 @@ export function fetchFreeTierDispatchStatus(
 
 const DETAIL_PAGE_SIZE = 200;
 
+/** Fetches every page of a paginated run-detail response and concatenates
+ * their guesses. Page 1 is needed first to learn the total page count, but
+ * the rest are fetched in parallel rather than one page-at-a-time — a
+ * deterministic run can hold ~2,400 guesses (12 pages at DETAIL_PAGE_SIZE),
+ * and awaiting each page sequentially before requesting the next turns that
+ * into 12 serial round trips instead of 2. */
+async function fetchAllRunDetailPages(
+  fetchPage: (page: number) => Promise<StrategyRunDetail>,
+): Promise<StrategyRunDetail> {
+  const first = await fetchPage(1);
+  const totalPages = Math.ceil(first.meta.total / first.meta.limit);
+  if (totalPages <= 1) return first;
+
+  const rest = await Promise.all(
+    Array.from({ length: totalPages - 1 }, (_, i) => fetchPage(i + 2)),
+  );
+
+  return { ...first, guesses: [...first.guesses, ...rest.flatMap((page) => page.guesses)] };
+}
+
 /** Full detail for one run (guesses plus, for LLM strategies, the
- * reconstructed prompt/proposal chain), keyed by the run's own id. The
- * detail endpoint paginates guesses (a deterministic run can hold ~2,400), so
- * this fetches every page and concatenates them — mirroring
- * GuessSequencePanel's fetchFullRunDetail, the existing precedent for this
- * exact pagination shape. */
-export async function fetchRunDetail(
-  runId: number,
+ * reconstructed prompt/proposal chain), keyed by the run's own id. */
+export function fetchRunDetail(runId: number, signal?: AbortSignal): Promise<StrategyRunDetail> {
+  return fetchAllRunDetailPages((page) =>
+    fetchJson<StrategyRunDetail>(`/strategy/run/${runId}?page=${page}&limit=${DETAIL_PAGE_SIZE}`, signal),
+  );
+}
+
+/** Same detail payload as fetchRunDetail, keyed by (strategyName, date,
+ * trialNumber) instead of runId — for GuessSequencePanel, which only knows
+ * the puzzle date and strategy (not the run's id) at fetch time. */
+export function fetchRunDetailByStrategyDate(
+  strategyName: string,
+  date: string,
+  trialNumber: number,
   signal?: AbortSignal,
 ): Promise<StrategyRunDetail> {
-  const fetchPage = (page: number) =>
+  return fetchAllRunDetailPages((page) =>
     fetchJson<StrategyRunDetail>(
-      `/strategy/run/${runId}?page=${page}&limit=${DETAIL_PAGE_SIZE}`,
+      `/strategy/${strategyName}/puzzle/${date}/run/${trialNumber}?page=${page}&limit=${DETAIL_PAGE_SIZE}`,
       signal,
-    );
-
-  const first = await fetchPage(1);
-  const guesses = [...first.guesses];
-  const totalPages = Math.ceil(first.meta.total / first.meta.limit);
-
-  for (let page = 2; page <= totalPages; page++) {
-    if (signal?.aborted) break;
-    const next = await fetchPage(page);
-    guesses.push(...next.guesses);
-  }
-
-  return { ...first, guesses };
+    ),
+  );
 }
 
 /** Adapts a live run-list item into the RunsTable component's existing
@@ -149,10 +177,7 @@ export async function fetchRunDetail(
  * it in for completed runs) — the real count is informative for
  * failed/duplicate runs too, and null only means "no guesses yet". */
 export function toRunRecord(item: StrategyRunListItem): RunRecord {
-  const durationMs =
-    item.finishedAt !== null
-      ? new Date(item.finishedAt).getTime() - new Date(item.startedAt).getTime()
-      : null;
+  const durationMs = computeDurationMs(item.startedAt, item.finishedAt);
 
   return {
     runId: item.id,

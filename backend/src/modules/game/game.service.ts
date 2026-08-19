@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException, OnModuleDestroy } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { Puzzle } from "./entities/puzzle.entity";
@@ -20,13 +20,39 @@ export interface PuzzleResponseDto {
 }
 
 @Injectable()
-export class GameService {
+export class GameService implements OnModuleDestroy {
   // Puzzles are inserted once by ingestion and never mutated, so a date-keyed
   // in-memory cache is safe and needs no invalidation.
   private static readonly PUZZLE_CACHE_TTL_MS = 86_400_000; // 24h
+  // A stale entry is otherwise only ever overwritten on its own next read
+  // (see getPuzzleByDate), never proactively removed — bounded today by the
+  // puzzle-date range, but with no eviction path if that range or the
+  // process's lifetime grows. This sweep is a backstop for that, not the
+  // primary invalidation mechanism.
+  private static readonly CACHE_SWEEP_INTERVAL_MS = 3_600_000; // 1h
   private readonly puzzleCache = new Map<string, { expiresAt: number; value: PuzzleResponseDto }>();
+  private readonly cacheSweepTimer: NodeJS.Timeout;
 
-  constructor(@InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>) {}
+  constructor(@InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>) {
+    this.cacheSweepTimer = setInterval(
+      () => this.evictExpiredCacheEntries(),
+      GameService.CACHE_SWEEP_INTERVAL_MS,
+    );
+    this.cacheSweepTimer.unref();
+  }
+
+  onModuleDestroy(): void {
+    clearInterval(this.cacheSweepTimer);
+  }
+
+  private evictExpiredCacheEntries(): void {
+    const now = Date.now();
+    for (const [date, entry] of this.puzzleCache) {
+      if (entry.expiresAt <= now) {
+        this.puzzleCache.delete(date);
+      }
+    }
+  }
 
   async puzzleDateToId(date: string): Promise<number> {
     const puzzle = await this.puzzleRepo.findOne({ where: { date } });
@@ -115,6 +141,18 @@ export class GameService {
     // Empty table: fall back to the NYT Connections origin date so callers
     // still have a sensible "first" puzzle date to anchor on.
     return result.latest_date ?? NYT_CONNECTIONS_ORIGIN_DATE;
+  }
+
+  // The real single source of truth for "oldest puzzle date" — the
+  // frontend's calendar range used to hardcode this as a duplicate literal
+  // (CALENDAR_MIN_DATE) with nothing keeping the two in sync; see
+  // calendarMock.ts's initCalendarRange, which now fetches this instead.
+  async getEarliestDate() {
+    const result = await this.puzzleRepo
+      .createQueryBuilder("puzzle")
+      .select("MIN(puzzle.date)", "earliest_date")
+      .getRawOne();
+    return result.earliest_date ?? NYT_CONNECTIONS_ORIGIN_DATE;
   }
 
   async getPuzzleByDate(date: string): Promise<PuzzleResponseDto> {

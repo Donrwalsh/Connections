@@ -5,6 +5,7 @@ import {
   ManyToOne,
   OneToMany,
   Unique,
+  Index,
   CreateDateColumn,
   UpdateDateColumn,
   JoinColumn,
@@ -37,6 +38,11 @@ export const TERMINAL_STATUSES: ReadonlySet<StrategyRunStatus> = new Set([
   "strategyName",
   "trialNumber",
 ])
+// Backs countTodayDispatchByModel / countInFlightByModel's
+// (strategyName, modelName [, startedAt]) filters, which run on every
+// free-tier dispatch tick and would otherwise scan the whole table.
+@Index("IDX_StrategyRun_strategyName_modelName", ["strategyName", "modelName"])
+@Index("IDX_StrategyRun_strategyName_startedAt", ["strategyName", "startedAt"])
 export class StrategyRun {
   @PrimaryGeneratedColumn()
   id: number;
@@ -48,7 +54,7 @@ export class StrategyRun {
   @JoinColumn({ name: "puzzleId" })
   puzzle: Puzzle;
 
-  @Column({ type: "varchar" })
+  @Column({ type: "text" })
   strategyName: string;
 
   // Distinguishes multiple runs of the same strategy on one puzzle. Always 0
@@ -74,7 +80,7 @@ export class StrategyRun {
   currentCombination: number[];
 
   // LLM strategy: the model that produced this run's guesses (e.g. "mistral")
-  @Column({ type: "varchar", nullable: true })
+  @Column({ type: "text", nullable: true })
   modelName: string | null;
 
   // LLM strategy: context window of the model in tokens
