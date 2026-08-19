@@ -189,6 +189,23 @@ export interface RunHistoryDto {
   meta: RunHistoryMetaDto;
 }
 
+// One row of GET /strategy/runs/recent: the most recent StrategyRun rows
+// across *every* strategy/model (unlike RunHistoryRowDto, which is scoped
+// to one strategy) — backs the Activity page's live feed. Deliberately
+// slimmer than RunHistoryRowDto (no guessCount/tokenCostUsd/
+// hadWordsParenthetical) since this is polled repeatedly.
+export interface RecentRunDto {
+  id: number;
+  puzzleId: number;
+  puzzleDate: string;
+  strategyName: string;
+  modelName: string | null;
+  trialNumber: number;
+  status: StrategyRunStatus;
+  startedAt: Date;
+  finishedAt: Date | null;
+}
+
 // The full allowlist entry for one model — lets a caller (e.g. the
 // leaderboard's per-model run page) recognize a real model it doesn't
 // otherwise know about and resolve which backend strategy it belongs to.

@@ -116,6 +116,7 @@
 .bench-free-tier__dispatch {
   display: flex;
   align-items: center;
+  gap: 0.5rem;
   min-height: 2rem;
 }
 
@@ -301,6 +302,32 @@
   cursor: not-allowed;
 }
 
+/* Filled-accent variant of .bench-sort-btn for a page's one primary action
+ * (e.g. "Enable Auto-Dispatch") — same pill shape/sizing, but a solid fill
+ * so it reads as the thing to click rather than blending in with the
+ * outlined sort/filter/pagination controls around it. Distinct from the
+ * accent-border "active/leading" treatment (DESIGN.md) — that marks state
+ * (top row, current tab); this marks an action. */
+.bench-btn-primary {
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.85rem;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.bench-btn-primary:hover {
+  opacity: 0.9;
+}
+
+.bench-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+
 .bench-filter {
   display: inline-flex;
   align-items: center;
@@ -341,6 +368,31 @@
   align-items: center;
   column-gap: 1rem;
   row-gap: 0.35rem;
+}
+
+/* Puts a page-level primary action (e.g. "Enable Auto-Dispatch") beside the
+ * title+description block instead of its own stacked row, so it doesn't eat
+ * extra vertical space — align-items: center centers it against the *whole*
+ * title-block's height (both lines), not just the title. Wraps below the
+ * title block on narrow screens rather than squeezing both onto one
+ * cramped line. */
+.bench-page-header__title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  column-gap: 1rem;
+  row-gap: 0.35rem;
+}
+
+.bench-page-header__title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.bench-page-header__title-row .bench-page-header__title {
+  margin-top: 0;
 }
 
 .bench-page-header__title {
@@ -560,4 +612,88 @@
 
 .bench-coverage-stub__title {
   margin: 0 0 0.25rem;
+}
+
+/* Free-tier dispatch modal (FreeTierDispatchModal) — a blocking dialog, not
+ * a positioned popover like the calendar, so styled separately from
+ * .calendar-popover even though both use the same --bg/--border/--shadow
+ * tokens. */
+.bench-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+.bench-modal {
+  width: 100%;
+  max-width: 24rem;
+  padding: 1.25rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background-color: var(--bg);
+  box-shadow: var(--shadow);
+}
+
+.bench-modal__title {
+  margin: 0 0 0.75rem;
+}
+
+.bench-modal__fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  border: none;
+}
+
+.bench-modal__fieldset legend {
+  width: 100%;
+  margin-bottom: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.bench-modal__radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.bench-modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.bench-modal__number {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-h);
+  font-size: 0.95rem;
+}
+
+.bench-modal__results {
+  margin: 0 0 0.75rem;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.bench-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }

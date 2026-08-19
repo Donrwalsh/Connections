@@ -133,18 +133,6 @@ afterEach(() => {
 });
 
 describe("LeaderboardPage", () => {
-  it("renders both free-tier budget widgets alongside the leaderboard", async () => {
-    stubFetch(leaderboard);
-    renderLeaderboard();
-
-    expect(await screen.findByText("12,000 / 250,000 used")).toBeInTheDocument();
-    expect(screen.getByText("238,000 tokens remaining today")).toBeInTheDocument();
-    expect(screen.getByText("500,000 / 2,500,000 used")).toBeInTheDocument();
-    expect(screen.getByText("2,000,000 tokens remaining today")).toBeInTheDocument();
-    expect(screen.getByText("Flagship daily tokens")).toBeInTheDocument();
-    expect(screen.getByText("Mini & nano daily tokens")).toBeInTheDocument();
-  });
-
   it("renders the hero, status strip, and both tables split by kind", async () => {
     stubFetch(leaderboard);
     renderLeaderboard();
@@ -301,45 +289,6 @@ describe("LeaderboardPage", () => {
     await screen.findAllByRole("table");
     expect(screen.queryByText("Flagship")).not.toBeInTheDocument();
     expect(screen.queryByText("Mini")).not.toBeInTheDocument();
-  });
-
-  it("shows each free-tier widget's total spend, summed from that tier's models across the whole leaderboard", async () => {
-    stubFetch({
-      deterministic: [],
-      llm: [
-        makeRow({ id: "gpt-5", strategyName: "llm-openai", modelName: "gpt-5", kind: "llm", totalCostUsd: 1.5 }),
-        makeRow({ id: "o1", strategyName: "llm-openai", modelName: "o1", kind: "llm", totalCostUsd: 2.25 }),
-        makeRow({
-          id: "o4-mini",
-          strategyName: "llm-openai",
-          modelName: "o4-mini",
-          kind: "llm",
-          totalCostUsd: 0.4,
-        }),
-        // Not in either tier's model list — must not be counted toward
-        // either widget's total.
-        makeRow({
-          id: "mistral",
-          strategyName: "llm-ollama",
-          modelName: "mistral",
-          kind: "llm",
-          totalCostUsd: 99,
-        }),
-        // No runs priced yet — must not blow up the sum.
-        makeRow({
-          id: "o3",
-          strategyName: "llm-openai",
-          modelName: "o3",
-          kind: "llm",
-          totalCostUsd: null,
-        }),
-      ],
-    });
-    renderLeaderboard();
-
-    expect(await screen.findByText("$3.75")).toBeInTheDocument(); // flagship: 1.5 + 2.25 + 0
-    expect(screen.getByText("$0.40")).toBeInTheDocument(); // mini: 0.4
-    expect(screen.getAllByText("spent on trials so far")).toHaveLength(2);
   });
 
   it("navigates to the row detail page on click", async () => {

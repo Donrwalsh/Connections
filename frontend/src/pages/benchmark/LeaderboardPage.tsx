@@ -1,25 +1,11 @@
 import { useState } from "react";
 import { useQuery, useQueries } from "@tanstack/react-query";
-import { FreeTierBudgetWidget } from "../../components/benchmark/FreeTierBudgetWidget";
 import { HeroHeader } from "../../components/benchmark/HeroHeader";
 import { MetricSelector } from "../../components/benchmark/MetricSelector";
 import { StatusStrip } from "../../components/benchmark/StatusStrip";
 import { StrategyTable, type FreeTierModelSets } from "../../components/benchmark/StrategyTable";
 import { fetchFreeTierUsage, fetchLeaderboard } from "../../data/benchmark/api";
 import type { LeaderboardMetricKey } from "../../data/benchmark/metrics";
-import type { LeaderboardRow } from "../../data/benchmark/types";
-
-/** Total USD cost (row.totalCostUsd, which is already all-time — not
- * today-scoped like the token budget) across every LLM row whose model
- * belongs to `models`. Null while either input hasn't loaded yet, so the
- * widget can distinguish "not loaded" from "genuinely $0 spent". */
-function sumSpendUsd(llmRows: LeaderboardRow[] | null, models: Set<string>): number | null {
-  if (llmRows === null || models.size === 0) return null;
-  return llmRows.reduce(
-    (sum, row) => (row.modelName && models.has(row.modelName) ? sum + (row.totalCostUsd ?? 0) : sum),
-    0,
-  );
-}
 
 /** Homepage of the benchmark area: two DB-driven leaderboard tables (LLM
  * strategies above deterministic/shuffle strategies — see StrategyTable's
@@ -56,18 +42,11 @@ export function LeaderboardPage() {
   const allRows = leaderboard ? [...leaderboard.deterministic, ...leaderboard.llm] : [];
   const active = allRows.reduce((sum, row) => sum + row.progress.active, 0);
   const queued = allRows.reduce((sum, row) => sum + row.progress.queued, 0);
-  const llmRows = leaderboard ? leaderboard.llm : null;
-  const flagshipSpentUsd = sumSpendUsd(llmRows, freeTierModels.flagship);
-  const miniSpentUsd = sumSpendUsd(llmRows, freeTierModels.mini);
 
   return (
     <div className="bench-page">
       <HeroHeader />
       <StatusStrip running={active} queued={queued} />
-      <div className="bench-free-tiers" aria-label="Daily free-token budgets">
-        <FreeTierBudgetWidget tier="flagship" spentUsd={flagshipSpentUsd} />
-        <FreeTierBudgetWidget tier="mini" spentUsd={miniSpentUsd} />
-      </div>
 
       {isLoading ? <p className="bench-muted">Loading leaderboard…</p> : null}
       {error && !isLoading ? <p className="bench-error">{error}</p> : null}

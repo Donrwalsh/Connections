@@ -3,6 +3,8 @@
 // format/sort the results. Kept framework-free so it is unit-testable without
 // rendering.
 
+import type { LeaderboardRow } from "./types";
+
 export type LeaderboardMetricKey = "avgGuesses" | "successRate" | "speed";
 
 export interface MetricDefinition {
@@ -102,12 +104,15 @@ export function formatDuration(ms: number): string {
   return `${minutes}m ${seconds}s`;
 }
 
-/** Run-timestamp formatter with an explicit locale/timezone (UTC) so output
- * is deterministic regardless of the host's locale — same reasoning as
- * Game.tsx's puzzle-date formatting. */
+/** Run-timestamp formatter. `iso` is always a UTC instant (an ISO string
+ * with a "Z"/offset), but deliberately rendered in the *viewer's* local
+ * timezone (no `timeZone` override — Intl defaults to the runtime's own)
+ * rather than forced to UTC: unlike a puzzle's date (a calendar-day
+ * identity every viewer should see the same way, see Game.tsx), a run's
+ * startedAt is a real wall-clock moment, and showing it in the viewer's own
+ * timezone is what "when did this run start" actually means to them. */
 export function formatTimestamp(iso: string): string {
   return new Date(iso).toLocaleString("en-US", {
-    timeZone: "UTC",
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -121,4 +126,17 @@ export function formatTimestamp(iso: string): string {
  * away to "$0.00". */
 export function formatCostUsd(usd: number): string {
   return usd > 0 && usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
+}
+
+/** Total USD cost (row.totalCostUsd, which is already all-time — not
+ * today-scoped like the token budget) across every LLM row whose model
+ * belongs to `models`. Null while either input hasn't loaded yet, so a
+ * caller (the Activity page's free-tier widgets) can distinguish "not
+ * loaded" from "genuinely $0 spent". */
+export function sumSpendUsd(llmRows: LeaderboardRow[] | null, models: Set<string>): number | null {
+  if (llmRows === null || models.size === 0) return null;
+  return llmRows.reduce(
+    (sum, row) => (row.modelName && models.has(row.modelName) ? sum + (row.totalCostUsd ?? 0) : sum),
+    0,
+  );
 }

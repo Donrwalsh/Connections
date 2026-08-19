@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import { fetchFreeTierDispatchStatus, fetchFreeTierUsage } from "../../data/benchmark/api";
+import {
+  fetchFreeTierDispatchStatus,
+  fetchFreeTierUsage,
+  stopFreeTierDispatch,
+} from "../../data/benchmark/api";
 import { formatCostUsd } from "../../data/benchmark/metrics";
 import type { FreeTierDispatchStatus, FreeTierId, FreeTierUsage } from "../../data/benchmark/types";
 import { StatusPill } from "./StatusPill";
@@ -37,6 +41,13 @@ export interface FreeTierBudgetWidgetProps {
    * undefined/null just omits the line rather than showing $0.00 while it's
    * still loading. */
   spentUsd?: number | null;
+  /** Bumped by the parent (e.g. after FreeTierDispatchModal starts a cycle
+   * for this tier, or for 'both') to force an immediate dispatch-status
+   * refetch instead of waiting up to DISPATCH_STATUS_POLL_MS — an action
+   * taken elsewhere on the page that this widget wouldn't otherwise know
+   * about. Not needed for this widget's own Disable button, which refetches
+   * its own status directly after stopping. */
+  refreshSignal?: number;
 }
 
 /** Leaderboard widget: today's spend against one of the two free-token
@@ -44,11 +55,14 @@ export interface FreeTierBudgetWidgetProps {
  * daily limit per tier (FreeTierUsageService). Self-fetches so the rest of
  * the page doesn't wait on it; render one instance per tier. Also shows
  * whether a continuous dispatch cycle (FreeTierDispatchService) is
- * currently running for this tier and at what threshold. */
-export function FreeTierBudgetWidget({ tier, spentUsd }: FreeTierBudgetWidgetProps) {
+ * currently running for this tier and at what threshold, with a button to
+ * disable it. */
+export function FreeTierBudgetWidget({ tier, spentUsd, refreshSignal }: FreeTierBudgetWidgetProps) {
   const [usage, setUsage] = useState<FreeTierUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dispatchStatus, setDispatchStatus] = useState<FreeTierDispatchStatus | null>(null);
+  const [isDisabling, setIsDisabling] = useState(false);
+  const [disableError, setDisableError] = useState<string | null>(null);
 
   useEffect(() => {
     setUsage(null);
@@ -84,7 +98,24 @@ export function FreeTierBudgetWidget({ tier, spentUsd }: FreeTierBudgetWidgetPro
       controller.abort();
       clearInterval(intervalId);
     };
-  }, [tier]);
+    // refreshSignal is intentionally in the dependency list even though it's
+    // otherwise unused in the effect body — bumping it is how a sibling
+    // (FreeTierDispatchModal) triggers an immediate re-poll here instead of
+    // waiting up to DISPATCH_STATUS_POLL_MS.
+  }, [tier, refreshSignal]);
+
+  function handleDisable() {
+    setIsDisabling(true);
+    setDisableError(null);
+
+    stopFreeTierDispatch(tier)
+      .then(() => fetchFreeTierDispatchStatus(tier))
+      .then(setDispatchStatus)
+      .catch((err: unknown) => {
+        setDisableError(err instanceof Error ? err.message : "Failed to disable auto-dispatch");
+      })
+      .finally(() => setIsDisabling(false));
+  }
 
   const title = TIER_TITLES[tier];
 
@@ -130,16 +161,27 @@ export function FreeTierBudgetWidget({ tier, spentUsd }: FreeTierBudgetWidgetPro
        * vertical alignment between the two side-by-side widgets. */}
       <div className="bench-free-tier__dispatch">
         {dispatchStatus?.active ? (
-          <span
-            title={
-              `Auto-dispatch is queuing new ${tier}-tier trials, evenly spread across its models, ` +
-              `until usage reaches ${dispatchStatus.thresholdPercent}% of the daily budget.`
-            }
-          >
-            <StatusPill label={`Auto-dispatch active · ${dispatchStatus.thresholdPercent}%`} tone="active" />
-          </span>
+          <>
+            <span
+              title={
+                `Auto-dispatch is queuing new ${tier}-tier trials, evenly spread across its models, ` +
+                `until usage reaches ${dispatchStatus.thresholdPercent}% of the daily budget.`
+              }
+            >
+              <StatusPill label={`Auto-dispatch active · ${dispatchStatus.thresholdPercent}%`} tone="active" />
+            </span>
+            <button
+              type="button"
+              className="bench-sort-btn"
+              onClick={handleDisable}
+              disabled={isDisabling}
+            >
+              {isDisabling ? "Disabling…" : "Disable"}
+            </button>
+          </>
         ) : null}
       </div>
+      {disableError ? <p className="bench-error">{disableError}</p> : null}
       <div
         className="bench-free-tier__bar"
         role="progressbar"

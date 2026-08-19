@@ -4,10 +4,13 @@
 // which parts of the benchmark UI are still mock-driven.
 
 import type {
+  FreeTierDispatchBothStartResult,
+  FreeTierDispatchBothStopResult,
   FreeTierDispatchStatus,
   FreeTierId,
   FreeTierUsage,
   Leaderboard,
+  RecentRun,
   RunHistory,
   RunHistorySortBy,
   RunHistorySortDir,
@@ -21,8 +24,8 @@ import { computeDurationMs } from "./metrics";
 
 const apiUrl = (path: string) => `${import.meta.env.VITE_API_URL}${path}`;
 
-async function fetchJson<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(apiUrl(path), { signal });
+async function fetchJson<T>(path: string, signal?: AbortSignal, init?: RequestInit): Promise<T> {
+  const res = await fetch(apiUrl(path), { ...init, signal });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.message ?? `Request failed with status ${res.status}`);
@@ -106,6 +109,13 @@ export function fetchRunHistory(
   return fetchJson(`/strategy/${strategyName}/runs${query ? `?${query}` : ""}`, signal);
 }
 
+/** The most recent runs across every strategy/model, newest first — backs
+ * the Activity page's live feed. Fixed at 100 rows server-side, no
+ * pagination (a rolling window, not a list to page through). */
+export function fetchRecentRuns(signal?: AbortSignal): Promise<RecentRun[]> {
+  return fetchJson("/strategy/runs/recent", signal);
+}
+
 /** The real model allowlist (every configured model, any strategy). Used to
  * resolve a :strategyId route param the static mock catalog doesn't
  * recognize — e.g. a model added to the backend after the mock list was
@@ -129,6 +139,50 @@ export function fetchFreeTierDispatchStatus(
   signal?: AbortSignal,
 ): Promise<FreeTierDispatchStatus> {
   return fetchJson(`/dispatch/free-tier/${tier}`, signal);
+}
+
+/** Starts a continuous free-tier dispatch cycle for one tier at
+ * `thresholdPercent` (a whole number, 1-100). Rejects (thrown Error, message
+ * from the backend) if a cycle for this tier is already running, or the
+ * threshold is out of range — see FreeTierDispatchModal, which surfaces
+ * that message directly. */
+export function startFreeTierDispatch(
+  tier: FreeTierId,
+  thresholdPercent: number,
+  signal?: AbortSignal,
+): Promise<FreeTierDispatchStatus> {
+  return fetchJson(`/dispatch/free-tier/${tier}?threshold=${thresholdPercent}`, signal, {
+    method: "POST",
+  });
+}
+
+/** Starts both tiers at once, independently — unlike startFreeTierDispatch,
+ * this never rejects outright: each tier's own success/failure is reported
+ * in the returned FreeTierDispatchBothStartResult instead, so one tier
+ * already running doesn't prevent the other from starting. */
+export function startBothFreeTierDispatch(
+  thresholdPercent: number,
+  signal?: AbortSignal,
+): Promise<FreeTierDispatchBothStartResult> {
+  return fetchJson(`/dispatch/free-tier/both?threshold=${thresholdPercent}`, signal, {
+    method: "POST",
+  });
+}
+
+/** Stops one tier's dispatch cycle — a no-op (not an error) if it wasn't
+ * running. */
+export function stopFreeTierDispatch(
+  tier: FreeTierId,
+  signal?: AbortSignal,
+): Promise<FreeTierDispatchStatus> {
+  return fetchJson(`/dispatch/free-tier/${tier}`, signal, { method: "DELETE" });
+}
+
+/** Stops both tiers' dispatch cycles at once. */
+export function stopBothFreeTierDispatch(
+  signal?: AbortSignal,
+): Promise<FreeTierDispatchBothStopResult> {
+  return fetchJson("/dispatch/free-tier/both", signal, { method: "DELETE" });
 }
 
 const DETAIL_PAGE_SIZE = 200;

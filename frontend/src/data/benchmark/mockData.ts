@@ -108,7 +108,7 @@ export function getStrategyMeta(strategyId: string): StrategyMeta | undefined {
   return STRATEGY_DEFS.find((candidate) => candidate.id === strategyId);
 }
 
-function humanizeStrategyName(strategyName: string): string {
+export function humanizeStrategyName(strategyName: string): string {
   return strategyName
     .split("-")
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))

@@ -51,6 +51,14 @@ export class StrategyController {
     return this.freeTierUsageService.getMiniUsage();
   }
 
+  // Same reasoning as "models"/"leaderboard" above. Backs the Activity
+  // page's live feed — the most recent runs across every strategy/model,
+  // not scoped to one strategyName like the routes below.
+  @Get("runs/recent")
+  async getRecentRuns() {
+    return this.strategyService.getRecentRuns();
+  }
+
   @Get(":strategyName/puzzle/:date")
   @ApiParam({
     name: "strategyName",

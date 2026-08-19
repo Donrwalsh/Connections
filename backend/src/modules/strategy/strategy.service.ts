@@ -21,6 +21,7 @@ import {
   RunHistoryDto,
   RunHistoryRowDto,
   RunHistorySortBy,
+  RecentRunDto,
 } from "./dto/strategy.dto";
 import {
   SHUFFLE_SMART,
@@ -47,6 +48,10 @@ const QUEUE_PAGE_SIZE = 1000;
 
 const DEFAULT_RUN_HISTORY_LIMIT = 100;
 const MAX_RUN_HISTORY_LIMIT = 500;
+
+// Fixed-size rolling window for getRecentRuns — a live feed, not a paginated
+// list, so there's no caller-adjustable limit/page like getRunHistory.
+const RECENT_RUNS_LIMIT = 100;
 
 // Raw ORDER BY expressions for getRunHistory, keyed by the sort the caller
 // asked for. "puzzleDate" and "guessCount" order by their raw-query SELECT
@@ -1022,6 +1027,60 @@ export class StrategyService {
     }));
 
     return { rows, meta: { total, page: safePage, limit: safeLimit } };
+  }
+
+  /**
+   * The most recent StrategyRun rows across *every* strategy/model, newest
+   * first — backs the Activity page's live feed (polled, so this is
+   * deliberately cheap: no guessCount/tokenCostUsd correlated subqueries or
+   * SupportedModel/ModelPrice joins like getRunHistory has, just the columns
+   * the feed actually renders). Fixed at RECENT_RUNS_LIMIT rather than
+   * paginated — a rolling window, not a list a caller pages through.
+   */
+  async getRecentRuns(): Promise<RecentRunDto[]> {
+    const rawRows = await this.strategyRunRepo
+      .createQueryBuilder("run")
+      .innerJoin(Puzzle, "puzzle", 'puzzle.id = run."puzzleId"')
+      .select("run.id", "id")
+      .addSelect("run.puzzleId", "puzzleId")
+      // Cast to text — see the identical cast in getRunHistory: getRawMany()
+      // bypasses Puzzle.date's entity-level string transformer.
+      .addSelect("puzzle.date::text", "puzzleDate")
+      .addSelect("run.strategyName", "strategyName")
+      .addSelect("run.modelName", "modelName")
+      .addSelect("run.trialNumber", "trialNumber")
+      .addSelect("run.status", "status")
+      .addSelect("run.startedAt", "startedAt")
+      .addSelect("run.finishedAt", "finishedAt")
+      .orderBy("run.startedAt", "DESC")
+      // Stable tiebreaker: without one, ties on startedAt (plausible under
+      // concurrent dispatch) could reorder rows between polls even though
+      // the underlying set hasn't changed.
+      .addOrderBy("run.id", "DESC")
+      .limit(RECENT_RUNS_LIMIT)
+      .getRawMany<{
+        id: number;
+        puzzleId: number;
+        puzzleDate: string;
+        strategyName: string;
+        modelName: string | null;
+        trialNumber: number;
+        status: StrategyRunStatus;
+        startedAt: Date | string;
+        finishedAt: Date | string | null;
+      }>();
+
+    return rawRows.map((row) => ({
+      id: row.id,
+      puzzleId: row.puzzleId,
+      puzzleDate: row.puzzleDate,
+      strategyName: row.strategyName,
+      modelName: row.modelName,
+      trialNumber: row.trialNumber,
+      status: row.status,
+      startedAt: new Date(row.startedAt),
+      finishedAt: row.finishedAt ? new Date(row.finishedAt) : null,
+    }));
   }
 
   private mapRunDetail(

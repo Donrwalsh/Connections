@@ -314,6 +314,39 @@ describe("App (e2e)", () => {
     expect(rows.every((row) => row.status === "failed")).toBe(true);
   });
 
+  it("GET /strategy/runs/recent returns the most recent runs across every strategy, newest first", async () => {
+    // "reverse-order" again (see the status-filter test above) rather than
+    // an LLM strategy/model combo — dispatch elsewhere in this suite counts
+    // existing StrategyRun rows per (puzzle, model) against a trial cap, and
+    // an extra ad-hoc row for a real dispatched model would push it over.
+    const puzzle = await dataSource.getRepository(Puzzle).findOneByOrFail({ date: TEST_DATE });
+    const newestRun = await dataSource.getRepository(StrategyRun).save({
+      puzzle,
+      strategyName: "reverse-order",
+      trialNumber: 206,
+      status: StrategyRunStatus.RUNNING,
+      availableWords: [],
+      currentCombination: [0, 1, 2, 3],
+    });
+
+    const res = await request(app.getHttpServer()).get("/strategy/runs/recent");
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body.length).toBeLessThanOrEqual(100);
+    // Just inserted, so it has the latest startedAt of everything in the
+    // suite so far — the endpoint's own DESC ordering puts it first.
+    expect(res.body[0]).toMatchObject({
+      id: newestRun.id,
+      strategyName: "reverse-order",
+      modelName: null,
+      trialNumber: 206,
+      status: "running",
+      puzzleId: puzzle.id,
+      puzzleDate: TEST_DATE,
+    });
+  });
+
   it("GET /strategy/free-tier-usage/flagship reports today's usage against the 250k flagship budget", async () => {
     const res = await request(app.getHttpServer()).get("/strategy/free-tier-usage/flagship");
 

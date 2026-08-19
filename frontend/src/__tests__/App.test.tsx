@@ -94,6 +94,9 @@ describe("App Component", () => {
     renderApp(["/"]);
 
     expect(await screen.findByText("Monday, January 15, 2024")).toBeInTheDocument();
+    // The header (shared across every route via SiteLayout) links to the
+    // Activity page.
+    expect(screen.getByRole("link", { name: /Activity/ })).toHaveAttribute("href", "/activity");
   });
 
   it("renders the puzzle for a specific date route", async () => {
@@ -214,5 +217,47 @@ describe("App leaderboard routes", () => {
     renderApp(["/leaderboard/alphabetical/1"]);
 
     expect(await screen.findByRole("heading", { name: "Guess chain" })).toBeInTheDocument();
+  });
+
+  it("renders the free-tier budget widgets at /activity", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        const href = String(url);
+        if (href.includes("/strategy/free-tier-usage/flagship")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              tier: "flagship",
+              label: "Flagship models",
+              usedTokens: 0,
+              dailyLimitTokens: 250_000,
+              remainingTokens: 250_000,
+              models: [],
+            }),
+          });
+        }
+        if (href.includes("/strategy/free-tier-usage/mini")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              tier: "mini",
+              label: "Mini & nano models",
+              usedTokens: 0,
+              dailyLimitTokens: 2_500_000,
+              remainingTokens: 2_500_000,
+              models: [],
+            }),
+          });
+        }
+        return Promise.resolve({ ok: true, json: async () => ({ deterministic: [], llm: [] }) });
+      }),
+    );
+
+    renderApp(["/activity"]);
+
+    expect(await screen.findByRole("heading", { name: "Activity" })).toBeInTheDocument();
+    expect(screen.getByText("Flagship daily tokens")).toBeInTheDocument();
+    expect(screen.getByText("Mini & nano daily tokens")).toBeInTheDocument();
   });
 });

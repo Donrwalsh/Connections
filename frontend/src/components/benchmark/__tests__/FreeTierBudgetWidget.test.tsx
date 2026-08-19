@@ -1,4 +1,5 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FreeTierBudgetWidget } from "../FreeTierBudgetWidget";
 import type { FreeTierDispatchStatus, FreeTierUsage } from "../../../data/benchmark/types";
@@ -235,5 +236,94 @@ describe("FreeTierBudgetWidget", () => {
     });
 
     expect(screen.queryByText(/Auto-dispatch active/)).not.toBeInTheDocument();
+  });
+
+  it("shows no Disable button when no cycle is running", async () => {
+    stubFetch(miniUsage, inactiveDispatch);
+
+    render(<FreeTierBudgetWidget tier="mini" />);
+
+    await screen.findByText("400,000 / 2,500,000 used");
+    expect(screen.queryByRole("button", { name: /Disable/ })).not.toBeInTheDocument();
+  });
+
+  it("disables the tier's dispatch cycle and hides the pill once stopped", async () => {
+    const user = userEvent.setup();
+    let dispatchStatus: FreeTierDispatchStatus = activeDispatch;
+    const fetchMock = vi.fn((url: unknown, init?: RequestInit) => {
+      const href = String(url);
+      if (href.includes("/dispatch/free-tier/")) {
+        if (init?.method === "DELETE") {
+          dispatchStatus = inactiveDispatch;
+          return Promise.resolve({ ok: true, json: async () => dispatchStatus });
+        }
+        return Promise.resolve({ ok: true, json: async () => dispatchStatus });
+      }
+      return Promise.resolve({ ok: true, json: async () => miniUsage });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<FreeTierBudgetWidget tier="mini" />);
+
+    const disableButton = await screen.findByRole("button", { name: "Disable" });
+    await user.click(disableButton);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/dispatch/free-tier/mini"),
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    // The mock resolves immediately, so the transient "Disabling…" state
+    // isn't reliably observable here — assert the settled end state
+    // instead: the pill and button both gone once the cycle is confirmed
+    // stopped.
+    await waitFor(() => {
+      expect(screen.queryByText(/Auto-dispatch active/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Disable/ })).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows an error and re-enables the button when disabling fails", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn((url: unknown, init?: RequestInit) => {
+      const href = String(url);
+      if (href.includes("/dispatch/free-tier/") && init?.method === "DELETE") {
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({ message: "boom" }) });
+      }
+      if (href.includes("/dispatch/free-tier/")) {
+        return Promise.resolve({ ok: true, json: async () => activeDispatch });
+      }
+      return Promise.resolve({ ok: true, json: async () => miniUsage });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<FreeTierBudgetWidget tier="mini" />);
+
+    const disableButton = await screen.findByRole("button", { name: "Disable" });
+    await user.click(disableButton);
+
+    expect(await screen.findByText("boom")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Disable" })).toBeInTheDocument();
+  });
+
+  it("refetches dispatch status immediately when refreshSignal changes", async () => {
+    let dispatchStatus = inactiveDispatch;
+    const fetchMock = vi.fn((url: unknown) => {
+      if (String(url).includes("/dispatch/free-tier/")) {
+        return Promise.resolve({ ok: true, json: async () => dispatchStatus });
+      }
+      return Promise.resolve({ ok: true, json: async () => miniUsage });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { rerender } = render(<FreeTierBudgetWidget tier="mini" refreshSignal={0} />);
+    await screen.findByText("400,000 / 2,500,000 used");
+    expect(screen.queryByText(/Auto-dispatch active/)).not.toBeInTheDocument();
+
+    // Simulates FreeTierDispatchModal starting a cycle elsewhere on the
+    // page — this widget wouldn't otherwise know until its next 30s poll.
+    dispatchStatus = activeDispatch;
+    rerender(<FreeTierBudgetWidget tier="mini" refreshSignal={1} />);
+
+    expect(await screen.findByText("Auto-dispatch active · 90%")).toBeInTheDocument();
   });
 });

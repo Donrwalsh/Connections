@@ -1601,6 +1601,88 @@ describe("StrategyService", () => {
     });
   });
 
+  describe("getRecentRuns", () => {
+    function mockRecentRunsQuery(rawRows: unknown[]) {
+      const qb = {
+        innerJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue(rawRows),
+      };
+      mockStrategyRunRepo.createQueryBuilder.mockReturnValue(qb);
+      return qb;
+    }
+
+    function rawRun(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 1,
+        puzzleId: 10,
+        puzzleDate: "2024-01-01",
+        strategyName: "alphabetical",
+        modelName: null,
+        trialNumber: 0,
+        status: StrategyRunStatus.COMPLETED,
+        startedAt: new Date("2024-01-01T00:00:00Z"),
+        finishedAt: new Date("2024-01-01T00:00:05Z"),
+        ...overrides,
+      };
+    }
+
+    it("should query without a strategyName filter, newest first with a stable tiebreaker, capped at 100", async () => {
+      const qb = mockRecentRunsQuery([rawRun()]);
+
+      await service.getRecentRuns();
+
+      expect(mockStrategyRunRepo.createQueryBuilder).toHaveBeenCalledWith("run");
+      expect(qb.orderBy).toHaveBeenCalledWith("run.startedAt", "DESC");
+      expect(qb.addOrderBy).toHaveBeenCalledWith("run.id", "DESC");
+      expect(qb.limit).toHaveBeenCalledWith(100);
+    });
+
+    it("should map raw rows across strategies, including LLM modelName", async () => {
+      mockRecentRunsQuery([
+        rawRun({ id: 1, strategyName: "alphabetical", modelName: null }),
+        rawRun({
+          id: 2,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          status: StrategyRunStatus.FAILED,
+          finishedAt: null,
+        }),
+      ]);
+
+      const result = await service.getRecentRuns();
+
+      expect(result).toEqual([
+        {
+          id: 1,
+          puzzleId: 10,
+          puzzleDate: "2024-01-01",
+          strategyName: "alphabetical",
+          modelName: null,
+          trialNumber: 0,
+          status: StrategyRunStatus.COMPLETED,
+          startedAt: new Date("2024-01-01T00:00:00Z"),
+          finishedAt: new Date("2024-01-01T00:00:05Z"),
+        },
+        {
+          id: 2,
+          puzzleId: 10,
+          puzzleDate: "2024-01-01",
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          trialNumber: 0,
+          status: StrategyRunStatus.FAILED,
+          startedAt: new Date("2024-01-01T00:00:00Z"),
+          finishedAt: null,
+        },
+      ]);
+    });
+  });
+
   describe("runDeterministicStrategy", () => {
     it("should short-circuit for an already completed run", async () => {
       mockPuzzleRepo.findOne.mockResolvedValueOnce(solvePuzzle);

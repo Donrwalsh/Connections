@@ -144,6 +144,23 @@ export interface RunHistory {
   meta: RunHistoryMeta;
 }
 
+/** One row of GET /strategy/runs/recent: the most recent StrategyRun rows
+ * across *every* strategy/model (unlike RunHistoryRow, which is scoped to
+ * one strategy) — backs the Activity page's live feed. Deliberately slimmer
+ * than RunHistoryRow (no guessCount/tokenCostUsd/hadWordsParenthetical)
+ * since this is polled repeatedly. */
+export interface RecentRun {
+  id: number;
+  puzzleId: number;
+  puzzleDate: string;
+  strategyName: string;
+  modelName: string | null;
+  trialNumber: number;
+  status: RunStatus;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
 /** One row from GET /strategy/models — the real allowlist of models a
  * strategy may dispatch runs against. Used to recognize a model the static
  * mock catalog (mockData.ts) doesn't know about, e.g. one added to the
@@ -190,6 +207,30 @@ export interface FreeTierDispatchStatus {
   active: boolean;
   thresholdPercent: number | null;
   startedAt: string | null;
+}
+
+/** POST /dispatch/free-tier/both's per-tier result: unlike a single-tier
+ * start (which rejects the whole request via a thrown error), starting
+ * 'both' never fails outright — each tier's own outcome is reported
+ * independently here instead, so one tier already running doesn't prevent
+ * the other from starting. */
+export interface FreeTierDispatchOutcome {
+  tier: FreeTierId;
+  status: FreeTierDispatchStatus | null;
+  error: string | null;
+}
+
+export interface FreeTierDispatchBothStartResult {
+  flagship: FreeTierDispatchOutcome;
+  mini: FreeTierDispatchOutcome;
+}
+
+/** DELETE /dispatch/free-tier/both's result — stopping can't fail (it's a
+ * no-op for a tier that isn't running), so unlike the start-both result
+ * this is just the plain per-tier status, no error field. */
+export interface FreeTierDispatchBothStopResult {
+  flagship: FreeTierDispatchStatus;
+  mini: FreeTierDispatchStatus;
 }
 
 /** A run row from GET /strategy/:strategyName/puzzle-id/:puzzleId. The

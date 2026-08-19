@@ -46,6 +46,14 @@ function LeaderboardIcon() {
   );
 }
 
+function ActivityIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path d="M9 1 3 9h4l-1 6 6-8H8l1-6z" />
+    </svg>
+  );
+}
+
 function navLinkClass({ isActive }: { isActive: boolean }): string {
   return `site-header__link${isActive ? " site-header__link--active" : ""}`;
 }
@@ -122,6 +130,11 @@ export function Header() {
         <NavLink to="/leaderboard" className={navLinkClass}>
           <LeaderboardIcon />
           <span>Leaderboard</span>
+        </NavLink>
+
+        <NavLink to="/activity" className={navLinkClass}>
+          <ActivityIcon />
+          <span>Activity</span>
         </NavLink>
       </nav>
     </header>

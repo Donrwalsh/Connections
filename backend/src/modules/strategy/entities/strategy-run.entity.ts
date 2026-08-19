@@ -43,6 +43,10 @@ export const TERMINAL_STATUSES: ReadonlySet<StrategyRunStatus> = new Set([
 // free-tier dispatch tick and would otherwise scan the whole table.
 @Index("IDX_StrategyRun_strategyName_modelName", ["strategyName", "modelName"])
 @Index("IDX_StrategyRun_strategyName_startedAt", ["strategyName", "startedAt"])
+// Backs getRecentRuns' unfiltered "ORDER BY startedAt DESC LIMIT 100" — the
+// two composite indexes above both lead with strategyName, so neither can
+// serve a global (cross-strategy) sort on startedAt alone.
+@Index("IDX_StrategyRun_startedAt", ["startedAt"])
 export class StrategyRun {
   @PrimaryGeneratedColumn()
   id: number;
