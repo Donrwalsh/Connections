@@ -4,6 +4,8 @@ import { Worker, Job } from "bullmq";
 import { AppModule } from "./app.module";
 import { StrategyService } from "./modules/strategy/strategy.service";
 import { LlmStrategyRunner } from "./modules/strategy/llm-strategy-runner.service";
+import { FreeTierDispatchService } from "./modules/free-tier-dispatch/free-tier-dispatch.service";
+import type { FreeTierId } from "./modules/strategy/free-tier-usage.service";
 import { redisConnection } from "./modules/queue/redis.config";
 import { PuzzleIngestionService } from "./modules/game/puzzle-ingestion.service";
 import {
@@ -14,6 +16,10 @@ import {
   llmOpenAIConcurrency,
   STRATEGY_SET,
 } from "./strategies";
+
+interface FreeTierDispatchTickJobData {
+  tier: FreeTierId;
+}
 
 interface RunStrategyJobData {
   puzzleId: number;
@@ -32,6 +38,7 @@ async function bootstrap() {
   const strategyService = appContext.get(StrategyService);
   const llmStrategyRunner = appContext.get(LlmStrategyRunner);
   const puzzleIngestionService = appContext.get(PuzzleIngestionService);
+  const freeTierDispatchService = appContext.get(FreeTierDispatchService);
 
   const worker = new Worker(
     "strategy-runs",
@@ -153,6 +160,30 @@ async function bootstrap() {
     logger.error(`puzzle population job ${job?.id} failed`, err?.stack || err);
   });
 
+  // Each job is one tick of a free-tier dispatch cycle (see
+  // FreeTierDispatchService) — it queues this tick's batch onto
+  // llm-openai-runs (processed by llmOpenAIWorker above, not here) and, if
+  // the cycle should keep going, schedules its own successor tick. One at a
+  // time: ticks self-chain with a delay, so there's never a reason to run
+  // two concurrently.
+  const freeTierDispatchWorker = new Worker(
+    "free-tier-dispatch",
+    async (job: Job<FreeTierDispatchTickJobData>) => {
+      const { tier } = job.data;
+      logger.log(`starting free-tier dispatch tick ${job.id}: tier=${tier}`);
+      await freeTierDispatchService.runTick(tier);
+      logger.log(`finished free-tier dispatch tick ${job.id}: tier=${tier}`);
+    },
+    {
+      connection: redisConnection,
+      concurrency: 1,
+    },
+  );
+
+  freeTierDispatchWorker.on("failed", (job, err) => {
+    logger.error(`free-tier dispatch tick ${job?.id} failed`, err?.stack || err);
+  });
+
   // Graceful shutdown: let BullMQ finish (or safely abandon, mid-transaction-safe)
   // the current job before the process exits, rather than getting killed
   // mid-write.
@@ -163,6 +194,7 @@ async function bootstrap() {
       llmOpenAIWorker.close(),
       llmOllamaWorker.close(),
       puzzleWorker.close(),
+      freeTierDispatchWorker.close(),
     ]);
     await appContext.close();
     process.exit(0);
@@ -172,7 +204,8 @@ async function bootstrap() {
   process.on("SIGINT", shutdown);
 
   logger.log(
-    "listening for jobs on 'strategy-runs', 'llm-openai-runs', 'llm-ollama-runs' and 'puzzle-population' queues",
+    "listening for jobs on 'strategy-runs', 'llm-openai-runs', 'llm-ollama-runs', " +
+      "'puzzle-population' and 'free-tier-dispatch' queues",
   );
 }
 

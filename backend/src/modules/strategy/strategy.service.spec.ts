@@ -954,6 +954,122 @@ describe("StrategyService", () => {
     });
   });
 
+  describe("countTodayDispatchByModel", () => {
+    function mockDbCountsQuery(rows: { modelName: string; count: string }[]) {
+      const qb = {
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue(rows),
+      };
+      mockStrategyRunRepo.createQueryBuilder.mockReturnValue(qb);
+      return qb;
+    }
+
+    it("should return zero for every model when there is no activity today", async () => {
+      mockDbCountsQuery([]);
+      mockOpenAIQueue.getJobs.mockResolvedValueOnce([]);
+
+      const result = await service.countTodayDispatchByModel("llm-openai", ["gpt-4.1-nano", "o3-mini"]);
+
+      expect(result).toEqual(
+        new Map([
+          ["gpt-4.1-nano", 0],
+          ["o3-mini", 0],
+        ]),
+      );
+    });
+
+    it("should combine today's StrategyRun rows with waiting/delayed queue jobs, per model", async () => {
+      const qb = mockDbCountsQuery([{ modelName: "gpt-4.1-nano", count: "2" }]);
+      mockOpenAIQueue.getJobs.mockResolvedValueOnce([
+        { data: { model: "gpt-4.1-nano" } },
+        { data: { model: "o3-mini" } },
+        { data: { model: "o3-mini" } },
+        // A different strategy's job (e.g. llm-ollama) or a model outside
+        // the requested set must never bleed into these counts.
+        { data: { model: "mistral" } },
+      ]);
+
+      const result = await service.countTodayDispatchByModel("llm-openai", ["gpt-4.1-nano", "o3-mini"]);
+
+      expect(result).toEqual(
+        new Map([
+          ["gpt-4.1-nano", 3],
+          ["o3-mini", 2],
+        ]),
+      );
+      expect(qb.where).toHaveBeenCalledWith("run.strategyName = :strategyName", {
+        strategyName: "llm-openai",
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith("run.modelName IN (:...models)", {
+        models: ["gpt-4.1-nano", "o3-mini"],
+      });
+    });
+
+    it("should return an empty map without querying anything for an empty model list", async () => {
+      const result = await service.countTodayDispatchByModel("llm-openai", []);
+
+      expect(result).toEqual(new Map());
+      expect(mockStrategyRunRepo.createQueryBuilder).not.toHaveBeenCalled();
+      expect(mockOpenAIQueue.getJobs).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("countInFlightByModel", () => {
+    function mockRunningCountsQuery(rows: { modelName: string; count: string }[]) {
+      const qb = {
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue(rows),
+      };
+      mockStrategyRunRepo.createQueryBuilder.mockReturnValue(qb);
+      return qb;
+    }
+
+    it("should count RUNNING rows plus waiting/delayed queue jobs, excluding finished runs", async () => {
+      const qb = mockRunningCountsQuery([{ modelName: "gpt-4.1-nano", count: "1" }]);
+      mockOpenAIQueue.getJobs.mockResolvedValueOnce([{ data: { model: "o3-mini" } }]);
+
+      const result = await service.countInFlightByModel("llm-openai", ["gpt-4.1-nano", "o3-mini"]);
+
+      expect(result).toEqual(
+        new Map([
+          ["gpt-4.1-nano", 1],
+          ["o3-mini", 1],
+        ]),
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith("run.status = :status", {
+        status: StrategyRunStatus.RUNNING,
+      });
+    });
+
+    it("should not double-count a completed run — only RUNNING rows are in flight", async () => {
+      // The mock DB query itself is what enforces the RUNNING filter in
+      // production (see the andWhere assertion above); here it simply
+      // returns nothing, standing in for "no RUNNING rows" regardless of
+      // how many completed runs exist for this model today.
+      mockRunningCountsQuery([]);
+      mockOpenAIQueue.getJobs.mockResolvedValueOnce([]);
+
+      const result = await service.countInFlightByModel("llm-openai", ["gpt-4.1-nano"]);
+
+      expect(result).toEqual(new Map([["gpt-4.1-nano", 0]]));
+    });
+
+    it("should return an empty map without querying anything for an empty model list", async () => {
+      const result = await service.countInFlightByModel("llm-openai", []);
+
+      expect(result).toEqual(new Map());
+      expect(mockStrategyRunRepo.createQueryBuilder).not.toHaveBeenCalled();
+    });
+  });
+
   describe("getLeaderboard", () => {
     function mockGuessCounts(rows: { strategyRunId: number; count: string }[]) {
       mockGuessRepo.createQueryBuilder.mockReturnValue({

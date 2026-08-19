@@ -1,7 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FreeTierBudgetWidget } from "../FreeTierBudgetWidget";
-import type { FreeTierUsage } from "../../../data/benchmark/types";
+import type { FreeTierDispatchStatus, FreeTierUsage } from "../../../data/benchmark/types";
 
 const flagshipUsage: FreeTierUsage = {
   tier: "flagship",
@@ -21,12 +21,35 @@ const miniUsage: FreeTierUsage = {
   models: ["gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o-mini", "o3-mini", "o4-mini", "gpt-5-nano"],
 };
 
-function stubFetch(usage: FreeTierUsage) {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => usage }));
+const inactiveDispatch: FreeTierDispatchStatus = {
+  tier: "mini",
+  active: false,
+  thresholdPercent: null,
+  startedAt: null,
+};
+
+const activeDispatch: FreeTierDispatchStatus = {
+  tier: "mini",
+  active: true,
+  thresholdPercent: 90,
+  startedAt: "2024-01-01T00:00:00Z",
+};
+
+function stubFetch(usage: FreeTierUsage, dispatchStatus: FreeTierDispatchStatus = inactiveDispatch) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((url: unknown) => {
+      if (String(url).includes("/dispatch/free-tier/")) {
+        return Promise.resolve({ ok: true, json: async () => dispatchStatus });
+      }
+      return Promise.resolve({ ok: true, json: async () => usage });
+    }),
+  );
 }
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("FreeTierBudgetWidget", () => {
@@ -117,5 +140,73 @@ describe("FreeTierBudgetWidget", () => {
 
     expect(screen.getByText("Mini & nano daily tokens")).toBeInTheDocument();
     expect(await screen.findByText("Couldn't load token usage: boom")).toBeInTheDocument();
+  });
+
+  it("checks dispatch status for the mini tier", () => {
+    const fetchMock = vi.fn(() => new Promise(() => {}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<FreeTierBudgetWidget tier="mini" />);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/dispatch/free-tier/mini"),
+      expect.anything(),
+    );
+  });
+
+  it("checks dispatch status for the flagship tier too — both tiers are dispatchable", () => {
+    const fetchMock = vi.fn(() => new Promise(() => {}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<FreeTierBudgetWidget tier="flagship" />);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/dispatch/free-tier/flagship"),
+      expect.anything(),
+    );
+  });
+
+  it("shows the auto-dispatch pill with its threshold when a cycle is active", async () => {
+    stubFetch(miniUsage, activeDispatch);
+
+    render(<FreeTierBudgetWidget tier="mini" />);
+
+    expect(await screen.findByText("Auto-dispatch active · 90%")).toBeInTheDocument();
+  });
+
+  it("shows no auto-dispatch pill when no cycle is running", async () => {
+    stubFetch(miniUsage, inactiveDispatch);
+
+    render(<FreeTierBudgetWidget tier="mini" />);
+
+    await screen.findByText("400,000 / 2,500,000 used");
+    expect(screen.queryByText(/Auto-dispatch active/)).not.toBeInTheDocument();
+  });
+
+  it("re-checks dispatch status periodically, picking up a cycle that stopped since the last check", async () => {
+    vi.useFakeTimers();
+    let dispatchStatus = activeDispatch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        if (String(url).includes("/dispatch/free-tier/")) {
+          return Promise.resolve({ ok: true, json: async () => dispatchStatus });
+        }
+        return Promise.resolve({ ok: true, json: async () => miniUsage });
+      }),
+    );
+
+    render(<FreeTierBudgetWidget tier="mini" />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText("Auto-dispatch active · 90%")).toBeInTheDocument();
+
+    dispatchStatus = inactiveDispatch;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+
+    expect(screen.queryByText(/Auto-dispatch active/)).not.toBeInTheDocument();
   });
 });

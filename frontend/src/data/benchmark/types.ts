@@ -180,6 +180,18 @@ export interface FreeTierUsage {
   models: string[];
 }
 
+/** GET /dispatch/free-tier/:tier — whether a continuous free-tier dispatch
+ * cycle (see the backend's FreeTierDispatchService) is currently running
+ * for `tier`, and at what threshold. Both tiers are dispatchable; a tier
+ * with no cycle ever started reports `active: false` with null
+ * threshold/startedAt rather than an error. */
+export interface FreeTierDispatchStatus {
+  tier: FreeTierId;
+  active: boolean;
+  thresholdPercent: number | null;
+  startedAt: string | null;
+}
+
 /** A run row from GET /strategy/:strategyName/puzzle-id/:puzzleId. The
  * backend never returns "queued" (a StrategyRun row only exists once a job
  * has actually started), so this is always one of the other RunStatus

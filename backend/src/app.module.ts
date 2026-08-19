@@ -18,6 +18,7 @@ import { SolvePrompt } from "./modules/strategy/entities/solve-prompt.entity";
 import { StrategyRun } from "./modules/strategy/entities/strategy-run.entity";
 import { SupportedModel } from "./modules/supported-model/entities/supported-model.entity";
 import { ModelPrice } from "./modules/supported-model/entities/model-price.entity";
+import { FreeTierDispatchState } from "./modules/free-tier-dispatch/entities/free-tier-dispatch-state.entity";
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { ModelPrice } from "./modules/supported-model/entities/model-price.entit
         SolvePrompt,
         SupportedModel,
         ModelPrice,
+        FreeTierDispatchState,
       ],
       synchronize: false,
       migrations: [__dirname + "/migrations/*{.ts,.js}"],

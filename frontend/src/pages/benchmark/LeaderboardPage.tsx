@@ -17,7 +17,7 @@ export function LeaderboardPage() {
   const [leaderboard, setLeaderboard] = useState<Leaderboard | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [metricKey, setMetricKey] = useState<LeaderboardMetricKey>("avgGuesses");
+  const [metricKey, setMetricKey] = useState<LeaderboardMetricKey>("successRate");
 
   useEffect(() => {
     const controller = new AbortController();

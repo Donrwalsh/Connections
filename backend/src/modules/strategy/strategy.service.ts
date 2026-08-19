@@ -26,6 +26,7 @@ import {
   isLlmStrategy,
   llmMaxTrialsPerModel,
   strategyTrialNumbers,
+  startOfTodayUtc,
 } from "../../strategies";
 import { runStrategyJobId, queueForStrategy } from "../queue/strategy.queue";
 import { StrategyRunStore, computeInitialWordOrder } from "./strategy-run-store.service";
@@ -252,6 +253,108 @@ export class StrategyService {
       .getRawMany<{ puzzleId: number; date: string }>();
 
     return rows.map((row) => ({ puzzleId: Number(row.puzzleId), date: row.date }));
+  }
+
+  /**
+   * Today's (UTC) dispatch count per model for an LLM strategy, combining
+   * StrategyRun rows already started today with jobs still waiting/delayed
+   * on that strategy's queue (not yet started, so no StrategyRun row exists
+   * for them yet — same reasoning as queuedCountsByKey). Every model in
+   * `models` is present in the returned map, 0 if it has no activity today.
+   * Used by FreeTierDispatchService to keep a dispatch cycle's new trials
+   * spread evenly across a tier's models rather than favoring whichever
+   * model happened to be picked first.
+   */
+  async countTodayDispatchByModel(
+    strategyName: string,
+    models: readonly string[],
+  ): Promise<Map<string, number>> {
+    if (models.length === 0) return new Map();
+
+    const counts = await this.queuedCountsByModel(strategyName, models);
+
+    const dbRows = await this.strategyRunRepo
+      .createQueryBuilder("run")
+      .select("run.modelName", "modelName")
+      .addSelect("COUNT(*)", "count")
+      .where("run.strategyName = :strategyName", { strategyName })
+      .andWhere("run.modelName IN (:...models)", { models })
+      .andWhere("run.startedAt >= :startOfTodayUtc", { startOfTodayUtc: startOfTodayUtc() })
+      .groupBy("run.modelName")
+      .getRawMany<{ modelName: string; count: string }>();
+
+    for (const row of dbRows) {
+      counts.set(row.modelName, (counts.get(row.modelName) ?? 0) + Number(row.count));
+    }
+
+    return counts;
+  }
+
+  /**
+   * Trials per model not yet reflected in FreeTierUsageService's token
+   * totals: still RUNNING (started, not yet finished) StrategyRun rows plus
+   * jobs still waiting/delayed on the queue. Unlike countTodayDispatchByModel
+   * above (which counts *all* of today's activity, completed included — the
+   * right basis for fair-share ranking), this deliberately excludes
+   * completed/failed/etc. runs, since those are already counted in real
+   * token usage and including them here would double-reserve budget for
+   * tokens already spent. Used by FreeTierDispatchService to avoid
+   * overcommitting a dispatch batch past a tier's threshold.
+   */
+  async countInFlightByModel(
+    strategyName: string,
+    models: readonly string[],
+  ): Promise<Map<string, number>> {
+    if (models.length === 0) return new Map();
+
+    const counts = await this.queuedCountsByModel(strategyName, models);
+
+    const runningRows = await this.strategyRunRepo
+      .createQueryBuilder("run")
+      .select("run.modelName", "modelName")
+      .addSelect("COUNT(*)", "count")
+      .where("run.strategyName = :strategyName", { strategyName })
+      .andWhere("run.modelName IN (:...models)", { models })
+      .andWhere("run.status = :status", { status: StrategyRunStatus.RUNNING })
+      .groupBy("run.modelName")
+      .getRawMany<{ modelName: string; count: string }>();
+
+    for (const row of runningRows) {
+      counts.set(row.modelName, (counts.get(row.modelName) ?? 0) + Number(row.count));
+    }
+
+    return counts;
+  }
+
+  /**
+   * Waiting/delayed job counts per model on `strategyName`'s queue — the
+   * "queued but not started yet" baseline shared by countTodayDispatchByModel
+   * and countInFlightByModel (each then adds its own DB-side count on top).
+   * Every model in `models` is present in the returned map, 0 if it has no
+   * queued jobs.
+   */
+  private async queuedCountsByModel(
+    strategyName: string,
+    models: readonly string[],
+  ): Promise<Map<string, number>> {
+    const counts = new Map<string, number>(models.map((model) => [model, 0]));
+    const modelSet = new Set(models);
+    const queue = this.queueFor(strategyName);
+
+    for (let start = 0; ; start += QUEUE_PAGE_SIZE) {
+      const jobs = await queue.getJobs(["waiting", "delayed"], start, start + QUEUE_PAGE_SIZE - 1);
+
+      for (const job of jobs) {
+        const data = job.data as { model?: string | null };
+        if (data.model && modelSet.has(data.model)) {
+          counts.set(data.model, (counts.get(data.model) ?? 0) + 1);
+        }
+      }
+
+      if (jobs.length < QUEUE_PAGE_SIZE) break;
+    }
+
+    return counts;
   }
 
   /**

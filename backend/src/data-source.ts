@@ -9,6 +9,7 @@ import { SolvePrompt } from "./modules/strategy/entities/solve-prompt.entity";
 import { StrategyRun } from "./modules/strategy/entities/strategy-run.entity";
 import { SupportedModel } from "./modules/supported-model/entities/supported-model.entity";
 import { ModelPrice } from "./modules/supported-model/entities/model-price.entity";
+import { FreeTierDispatchState } from "./modules/free-tier-dispatch/entities/free-tier-dispatch-state.entity";
 
 /**
  * Standalone DataSource used by the TypeORM CLI (migration:generate/run/
@@ -32,6 +33,7 @@ export const AppDataSource = new DataSource({
     SolvePrompt,
     SupportedModel,
     ModelPrice,
+    FreeTierDispatchState,
   ],
   migrations: [__dirname + "/migrations/*{.ts,.js}"],
   synchronize: false,

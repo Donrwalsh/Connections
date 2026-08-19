@@ -2,15 +2,22 @@ import {
   Controller,
   Inject,
   Post,
+  Delete,
+  Get,
   Param,
+  Query,
   ParseIntPipe,
   BadRequestException,
 } from "@nestjs/common";
-import { ApiParam } from "@nestjs/swagger";
+import { ApiParam, ApiQuery } from "@nestjs/swagger";
 import { StrategyService } from "../strategy/strategy.service";
 import { GameService } from "../game/game.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
+import { FreeTierDispatchService } from "../free-tier-dispatch/free-tier-dispatch.service";
+import { FreeTierId } from "../strategy/free-tier-usage.service";
 import { AUTOMATIC_STRATEGIES, LLM_STRATEGIES, STRATEGY_SET, isLlmStrategy } from "../../strategies";
+
+const DEFAULT_FREE_TIER_DISPATCH_THRESHOLD_PERCENT = 90;
 
 @Controller("dispatch")
 export class DispatchController {
@@ -18,6 +25,7 @@ export class DispatchController {
     @Inject(StrategyService) private readonly strategyService: StrategyService,
     @Inject(GameService) private readonly gameService: GameService,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
+    @Inject(FreeTierDispatchService) private readonly freeTierDispatchService: FreeTierDispatchService,
   ) {}
 
   @Post("strategy/:strategyName/:date")
@@ -166,5 +174,49 @@ export class DispatchController {
       modelName,
       dates: targets.map((target) => target.date),
     };
+  }
+
+  // Starts (or, if already running, rejects) a continuous background
+  // dispatch cycle: queues llm-openai trials for `tier`'s models — evenly
+  // spread across them — until today's usage reaches `threshold`% of the
+  // tier's daily free-token budget. See FreeTierDispatchService for how the
+  // cycle paces itself and stays under the threshold.
+  @Post("free-tier/:tier")
+  @ApiParam({
+    name: "tier",
+    type: String,
+    description: "Free-tier program id (see GET /strategy/free-tier-usage/:tier): 'flagship' or 'mini'.",
+    example: "mini",
+  })
+  @ApiQuery({
+    name: "threshold",
+    type: Number,
+    required: false,
+    description: "Stop once usage reaches this percent of the tier's daily token budget (default 90).",
+    example: 90,
+  })
+  async startFreeTierDispatch(@Param("tier") tier: string, @Query("threshold") thresholdRaw?: string) {
+    const thresholdPercent =
+      thresholdRaw === undefined
+        ? DEFAULT_FREE_TIER_DISPATCH_THRESHOLD_PERCENT
+        : Number(thresholdRaw);
+
+    return this.freeTierDispatchService.start(tier as FreeTierId, thresholdPercent);
+  }
+
+  // Deactivates `tier`'s dispatch cycle so it stops scheduling further
+  // ticks — a no-op (not an error) if it wasn't running.
+  @Delete("free-tier/:tier")
+  @ApiParam({ name: "tier", type: String, example: "mini" })
+  async stopFreeTierDispatch(@Param("tier") tier: string) {
+    return this.freeTierDispatchService.stop(tier as FreeTierId);
+  }
+
+  // Backs the leaderboard page's "is free-tier dispatch running, and at
+  // what threshold" indicator.
+  @Get("free-tier/:tier")
+  @ApiParam({ name: "tier", type: String, example: "mini" })
+  async getFreeTierDispatchStatus(@Param("tier") tier: string) {
+    return this.freeTierDispatchService.getStatus(tier as FreeTierId);
   }
 }

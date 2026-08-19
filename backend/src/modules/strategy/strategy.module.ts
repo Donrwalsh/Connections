@@ -24,6 +24,6 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
   ],
   controllers: [StrategyController],
   providers: [StrategyService, StrategyRunStore, LlmStrategyRunner, OrchestratorService, FreeTierUsageService],
-  exports: [StrategyService, LlmStrategyRunner],
+  exports: [StrategyService, LlmStrategyRunner, FreeTierUsageService],
 })
 export class StrategyModule {}

@@ -228,24 +228,38 @@ describe("LeaderboardPage", () => {
     renderLeaderboard();
 
     const tables = await screen.findAllByRole("table");
-    // avgGuesses, fewest first: alphabetical (12) beats shuffle-foolish (30)
-    // in the deterministic table (second — LLM renders first).
+    // Default metric is now successRate, best first: alphabetical (100%)
+    // beats shuffle-foolish (60%) in the deterministic table (second — LLM
+    // renders first).
     expect(firstRowIn(tables[1]!)).toHaveClass("bench-row--leading");
     expect(firstRowIn(tables[1]!).textContent).toContain("Alphabetical");
   });
 
   it("re-ranks the leading row when the metric changes", async () => {
     const user = userEvent.setup();
-    stubFetch(leaderboard);
+    // alphabetical wins on the default metric (successRate); shuffle-foolish
+    // wins on avgGuesses — so switching to it should flip which row leads.
+    stubFetch({
+      deterministic: [
+        makeRow({ id: "alphabetical", strategyName: "alphabetical", successRate: 100, avgGuessesToSolve: 30 }),
+        makeRow({
+          id: "shuffle-foolish",
+          strategyName: "shuffle-foolish",
+          successRate: 60,
+          avgGuessesToSolve: 12,
+        }),
+      ],
+      llm: [],
+    });
     renderLeaderboard();
 
-    await screen.findAllByRole("table");
-    await user.click(screen.getByRole("button", { name: "Success rate" }));
+    const tableBefore = await screen.findByRole("table");
+    expect(firstRowIn(tableBefore).textContent).toContain("Alphabetical");
 
-    const tables = screen.getAllByRole("table");
-    // success rate, best first: alphabetical (100%) still leads over
-    // shuffle-foolish (60%) in the deterministic table (second).
-    expect(firstRowIn(tables[1]!).textContent).toContain("Alphabetical");
+    await user.click(screen.getByRole("button", { name: "Avg guesses" }));
+
+    const tableAfter = screen.getByRole("table");
+    expect(firstRowIn(tableAfter).textContent).toContain("Shuffle-Foolish");
   });
 
   it("navigates to the row detail page on click", async () => {

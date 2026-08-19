@@ -4,6 +4,7 @@
 // which parts of the benchmark UI are still mock-driven.
 
 import type {
+  FreeTierDispatchStatus,
   FreeTierId,
   FreeTierUsage,
   Leaderboard,
@@ -98,6 +99,16 @@ export function fetchSupportedModels(signal?: AbortSignal): Promise<SupportedMod
  * one instance per tier. */
 export function fetchFreeTierUsage(tier: FreeTierId, signal?: AbortSignal): Promise<FreeTierUsage> {
   return fetchJson(`/strategy/free-tier-usage/${tier}`, signal);
+}
+
+/** Whether a continuous free-tier dispatch cycle is currently running for
+ * `tier`, and at what threshold — see FreeTierDispatchStatus. Backs the
+ * leaderboard budget widget's "auto-dispatch active" indicator. */
+export function fetchFreeTierDispatchStatus(
+  tier: FreeTierId,
+  signal?: AbortSignal,
+): Promise<FreeTierDispatchStatus> {
+  return fetchJson(`/dispatch/free-tier/${tier}`, signal);
 }
 
 const DETAIL_PAGE_SIZE = 200;

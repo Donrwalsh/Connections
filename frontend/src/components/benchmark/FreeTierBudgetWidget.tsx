@@ -1,10 +1,18 @@
 import { useEffect, useState } from "react";
-import { fetchFreeTierUsage } from "../../data/benchmark/api";
-import type { FreeTierId, FreeTierUsage } from "../../data/benchmark/types";
+import { fetchFreeTierDispatchStatus, fetchFreeTierUsage } from "../../data/benchmark/api";
+import type { FreeTierDispatchStatus, FreeTierId, FreeTierUsage } from "../../data/benchmark/types";
+import { StatusPill } from "./StatusPill";
 
 // Usage at or above this share of a tier's daily budget gets the warning
 // tint on its bar, as an early heads-up before the budget is exhausted.
 const WARNING_THRESHOLD_PERCENT = 90;
+
+// How often to re-check whether a free-tier dispatch cycle is still
+// running. The cycle can stop on its own (threshold reached, or it runs out
+// of puzzles) between page loads, so a one-time fetch on mount would go
+// stale — polling is what keeps "Auto-dispatch active" honest without the
+// viewer having to refresh the page themselves.
+const DISPATCH_STATUS_POLL_MS = 30_000;
 
 // Frontend-owned copy for each tier's title, shown immediately (loading and
 // error states included) rather than waiting on the fetched `label` field —
@@ -23,10 +31,13 @@ export interface FreeTierBudgetWidgetProps {
 /** Leaderboard widget: today's spend against one of the two free-token
  * programs (see FreeTierId) — the backend tracks a fixed model list and
  * daily limit per tier (FreeTierUsageService). Self-fetches so the rest of
- * the page doesn't wait on it; render one instance per tier. */
+ * the page doesn't wait on it; render one instance per tier. Also shows
+ * whether a continuous dispatch cycle (FreeTierDispatchService) is
+ * currently running for this tier and at what threshold. */
 export function FreeTierBudgetWidget({ tier }: FreeTierBudgetWidgetProps) {
   const [usage, setUsage] = useState<FreeTierUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dispatchStatus, setDispatchStatus] = useState<FreeTierDispatchStatus | null>(null);
 
   useEffect(() => {
     setUsage(null);
@@ -41,6 +52,27 @@ export function FreeTierBudgetWidget({ tier }: FreeTierBudgetWidgetProps) {
       });
 
     return () => controller.abort();
+  }, [tier]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const poll = () => {
+      fetchFreeTierDispatchStatus(tier, controller.signal)
+        .then(setDispatchStatus)
+        .catch(() => {
+          // Best-effort — the token-usage figures above are this widget's
+          // main job, so a failed status check just leaves the indicator
+          // showing whatever it last knew (or nothing, on first load).
+        });
+    };
+
+    poll();
+    const intervalId = setInterval(poll, DISPATCH_STATUS_POLL_MS);
+
+    return () => {
+      controller.abort();
+      clearInterval(intervalId);
+    };
   }, [tier]);
 
   const title = TIER_TITLES[tier];
@@ -73,6 +105,16 @@ export function FreeTierBudgetWidget({ tier }: FreeTierBudgetWidgetProps) {
     <div className="bench-free-tier" role="status" aria-label={`${title} usage`}>
       <div className="bench-free-tier__head">
         <span className="bench-free-tier__title">{title}</span>
+        {dispatchStatus?.active ? (
+          <span
+            title={
+              `Auto-dispatch is queuing new ${tier}-tier trials, evenly spread across its models, ` +
+              `until usage reaches ${dispatchStatus.thresholdPercent}% of the daily budget.`
+            }
+          >
+            <StatusPill label={`Auto-dispatch active · ${dispatchStatus.thresholdPercent}%`} tone="active" />
+          </span>
+        ) : null}
         <span
           className="bench-mono bench-free-tier__figures"
           title={`Covers: ${usage.models.join(", ")}`}

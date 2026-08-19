@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
+import { startOfTodayUtc } from "../../strategies";
 
 // Two separate provider programs, each with its own daily token allowance
 // and its own fixed model list. Membership/limits are a program fact, not
@@ -56,6 +57,14 @@ export interface FreeTierUsageDto {
   models: string[];
 }
 
+// Every program, keyed by id — the lookup getUsage(tier) and
+// FreeTierDispatchService both use to go from "which tier" to "which models/
+// limit" without a switch statement at each call site.
+export const FREE_TIER_PROGRAMS: Record<FreeTierId, FreeTierProgram> = {
+  flagship: FLAGSHIP_FREE_TIER,
+  mini: MINI_FREE_TIER,
+};
+
 @Injectable()
 export class FreeTierUsageService {
   constructor(
@@ -64,30 +73,29 @@ export class FreeTierUsageService {
   ) {}
 
   async getFlagshipUsage(): Promise<FreeTierUsageDto> {
-    return this.getUsage(FLAGSHIP_FREE_TIER);
+    return this.getUsage("flagship");
   }
 
   async getMiniUsage(): Promise<FreeTierUsageDto> {
-    return this.getUsage(MINI_FREE_TIER);
+    return this.getUsage("mini");
   }
 
   /**
-   * Tokens spent today (UTC) across every run of one of `program`'s models,
-   * summed from SolvePrompt.totalTokens — the same per-call token figure
+   * Tokens spent today (UTC) across every run of `tier`'s models, summed
+   * from SolvePrompt.totalTokens — the same per-call token figure
    * StrategyService's cost calculations use. "Today" resets at UTC midnight
    * rather than server-local time, since that's when the provider's own
-   * usage window resets. Shared by both getFlagshipUsage/getMiniUsage so the
-   * query itself only exists once — the two programs differ only in which
-   * models/limit they pass in, not in how usage is computed.
+   * usage window resets. getFlagshipUsage/getMiniUsage are thin wrappers
+   * over this; FreeTierDispatchService calls it directly since it needs to
+   * look usage up by whichever tier it's currently ticking.
    */
-  private async getUsage(program: FreeTierProgram): Promise<FreeTierUsageDto> {
-    const startOfTodayUtc = FreeTierUsageService.startOfTodayUtc();
-
+  async getUsage(tier: FreeTierId): Promise<FreeTierUsageDto> {
+    const program = FREE_TIER_PROGRAMS[tier];
     const raw = await this.solvePromptRepo
       .createQueryBuilder("prompt")
       .innerJoin("prompt.strategyRun", "run")
       .where("run.modelName IN (:...models)", { models: program.models })
-      .andWhere("prompt.createdAt >= :startOfTodayUtc", { startOfTodayUtc })
+      .andWhere("prompt.createdAt >= :startOfTodayUtc", { startOfTodayUtc: startOfTodayUtc() })
       .select("COALESCE(SUM(prompt.totalTokens), 0)", "totalTokens")
       .getRawOne<{ totalTokens: string }>();
 
@@ -101,9 +109,5 @@ export class FreeTierUsageService {
       remainingTokens: Math.max(0, program.dailyLimitTokens - usedTokens),
       models: [...program.models],
     };
-  }
-
-  private static startOfTodayUtc(now: Date = new Date()): Date {
-    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   }
 }

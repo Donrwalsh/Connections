@@ -20,6 +20,7 @@ import {
 } from "../src/modules/strategy/entities/strategy-run.entity";
 import { LlmStrategyRunner } from "../src/modules/strategy/llm-strategy-runner.service";
 import { llmOpenAIQueue } from "../src/modules/queue/strategy.queue";
+import { freeTierDispatchQueue } from "../src/modules/queue/free-tier-dispatch.queue";
 
 const TEST_DATE = "1999-12-31";
 
@@ -326,6 +327,122 @@ describe("App (e2e)", () => {
 
     expect(res.status).toBe(400);
     expect(res.body.message).toContain("puzzle date(s) exist");
+  });
+
+  describe("free-tier dispatch", () => {
+    beforeEach(async () => {
+      // This suite's tests assume genuinely fresh 'mini'/'flagship' rows —
+      // deleting them (rather than just deactivating) is what makes "before
+      // anything starts" true on every run, not just the first one ever
+      // against this shared test database.
+      await dataSource.query(
+        `DELETE FROM "FreeTierDispatchState" WHERE tier IN ('mini', 'flagship')`,
+      );
+    });
+
+    afterEach(async () => {
+      // Drop any tick job this test queued — nothing in this describe block
+      // expects a worker to ever process it (the e2e suite doesn't run
+      // one), so it would otherwise just sit in this shared test Redis db
+      // across runs.
+      await freeTierDispatchQueue.drain(true);
+    });
+
+    it("GET /dispatch/free-tier/mini reports inactive with a null threshold before anything starts", async () => {
+      const res = await request(app.getHttpServer()).get("/dispatch/free-tier/mini");
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        tier: "mini",
+        active: false,
+        thresholdPercent: null,
+        startedAt: null,
+      });
+    });
+
+    it("POST /dispatch/free-tier/mini starts a cycle at the given threshold", async () => {
+      const res = await request(app.getHttpServer()).post("/dispatch/free-tier/mini?threshold=75");
+
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({ tier: "mini", active: true, thresholdPercent: 75 });
+      expect(res.body.startedAt).toEqual(expect.any(String));
+
+      const status = await request(app.getHttpServer()).get("/dispatch/free-tier/mini");
+      expect(status.body).toMatchObject({ active: true, thresholdPercent: 75 });
+    });
+
+    it("POST /dispatch/free-tier/mini defaults to a 90% threshold when none is given", async () => {
+      const res = await request(app.getHttpServer()).post("/dispatch/free-tier/mini");
+
+      expect(res.status).toBe(201);
+      expect(res.body.thresholdPercent).toBe(90);
+    });
+
+    it("POST /dispatch/free-tier/mini rejects starting a second cycle while one is already active", async () => {
+      await request(app.getHttpServer()).post("/dispatch/free-tier/mini?threshold=50");
+
+      const res = await request(app.getHttpServer()).post("/dispatch/free-tier/mini?threshold=80");
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain("already running");
+    });
+
+    it("POST /dispatch/free-tier/mini rejects a non-integer threshold", async () => {
+      const res = await request(app.getHttpServer()).post("/dispatch/free-tier/mini?threshold=87.5");
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain("whole number");
+    });
+
+    it("POST /dispatch/free-tier/mini rejects a threshold outside (0, 100]", async () => {
+      const tooLow = await request(app.getHttpServer()).post("/dispatch/free-tier/mini?threshold=0");
+      const tooHigh = await request(app.getHttpServer()).post(
+        "/dispatch/free-tier/mini?threshold=101",
+      );
+
+      expect(tooLow.status).toBe(400);
+      expect(tooHigh.status).toBe(400);
+    });
+
+    it("POST /dispatch/free-tier/flagship starts its own cycle, independent of mini", async () => {
+      const res = await request(app.getHttpServer()).post("/dispatch/free-tier/flagship?threshold=60");
+
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({ tier: "flagship", active: true, thresholdPercent: 60 });
+
+      const flagshipStatus = await request(app.getHttpServer()).get("/dispatch/free-tier/flagship");
+      expect(flagshipStatus.body).toMatchObject({ active: true, thresholdPercent: 60 });
+
+      const miniStatus = await request(app.getHttpServer()).get("/dispatch/free-tier/mini");
+      expect(miniStatus.body).toMatchObject({ active: false, thresholdPercent: null });
+    });
+
+    it("POST /dispatch/free-tier/:tier rejects a tier that isn't a real free-tier program", async () => {
+      const res = await request(app.getHttpServer()).post("/dispatch/free-tier/bogus?threshold=90");
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain("flagship");
+      expect(res.body.message).toContain("mini");
+    });
+
+    it("DELETE /dispatch/free-tier/mini stops an active cycle", async () => {
+      await request(app.getHttpServer()).post("/dispatch/free-tier/mini?threshold=90");
+
+      const res = await request(app.getHttpServer()).delete("/dispatch/free-tier/mini");
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ active: false });
+
+      const status = await request(app.getHttpServer()).get("/dispatch/free-tier/mini");
+      expect(status.body.active).toBe(false);
+    });
+
+    it("DELETE /dispatch/free-tier/mini on an already-inactive tier is a harmless no-op", async () => {
+      const res = await request(app.getHttpServer()).delete("/dispatch/free-tier/mini");
+
+      expect(res.status).toBe(200);
+      expect(res.body.active).toBe(false);
+    });
   });
 
   it("GET /strategy/:strategy/puzzle/:date returns an empty run list", async () => {
