@@ -1,11 +1,13 @@
 import { Module } from "@nestjs/common";
-import { APP_GUARD } from "@nestjs/core";
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import { AppEnv, loadEnv } from "./config/env";
+import { AllExceptionsFilter } from "./common/all-exceptions.filter";
+import { LoggingInterceptor } from "./common/logging.interceptor";
 import { GameModule } from "./modules/game/game.module";
 import { AnswerGroup } from "./modules/game/entities/answer-group.entity";
 import { GroupMember } from "./modules/game/entities/group-member.entity";
@@ -75,6 +77,14 @@ import { FreeTierDispatchState } from "./modules/free-tier-dispatch/entities/fre
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_FILTER,
+      useClass: AllExceptionsFilter,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: LoggingInterceptor,
     },
   ],
 })
