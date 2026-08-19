@@ -143,6 +143,18 @@ export class GameService implements OnModuleDestroy {
     return result.latest_date ?? NYT_CONNECTIONS_ORIGIN_DATE;
   }
 
+  // The real single source of truth for "oldest puzzle date" — the
+  // frontend's calendar range used to hardcode this as a duplicate literal
+  // (CALENDAR_MIN_DATE) with nothing keeping the two in sync; see
+  // calendarMock.ts's initCalendarRange, which now fetches this instead.
+  async getEarliestDate() {
+    const result = await this.puzzleRepo
+      .createQueryBuilder("puzzle")
+      .select("MIN(puzzle.date)", "earliest_date")
+      .getRawOne();
+    return result.earliest_date ?? NYT_CONNECTIONS_ORIGIN_DATE;
+  }
+
   async getPuzzleByDate(date: string): Promise<PuzzleResponseDto> {
     const cached = this.puzzleCache.get(date);
     if (cached && cached.expiresAt > Date.now()) {

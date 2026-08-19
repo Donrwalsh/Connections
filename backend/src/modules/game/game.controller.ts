@@ -12,6 +12,11 @@ export class GameController {
     return this.gameService.getLatestDate();
   }
 
+  @Get("data/earliest_date")
+  getEarliestDate() {
+    return this.gameService.getEarliestDate();
+  }
+
   // Puzzles are immutable once ingested, so their date never changes —
   // cacheable indefinitely, same as puzzle/:date below.
   @Get("puzzle-id/:id")
