@@ -262,6 +262,76 @@ describe("LeaderboardPage", () => {
     expect(firstRowIn(tableAfter).textContent).toContain("Shuffle-Foolish");
   });
 
+  it("badges an LLM row whose model belongs to the flagship free tier", async () => {
+    stubFetch({
+      deterministic: leaderboard.deterministic,
+      llm: [makeRow({ id: "gpt-5", strategyName: "llm-openai", modelName: "gpt-5", kind: "llm" })],
+    });
+    renderLeaderboard();
+
+    expect(await screen.findByText("Flagship")).toBeInTheDocument();
+    expect(screen.queryByText("Mini")).not.toBeInTheDocument();
+  });
+
+  it("badges an LLM row whose model belongs to the mini free tier", async () => {
+    stubFetch({
+      deterministic: leaderboard.deterministic,
+      llm: [makeRow({ id: "o4-mini", strategyName: "llm-openai", modelName: "o4-mini", kind: "llm" })],
+    });
+    renderLeaderboard();
+
+    expect(await screen.findByText("Mini")).toBeInTheDocument();
+    expect(screen.queryByText("Flagship")).not.toBeInTheDocument();
+  });
+
+  it("shows no free-tier badge for a model in neither program", async () => {
+    stubFetch(leaderboard); // gpt-4.1-nano-2025-04-14, a dated snapshot name in neither list
+    renderLeaderboard();
+
+    await screen.findAllByRole("table");
+    expect(screen.queryByText("Flagship")).not.toBeInTheDocument();
+    expect(screen.queryByText("Mini")).not.toBeInTheDocument();
+  });
+
+  it("shows each free-tier widget's total spend, summed from that tier's models across the whole leaderboard", async () => {
+    stubFetch({
+      deterministic: [],
+      llm: [
+        makeRow({ id: "gpt-5", strategyName: "llm-openai", modelName: "gpt-5", kind: "llm", totalCostUsd: 1.5 }),
+        makeRow({ id: "o1", strategyName: "llm-openai", modelName: "o1", kind: "llm", totalCostUsd: 2.25 }),
+        makeRow({
+          id: "o4-mini",
+          strategyName: "llm-openai",
+          modelName: "o4-mini",
+          kind: "llm",
+          totalCostUsd: 0.4,
+        }),
+        // Not in either tier's model list — must not be counted toward
+        // either widget's total.
+        makeRow({
+          id: "mistral",
+          strategyName: "llm-ollama",
+          modelName: "mistral",
+          kind: "llm",
+          totalCostUsd: 99,
+        }),
+        // No runs priced yet — must not blow up the sum.
+        makeRow({
+          id: "o3",
+          strategyName: "llm-openai",
+          modelName: "o3",
+          kind: "llm",
+          totalCostUsd: null,
+        }),
+      ],
+    });
+    renderLeaderboard();
+
+    expect(await screen.findByText("$3.75")).toBeInTheDocument(); // flagship: 1.5 + 2.25 + 0
+    expect(screen.getByText("$0.40")).toBeInTheDocument(); // mini: 0.4
+    expect(screen.getAllByText("spent on trials so far")).toHaveLength(2);
+  });
+
   it("navigates to the row detail page on click", async () => {
     const user = userEvent.setup();
     stubFetch(leaderboard);

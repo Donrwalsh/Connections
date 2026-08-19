@@ -65,6 +65,18 @@
   border-color: #d9bcb7;
 }
 
+/* Free-tier membership badges on the LLM leaderboard table — see
+ * StrategyTable's freeTierModels prop. */
+.bench-pill--flagship {
+  color: #7c5cbf;
+  border-color: #d5c8ea;
+}
+
+.bench-pill--mini {
+  color: #2f9e6f;
+  border-color: #bfe3d2;
+}
+
 /* Daily free-token budget widgets (leaderboard page) — one per program
  * (flagship/mini), laid out side by side. */
 .bench-free-tiers {
@@ -96,6 +108,15 @@
 
 .bench-free-tier__figures {
   font-size: 0.85rem;
+}
+
+/* Reserves the auto-dispatch pill's row height whether or not a cycle is
+ * currently active, so the flagship/mini widgets stay vertically aligned
+ * regardless of each other's dispatch state — see FreeTierBudgetWidget. */
+.bench-free-tier__dispatch {
+  display: flex;
+  align-items: center;
+  min-height: 2rem;
 }
 
 .bench-free-tier__bar {
@@ -212,6 +233,12 @@
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   color: var(--text-h);
+}
+
+.bench-strategy-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
 .bench-strategy-name {

@@ -13,11 +13,27 @@ import { ApiParam, ApiQuery } from "@nestjs/swagger";
 import { StrategyService } from "../strategy/strategy.service";
 import { GameService } from "../game/game.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
-import { FreeTierDispatchService } from "../free-tier-dispatch/free-tier-dispatch.service";
+import {
+  FreeTierDispatchService,
+  FreeTierDispatchStatusDto,
+} from "../free-tier-dispatch/free-tier-dispatch.service";
 import { FreeTierId } from "../strategy/free-tier-usage.service";
 import { AUTOMATIC_STRATEGIES, LLM_STRATEGIES, STRATEGY_SET, isLlmStrategy } from "../../strategies";
 
 const DEFAULT_FREE_TIER_DISPATCH_THRESHOLD_PERCENT = 90;
+
+// The only two real programs — see FreeTierId — that "both" fans out to.
+const BOTH_FREE_TIERS: readonly FreeTierId[] = ["flagship", "mini"];
+
+// A per-tier outcome when "both" is requested — start() can reject for one
+// tier (e.g. already running) without that stopping the other from
+// starting, so each tier's own result (success or failure) is reported
+// independently rather than the whole request failing on the first error.
+interface FreeTierDispatchOutcome {
+  tier: FreeTierId;
+  status: FreeTierDispatchStatusDto | null;
+  error: string | null;
+}
 
 @Controller("dispatch")
 export class DispatchController {
@@ -180,12 +196,16 @@ export class DispatchController {
   // dispatch cycle: queues llm-openai trials for `tier`'s models — evenly
   // spread across them — until today's usage reaches `threshold`% of the
   // tier's daily free-token budget. See FreeTierDispatchService for how the
-  // cycle paces itself and stays under the threshold.
+  // cycle paces itself and stays under the threshold. `tier` also accepts
+  // 'both', which starts flagship and mini independently under the same
+  // threshold and reports each one's own outcome (see startBothFreeTiers).
   @Post("free-tier/:tier")
   @ApiParam({
     name: "tier",
     type: String,
-    description: "Free-tier program id (see GET /strategy/free-tier-usage/:tier): 'flagship' or 'mini'.",
+    description:
+      "Free-tier program id (see GET /strategy/free-tier-usage/:tier): 'flagship', 'mini', or" +
+      " 'both' (starts both under the same threshold, independently).",
     example: "mini",
   })
   @ApiQuery({
@@ -201,15 +221,59 @@ export class DispatchController {
         ? DEFAULT_FREE_TIER_DISPATCH_THRESHOLD_PERCENT
         : Number(thresholdRaw);
 
+    if (tier === "both") {
+      return this.startBothFreeTiers(thresholdPercent);
+    }
+
     return this.freeTierDispatchService.start(tier as FreeTierId, thresholdPercent);
   }
 
   // Deactivates `tier`'s dispatch cycle so it stops scheduling further
-  // ticks — a no-op (not an error) if it wasn't running.
+  // ticks — a no-op (not an error) if it wasn't running. `tier` also accepts
+  // 'both', stopping flagship and mini together.
   @Delete("free-tier/:tier")
-  @ApiParam({ name: "tier", type: String, example: "mini" })
+  @ApiParam({
+    name: "tier",
+    type: String,
+    description: "Free-tier program id: 'flagship', 'mini', or 'both' (stops both).",
+    example: "mini",
+  })
   async stopFreeTierDispatch(@Param("tier") tier: string) {
+    if (tier === "both") {
+      const [flagship, mini] = await Promise.all(
+        BOTH_FREE_TIERS.map((t) => this.freeTierDispatchService.stop(t)),
+      );
+      return { flagship, mini };
+    }
+
     return this.freeTierDispatchService.stop(tier as FreeTierId);
+  }
+
+  // Starts flagship and mini concurrently under the same threshold. stop()
+  // can't fail, but start() rejects a tier that's already running — so
+  // unlike the DELETE fan-out above, each tier's start is caught
+  // independently: one tier already being active (or otherwise rejecting)
+  // doesn't prevent the other from starting, and the response reports both
+  // outcomes rather than a single opaque 400 that would hide a partial
+  // success.
+  private async startBothFreeTiers(
+    thresholdPercent: number,
+  ): Promise<{ flagship: FreeTierDispatchOutcome; mini: FreeTierDispatchOutcome }> {
+    const startOne = async (t: FreeTierId): Promise<FreeTierDispatchOutcome> => {
+      try {
+        const status = await this.freeTierDispatchService.start(t, thresholdPercent);
+        return { tier: t, status, error: null };
+      } catch (err) {
+        return {
+          tier: t,
+          status: null,
+          error: err instanceof Error ? err.message : "Failed to start free-tier dispatch",
+        };
+      }
+    };
+
+    const [flagship, mini] = await Promise.all(BOTH_FREE_TIERS.map(startOne));
+    return { flagship, mini };
   }
 
   // Backs the leaderboard page's "is free-tier dispatch running, and at

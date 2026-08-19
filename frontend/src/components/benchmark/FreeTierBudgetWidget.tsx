@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchFreeTierDispatchStatus, fetchFreeTierUsage } from "../../data/benchmark/api";
+import { formatCostUsd } from "../../data/benchmark/metrics";
 import type { FreeTierDispatchStatus, FreeTierId, FreeTierUsage } from "../../data/benchmark/types";
 import { StatusPill } from "./StatusPill";
 
@@ -26,6 +27,16 @@ const TIER_TITLES: Record<FreeTierId, string> = {
 
 export interface FreeTierBudgetWidgetProps {
   tier: FreeTierId;
+  /** Total USD cost (summed from the leaderboard's per-model totalCostUsd,
+   * across every trial ever run — not just today) of every trial run against
+   * this tier's models. Unlike the token-budget figures below, this isn't a
+   * daily figure and doesn't reset — it's real spend against the provider
+   * bill, which the free-token budget only partially offsets. The parent
+   * page owns this (it already loads the leaderboard the number comes from),
+   * so it's a prop rather than something this widget fetches itself;
+   * undefined/null just omits the line rather than showing $0.00 while it's
+   * still loading. */
+  spentUsd?: number | null;
 }
 
 /** Leaderboard widget: today's spend against one of the two free-token
@@ -34,7 +45,7 @@ export interface FreeTierBudgetWidgetProps {
  * the page doesn't wait on it; render one instance per tier. Also shows
  * whether a continuous dispatch cycle (FreeTierDispatchService) is
  * currently running for this tier and at what threshold. */
-export function FreeTierBudgetWidget({ tier }: FreeTierBudgetWidgetProps) {
+export function FreeTierBudgetWidget({ tier, spentUsd }: FreeTierBudgetWidgetProps) {
   const [usage, setUsage] = useState<FreeTierUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dispatchStatus, setDispatchStatus] = useState<FreeTierDispatchStatus | null>(null);
@@ -105,6 +116,19 @@ export function FreeTierBudgetWidget({ tier }: FreeTierBudgetWidgetProps) {
     <div className="bench-free-tier" role="status" aria-label={`${title} usage`}>
       <div className="bench-free-tier__head">
         <span className="bench-free-tier__title">{title}</span>
+        <span
+          className="bench-mono bench-free-tier__figures"
+          title={`Covers: ${usage.models.join(", ")}`}
+        >
+          {usage.usedTokens.toLocaleString()} / {usage.dailyLimitTokens.toLocaleString()} used
+        </span>
+      </div>
+      {/* Always rendered (reserves a fixed row height via CSS) rather than
+       * only when a cycle is active — otherwise the flagship and mini
+       * widgets, which rarely have matching dispatch state at the same
+       * time, end up different heights and everything below drifts out of
+       * vertical alignment between the two side-by-side widgets. */}
+      <div className="bench-free-tier__dispatch">
         {dispatchStatus?.active ? (
           <span
             title={
@@ -115,12 +139,6 @@ export function FreeTierBudgetWidget({ tier }: FreeTierBudgetWidgetProps) {
             <StatusPill label={`Auto-dispatch active · ${dispatchStatus.thresholdPercent}%`} tone="active" />
           </span>
         ) : null}
-        <span
-          className="bench-mono bench-free-tier__figures"
-          title={`Covers: ${usage.models.join(", ")}`}
-        >
-          {usage.usedTokens.toLocaleString()} / {usage.dailyLimitTokens.toLocaleString()} used
-        </span>
       </div>
       <div
         className="bench-free-tier__bar"
@@ -139,6 +157,14 @@ export function FreeTierBudgetWidget({ tier }: FreeTierBudgetWidgetProps) {
       <span className="bench-muted bench-free-tier__remaining">
         {usage.remainingTokens.toLocaleString()} tokens remaining today
       </span>
+      {spentUsd !== undefined && spentUsd !== null ? (
+        <span
+          className="bench-muted bench-free-tier__spent"
+          title="Total cost of every trial ever run against this tier's models, not just today's."
+        >
+          <span className="bench-mono">{formatCostUsd(spentUsd)}</span> spent on trials so far
+        </span>
+      ) : null}
     </div>
   );
 }

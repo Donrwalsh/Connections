@@ -133,6 +133,33 @@ describe("FreeTierBudgetWidget", () => {
     expect(bar).toHaveAttribute("aria-valuenow", "100");
   });
 
+  it("shows the total spent on trials so far when spentUsd is given", async () => {
+    stubFetch(flagshipUsage);
+
+    render(<FreeTierBudgetWidget tier="flagship" spentUsd={12.3456} />);
+
+    await screen.findByText("238,000 tokens remaining today");
+    expect(screen.getByText("$12.35")).toBeInTheDocument();
+    expect(screen.getByText("spent on trials so far")).toBeInTheDocument();
+  });
+
+  it("renders a small spend figure with extra precision, matching the leaderboard's cost formatting", async () => {
+    stubFetch(flagshipUsage);
+
+    render(<FreeTierBudgetWidget tier="flagship" spentUsd={0.0057} />);
+
+    expect(await screen.findByText("$0.0057")).toBeInTheDocument();
+  });
+
+  it("omits the spend line entirely when spentUsd hasn't loaded yet", async () => {
+    stubFetch(flagshipUsage);
+
+    render(<FreeTierBudgetWidget tier="flagship" />);
+
+    await screen.findByText("238,000 tokens remaining today");
+    expect(screen.queryByText(/spent on trials so far/)).not.toBeInTheDocument();
+  });
+
   it("shows a tier-specific error message when the fetch fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("boom")));
 

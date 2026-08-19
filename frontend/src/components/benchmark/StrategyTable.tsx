@@ -12,6 +12,15 @@ import { describeLeaderboardRow } from "../../data/benchmark/mockData";
 import type { LeaderboardRow } from "../../data/benchmark/types";
 import { StatusPill } from "./StatusPill";
 
+/** Which models belong to each free-token program (see FreeTierId) — used
+ * only to badge LLM rows on this table, so a model missing from both sets
+ * (or the fetch that populates them still being in flight) just renders with
+ * no badge rather than an error. */
+export interface FreeTierModelSets {
+  flagship: Set<string>;
+  mini: Set<string>;
+}
+
 export interface StrategyTableProps {
   rows: LeaderboardRow[];
   metricKey: LeaderboardMetricKey;
@@ -26,6 +35,9 @@ export interface StrategyTableProps {
    * hundreds or thousands of guesses, formatted here as whole numbers with
    * thousands separators. */
   variant: "llm" | "deterministic";
+  /** Only consulted for variant 'llm'; omit for 'deterministic' rows, which
+   * never belong to a free tier. */
+  freeTierModels?: FreeTierModelSets;
 }
 
 function formatRange(
@@ -40,7 +52,7 @@ function formatRange(
 /** Leaderboard table of aggregated strategy/model rows (see LeaderboardRow).
  * The leading (top-ranked) row per the active metric gets the accent
  * "leading" treatment. Rows navigate to /leaderboard/:id. */
-export function StrategyTable({ rows, metricKey, variant }: StrategyTableProps) {
+export function StrategyTable({ rows, metricKey, variant, freeTierModels }: StrategyTableProps) {
   const navigate = useNavigate();
   const metric = getMetricDefinition(metricKey);
   const sorted = sortStrategiesByMetric(rows, metricKey);
@@ -84,6 +96,12 @@ export function StrategyTable({ rows, metricKey, variant }: StrategyTableProps) 
           const speedDisplay = speed === null ? "—" : Math.round(speed).toLocaleString();
           const durationDisplay =
             row.avgDurationMs === null ? "—" : formatDuration(row.avgDurationMs);
+          const freeTier =
+            row.modelName && freeTierModels?.flagship.has(row.modelName)
+              ? "flagship"
+              : row.modelName && freeTierModels?.mini.has(row.modelName)
+                ? "mini"
+                : null;
           return (
             <tr
               key={row.id}
@@ -100,7 +118,16 @@ export function StrategyTable({ rows, metricKey, variant }: StrategyTableProps) 
               aria-label={`View ${name} details`}
             >
               <td>
-                <span className="bench-strategy-name">{name}</span>
+                <span className="bench-strategy-name-row">
+                  <span className="bench-strategy-name">{name}</span>
+                  {freeTier ? (
+                    <span
+                      title={`Counts toward the ${freeTier === "flagship" ? "flagship" : "mini"} free-token budget.`}
+                    >
+                      <StatusPill label={freeTier === "flagship" ? "Flagship" : "Mini"} tone={freeTier} />
+                    </span>
+                  ) : null}
+                </span>
                 <span className="bench-strategy-desc">{description}</span>
               </td>
               {variant === "llm" ? <td className="bench-mono">{successRateDisplay}</td> : null}

@@ -425,6 +425,67 @@ describe("App (e2e)", () => {
       expect(res.body.message).toContain("mini");
     });
 
+    it("POST /dispatch/free-tier/both starts flagship and mini together under the same threshold", async () => {
+      const res = await request(app.getHttpServer()).post("/dispatch/free-tier/both?threshold=70");
+
+      expect(res.status).toBe(201);
+      expect(res.body.flagship).toMatchObject({
+        tier: "flagship",
+        error: null,
+        status: expect.objectContaining({ tier: "flagship", active: true, thresholdPercent: 70 }),
+      });
+      expect(res.body.mini).toMatchObject({
+        tier: "mini",
+        error: null,
+        status: expect.objectContaining({ tier: "mini", active: true, thresholdPercent: 70 }),
+      });
+
+      const flagshipStatus = await request(app.getHttpServer()).get("/dispatch/free-tier/flagship");
+      expect(flagshipStatus.body).toMatchObject({ active: true, thresholdPercent: 70 });
+      const miniStatus = await request(app.getHttpServer()).get("/dispatch/free-tier/mini");
+      expect(miniStatus.body).toMatchObject({ active: true, thresholdPercent: 70 });
+    });
+
+    it("POST /dispatch/free-tier/both reports one tier's failure without blocking the other from starting", async () => {
+      await request(app.getHttpServer()).post("/dispatch/free-tier/mini?threshold=50");
+
+      const res = await request(app.getHttpServer()).post("/dispatch/free-tier/both?threshold=70");
+
+      expect(res.status).toBe(201);
+      expect(res.body.mini.status).toBeNull();
+      expect(res.body.mini.error).toContain("already running");
+      expect(res.body.flagship.status).toMatchObject({ active: true, thresholdPercent: 70 });
+
+      // Mini's pre-existing 50% cycle was untouched by the failed attempt to
+      // restart it via 'both' — not silently overwritten or reset.
+      const miniStatus = await request(app.getHttpServer()).get("/dispatch/free-tier/mini");
+      expect(miniStatus.body).toMatchObject({ active: true, thresholdPercent: 50 });
+    });
+
+    it("DELETE /dispatch/free-tier/both stops both cycles", async () => {
+      await request(app.getHttpServer()).post("/dispatch/free-tier/flagship?threshold=60");
+      await request(app.getHttpServer()).post("/dispatch/free-tier/mini?threshold=60");
+
+      const res = await request(app.getHttpServer()).delete("/dispatch/free-tier/both");
+
+      expect(res.status).toBe(200);
+      expect(res.body.flagship).toMatchObject({ tier: "flagship", active: false });
+      expect(res.body.mini).toMatchObject({ tier: "mini", active: false });
+
+      const flagshipStatus = await request(app.getHttpServer()).get("/dispatch/free-tier/flagship");
+      expect(flagshipStatus.body.active).toBe(false);
+      const miniStatus = await request(app.getHttpServer()).get("/dispatch/free-tier/mini");
+      expect(miniStatus.body.active).toBe(false);
+    });
+
+    it("DELETE /dispatch/free-tier/both on already-inactive tiers is a harmless no-op", async () => {
+      const res = await request(app.getHttpServer()).delete("/dispatch/free-tier/both");
+
+      expect(res.status).toBe(200);
+      expect(res.body.flagship.active).toBe(false);
+      expect(res.body.mini.active).toBe(false);
+    });
+
     it("DELETE /dispatch/free-tier/mini stops an active cycle", async () => {
       await request(app.getHttpServer()).post("/dispatch/free-tier/mini?threshold=90");
 

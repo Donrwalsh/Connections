@@ -3,7 +3,7 @@
 
 import type { GuessResultValue, PuzzleRunStatus, RunStatus } from "./types";
 
-export type PillTone = "queued" | "active" | "completed" | "failed" | "neutral";
+export type PillTone = "queued" | "active" | "completed" | "failed" | "neutral" | "flagship" | "mini";
 
 const FAILED_STATUSES: RunStatus[] = ["failed", "duplicate", "malformedResponse", "error"];
 

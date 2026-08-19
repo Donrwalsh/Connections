@@ -3,10 +3,24 @@ import { FreeTierBudgetWidget } from "../../components/benchmark/FreeTierBudgetW
 import { HeroHeader } from "../../components/benchmark/HeroHeader";
 import { MetricSelector } from "../../components/benchmark/MetricSelector";
 import { StatusStrip } from "../../components/benchmark/StatusStrip";
-import { StrategyTable } from "../../components/benchmark/StrategyTable";
-import { fetchLeaderboard } from "../../data/benchmark/api";
+import { StrategyTable, type FreeTierModelSets } from "../../components/benchmark/StrategyTable";
+import { fetchFreeTierUsage, fetchLeaderboard } from "../../data/benchmark/api";
 import type { LeaderboardMetricKey } from "../../data/benchmark/metrics";
-import type { Leaderboard } from "../../data/benchmark/types";
+import type { Leaderboard, LeaderboardRow } from "../../data/benchmark/types";
+
+const EMPTY_FREE_TIER_MODELS: FreeTierModelSets = { flagship: new Set(), mini: new Set() };
+
+/** Total USD cost (row.totalCostUsd, which is already all-time — not
+ * today-scoped like the token budget) across every LLM row whose model
+ * belongs to `models`. Null while either input hasn't loaded yet, so the
+ * widget can distinguish "not loaded" from "genuinely $0 spent". */
+function sumSpendUsd(llmRows: LeaderboardRow[] | null, models: Set<string>): number | null {
+  if (llmRows === null || models.size === 0) return null;
+  return llmRows.reduce(
+    (sum, row) => (row.modelName && models.has(row.modelName) ? sum + (row.totalCostUsd ?? 0) : sum),
+    0,
+  );
+}
 
 /** Homepage of the benchmark area: two DB-driven leaderboard tables (LLM
  * strategies above deterministic/shuffle strategies — see StrategyTable's
@@ -18,6 +32,7 @@ export function LeaderboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [metricKey, setMetricKey] = useState<LeaderboardMetricKey>("successRate");
+  const [freeTierModels, setFreeTierModels] = useState<FreeTierModelSets>(EMPTY_FREE_TIER_MODELS);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -38,17 +53,38 @@ export function LeaderboardPage() {
     return () => controller.abort();
   }, []);
 
+  useEffect(() => {
+    const controller = new AbortController();
+
+    // Best-effort: which models belong to which free tier is only used for
+    // a small badge, so a failed fetch here just leaves rows unbadged rather
+    // than surfacing a page-level error.
+    Promise.all([
+      fetchFreeTierUsage("flagship", controller.signal),
+      fetchFreeTierUsage("mini", controller.signal),
+    ])
+      .then(([flagship, mini]) => {
+        setFreeTierModels({ flagship: new Set(flagship.models), mini: new Set(mini.models) });
+      })
+      .catch(() => {});
+
+    return () => controller.abort();
+  }, []);
+
   const allRows = leaderboard ? [...leaderboard.deterministic, ...leaderboard.llm] : [];
   const active = allRows.reduce((sum, row) => sum + row.progress.active, 0);
   const queued = allRows.reduce((sum, row) => sum + row.progress.queued, 0);
+  const llmRows = leaderboard ? leaderboard.llm : null;
+  const flagshipSpentUsd = sumSpendUsd(llmRows, freeTierModels.flagship);
+  const miniSpentUsd = sumSpendUsd(llmRows, freeTierModels.mini);
 
   return (
     <div className="bench-page">
       <HeroHeader />
       <StatusStrip running={active} queued={queued} />
       <div className="bench-free-tiers" aria-label="Daily free-token budgets">
-        <FreeTierBudgetWidget tier="flagship" />
-        <FreeTierBudgetWidget tier="mini" />
+        <FreeTierBudgetWidget tier="flagship" spentUsd={flagshipSpentUsd} />
+        <FreeTierBudgetWidget tier="mini" spentUsd={miniSpentUsd} />
       </div>
 
       {isLoading ? <p className="bench-muted">Loading leaderboard…</p> : null}
@@ -64,7 +100,12 @@ export function LeaderboardPage() {
             {leaderboard.llm.length === 0 ? (
               <p className="bench-muted">No LLM runs yet.</p>
             ) : (
-              <StrategyTable rows={leaderboard.llm} metricKey={metricKey} variant="llm" />
+              <StrategyTable
+                rows={leaderboard.llm}
+                metricKey={metricKey}
+                variant="llm"
+                freeTierModels={freeTierModels}
+              />
             )}
           </section>
 
