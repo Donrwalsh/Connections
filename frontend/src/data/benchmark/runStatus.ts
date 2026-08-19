@@ -25,6 +25,20 @@ export function runStatusLabel(status: RunStatus): string {
   return RUN_STATUS_LABEL[status];
 }
 
+/** Every status a run-history row can actually have — "queued" is a valid
+ * RunStatus generally (see the leaderboard's progress counts), but a
+ * StrategyRun row is only ever inserted once a run has started, so it never
+ * appears here. Used to build the run-history status filter's option list
+ * without offering a choice that can never match anything. */
+export const RUN_HISTORY_STATUSES: RunStatus[] = [
+  "running",
+  "completed",
+  "failed",
+  "duplicate",
+  "malformedResponse",
+  "error",
+];
+
 export function runStatusTone(status: RunStatus): PillTone {
   if (status === "queued") return "queued";
   if (status === "running") return "active";

@@ -11,6 +11,10 @@ import { GroupMember } from "../src/modules/game/entities/group-member.entity";
 import { Puzzle } from "../src/modules/game/entities/puzzle.entity";
 import { Guess, GuessResult, GuessSource } from "../src/modules/strategy/entities/guess.entity";
 import {
+  SolvePrompt,
+  SolvePromptType,
+} from "../src/modules/strategy/entities/solve-prompt.entity";
+import {
   LlmProposal,
   LlmProposalStatus,
 } from "../src/modules/strategy/entities/llm-proposal.entity";
@@ -206,6 +210,108 @@ describe("App (e2e)", () => {
     // on ModelPrice — nothing in this project ever priced cached input
     // tokens, so it wasn't carried over.
     expect(res.body[0]).not.toHaveProperty("cachedInputCostPerMillionTokens");
+  });
+
+  it("GET /strategy/:strategyName/runs sorts by tokenCost using each row's real per-model rate", async () => {
+    // Rate comes from the live seeded catalog rather than a hardcoded
+    // number, so this doesn't drift if a future migration changes the
+    // price — only the token counts below (which this test controls) need
+    // to differ enough to produce a clear ordering.
+    const models = await request(app.getHttpServer()).get("/strategy/models");
+    const rate = (
+      models.body as Array<{
+        modelName: string;
+        inputCostPerMillionTokens: number;
+        outputCostPerMillionTokens: number;
+      }>
+    ).find((m) => m.modelName === "gpt-4.1-nano-2025-04-14")!;
+
+    const puzzle = await dataSource.getRepository(Puzzle).findOneByOrFail({ date: TEST_DATE });
+    const cheapRun = await dataSource.getRepository(StrategyRun).save({
+      puzzle,
+      strategyName: "llm-openai",
+      modelName: "gpt-4.1-nano-2025-04-14",
+      trialNumber: 201,
+      availableWords: ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"],
+      currentCombination: [0, 1, 2, 3],
+    });
+    const expensiveRun = await dataSource.getRepository(StrategyRun).save({
+      puzzle,
+      strategyName: "llm-openai",
+      modelName: "gpt-4.1-nano-2025-04-14",
+      trialNumber: 202,
+      availableWords: ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"],
+      currentCombination: [0, 1, 2, 3],
+    });
+    await dataSource.getRepository(SolvePrompt).save({
+      strategyRunId: cheapRun.id,
+      promptNumber: 1,
+      promptType: SolvePromptType.INITIAL_SOLVE,
+      promptTokens: 1000,
+      completionTokens: 500,
+    });
+    await dataSource.getRepository(SolvePrompt).save({
+      strategyRunId: expensiveRun.id,
+      promptNumber: 1,
+      promptType: SolvePromptType.INITIAL_SOLVE,
+      promptTokens: 1_000_000,
+      completionTokens: 500_000,
+    });
+
+    const res = await request(app.getHttpServer()).get(
+      "/strategy/llm-openai/runs?model=gpt-4.1-nano-2025-04-14&sortBy=tokenCost&sortDir=asc&limit=500",
+    );
+
+    expect(res.status).toBe(200);
+    const ids = (res.body.rows as Array<{ id: number }>).map((row) => row.id);
+    // Ascending: the cheap run's index must precede the expensive run's.
+    expect(ids.indexOf(cheapRun.id)).toBeLessThan(ids.indexOf(expensiveRun.id));
+
+    const cheapRow = res.body.rows.find((row: { id: number }) => row.id === cheapRun.id);
+    const expensiveRow = res.body.rows.find((row: { id: number }) => row.id === expensiveRun.id);
+    expect(cheapRow.tokenCostUsd).toBeCloseTo(
+      (1000 / 1_000_000) * rate.inputCostPerMillionTokens +
+        (500 / 1_000_000) * rate.outputCostPerMillionTokens,
+    );
+    expect(expensiveRow.tokenCostUsd).toBeCloseTo(
+      (1_000_000 / 1_000_000) * rate.inputCostPerMillionTokens +
+        (500_000 / 1_000_000) * rate.outputCostPerMillionTokens,
+    );
+  });
+
+  it("GET /strategy/:strategyName/runs filters by status", async () => {
+    // Uses "reverse-order" (untouched by every other test in this file)
+    // rather than "alphabetical" — several other tests assert an exact
+    // count/emptiness of alphabetical's run list for TEST_DATE, and this
+    // suite shares one puzzle across all tests with no per-test cleanup.
+    const puzzle = await dataSource.getRepository(Puzzle).findOneByOrFail({ date: TEST_DATE });
+    const failedRun = await dataSource.getRepository(StrategyRun).save({
+      puzzle,
+      strategyName: "reverse-order",
+      trialNumber: 203,
+      status: StrategyRunStatus.FAILED,
+      availableWords: [],
+      currentCombination: [0, 1, 2, 3],
+      finishedAt: new Date(),
+    });
+    await dataSource.getRepository(StrategyRun).save({
+      puzzle,
+      strategyName: "reverse-order",
+      trialNumber: 204,
+      status: StrategyRunStatus.COMPLETED,
+      availableWords: [],
+      currentCombination: [0, 1, 2, 3],
+      finishedAt: new Date(),
+    });
+
+    const res = await request(app.getHttpServer()).get(
+      "/strategy/reverse-order/runs?status=failed&limit=500",
+    );
+
+    expect(res.status).toBe(200);
+    const rows = res.body.rows as Array<{ id: number; status: string }>;
+    expect(rows.some((row) => row.id === failedRun.id)).toBe(true);
+    expect(rows.every((row) => row.status === "failed")).toBe(true);
   });
 
   it("GET /strategy/free-tier-usage/flagship reports today's usage against the 250k flagship budget", async () => {

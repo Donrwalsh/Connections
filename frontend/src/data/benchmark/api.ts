@@ -12,6 +12,7 @@ import type {
   RunHistorySortBy,
   RunHistorySortDir,
   RunRecord,
+  RunStatus,
   StrategyRunDetail,
   StrategyRunListItem,
   SupportedModelRecord,
@@ -77,11 +78,17 @@ export interface FetchRunHistoryOptions {
   limit?: number;
   sortBy?: RunHistorySortBy;
   sortDir?: RunHistorySortDir;
+  /** Narrows to one run status. "queued" is accepted by the type but never
+   * actually matches anything server-side — a StrategyRun row is only ever
+   * inserted once a run has started, so "queued" never appears as a real
+   * row status (see RunHistoryRow). */
+  status?: RunStatus;
 }
 
-/** Paginated, sortable history of every individual run for a strategy — one
- * row per run across every puzzle (unlike fetchRunsForPuzzle, which scopes to
- * one puzzle). Powers the /leaderboard/:strategyId run-history table. */
+/** Paginated, sortable, filterable history of every individual run for a
+ * strategy — one row per run across every puzzle (unlike fetchRunsForPuzzle,
+ * which scopes to one puzzle). Powers the /leaderboard/:strategyId
+ * run-history table. */
 export function fetchRunHistory(
   strategyName: string,
   options: FetchRunHistoryOptions = {},
@@ -93,6 +100,7 @@ export function fetchRunHistory(
   if (options.limit) params.set("limit", String(options.limit));
   if (options.sortBy) params.set("sortBy", options.sortBy);
   if (options.sortDir) params.set("sortDir", options.sortDir);
+  if (options.status) params.set("status", options.status);
 
   const query = params.toString();
   return fetchJson(`/strategy/${strategyName}/runs${query ? `?${query}` : ""}`, signal);

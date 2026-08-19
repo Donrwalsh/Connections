@@ -10,6 +10,7 @@ import type {
   RunHistory,
   RunHistorySortBy,
   RunHistorySortDir,
+  RunStatus,
 } from "../../data/benchmark/types";
 
 const PAGE_SIZE = 100;
@@ -45,6 +46,7 @@ export function StrategyPuzzlePage() {
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState<RunHistorySortBy>("puzzleDate");
   const [sortDir, setSortDir] = useState<RunHistorySortDir>("desc");
+  const [status, setStatus] = useState<RunStatus | null>(null);
 
   useEffect(() => {
     if (!strategyId) return;
@@ -77,6 +79,7 @@ export function StrategyPuzzlePage() {
         limit: PAGE_SIZE,
         sortBy,
         sortDir,
+        status: status ?? undefined,
       },
       controller.signal,
     )
@@ -91,7 +94,12 @@ export function StrategyPuzzlePage() {
       });
 
     return () => controller.abort();
-  }, [resolvedStrategyName, resolvedKind, resolvedModelId, page, sortBy, sortDir]);
+  }, [resolvedStrategyName, resolvedKind, resolvedModelId, page, sortBy, sortDir, status]);
+
+  function handleStatusChange(newStatus: RunStatus | null) {
+    setPage(1);
+    setStatus(newStatus);
+  }
 
   function handleSortChange(newSortBy: RunHistorySortBy) {
     setPage(1);
@@ -231,6 +239,8 @@ export function StrategyPuzzlePage() {
             sortDir={sortDir}
             onSortChange={handleSortChange}
             showTokenCost={resolvedKind === "llm"}
+            status={status}
+            onStatusChange={handleStatusChange}
           />
           <div className="bench-controls">
             <button

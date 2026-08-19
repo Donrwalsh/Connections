@@ -147,7 +147,7 @@ export interface LeaderboardDto {
   llm: LeaderboardRowDto[];
 }
 
-export type RunHistorySortBy = "puzzleDate" | "startedAt" | "guessCount" | "duration";
+export type RunHistorySortBy = "puzzleDate" | "startedAt" | "guessCount" | "duration" | "tokenCost";
 export type RunHistorySortDir = "asc" | "desc";
 
 // One row of GET /strategy/:strategyName/runs: a single StrategyRun (not a

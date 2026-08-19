@@ -190,10 +190,16 @@ describe("StrategyPuzzlePage", () => {
     // Cell order must track header order exactly — a value sitting under the
     // wrong header (e.g. guesses/duration transposed) wouldn't be caught by
     // just asserting presence anywhere in the table.
-    const headers = within(table)
-      .getAllByRole("columnheader")
-      .map((header) => header.textContent);
-    expect(headers).toEqual(["Puzzle date ↓", "Run date", "Guesses", "Duration", "Status"]);
+    const headerCells = within(table).getAllByRole("columnheader");
+    expect(headerCells.slice(0, -1).map((header) => header.textContent)).toEqual([
+      "Puzzle date ↓",
+      "Run date",
+      "Guesses",
+      "Duration",
+    ]);
+    // The last (Status) header holds the status filter — see
+    // RunStatusFilter — rather than a plain "Status" label.
+    expect(within(headerCells[headerCells.length - 1]!).getByLabelText("Status")).toBeInTheDocument();
 
     // The row itself carries an explicit role="link" (see RunHistoryTable),
     // which overrides its implicit "row" role — query its <td>s directly by
@@ -248,11 +254,64 @@ describe("StrategyPuzzlePage", () => {
     renderStrategy("gpt-4.1-nano-2025-04-14");
 
     const table = await screen.findByRole("table");
-    const headers = within(table)
-      .getAllByRole("columnheader")
-      .map((header) => header.textContent);
-    expect(headers).toEqual(["Puzzle date ↓", "Run date", "Guesses", "Duration", "Token cost", "Status"]);
+    const headerCells = within(table).getAllByRole("columnheader");
+    expect(headerCells.slice(0, -1).map((header) => header.textContent)).toEqual([
+      "Puzzle date ↓",
+      "Run date",
+      "Guesses",
+      "Duration",
+      "Token cost",
+    ]);
+    expect(within(headerCells[headerCells.length - 1]!).getByLabelText("Status")).toBeInTheDocument();
     expect(within(table).getByText("$0.12")).toBeInTheDocument();
+  });
+
+  it("sorts by Token cost when its column header is clicked, resetting to page 1", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubFetch({
+      history: {
+        rows: [makeRow({ strategyName: "llm-openai", modelName: "gpt-4.1-nano-2025-04-14" })],
+        meta: { total: 1, page: 1, limit: 100 },
+      },
+    });
+
+    renderStrategy("gpt-4.1-nano-2025-04-14");
+
+    await screen.findByRole("table");
+    await user.click(screen.getByRole("button", { name: /Sort by Token cost/ }));
+
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      expect.stringContaining("sortBy=tokenCost"),
+      expect.anything(),
+    );
+    expect(fetchMock).toHaveBeenLastCalledWith(expect.stringContaining("sortDir=desc"), expect.anything());
+    expect(fetchMock).toHaveBeenLastCalledWith(expect.stringContaining("page=1"), expect.anything());
+  });
+
+  it("filters by status when the status dropdown changes, resetting to page 1", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubFetch({
+      history: { rows: [makeRow()], meta: { total: 1, page: 1, limit: 100 } },
+    });
+
+    renderStrategy("alphabetical");
+
+    await screen.findByRole("table");
+    await user.selectOptions(screen.getByLabelText("Status"), "failed");
+
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      expect.stringContaining("status=failed"),
+      expect.anything(),
+    );
+    expect(fetchMock).toHaveBeenLastCalledWith(expect.stringContaining("page=1"), expect.anything());
+
+    // Switching back to the unset "Status" option drops the param entirely
+    // rather than sending an empty one.
+    await user.selectOptions(screen.getByLabelText("Status"), "");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      expect.not.stringContaining("status="),
+      expect.anything(),
+    );
   });
 
   it("requests the next page and toggles the prev/next buttons", async () => {

@@ -9,6 +9,8 @@ import { combinationToWords, firstCombination, nextCombination } from "./combina
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { LlmProposal } from "./entities/llm-proposal.entity";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
+import { SupportedModel } from "../supported-model/entities/supported-model.entity";
+import { ModelPrice } from "../supported-model/entities/model-price.entity";
 import { GameService } from "../game/game.service";
 import {
   StrategyRunDetailDto,
@@ -56,6 +58,7 @@ const RUN_HISTORY_SORT_EXPR: Record<RunHistorySortBy, string> = {
   startedAt: 'run."startedAt"',
   guessCount: '"guessCount"',
   duration: '(run."finishedAt" - run."startedAt")',
+  tokenCost: '"tokenCostUsd"',
 };
 
 /**
@@ -861,21 +864,31 @@ export class StrategyService {
   }
 
   /**
-   * Paginated, sortable history of every individual run for a strategy —
-   * one row per StrategyRun across every puzzle, unlike getRunsForPuzzleId
-   * (which scopes to a single puzzle) or getLeaderboard (which aggregates
-   * across runs). Powers the /leaderboard/:strategyId run-history table.
+   * Paginated, sortable, filterable history of every individual run for a
+   * strategy — one row per StrategyRun across every puzzle, unlike
+   * getRunsForPuzzleId (which scopes to a single puzzle) or getLeaderboard
+   * (which aggregates across runs). Powers the /leaderboard/:strategyId
+   * run-history table.
    *
    * `model` narrows to one LLM model's runs; it's ignored for non-LLM
    * strategies (which never set modelName). Even without it, each row still
    * resolves its own token cost from its own modelName, so a mixed-model
-   * result set still gets a per-row cost.
+   * result set still gets a per-row cost. `status` narrows to one
+   * StrategyRunStatus; anything else (missing, or a client-side-only value
+   * like "queued", which the backend never actually sets on a StrategyRun
+   * row) is ignored rather than rejected, same lenient handling as sortBy's
+   * fallback below.
    *
    * Sorting/pagination happen in SQL (not fetch-then-sort in JS) because
-   * `guessCount` and `duration` aren't real StrategyRun columns — see
-   * RUN_HISTORY_SORT_EXPR. `guessCount` is a correlated scalar subquery
-   * rather than a JOIN+GROUP BY specifically to avoid a Guess-row fan-out
-   * multiplying the page's row count.
+   * `guessCount`, `duration`, and `tokenCost` aren't real StrategyRun
+   * columns — see RUN_HISTORY_SORT_EXPR. `guessCount` is a correlated
+   * scalar subquery rather than a JOIN+GROUP BY specifically to avoid a
+   * Guess-row fan-out multiplying the page's row count; `tokenCostUsd` is
+   * computed the same way (via a CASE over each row's own model's *current*
+   * ModelPrice, left-joined so a run whose model has no price stays NULL)
+   * so it's both priceable per-row *and* sortable — an earlier version of
+   * this priced rows in JS after pagination, which worked for display but
+   * couldn't be sorted on.
    */
   async getRunHistory(
     strategyName: string,
@@ -885,6 +898,7 @@ export class StrategyService {
       limit?: number;
       sortBy?: string;
       sortDir?: string;
+      status?: string;
     },
   ): Promise<RunHistoryDto> {
     const safePage = Math.max(1, Math.floor(options.page ?? 1));
@@ -905,6 +919,10 @@ export class StrategyService {
 
     if (options.model) {
       baseQuery.andWhere("run.modelName = :model", { model: options.model });
+    }
+
+    if (options.status && (Object.values(StrategyRunStatus) as string[]).includes(options.status)) {
+      baseQuery.andWhere("run.status = :status", { status: options.status });
     }
 
     const total = await baseQuery.clone().getCount();
@@ -935,6 +953,33 @@ export class StrategyService {
         )`,
         "hadWordsParenthetical",
       )
+      // Each row's own model's *current* rate (ModelPrice's highest-id row
+      // per model — see that entity's comment) via plain left joins, so a
+      // mixed-model result set still prices each row from its own model.
+      // Both joins are 1:1 (SupportedModel is unique on (strategyName,
+      // modelName); the ModelPrice subquery picks exactly one row), so
+      // neither can fan out a run into multiple result rows.
+      .leftJoin(
+        SupportedModel,
+        "sm",
+        'sm."strategyName" = :strategyName AND sm."modelName" = run."modelName"',
+      )
+      .leftJoin(
+        ModelPrice,
+        "mp",
+        `mp.id = (
+          SELECT id FROM "ModelPrice" WHERE "supportedModelId" = sm.id ORDER BY id DESC LIMIT 1
+        )`,
+      )
+      .addSelect(
+        `CASE WHEN mp."inputCostPerMillionTokens" IS NULL THEN NULL ELSE
+          (SELECT COALESCE(SUM(sp."promptTokens"), 0) FROM "SolvePrompt" sp WHERE sp."strategyRunId" = run.id)::float8
+            / 1000000.0 * mp."inputCostPerMillionTokens"
+          + (SELECT COALESCE(SUM(sp."completionTokens"), 0) FROM "SolvePrompt" sp WHERE sp."strategyRunId" = run.id)::float8
+            / 1000000.0 * mp."outputCostPerMillionTokens"
+        END`,
+        "tokenCostUsd",
+      )
       .orderBy(RUN_HISTORY_SORT_EXPR[sortBy], sortDir)
       // Stable tiebreaker: without one, ties on the chosen sort column can
       // shuffle rows between identical LIMIT/OFFSET pages.
@@ -958,14 +1003,8 @@ export class StrategyService {
         finishedAt: Date | string | null;
         guessCount: number;
         hadWordsParenthetical: boolean;
+        tokenCostUsd: string | number | null;
       }>();
-
-    const tokenCostByRun = isLlmStrategy(strategyName)
-      ? await this.tokenCostByRun(
-          strategyName,
-          rawRows.map((row) => ({ id: row.id, modelName: row.modelName })),
-        )
-      : new Map<number, number>();
 
     const rows: RunHistoryRowDto[] = rawRows.map((row) => ({
       id: row.id,
@@ -978,65 +1017,11 @@ export class StrategyService {
       startedAt: new Date(row.startedAt),
       finishedAt: row.finishedAt ? new Date(row.finishedAt) : null,
       guessCount: Number(row.guessCount),
-      tokenCostUsd: tokenCostByRun.get(row.id) ?? null,
+      tokenCostUsd: row.tokenCostUsd === null ? null : Number(row.tokenCostUsd),
       hadWordsParenthetical: row.hadWordsParenthetical,
     }));
 
     return { rows, meta: { total, page: safePage, limit: safeLimit } };
-  }
-
-  /**
-   * USD cost of the LLM tokens spent by each given run, keyed by run id —
-   * each run's own modelName resolves its current rate (ModelPrice), summed
-   * over every SolvePrompt the run made. A run is simply absent from the
-   * returned map (never present as 0) when its tokens or its model's rate
-   * can't be resolved, so callers can tell "no cost data" apart from "free".
-   */
-  private async tokenCostByRun(
-    strategyName: string,
-    runs: { id: number; modelName: string | null }[],
-  ): Promise<Map<number, number>> {
-    if (runs.length === 0) return new Map();
-
-    const [tokenRows, models] = await Promise.all([
-      this.solvePromptRepo
-        .createQueryBuilder("prompt")
-        .select("prompt.strategyRunId", "strategyRunId")
-        .addSelect("SUM(prompt.promptTokens)", "promptTokens")
-        .addSelect("SUM(prompt.completionTokens)", "completionTokens")
-        .where("prompt.strategyRunId IN (:...ids)", { ids: runs.map((run) => run.id) })
-        .groupBy("prompt.strategyRunId")
-        .getRawMany<{
-          strategyRunId: number;
-          promptTokens: string | null;
-          completionTokens: string | null;
-        }>(),
-      this.supportedModelService.findAll(),
-    ]);
-
-    const rateByModel = new Map<string, SupportedModelWithRate>();
-    for (const model of models) {
-      if (model.strategyName === strategyName) {
-        rateByModel.set(leaderboardKey(model.strategyName, model.modelName), model);
-      }
-    }
-
-    const modelByRun = new Map(runs.map((run) => [run.id, run.modelName]));
-    const costs = new Map<number, number>();
-
-    for (const row of tokenRows) {
-      const runId = Number(row.strategyRunId);
-      const modelName = modelByRun.get(runId);
-      const rate = modelName ? rateByModel.get(leaderboardKey(strategyName, modelName)) : undefined;
-      if (!rate || !hasPrice(rate)) continue;
-
-      costs.set(
-        runId,
-        computeTokenCostUsd(Number(row.promptTokens ?? 0), Number(row.completionTokens ?? 0), rate),
-      );
-    }
-
-    return costs;
   }
 
   private mapRunDetail(

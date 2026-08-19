@@ -309,6 +309,21 @@
   color: var(--text);
 }
 
+.bench-filter__select {
+  border: 1px solid var(--border);
+  background: transparent;
+  border-radius: 999px;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.85rem;
+  color: inherit;
+  cursor: pointer;
+  /* Its parent .bench-table th is uppercase, but that reads worse on a
+   * multi-word dropdown (option text like "Malformed" or the unset
+   * "Status" placeholder) than it does on the other columns' short plain
+   * labels — override back to normal case for this control specifically. */
+  text-transform: none;
+}
+
 /* Strategy/run detail header. Flex column with a gap so every child
  * (nav row, title, meta line, description, badges) gets consistent spacing
  * from layout alone — previously the title relied on the global `h1` rule's

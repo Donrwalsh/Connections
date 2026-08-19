@@ -8,7 +8,13 @@ import {
 } from "../../data/benchmark/metrics";
 import { formatDateLabel } from "../../data/benchmark/mockData";
 import { runStatusLabel, runStatusTone } from "../../data/benchmark/runStatus";
-import type { RunHistoryRow, RunHistorySortBy, RunHistorySortDir } from "../../data/benchmark/types";
+import type {
+  RunHistoryRow,
+  RunHistorySortBy,
+  RunHistorySortDir,
+  RunStatus,
+} from "../../data/benchmark/types";
+import { RunStatusFilter } from "./RunStatusFilter";
 import { StatusPill } from "./StatusPill";
 
 export interface RunHistoryTableProps {
@@ -24,6 +30,11 @@ export interface RunHistoryTableProps {
   onSortChange: (sortBy: RunHistorySortBy) => void;
   /** Adds the Token cost column — only meaningful for LLM strategies. */
   showTokenCost: boolean;
+  /** Current status filter (null = every status) and its setter — rendered
+   * inside the Status column's header, alongside the label, rather than as
+   * a standalone control above the table. */
+  status: RunStatus | null;
+  onStatusChange: (status: RunStatus | null) => void;
 }
 
 const SORTABLE_COLUMNS: { key: RunHistorySortBy; label: string }[] = [
@@ -33,10 +44,17 @@ const SORTABLE_COLUMNS: { key: RunHistorySortBy; label: string }[] = [
   { key: "duration", label: "Duration" },
 ];
 
+const TOKEN_COST_COLUMN: { key: RunHistorySortBy; label: string } = {
+  key: "tokenCost",
+  label: "Token cost",
+};
+
 /** One row per individual run (not per puzzle, unlike the old mockup) — the
  * same table shape works for every strategy kind, with an extra Token cost
- * column for LLM strategies. The four sortable columns double as sort
- * controls; Status and Token cost aren't sortable. */
+ * column for LLM strategies. Every column but Status doubles as a sort
+ * control; Status's header instead holds the status filter (see
+ * RunStatusFilter) — a control embedded in the table rather than a
+ * separate widget above it. */
 export function RunHistoryTable({
   strategyId,
   rows,
@@ -44,16 +62,19 @@ export function RunHistoryTable({
   sortDir,
   onSortChange,
   showTokenCost,
+  status,
+  onStatusChange,
 }: RunHistoryTableProps) {
   const navigate = useNavigate();
-  const columnCount = SORTABLE_COLUMNS.length + 1 + (showTokenCost ? 1 : 0);
+  const sortableColumns = showTokenCost ? [...SORTABLE_COLUMNS, TOKEN_COST_COLUMN] : SORTABLE_COLUMNS;
+  const columnCount = sortableColumns.length + 1;
 
   return (
     <table className="bench-table">
       <caption className="bench-table__caption">Runs · {rows.length} on this page</caption>
       <thead>
         <tr>
-          {SORTABLE_COLUMNS.map((column) => {
+          {sortableColumns.map((column) => {
             const isActive = sortBy === column.key;
             return (
               <th scope="col" key={column.key}>
@@ -71,8 +92,9 @@ export function RunHistoryTable({
               </th>
             );
           })}
-          {showTokenCost ? <th scope="col">Token cost</th> : null}
-          <th scope="col">Status</th>
+          <th scope="col">
+            <RunStatusFilter value={status} onChange={onStatusChange} />
+          </th>
         </tr>
       </thead>
       <tbody>

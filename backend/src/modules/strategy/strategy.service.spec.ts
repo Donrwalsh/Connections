@@ -1412,6 +1412,7 @@ describe("StrategyService", () => {
     function mockRunHistoryQuery(total: number, rawRows: unknown[]) {
       const qb = {
         innerJoin: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         clone: jest.fn().mockReturnThis(),
@@ -1428,6 +1429,10 @@ describe("StrategyService", () => {
       return qb;
     }
 
+    // tokenCostUsd is computed by the SQL query itself (a CASE over each
+    // row's own model's current ModelPrice — see getRunHistory's doc
+    // comment), so the raw row fixture carries it directly rather than a
+    // separate token-cost lookup being mocked.
     function rawRun(overrides: Record<string, unknown> = {}) {
       return {
         id: 1,
@@ -1440,6 +1445,7 @@ describe("StrategyService", () => {
         finishedAt: new Date("2024-01-01T00:00:05Z"),
         guessCount: 4,
         hadWordsParenthetical: false,
+        tokenCostUsd: null,
         ...overrides,
       };
     }
@@ -1462,6 +1468,10 @@ describe("StrategyService", () => {
       expect(qb.addSelect).toHaveBeenCalledWith(
         expect.stringContaining('"wordsHadParenthetical" = true'),
         "hadWordsParenthetical",
+      );
+      expect(qb.addSelect).toHaveBeenCalledWith(
+        expect.stringContaining('"inputCostPerMillionTokens" IS NULL'),
+        "tokenCostUsd",
       );
       expect(qb.orderBy).toHaveBeenCalledWith('"puzzleDate"', "DESC");
       expect(qb.addOrderBy).toHaveBeenCalledWith("run.id", "DESC");
@@ -1516,7 +1526,7 @@ describe("StrategyService", () => {
       expect(qb.limit).toHaveBeenCalledWith(25);
     });
 
-    it("should sort by startedAt or duration when asked", async () => {
+    it("should sort by startedAt, duration, or tokenCost when asked", async () => {
       const qb = mockRunHistoryQuery(0, []);
 
       await service.getRunHistory("alphabetical", { sortBy: "startedAt" });
@@ -1524,6 +1534,9 @@ describe("StrategyService", () => {
 
       await service.getRunHistory("alphabetical", { sortBy: "duration" });
       expect(qb.orderBy).toHaveBeenLastCalledWith('(run."finishedAt" - run."startedAt")', "DESC");
+
+      await service.getRunHistory("llm-openai", { sortBy: "tokenCost", sortDir: "asc" });
+      expect(qb.orderBy).toHaveBeenLastCalledWith('"tokenCostUsd"', "ASC");
     });
 
     it("should fall back to puzzleDate desc for an unrecognized sortBy/sortDir", async () => {
@@ -1543,42 +1556,45 @@ describe("StrategyService", () => {
       expect(qb.limit).toHaveBeenCalledWith(500);
     });
 
-    it("should price each row from its own model's rate, leaving unpriceable rows null", async () => {
+    it("should filter by status when a real StrategyRunStatus is given", async () => {
+      const qb = mockRunHistoryQuery(0, []);
+
+      await service.getRunHistory("alphabetical", { status: "failed" });
+
+      expect(qb.andWhere).toHaveBeenCalledWith("run.status = :status", { status: "failed" });
+    });
+
+    it("should ignore an unrecognized status value instead of filtering by it", async () => {
+      const qb = mockRunHistoryQuery(0, []);
+
+      // "queued" is a client-side-only RunStatus — the backend never sets
+      // it on a real StrategyRun row (see the doc comment) — and plain
+      // garbage should be equally harmless rather than erroring.
+      await service.getRunHistory("alphabetical", { status: "queued" });
+      await service.getRunHistory("alphabetical", { status: "bogus" });
+
+      expect(qb.andWhere).not.toHaveBeenCalledWith(
+        "run.status = :status",
+        expect.anything(),
+      );
+    });
+
+    it("should cast the SQL-computed tokenCostUsd to a number, leaving NULL as null", async () => {
       mockRunHistoryQuery(2, [
-        rawRun({ id: 1, modelName: "gpt-4.1-nano" }),
-        // No SupportedModel row for this one below -> cost stays null.
-        rawRun({ id: 2, modelName: "gpt-4o-mini" }),
-      ]);
-      mockSolvePromptRepo.createQueryBuilder.mockReturnValue({
-        select: jest.fn().mockReturnThis(),
-        addSelect: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        groupBy: jest.fn().mockReturnThis(),
-        getRawMany: jest.fn().mockResolvedValue([
-          { strategyRunId: 1, promptTokens: "1000000", completionTokens: "500000" },
-          { strategyRunId: 2, promptTokens: "2000000", completionTokens: "0" },
-        ]),
-      });
-      mockSupportedModelService.findAll.mockResolvedValueOnce([
-        {
-          strategyName: "llm-openai",
-          modelName: "gpt-4.1-nano",
-          inputCostPerMillionTokens: 0.1,
-          outputCostPerMillionTokens: 0.4,
-          supported: true,
-        },
+        rawRun({ id: 1, modelName: "gpt-4.1-nano", tokenCostUsd: "0.5" }),
+        rawRun({ id: 2, modelName: "gpt-4o-mini", tokenCostUsd: null }),
       ]);
 
       const result = await service.getRunHistory("llm-openai", {});
 
-      expect(result.rows[0].tokenCostUsd).toBeCloseTo(1 * 0.1 + 0.5 * 0.4);
+      expect(result.rows[0].tokenCostUsd).toBe(0.5);
       expect(result.rows[1].tokenCostUsd).toBeNull();
     });
 
-    it("should skip the token-cost lookup entirely for non-LLM strategies", async () => {
+    it("should not run a separate token-cost lookup query — cost comes from the main query's join", async () => {
       mockRunHistoryQuery(1, [rawRun()]);
 
-      await service.getRunHistory("alphabetical", {});
+      await service.getRunHistory("llm-openai", {});
 
       expect(mockSolvePromptRepo.createQueryBuilder).not.toHaveBeenCalled();
       expect(mockSupportedModelService.findAll).not.toHaveBeenCalled();

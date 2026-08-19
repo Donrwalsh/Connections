@@ -169,7 +169,7 @@ export class StrategyController {
     name: "sortBy",
     type: String,
     required: false,
-    description: "'puzzleDate' (default) | 'startedAt' | 'guessCount' | 'duration'",
+    description: "'puzzleDate' (default) | 'startedAt' | 'guessCount' | 'duration' | 'tokenCost'",
     example: "puzzleDate",
   })
   @ApiQuery({
@@ -179,6 +179,15 @@ export class StrategyController {
     description: "'asc' | 'desc' (default)",
     example: "desc",
   })
+  @ApiQuery({
+    name: "status",
+    type: String,
+    required: false,
+    description:
+      "Narrows to one run status: 'running' | 'completed' | 'failed' | 'duplicate' |" +
+      " 'malformedResponse' | 'error'. Omitted or unrecognized values return every status.",
+    example: "completed",
+  })
   async getRunHistory(
     @Param("strategyName") strategyName: string,
     @Query("model") model: string | undefined,
@@ -186,6 +195,7 @@ export class StrategyController {
     @Query("limit", new DefaultValuePipe(100), ParseIntPipe) limit: number,
     @Query("sortBy") sortBy?: string,
     @Query("sortDir") sortDir?: string,
+    @Query("status") status?: string,
   ) {
     if (!STRATEGY_SET.has(strategyName)) {
       throw new BadRequestException(
@@ -193,7 +203,14 @@ export class StrategyController {
       );
     }
 
-    return this.strategyService.getRunHistory(strategyName, { model, page, limit, sortBy, sortDir });
+    return this.strategyService.getRunHistory(strategyName, {
+      model,
+      page,
+      limit,
+      sortBy,
+      sortDir,
+      status,
+    });
   }
 
   // Looked up directly by the run's primary key rather than nested under
