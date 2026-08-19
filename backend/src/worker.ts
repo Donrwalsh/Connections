@@ -15,6 +15,7 @@ import {
   llmOllamaConcurrency,
   llmOpenAIConcurrency,
   STRATEGY_SET,
+  workerRole,
 } from "./strategies";
 
 interface FreeTierDispatchTickJobData {
@@ -34,59 +35,72 @@ interface RunStrategyJobData {
 
 async function bootstrap() {
   const logger = new Logger("Worker");
+  const role = workerRole();
+  logger.log(`starting worker process with role='${role}'`);
+
   const appContext = await NestFactory.createApplicationContext(AppModule);
   const strategyService = appContext.get(StrategyService);
   const llmStrategyRunner = appContext.get(LlmStrategyRunner);
   const puzzleIngestionService = appContext.get(PuzzleIngestionService);
   const freeTierDispatchService = appContext.get(FreeTierDispatchService);
 
-  const worker = new Worker(
-    "strategy-runs",
-    async (job: Job<RunStrategyJobData>) => {
-      const { puzzleId, strategyName, date, trialNumber, model } = job.data;
+  const activeWorkers: Worker[] = [];
+  const activeQueueNames: string[] = [];
 
-      if (!STRATEGY_SET.has(strategyName)) {
-        throw new Error(
-          `Unsupported strategy '${strategyName}' passed to strategy-runs queue for puzzle ${puzzleId}`,
+  // role 'ollama' runs only the llm-ollama-runs queue (see createLlmWorker
+  // below) — everything else in this file is skipped for that role.
+  if (role !== "ollama") {
+    const strategyRunsWorker = new Worker(
+      "strategy-runs",
+      async (job: Job<RunStrategyJobData>) => {
+        const { puzzleId, strategyName, date, trialNumber, model } = job.data;
+
+        if (!STRATEGY_SET.has(strategyName)) {
+          throw new Error(
+            `Unsupported strategy '${strategyName}' passed to strategy-runs queue for puzzle ${puzzleId}`,
+          );
+        }
+
+        logger.log(
+          `starting job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName} trial=${trialNumber}`,
         );
-      }
 
-      logger.log(
-        `starting job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName} trial=${trialNumber}`,
-      );
+        const result = isLlmStrategy(strategyName)
+          ? // Defensive: LLM jobs are normally routed to their per-provider
+            // queues, but a stale job left on this queue before a deploy still
+            // needs processing rather than failing forever.
+            await llmStrategyRunner.runLlmStrategy(
+              puzzleId,
+              strategyName,
+              trialNumber,
+              model ?? undefined,
+            )
+          : await strategyService.runDeterministicStrategy(puzzleId, strategyName, trialNumber);
 
-      const result = isLlmStrategy(strategyName)
-        ? // Defensive: LLM jobs are normally routed to their per-provider
-          // queues, but a stale job left on this queue before a deploy still
-          // needs processing rather than failing forever.
-          await llmStrategyRunner.runLlmStrategy(
-            puzzleId,
-            strategyName,
-            trialNumber,
-            model ?? undefined,
-          )
-        : await strategyService.runDeterministicStrategy(puzzleId, strategyName, trialNumber);
+        logger.log(
+          `finished job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName} trial=${trialNumber} status=${result.status}`,
+        );
+        return result;
+      },
+      {
+        connection: redisConnection,
+        // Deterministic/shuffle runs are CPU-bound and cheap — serialize them so
+        // they never contend with each other's DB writes.
+        concurrency: 1,
+      },
+    );
 
-      logger.log(
-        `finished job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName} trial=${trialNumber} status=${result.status}`,
-      );
-      return result;
-    },
-    {
-      connection: redisConnection,
-      // Deterministic/shuffle runs are CPU-bound and cheap — serialize them so
-      // they never contend with each other's DB writes.
-      concurrency: 1,
-    },
-  );
+    strategyRunsWorker.on("completed", () => {
+      // logger.log(`job ${job.id} completed`);  noisy
+    });
 
-  worker.on("completed", () => {
-    // logger.log(`job ${job.id} completed`);  noisy
-  });
+    strategyRunsWorker.on("failed", (job, err) => {
+      logger.error(`job ${job?.id} failed`, err?.stack || err);
+    });
 
-  worker.on("failed", (job, err) => {
-    logger.error(`job ${job?.id} failed`, err?.stack || err);
-  });
+    activeWorkers.push(strategyRunsWorker);
+    activeQueueNames.push("strategy-runs");
+  }
 
   /**
    * A worker for one provider's LLM runs. Each provider gets its own queue and
@@ -139,63 +153,86 @@ async function bootstrap() {
     return llmWorker;
   };
 
-  const llmOpenAIWorker = createLlmWorker("llm-openai-runs", LLM_OPENAI, llmOpenAIConcurrency());
-  const llmOllamaWorker = createLlmWorker("llm-ollama-runs", LLM_OLLAMA, llmOllamaConcurrency());
+  // role 'ollama' runs ONLY this queue — that's the whole point of running a
+  // worker on the machine hosting Ollama: it pulls just llm-ollama-runs over
+  // an outbound connection to the deployed Redis/Postgres, so Ollama itself
+  // never has to be reachable from outside the local network.
+  if (role !== "cloud") {
+    const llmOllamaWorker = createLlmWorker(
+      "llm-ollama-runs",
+      LLM_OLLAMA,
+      llmOllamaConcurrency(),
+    );
+    activeWorkers.push(llmOllamaWorker);
+    activeQueueNames.push("llm-ollama-runs");
+  }
 
-  const puzzleWorker = new Worker(
-    "puzzle-population",
-    async (job) => {
-      logger.log(`starting puzzle population job ${job.id}`);
-      const result = await puzzleIngestionService.populateUntilCaughtUp();
-      logger.log(`finished job ${job.id}: ${JSON.stringify(result)}`);
-      return result;
-    },
-    {
-      connection: redisConnection,
-      concurrency: 1, // serialize — this loop mutates "latest date" state, don't run two at once
-    },
-  );
+  // role 'ollama' skips everything below — no OpenAI runs, puzzle ingestion,
+  // or free-tier dispatch on a worker that's only there to reach Ollama.
+  if (role !== "ollama") {
+    const llmOpenAIWorker = createLlmWorker(
+      "llm-openai-runs",
+      LLM_OPENAI,
+      llmOpenAIConcurrency(),
+    );
+    activeWorkers.push(llmOpenAIWorker);
+    activeQueueNames.push("llm-openai-runs");
 
-  puzzleWorker.on("failed", (job, err) => {
-    logger.error(`puzzle population job ${job?.id} failed`, err?.stack || err);
-  });
+    const puzzleWorker = new Worker(
+      "puzzle-population",
+      async (job) => {
+        logger.log(`starting puzzle population job ${job.id}`);
+        const result = await puzzleIngestionService.populateUntilCaughtUp();
+        logger.log(`finished job ${job.id}: ${JSON.stringify(result)}`);
+        return result;
+      },
+      {
+        connection: redisConnection,
+        concurrency: 1, // serialize — this loop mutates "latest date" state, don't run two at once
+      },
+    );
 
-  // Each job is one tick of a free-tier dispatch cycle (see
-  // FreeTierDispatchService) — it queues this tick's batch onto
-  // llm-openai-runs (processed by llmOpenAIWorker above, not here) and, if
-  // the cycle should keep going, schedules its own successor tick. One at a
-  // time: ticks self-chain with a delay, so there's never a reason to run
-  // two concurrently.
-  const freeTierDispatchWorker = new Worker(
-    "free-tier-dispatch",
-    async (job: Job<FreeTierDispatchTickJobData>) => {
-      const { tier } = job.data;
-      logger.log(`starting free-tier dispatch tick ${job.id}: tier=${tier}`);
-      await freeTierDispatchService.runTick(tier);
-      logger.log(`finished free-tier dispatch tick ${job.id}: tier=${tier}`);
-    },
-    {
-      connection: redisConnection,
-      concurrency: 1,
-    },
-  );
+    puzzleWorker.on("failed", (job, err) => {
+      logger.error(`puzzle population job ${job?.id} failed`, err?.stack || err);
+    });
 
-  freeTierDispatchWorker.on("failed", (job, err) => {
-    logger.error(`free-tier dispatch tick ${job?.id} failed`, err?.stack || err);
-  });
+    activeWorkers.push(puzzleWorker);
+    activeQueueNames.push("puzzle-population");
+
+    // Each job is one tick of a free-tier dispatch cycle (see
+    // FreeTierDispatchService) — it queues this tick's batch onto
+    // llm-openai-runs (processed by llmOpenAIWorker above, not here) and, if
+    // the cycle should keep going, schedules its own successor tick. One at a
+    // time: ticks self-chain with a delay, so there's never a reason to run
+    // two concurrently.
+    const freeTierDispatchWorker = new Worker(
+      "free-tier-dispatch",
+      async (job: Job<FreeTierDispatchTickJobData>) => {
+        const { tier } = job.data;
+        logger.log(`starting free-tier dispatch tick ${job.id}: tier=${tier}`);
+        await freeTierDispatchService.runTick(tier);
+        logger.log(`finished free-tier dispatch tick ${job.id}: tier=${tier}`);
+      },
+      {
+        connection: redisConnection,
+        concurrency: 1,
+      },
+    );
+
+    freeTierDispatchWorker.on("failed", (job, err) => {
+      logger.error(`free-tier dispatch tick ${job?.id} failed`, err?.stack || err);
+    });
+
+    activeWorkers.push(freeTierDispatchWorker);
+    activeQueueNames.push("free-tier-dispatch");
+  }
 
   // Graceful shutdown: let BullMQ finish (or safely abandon, mid-transaction-safe)
   // the current job before the process exits, rather than getting killed
   // mid-write.
   const shutdown = async () => {
     logger.log("shutting down worker process...");
-    await Promise.all([
-      worker.close(),
-      llmOpenAIWorker.close(),
-      llmOllamaWorker.close(),
-      puzzleWorker.close(),
-      freeTierDispatchWorker.close(),
-    ]);
+    await Promise.all(activeWorkers.map((w) => w.close()));
     await appContext.close();
     process.exit(0);
   };
@@ -203,10 +240,7 @@ async function bootstrap() {
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
 
-  logger.log(
-    "listening for jobs on 'strategy-runs', 'llm-openai-runs', 'llm-ollama-runs', " +
-      "'puzzle-population' and 'free-tier-dispatch' queues",
-  );
+  logger.log(`listening for jobs on ${activeQueueNames.map((q) => `'${q}'`).join(", ")} queues`);
 }
 
 bootstrap();

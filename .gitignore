@@ -1,4 +1,5 @@
 .env
+.env.local-ollama-worker
 .puzzle-cache/
 
 backend/node_modules

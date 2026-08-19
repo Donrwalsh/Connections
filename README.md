@@ -29,7 +29,9 @@ A multi-service application for playing and solving [NYT Connections](https://ww
 | **Redis** | — | Redis 7 | 6379 | BullMQ message broker |
 | **Ollama** | — | — | 11434 | Local LLM provider (default: `llama3.2`) |
 
-The worker runs as a separate process from the NestJS server (started via `npx tsx --watch src/worker.ts`). It bootstraps its own NestJS app context to access services. Both LLM providers are always configured and used simultaneously: the `llm-openai` strategy consults OpenAI, `llm-ollama` the bundled local Ollama service. The two LLM strategies run on separate queues (`llm-openai-runs` / `llm-ollama-runs`) with their own per-provider concurrency (`LLM_OPENAI_CONCURRENCY` / `LLM_OLLAMA_CONCURRENCY`), so the providers never block each other or the deterministic strategies. Provider-less requests (e.g. the in-game AI Assist) use the `MODEL_PROVIDER` default (`openai`).
+The worker runs as a separate process from the NestJS server (started via `npx tsx --watch src/worker.ts` in dev). It bootstraps its own NestJS app context to access services. Both LLM providers are configured and used simultaneously: the `llm-openai` strategy consults OpenAI, `llm-ollama` an Ollama service. The two LLM strategies run on separate queues (`llm-openai-runs` / `llm-ollama-runs`) with their own per-provider concurrency (`LLM_OPENAI_CONCURRENCY` / `LLM_OLLAMA_CONCURRENCY`), so the providers never block each other or the deterministic strategies. Provider-less requests (e.g. the in-game AI Assist) use the `MODEL_PROVIDER` default (`openai`).
+
+This table and diagram describe local dev (`docker-compose.yml`), where Ollama runs bundled alongside everything else. The production setup (`docker-compose.prod.yml`) has no Ollama service and splits the worker in two by role — see [Production deployment](#production-deployment) below.
 
 ### Puzzle solving flow
 
@@ -116,6 +118,10 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `POSTGRES_USER` | `postgres` | Postgres user (compose-level; the backend reads it as `DB_USER`) |
 | `POSTGRES_PASSWORD` | `postgres` | Postgres password (compose-level; the backend reads it as `DB_PASSWORD`) |
 | `POSTGRES_DB` | `mydb` | Postgres database name (compose-level; the backend reads it as `DB_NAME`) |
+| `WORKER_ROLE` | `all` | Which BullMQ queues a worker process consumes: `all` (dev), `cloud` (every queue except `llm-ollama-runs`), or `ollama` (only `llm-ollama-runs`) — see [Production deployment](#production-deployment) |
+| `DB_MIGRATIONS_RUN` | `true` | Whether this process runs pending TypeORM migrations at startup — set `false` on a worker sharing a database with another instance that already owns migrations |
+| `REDIS_PASSWORD` | — | Redis auth password; unset (unauthenticated) by default, matching local dev — required whenever Redis is reachable beyond the trusted deploy network |
+| `VITE_API_URL` | `http://localhost:4000` | Backend origin baked into the frontend bundle at build time (not a runtime env var — passed as a Docker build arg) |
 
 Postgres and Redis connection settings (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `REDIS_HOST`, `REDIS_PORT`) are read from the same `.env` — see [`.env.sample`](.env.sample) for defaults.
 
@@ -197,11 +203,52 @@ The backend E2E suite (`backend/test/app.e2e-spec.ts`) boots the real NestJS app
 │       ├── solver.ts          # generateObject call to the selected model
 │       ├── prompt.ts          # Prompt builder
 │       └── types.ts           # Zod schemas (request/response/model output)
-└── docker-compose.yml         # Orchestrates all services + Redis/Postgres
+├── docker-compose.yml          # Local dev — all services including Ollama, bind-mounted source
+├── docker-compose.prod.yml     # Production (e.g. Coolify) — built images, no Ollama
+└── docker-compose.local-ollama-worker.yml  # Runs on your machine — Ollama + local orchestrator + WORKER_ROLE=ollama worker
 ```
+
+## Production deployment
+
+`docker-compose.yml` is dev-only (bind-mounted source, `npm run dev`/watch commands, DB/Redis ports published to the host). Production deploys — e.g. to [Coolify](https://coolify.io) — use `docker-compose.prod.yml` instead, which builds the real images (`backend/Dockerfile`, `orchestrator/Dockerfile`, and `frontend/Dockerfile`, all multi-stage) and runs them without bind mounts.
+
+```bash
+cp .env.sample .env   # fill in INTERNAL_API_KEY, OPENAI_API_KEY, POSTGRES_PASSWORD,
+                       # CORS_ORIGIN, VITE_API_URL, REDIS_PASSWORD — see .env.sample
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+### No Ollama in the cloud — Option B (a local worker pulls jobs to your machine)
+
+The deployed stack has no Ollama service at all. Rather than exposing a local Ollama install to the internet, a second BullMQ worker runs on your own machine and *pulls* `llm-ollama-runs` jobs from the deployed Redis/Postgres over an outbound connection — nothing on your machine needs to be reachable from outside your network.
+
+This works because `backend/src/worker.ts` reads a `WORKER_ROLE` env var (see `workerRole()` in `backend/src/strategies.ts`):
+
+| Role | Queues processed | Used by |
+|------|-------------------|---------|
+| `all` (default) | everything, including `llm-ollama-runs` | local dev (`docker-compose.yml`, unchanged) |
+| `cloud` | everything *except* `llm-ollama-runs` | `docker-compose.prod.yml`'s `worker` service |
+| `ollama` | only `llm-ollama-runs` | your machine's worker (`docker-compose.local-ollama-worker.yml`) |
+
+One subtlety: neither worker ever calls a model API directly — `LlmStrategyRunner` always calls out to an orchestrator's `POST /solve-assist` (see `backend/src/modules/strategy/orchestrator.service.ts`), and the orchestrator is what actually talks to OpenAI or Ollama. So `docker-compose.local-ollama-worker.yml` runs *three* services on your machine: `ollama`, a second small `orchestrator` instance configured with `OLLAMA_BASE_URL=http://ollama:11434`, and the `WORKER_ROLE=ollama` worker — the worker only ever calls its local orchestrator, which is the only thing that talks to Ollama. Nothing on your machine listens on a port reachable from the internet.
+
+Setup:
+
+1. On the Coolify host: deploy `docker-compose.prod.yml` as above.
+2. On your machine: `cp .env.local-ollama-worker.sample .env.local-ollama-worker`, fill in `REMOTE_DB_*`/`REMOTE_REDIS_*` (pointing at the deployed Postgres/Redis) and a `LOCAL_INTERNAL_API_KEY` (any random string — it's local-only, shared only between your machine's worker and orchestrator, and doesn't need to match the deployed stack's `INTERNAL_API_KEY`), then:
+   ```bash
+   docker compose -f docker-compose.local-ollama-worker.yml --env-file .env.local-ollama-worker up -d --build
+   ```
+
+Two things worth taking seriously before you do this:
+
+- **Reachability.** The local worker needs your deployed Postgres *and* Redis reachable from your machine — not just Redis. Prefer a private tunnel (Tailscale, WireGuard) between your machine and the Coolify host over publishing their ports to the public internet. If you do publish them, `REDIS_PASSWORD` (set in the deployed stack's `.env`) is mandatory, and use a strong `POSTGRES_PASSWORD` too — see the commented-out `ports:` blocks on `db`/`redis` in `docker-compose.prod.yml`.
+- **Migrations.** Both workers boot the same `AppModule`, which normally runs pending TypeORM migrations at startup. Two independent processes doing that against the same database — possibly from different code versions — is asking for trouble, so the local worker sets `DB_MIGRATIONS_RUN=false` (see `backend/src/config/env.ts`): only the deployed backend/worker ever applies schema changes. Keep your local checkout reasonably close to whatever's deployed, since the local worker's compiled entities still need to match the live schema.
+
+If your machine is off or Ollama isn't running, `llm-ollama` runs just fail after their existing retry/backoff (`LLM_MAX_MODEL_ERRORS`) and end in an `error` status — nothing else in the deployed stack depends on Ollama being reachable.
 
 ## Notes
 
 - The frontend `package.json` proxy setting (`"proxy": "http://nest_backend:4000"`) is for Docker networking only — local dev uses `VITE_API_URL` instead.
-- Database schema is managed entirely by TypeORM migrations in `backend/src/migrations/` (baseline: `1754400000000-initial-schema.ts`). The app runs with `synchronize: false` and `migrationsRun: true`, so an empty database (CI, fresh local Postgres, `docker-compose down -v`) is bootstrapped automatically on backend/worker startup — there's no separate SQL init script.
-- For a production frontend image, build with the multi-stage `frontend/Dockerfile` (Vite build served by nginx). Pass the API base at build time: `docker build --build-arg VITE_API_URL=https://api.example.com -f frontend/Dockerfile frontend/`.
+- Database schema is managed entirely by TypeORM migrations in `backend/src/migrations/` (baseline: `1754400000000-initial-schema.ts`). The app runs with `synchronize: false`; `migrationsRun` defaults to `true` (see `DB_MIGRATIONS_RUN`), so an empty database (CI, fresh local Postgres, `docker-compose down -v`) is bootstrapped automatically on backend/worker startup — there's no separate SQL init script.
+- For a production frontend image, build with the multi-stage `frontend/Dockerfile` (Vite build served by nginx). Pass the API base at build time: `docker build --build-arg VITE_API_URL=https://api.example.com -f frontend/Dockerfile frontend/`. `docker-compose.prod.yml` does this automatically from `VITE_API_URL` in `.env`.

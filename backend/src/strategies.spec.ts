@@ -29,6 +29,7 @@ import {
   strategyTrialNumbers,
   SUPPORTED_STRATEGIES,
   STRATEGY_SET,
+  workerRole,
 } from "./strategies";
 
 describe("strategies", () => {
@@ -108,6 +109,18 @@ describe("strategies", () => {
 
     it("should read a valid positive integer", () => {
       expect(llmOllamaConcurrency({ LLM_OLLAMA_CONCURRENCY: "2" })).toBe(2);
+    });
+  });
+
+  describe("workerRole", () => {
+    it("should default to 'all' when the env var is missing or invalid", () => {
+      expect(workerRole({})).toBe("all");
+      expect(workerRole({ WORKER_ROLE: "bogus" })).toBe("all");
+    });
+
+    it("should read 'cloud' and 'ollama', case-insensitively", () => {
+      expect(workerRole({ WORKER_ROLE: "cloud" })).toBe("cloud");
+      expect(workerRole({ WORKER_ROLE: "OLLAMA" })).toBe("ollama");
     });
   });
 

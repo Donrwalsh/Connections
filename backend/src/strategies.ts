@@ -67,6 +67,23 @@ export const DEFAULT_LLM_MAX_PROMPTS = 19;
 // model call of every step in a run.
 export const DEFAULT_LLM_TEMPERATURE = 0.2;
 
+export type WorkerRole = "all" | "cloud" | "ollama";
+
+/**
+ * Which BullMQ queues a worker process should consume, from WORKER_ROLE.
+ * 'all' (default) runs every queue — the original single-process behavior,
+ * used by local dev (docker-compose.yml) where Ollama runs alongside
+ * everything else. 'cloud' runs everything except llm-ollama-runs, for a
+ * deployment with no local Ollama reachable. 'ollama' runs only
+ * llm-ollama-runs, for a worker run on the machine hosting Ollama — it
+ * connects outbound to the deployed Redis/Postgres to pull just that queue,
+ * so Ollama itself never needs to be exposed to the internet.
+ */
+export function workerRole(env: NodeJS.ProcessEnv = process.env): WorkerRole {
+  const raw = env.WORKER_ROLE?.toLowerCase();
+  return raw === "cloud" || raw === "ollama" ? raw : "all";
+}
+
 function positiveTrialCount(raw: string | undefined, fallback: number): number {
   const parsed = Number(raw);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;

@@ -58,7 +58,7 @@ import { FreeTierDispatchState } from "./modules/free-tier-dispatch/entities/fre
         ],
         synchronize: false,
         migrations: [__dirname + "/migrations/*{.ts,.js}"],
-        migrationsRun: true,
+        migrationsRun: config.get("DB_MIGRATIONS_RUN", { infer: true }),
       }),
     }),
 

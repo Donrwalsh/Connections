@@ -15,6 +15,7 @@ export interface AppEnv {
   BULL_BOARD_PASS: string;
   PUZZLE_POPULATION_CRON: string;
   PUZZLE_POPULATION_TZ: string;
+  DB_MIGRATIONS_RUN: boolean;
 }
 
 function required(name: string, value: string | undefined): string {
@@ -71,5 +72,13 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
     BULL_BOARD_PASS: bullBoardPass ?? "",
     PUZZLE_POPULATION_CRON: env.PUZZLE_POPULATION_CRON ?? "0 6 * * *",
     PUZZLE_POPULATION_TZ: env.PUZZLE_POPULATION_TZ ?? "UTC",
+    // Whether this process runs pending TypeORM migrations at startup.
+    // Defaults to true (unchanged behavior). Set to false on any process
+    // that shares a database with another instance already running
+    // migrations — e.g. a local WORKER_ROLE=ollama worker pointed at a
+    // deployed Postgres — so only one process (the deployed backend/worker)
+    // ever applies schema changes, regardless of which one boots first or
+    // which git revision the local process happens to be on.
+    DB_MIGRATIONS_RUN: env.DB_MIGRATIONS_RUN !== "false",
   };
 }

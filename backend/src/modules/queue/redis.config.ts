@@ -6,8 +6,14 @@ import { ConnectionOptions } from "bullmq";
 // enqueues is invisible to a live worker sharing the same Redis host/port —
 // without this, an e2e-enqueued LLM strategy job could be picked up by a real
 // worker and spend real API money. Same host+port, disjoint keyspace.
+//
+// REDIS_PASSWORD is optional and omitted entirely when unset, matching the
+// local-dev/compose default of an unauthenticated Redis. Set it whenever
+// Redis is reachable beyond the trusted deploy network — e.g. a
+// WORKER_ROLE=ollama worker connecting from outside the Coolify project.
 export const redisConnection: ConnectionOptions = {
   host: process.env.REDIS_HOST || "localhost",
   port: Number(process.env.REDIS_PORT) || 6379,
   db: Number(process.env.REDIS_DB) || 0,
+  ...(process.env.REDIS_PASSWORD ? { password: process.env.REDIS_PASSWORD } : {}),
 };

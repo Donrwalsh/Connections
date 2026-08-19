@@ -1,0 +1,227 @@
+# Production compose for a Coolify (or any single-host Docker) deployment.
+#
+# Differences from docker-compose.yml (local dev):
+#   - No bind mounts / watch commands — services run the images built by
+#     backend/Dockerfile, orchestrator/Dockerfile, frontend/Dockerfile.
+#   - No Ollama service. Ollama runs on your own machine instead; the
+#     'worker' service here only processes queues that don't need it
+#     (WORKER_ROLE=cloud skips llm-ollama-runs — see backend/src/worker.ts).
+#     Run docker-compose.local-ollama-worker.yml on your machine to process
+#     that queue against your local Ollama — see README.md for the full
+#     setup (Option B: a local worker pulls jobs over an outbound
+#     connection to this stack's Redis/Postgres; Ollama itself is never
+#     exposed to the internet).
+#   - db/redis ports are NOT published by default. Publish them only if
+#     you're running the local Ollama worker and have no private tunnel
+#     (Tailscale/WireGuard) between it and this host — and if you do,
+#     REDIS_PASSWORD (below) becomes mandatory, not optional.
+#
+# Required in your .env (Coolify: set these as the app's environment
+# variables — see .env.sample for the full list and defaults):
+#   INTERNAL_API_KEY, OPENAI_API_KEY, POSTGRES_PASSWORD (change from the
+#   dev default), CORS_ORIGIN (your real frontend origin), VITE_API_URL
+#   (your real backend origin, baked into the frontend at build time),
+#   REDIS_PASSWORD (required if you publish the redis port — see above).
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml up -d --build
+services:
+  db:
+    image: postgres:15
+    container_name: postgres_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-mydb}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-mydb}",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    # Only publish if the local Ollama worker needs to reach this database
+    # directly (no private tunnel available) — and set REDIS_PASSWORD +
+    # a non-default POSTGRES_PASSWORD before doing so.
+    # ports:
+    #   - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    # --requirepass is required here (not optional like local dev) because
+    # this Redis may be reachable by a worker outside the deploy network —
+    # REDIS_PASSWORD must be set in .env.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - "256mb"
+      - --maxmemory-policy
+      - allkeys-lru
+      - --requirepass
+      - ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    # Only publish if the local Ollama worker has no private tunnel to this
+    # host — see the note above db's ports.
+    # ports:
+    #   - "6379:6379"
+
+  orchestrator:
+    build: ./orchestrator
+    container_name: ai_orchestrator
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-openai}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-nano}
+      MODEL_CONTEXT_WINDOW: ${MODEL_CONTEXT_WINDOW:-8192}
+      # No OLLAMA_BASE_URL here on purpose: this orchestrator instance is
+      # never called with provider="ollama" in this stack — the 'worker'
+      # service below runs with WORKER_ROLE=cloud, which skips the
+      # llm-ollama-runs queue entirely. All llm-ollama runs are handled by a
+      # *second*, local orchestrator instance next to your Ollama install
+      # (see docker-compose.local-ollama-worker.yml) — see README.md for why.
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://localhost:3001/health',{headers:{'x-internal-api-key':process.env.INTERNAL_API_KEY}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  backend:
+    build: ./backend
+    container_name: nest_backend
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DB_NAME: ${POSTGRES_DB:-mydb}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      ORCHESTRATOR_URL: http://orchestrator:3001
+      ORCHESTRATOR_TIMEOUT_MS: ${ORCHESTRATOR_TIMEOUT_MS:-120000}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      BULL_BOARD_USER: ${BULL_BOARD_USER}
+      BULL_BOARD_PASS: ${BULL_BOARD_PASS}
+      PUZZLE_POPULATION_CRON: ${PUZZLE_POPULATION_CRON:-0 6 * * *}
+      PUZZLE_POPULATION_TZ: ${PUZZLE_POPULATION_TZ:-UTC}
+      SHUFFLE_TRIALS: ${SHUFFLE_TRIALS:-3}
+      LLM_TRIALS_PER_MODEL: ${LLM_TRIALS_PER_MODEL:-3}
+      LLM_MAX_DUPLICATE_GUESSES: ${LLM_MAX_DUPLICATE_GUESSES:-10}
+      LLM_MAX_MALFORMED_RESPONSES: ${LLM_MAX_MALFORMED_RESPONSES:-3}
+      LLM_MAX_MODEL_ERRORS: ${LLM_MAX_MODEL_ERRORS:-5}
+      LLM_MAX_PROMPTS: ${LLM_MAX_PROMPTS:-19}
+      LLM_NUM_RESPONSES: ${LLM_NUM_RESPONSES:-1}
+      LLM_TEMPERATURE_BASE: ${LLM_TEMPERATURE_BASE:-0.2}
+      LLM_OPENAI_CONCURRENCY: ${LLM_OPENAI_CONCURRENCY:-1}
+      LLM_OLLAMA_CONCURRENCY: ${LLM_OLLAMA_CONCURRENCY:-1}
+      PUZZLE_CACHE_DIR: /app/.puzzle-cache
+    ports:
+      - "4000:4000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - puzzle_cache:/app/.puzzle-cache
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+    container_name: connections_frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+  # Processes every queue except llm-ollama-runs (see backend/src/worker.ts
+  # workerRole()) — that queue is only ever drained by the local Ollama
+  # worker in docker-compose.local-ollama-worker.yml. This is the process
+  # that actually applies pending TypeORM migrations at startup
+  # (DB_MIGRATIONS_RUN defaults to true here — leave it unset).
+  worker:
+    build: ./backend
+    container_name: strategy_worker
+    restart: unless-stopped
+    command: node dist/worker.js
+    environment:
+      WORKER_ROLE: cloud
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DB_NAME: ${POSTGRES_DB:-mydb}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      ORCHESTRATOR_URL: http://orchestrator:3001
+      ORCHESTRATOR_TIMEOUT_MS: ${ORCHESTRATOR_TIMEOUT_MS:-120000}
+      PUZZLE_POPULATION_CRON: ${PUZZLE_POPULATION_CRON:-0 6 * * *}
+      PUZZLE_POPULATION_TZ: ${PUZZLE_POPULATION_TZ:-UTC}
+      SHUFFLE_TRIALS: ${SHUFFLE_TRIALS:-3}
+      LLM_TRIALS_PER_MODEL: ${LLM_TRIALS_PER_MODEL:-3}
+      LLM_MAX_DUPLICATE_GUESSES: ${LLM_MAX_DUPLICATE_GUESSES:-10}
+      LLM_MAX_MALFORMED_RESPONSES: ${LLM_MAX_MALFORMED_RESPONSES:-3}
+      LLM_MAX_MODEL_ERRORS: ${LLM_MAX_MODEL_ERRORS:-5}
+      LLM_MAX_PROMPTS: ${LLM_MAX_PROMPTS:-19}
+      LLM_NUM_RESPONSES: ${LLM_NUM_RESPONSES:-1}
+      LLM_TEMPERATURE_BASE: ${LLM_TEMPERATURE_BASE:-0.2}
+      LLM_OPENAI_CONCURRENCY: ${LLM_OPENAI_CONCURRENCY:-1}
+      LLM_OLLAMA_CONCURRENCY: ${LLM_OLLAMA_CONCURRENCY:-1}
+      PUZZLE_CACHE_DIR: /app/.puzzle-cache
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      orchestrator:
+        condition: service_started
+    volumes:
+      - puzzle_cache:/app/.puzzle-cache
+
+volumes:
+  postgres_data:
+  redis_data:
+  puzzle_cache:

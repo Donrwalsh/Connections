@@ -1,0 +1,109 @@
+# Runs on YOUR machine (the one with Ollama), not on the Coolify host. This
+# is the other half of the "Option B" split described in README.md: instead
+# of exposing Ollama to the internet, a worker here PULLS llm-ollama-runs
+# jobs from the deployed stack's Redis and writes results to its Postgres —
+# both outbound connections initiated from here, so nothing on this machine
+# needs to be reachable from the internet.
+#
+# Why there's an 'orchestrator' service here too, not just 'worker': the
+# worker never calls a model API directly — it always calls out to an
+# orchestrator's POST /solve-assist endpoint, which is what actually talks
+# to OpenAI or Ollama (see backend/src/modules/strategy/orchestrator.service.ts
+# and orchestrator/src/provider.ts). The orchestrator in your deployed stack
+# only ever gets called with provider="openai" (the 'worker' service there
+# runs WORKER_ROLE=cloud, which never touches llm-ollama-runs) — so a
+# *second*, local orchestrator instance runs here, right next to Ollama, and
+# only this machine's worker ever calls it. Nothing here is reachable from
+# outside this Docker network.
+#
+# Required in .env.local-ollama-worker (copy from
+# .env.local-ollama-worker.sample) — the DB_/REDIS_ values must reach your
+# deployed Postgres/Redis. Prefer a private tunnel (Tailscale, WireGuard)
+# over publishing their ports to the public internet; if you do publish
+# them, REDIS_PASSWORD is not optional.
+#
+# Usage (from the repo root, on this machine):
+#   docker compose -f docker-compose.local-ollama-worker.yml up -d --build
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 60s
+      timeout: 3s
+      retries: 5
+    # For an NVIDIA GPU + nvidia-container-toolkit, uncomment:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  orchestrator:
+    build: ./orchestrator
+    container_name: local_ollama_orchestrator
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      # Only ever called by the 'worker' service below with provider="ollama"
+      # — no OPENAI_API_KEY needed on this instance.
+      INTERNAL_API_KEY: ${LOCAL_INTERNAL_API_KEY}
+      MODEL_CONTEXT_WINDOW: ${MODEL_CONTEXT_WINDOW:-8192}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://localhost:3001/health',{headers:{'x-internal-api-key':process.env.INTERNAL_API_KEY}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  worker:
+    build: ./backend
+    container_name: local_ollama_worker
+    restart: unless-stopped
+    command: node dist/worker.js
+    environment:
+      WORKER_ROLE: ollama
+      # This process never applies migrations — the deployed backend/worker
+      # already owns that. See backend/src/config/env.ts DB_MIGRATIONS_RUN.
+      DB_MIGRATIONS_RUN: "false"
+      DB_HOST: ${REMOTE_DB_HOST}
+      DB_PORT: ${REMOTE_DB_PORT:-5432}
+      DB_USER: ${REMOTE_DB_USER}
+      DB_PASSWORD: ${REMOTE_DB_PASSWORD}
+      DB_NAME: ${REMOTE_DB_NAME}
+      REDIS_HOST: ${REMOTE_REDIS_HOST}
+      REDIS_PORT: ${REMOTE_REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REMOTE_REDIS_PASSWORD}
+      INTERNAL_API_KEY: ${LOCAL_INTERNAL_API_KEY}
+      ORCHESTRATOR_URL: http://orchestrator:3001
+      ORCHESTRATOR_TIMEOUT_MS: ${ORCHESTRATOR_TIMEOUT_MS:-120000}
+      LLM_OLLAMA_CONCURRENCY: ${LLM_OLLAMA_CONCURRENCY:-1}
+      LLM_MAX_DUPLICATE_GUESSES: ${LLM_MAX_DUPLICATE_GUESSES:-10}
+      LLM_MAX_MALFORMED_RESPONSES: ${LLM_MAX_MALFORMED_RESPONSES:-3}
+      LLM_MAX_MODEL_ERRORS: ${LLM_MAX_MODEL_ERRORS:-5}
+      LLM_MAX_PROMPTS: ${LLM_MAX_PROMPTS:-19}
+      LLM_NUM_RESPONSES: ${LLM_NUM_RESPONSES:-1}
+      LLM_TEMPERATURE_BASE: ${LLM_TEMPERATURE_BASE:-0.2}
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+
+volumes:
+  ollama_data:
