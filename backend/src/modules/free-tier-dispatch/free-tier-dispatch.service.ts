@@ -69,11 +69,7 @@ export class FreeTierDispatchService {
    * threshold, rather than silently layering a second cycle on top.
    */
   async start(tier: FreeTierId, thresholdPercent: number): Promise<FreeTierDispatchStatusDto> {
-    if (!DISPATCHABLE_TIERS.includes(tier)) {
-      throw new BadRequestException(
-        `Free-tier dispatch is only available for: ${DISPATCHABLE_TIERS.join(", ")}.`,
-      );
-    }
+    this.assertDispatchable(tier);
     if (!Number.isInteger(thresholdPercent) || thresholdPercent <= 0 || thresholdPercent > 100) {
       throw new BadRequestException(
         `'threshold' must be a whole number greater than 0 and at most 100, got ${thresholdPercent}.`,
@@ -115,6 +111,7 @@ export class FreeTierDispatchService {
   }
 
   async getStatus(tier: FreeTierId): Promise<FreeTierDispatchStatusDto> {
+    this.assertDispatchable(tier);
     const state = await this.stateRepo.findOne({ where: { tier } });
     return {
       tier,
@@ -122,6 +119,19 @@ export class FreeTierDispatchService {
       thresholdPercent: state?.thresholdPercent ?? null,
       startedAt: state?.startedAt ?? null,
     };
+  }
+
+  // Shared by start/getStatus (and transitively stop, via its call to
+  // getStatus) so an invalid tier — e.g. from the GET status route, which
+  // previously cast its :tier param straight to FreeTierId with no check —
+  // fails loudly instead of silently returning a default "not active"
+  // status for a program that doesn't exist.
+  private assertDispatchable(tier: FreeTierId): void {
+    if (!DISPATCHABLE_TIERS.includes(tier)) {
+      throw new BadRequestException(
+        `Free-tier dispatch is only available for: ${DISPATCHABLE_TIERS.join(", ")}.`,
+      );
+    }
   }
 
   /**
