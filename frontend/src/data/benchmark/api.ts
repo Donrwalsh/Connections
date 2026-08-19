@@ -16,6 +16,7 @@ import type {
   StrategyRunListItem,
   SupportedModelRecord,
 } from "./types";
+import { computeDurationMs } from "./metrics";
 
 const apiUrl = (path: string) => `${import.meta.env.VITE_API_URL}${path}`;
 
@@ -149,10 +150,7 @@ export async function fetchRunDetail(
  * it in for completed runs) — the real count is informative for
  * failed/duplicate runs too, and null only means "no guesses yet". */
 export function toRunRecord(item: StrategyRunListItem): RunRecord {
-  const durationMs =
-    item.finishedAt !== null
-      ? new Date(item.finishedAt).getTime() - new Date(item.startedAt).getTime()
-      : null;
+  const durationMs = computeDurationMs(item.startedAt, item.finishedAt);
 
   return {
     runId: item.id,
