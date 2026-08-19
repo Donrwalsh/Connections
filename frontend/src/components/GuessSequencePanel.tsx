@@ -1,83 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-
-type GuessResult = "success" | "failure" | "offBy1" | "duplicate";
-
-interface Guess {
-  sequenceNumber: number;
-  words: string[];
-  result: GuessResult;
-  guessedAt: string;
-}
-
-interface StrategyRunListItem {
-  id: number;
-  strategyName: string;
-  trialNumber: number;
-  status:
-    | "running"
-    | "completed"
-    | "failed"
-    | "duplicate"
-    | "malformedResponse"
-    | "error";
-  modelName: string | null;
-  contextWindow: number | null;
-  startedAt: string | null;
-  finishedAt: string | null;
-  guessCount: number;
-}
-
-interface StrategyRunDetail extends StrategyRunListItem {
-  guesses: Guess[];
-  meta: { total: number; page: number; limit: number };
-}
+import { fetchRunDetailByStrategyDate, fetchRunsForStrategyDate } from "../data/benchmark/api";
+import type { GuessResultValue, StrategyRunDetail, StrategyRunListItem } from "../data/benchmark/types";
 
 interface GuessSequencePanelProps {
   date: string;
   puzzleId: number;
   isOpen: boolean;
   onToggle: () => void;
-}
-
-const DETAIL_PAGE_SIZE = 200;
-
-// The run detail endpoint is paginated (a deterministic run can hold ~2,400
-// guesses), so the panel fetches every page and concatenates them to preserve
-// the old "show the whole sequence" behavior.
-async function fetchFullRunDetail(
-  strategyName: string,
-  date: string,
-  trialNumber: number,
-  signal: AbortSignal,
-): Promise<StrategyRunDetail> {
-  const fetchPage = async (page: number): Promise<StrategyRunDetail> => {
-    const res = await fetch(
-      apiUrl(
-        `/strategy/${strategyName}/puzzle/${date}/run/${trialNumber}?page=${page}&limit=${DETAIL_PAGE_SIZE}`,
-      ),
-      { signal },
-    );
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error(
-        body?.message ?? `Request failed with status ${res.status}`,
-      );
-    }
-    return res.json();
-  };
-
-  const first = await fetchPage(1);
-  const guesses = [...first.guesses];
-  const totalPages = Math.ceil(first.meta.total / first.meta.limit);
-
-  for (let page = 2; page <= totalPages; page++) {
-    if (signal.aborted) break;
-    const next = await fetchPage(page);
-    guesses.push(...next.guesses);
-  }
-
-  return { ...first, guesses };
 }
 
 const STRATEGIES = [
@@ -90,7 +20,6 @@ const STRATEGIES = [
   { id: "llm-openai", label: "LLM · OpenAI" },
   { id: "llm-ollama", label: "LLM · Ollama" },
 ];
-const apiUrl = (path: string) => `${import.meta.env.VITE_API_URL}${path}`;
 
 export function GuessSequencePanel({
   date,
@@ -138,17 +67,7 @@ export function GuessSequencePanel({
       setErrorMessages((prev) => ({ ...prev, [strategyId]: "" }));
 
       try {
-        const res = await fetch(
-          apiUrl(`/strategy/${strategyId}/puzzle/${date}`),
-          { signal: controller.signal },
-        );
-        if (!res.ok) {
-          const body = await res.json().catch(() => null);
-          throw new Error(
-            body?.message ?? `Request failed with status ${res.status}`,
-          );
-        }
-        const runs: StrategyRunListItem[] = await res.json();
+        const runs = await fetchRunsForStrategyDate(strategyId, date, controller.signal);
         if (!controller.signal.aborted) {
           setStrategyRuns((prev) => ({ ...prev, [strategyId]: runs }));
         }
@@ -201,7 +120,7 @@ export function GuessSequencePanel({
     setDetailLoading((prev) => ({ ...prev, [selectedRun.id]: true }));
     setDetailErrors((prev) => ({ ...prev, [selectedRun.id]: "" }));
 
-    fetchFullRunDetail(
+    fetchRunDetailByStrategyDate(
       selectedRun.strategyName,
       date,
       selectedRun.trialNumber,
@@ -398,7 +317,7 @@ export function GuessSequencePanel({
   );
 }
 
-function formatResult(result: GuessResult): string {
+function formatResult(result: GuessResultValue): string {
   switch (result) {
     case "success":
       return "✓ Correct";
