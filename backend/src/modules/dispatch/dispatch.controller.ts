@@ -6,10 +6,11 @@ import {
   Get,
   Param,
   Query,
+  UseGuards,
   ParseIntPipe,
   BadRequestException,
 } from "@nestjs/common";
-import { ApiParam, ApiQuery } from "@nestjs/swagger";
+import { ApiBody, ApiParam, ApiQuery } from "@nestjs/swagger";
 import { StrategyService } from "../strategy/strategy.service";
 import { GameService } from "../game/game.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
@@ -19,6 +20,8 @@ import {
 } from "../free-tier-dispatch/free-tier-dispatch.service";
 import { FreeTierId } from "../strategy/free-tier-usage.service";
 import { AUTOMATIC_STRATEGIES, LLM_STRATEGIES, STRATEGY_SET, isLlmStrategy } from "../../strategies";
+import { DispatchAuthGuard } from "./dispatch-auth.guard";
+import { DispatchAuthDto } from "./dto/dispatch-auth.dto";
 
 const DEFAULT_FREE_TIER_DISPATCH_THRESHOLD_PERCENT = 90;
 
@@ -107,6 +110,7 @@ export class DispatchController {
   }
 
   @Post("model/:modelName/:date")
+  @UseGuards(DispatchAuthGuard)
   @ApiParam({
     name: "modelName",
     type: String,
@@ -122,6 +126,7 @@ export class DispatchController {
     description: "Puzzle date in YYYY-MM-DD format",
     example: "2023-08-01",
   })
+  @ApiBody({ type: DispatchAuthDto })
   async queueModel(@Param("modelName") modelName: string, @Param("date") date: string) {
     const strategyName = await this.supportedModelService.resolveSupportedStrategy(modelName);
     const puzzleId = await this.gameService.resolveDateToPuzzleId(date);
@@ -138,6 +143,7 @@ export class DispatchController {
   }
 
   @Post("model/:modelName/runs/:n")
+  @UseGuards(DispatchAuthGuard)
   @ApiParam({
     name: "modelName",
     type: String,
@@ -156,10 +162,8 @@ export class DispatchController {
       " not accept explicit dates. Rejected (queuing nothing) if fewer than `n` such dates exist.",
     example: 5,
   })
-  async queueModelRuns(
-    @Param("modelName") modelName: string,
-    @Param("n", ParseIntPipe) n: number,
-  ) {
+  @ApiBody({ type: DispatchAuthDto })
+  async queueModelRuns(@Param("modelName") modelName: string, @Param("n", ParseIntPipe) n: number) {
     if (n < 1) {
       throw new BadRequestException(`'n' must be a positive integer, got ${n}.`);
     }
@@ -200,6 +204,7 @@ export class DispatchController {
   // 'both', which starts flagship and mini independently under the same
   // threshold and reports each one's own outcome (see startBothFreeTiers).
   @Post("free-tier/:tier")
+  @UseGuards(DispatchAuthGuard)
   @ApiParam({
     name: "tier",
     type: String,
@@ -215,6 +220,7 @@ export class DispatchController {
     description: "Stop once usage reaches this percent of the tier's daily token budget (default 90).",
     example: 90,
   })
+  @ApiBody({ type: DispatchAuthDto })
   async startFreeTierDispatch(@Param("tier") tier: string, @Query("threshold") thresholdRaw?: string) {
     const thresholdPercent =
       thresholdRaw === undefined

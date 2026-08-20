@@ -98,6 +98,7 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `OLLAMA_MODEL` | `llama3.2` | Ollama model id (used by the `llm-ollama` strategy) |
 | `MODEL_CONTEXT_WINDOW` | `8192` | Context window (in tokens) used to size the LLM solver prompt for both providers |
 | `BULL_BOARD_USER` / `BULL_BOARD_PASS` | `admin` / `bullboard` | Basic-auth credentials for the Bull Board dashboard (must be set together, or not at all) |
+| `DISPATCH_PASSWORD` | — | Password checked against the `password` field on `POST /dispatch/model/:modelName/:date`, `POST /dispatch/model/:modelName/runs/:n`, and `POST /dispatch/free-tier/:tier` — the dispatch routes that queue paid LLM calls. Only enforced when `NODE_ENV=production` (baked into `backend/Dockerfile`); **required** once it is — the backend/worker refuse to boot without it |
 | `CORS_ORIGIN` | `http://localhost:5173` | Comma-separated list of allowed frontend origins |
 | `ORCHESTRATOR_URL` | `http://orchestrator:3001` | Backend's URL for reaching the orchestrator |
 | `ORCHESTRATOR_TIMEOUT_MS` | `120000` | Per-attempt HTTP timeout for solve calls — must cover a whole multi-prompt step (up to `LLM_MAX_PROMPTS` model calls), since timeouts are not retried |
@@ -214,9 +215,12 @@ The backend E2E suite (`backend/test/app.e2e-spec.ts`) boots the real NestJS app
 
 ```bash
 cp .env.sample .env   # fill in INTERNAL_API_KEY, OPENAI_API_KEY, POSTGRES_PASSWORD,
-                       # CORS_ORIGIN, VITE_API_URL, REDIS_PASSWORD — see .env.sample
+                       # CORS_ORIGIN, VITE_API_URL, REDIS_PASSWORD, DISPATCH_PASSWORD —
+                       # see .env.sample
 docker compose -f docker-compose.prod.yml up -d --build
 ```
+
+`backend/Dockerfile` bakes in `NODE_ENV=production`, which turns on `DispatchAuthGuard` (`backend/src/modules/dispatch/dispatch-auth.guard.ts`): the paid-provider dispatch routes — `POST /dispatch/model/:modelName/:date`, `POST /dispatch/model/:modelName/runs/:n`, and `POST /dispatch/free-tier/:tier` — then reject any request whose JSON body doesn't include a matching `"password"` field. `loadEnv()` fails the backend/worker processes at boot if `DISPATCH_PASSWORD` isn't set once `NODE_ENV=production`, so there's no way to accidentally deploy prod without it. Local dev (`docker-compose.yml`, no `NODE_ENV=production`) never requires a password on these routes.
 
 ### No Ollama in the cloud — Option B (a local worker pulls jobs to your machine)
 

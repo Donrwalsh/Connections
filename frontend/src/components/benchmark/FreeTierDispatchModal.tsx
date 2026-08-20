@@ -37,6 +37,9 @@ const TIER_OPTIONS: TierSelection[] = ["flagship", "mini", "both"];
 export function FreeTierDispatchModal({ onClose, onDispatchChanged }: FreeTierDispatchModalProps) {
   const [tier, setTier] = useState<TierSelection>("both");
   const [threshold, setThreshold] = useState(DEFAULT_THRESHOLD_PERCENT);
+  // Only checked by the backend in production (DispatchAuthGuard) — left
+  // blank this has no effect against a local/dev backend.
+  const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Per-tier result lines, shown only after a "both" submission where at
@@ -68,7 +71,7 @@ export function FreeTierDispatchModal({ onClose, onDispatchChanged }: FreeTierDi
 
     try {
       if (tier === "both") {
-        const result = await startBothFreeTierDispatch(threshold);
+        const result = await startBothFreeTierDispatch(threshold, password);
         onDispatchChanged();
 
         const hasFailure = result.flagship.error !== null || result.mini.error !== null;
@@ -85,7 +88,7 @@ export function FreeTierDispatchModal({ onClose, onDispatchChanged }: FreeTierDi
           onClose();
         }
       } else {
-        await startFreeTierDispatch(tier, threshold);
+        await startFreeTierDispatch(tier, threshold, password);
         onDispatchChanged();
         onClose();
       }
@@ -138,6 +141,17 @@ export function FreeTierDispatchModal({ onClose, onDispatchChanged }: FreeTierDi
               step={1}
               value={threshold}
               onChange={(event) => setThreshold(Number(event.target.value))}
+            />
+          </label>
+
+          <label className="bench-modal__field">
+            Password
+            <input
+              type="password"
+              className="bench-modal__number"
+              autoComplete="off"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
             />
           </label>
 

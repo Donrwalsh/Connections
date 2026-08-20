@@ -14,4 +14,24 @@ describe("loadEnv", () => {
       expect(loadEnv({ ...baseEnv, DB_MIGRATIONS_RUN: "anything" }).DB_MIGRATIONS_RUN).toBe(true);
     });
   });
+
+  describe("DISPATCH_PASSWORD", () => {
+    it("should default to an empty string outside production", () => {
+      expect(loadEnv(baseEnv).DISPATCH_PASSWORD).toBe("");
+    });
+
+    it("should pass through a configured value", () => {
+      expect(loadEnv({ ...baseEnv, DISPATCH_PASSWORD: "secret" }).DISPATCH_PASSWORD).toBe("secret");
+    });
+
+    it("should fail closed when NODE_ENV=production and unset", () => {
+      expect(() => loadEnv({ ...baseEnv, NODE_ENV: "production" })).toThrow(/DISPATCH_PASSWORD/);
+    });
+
+    it("should boot fine in production once DISPATCH_PASSWORD is set", () => {
+      expect(
+        loadEnv({ ...baseEnv, NODE_ENV: "production", DISPATCH_PASSWORD: "secret" }).DISPATCH_PASSWORD,
+      ).toBe("secret");
+    });
+  });
 });

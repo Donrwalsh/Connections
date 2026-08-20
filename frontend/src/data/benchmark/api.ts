@@ -145,14 +145,18 @@ export function fetchFreeTierDispatchStatus(
  * `thresholdPercent` (a whole number, 1-100). Rejects (thrown Error, message
  * from the backend) if a cycle for this tier is already running, or the
  * threshold is out of range — see FreeTierDispatchModal, which surfaces
- * that message directly. */
+ * that message directly. `password` is only checked by the backend in
+ * production (DispatchAuthGuard) — harmless to send blank elsewhere. */
 export function startFreeTierDispatch(
   tier: FreeTierId,
   thresholdPercent: number,
+  password: string,
   signal?: AbortSignal,
 ): Promise<FreeTierDispatchStatus> {
   return fetchJson(`/dispatch/free-tier/${tier}?threshold=${thresholdPercent}`, signal, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
   });
 }
 
@@ -162,10 +166,13 @@ export function startFreeTierDispatch(
  * already running doesn't prevent the other from starting. */
 export function startBothFreeTierDispatch(
   thresholdPercent: number,
+  password: string,
   signal?: AbortSignal,
 ): Promise<FreeTierDispatchBothStartResult> {
   return fetchJson(`/dispatch/free-tier/both?threshold=${thresholdPercent}`, signal, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
   });
 }
 

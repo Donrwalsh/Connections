@@ -16,6 +16,7 @@ export interface AppEnv {
   PUZZLE_POPULATION_CRON: string;
   PUZZLE_POPULATION_TZ: string;
   DB_MIGRATIONS_RUN: boolean;
+  DISPATCH_PASSWORD: string;
 }
 
 function required(name: string, value: string | undefined): string {
@@ -55,6 +56,15 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
     throw new Error("BULL_BOARD_USER and BULL_BOARD_PASS must be set together (or neither).");
   }
 
+  const dispatchPassword = env.DISPATCH_PASSWORD ?? "";
+
+  // Only enforced by DispatchAuthGuard when NODE_ENV=production (see that
+  // guard for why dev/test dispatches stay password-free) — but fail fast at
+  // boot rather than let a production deploy come up silently unprotected.
+  if (env.NODE_ENV === "production" && !dispatchPassword) {
+    throw new Error("DISPATCH_PASSWORD must be set when NODE_ENV=production. See .env.sample.");
+  }
+
   return {
     DB_HOST: env.DB_HOST ?? "localhost",
     DB_PORT: optionalInt("DB_PORT", env.DB_PORT, 5432),
@@ -80,5 +90,6 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
     // ever applies schema changes, regardless of which one boots first or
     // which git revision the local process happens to be on.
     DB_MIGRATIONS_RUN: env.DB_MIGRATIONS_RUN !== "false",
+    DISPATCH_PASSWORD: dispatchPassword,
   };
 }

@@ -21,7 +21,9 @@
 #   INTERNAL_API_KEY, OPENAI_API_KEY, POSTGRES_PASSWORD (change from the
 #   dev default), CORS_ORIGIN (your real frontend origin), VITE_API_URL
 #   (your real backend origin, baked into the frontend at build time),
-#   REDIS_PASSWORD (required if you publish the redis port — see above).
+#   REDIS_PASSWORD (required if you publish the redis port — see above),
+#   DISPATCH_PASSWORD (required — the backend image sets NODE_ENV=production,
+#   so it refuses to boot without one; see .env.sample).
 #
 # Usage:
 #   docker compose -f docker-compose.prod.yml up -d --build
@@ -142,6 +144,10 @@ services:
       LLM_OPENAI_CONCURRENCY: ${LLM_OPENAI_CONCURRENCY:-1}
       LLM_OLLAMA_CONCURRENCY: ${LLM_OLLAMA_CONCURRENCY:-1}
       PUZZLE_CACHE_DIR: /app/.puzzle-cache
+      # Required in this image: NODE_ENV=production is baked in by
+      # backend/Dockerfile, and DispatchAuthGuard's password check is only
+      # enforced (and loadEnv() only requires this) under that NODE_ENV.
+      DISPATCH_PASSWORD: ${DISPATCH_PASSWORD}
     ports:
       - "4000:4000"
     depends_on:
@@ -211,6 +217,9 @@ services:
       LLM_OPENAI_CONCURRENCY: ${LLM_OPENAI_CONCURRENCY:-1}
       LLM_OLLAMA_CONCURRENCY: ${LLM_OLLAMA_CONCURRENCY:-1}
       PUZZLE_CACHE_DIR: /app/.puzzle-cache
+      # Worker boots the same AppModule (and thus the same loadEnv()
+      # validation) as the backend — see the backend service's comment above.
+      DISPATCH_PASSWORD: ${DISPATCH_PASSWORD}
     depends_on:
       db:
         condition: service_healthy

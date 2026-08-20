@@ -25,6 +25,7 @@
   border: none;
   border-radius: 6px;
   background-color: #efefe6;
+  color: #2d2d24;
   font-weight: 700;
   font-size: 0.95rem;
   letter-spacing: 0.02em;
@@ -57,6 +58,7 @@
   border-radius: 6px;
   margin-bottom: 0.5rem;
   font-size: 0.9rem;
+  color: #2d2d24;
 }
 
 .solved-row--yellow { background-color: #f0e17e; }
@@ -76,6 +78,7 @@
   border-radius: 20px;
   border: 1px solid #333;
   background: white;
+  color: #2d2d24;
   cursor: pointer;
 }
 
@@ -173,6 +176,7 @@
   border-radius: 20px;
   border: 1px solid #333;
   background: white;
+  color: #2d2d24;
   cursor: pointer;
 }
 
