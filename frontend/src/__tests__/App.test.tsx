@@ -53,6 +53,7 @@ const puzzleResponse = {
   date: "2024-01-15",
   categories,
   wordOrder: categories.flatMap((c) => c.words),
+  isImagePuzzle: false,
 };
 
 const strategyRun = {

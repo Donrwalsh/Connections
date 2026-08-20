@@ -58,6 +58,7 @@ const puzzle: Puzzle = {
     "MOM",
     "RACECAR",
   ],
+  isImagePuzzle: false,
 };
 
 function wrongGroup(offset: number): string[] {
