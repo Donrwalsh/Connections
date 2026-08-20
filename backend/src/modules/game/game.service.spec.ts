@@ -53,12 +53,13 @@ describe("GameService", () => {
       mockPuzzleRepo.findOne.mockResolvedValueOnce({
         id: 1,
         date: validDate,
+        is_image_puzzle: false,
         answerGroups: [
           {
             id: 10,
             group_name: "Fruits",
             level: 0,
-            members: [{ word: "APPLE", position: 0 }],
+            members: [{ word: "APPLE", position: 0, image_url: null }],
           },
         ],
       });
@@ -68,6 +69,7 @@ describe("GameService", () => {
       expect(result).toEqual({
         id: 1,
         date: validDate,
+        isImagePuzzle: false,
         categories: [
           {
             id: "cat-10",
@@ -96,39 +98,40 @@ describe("GameService", () => {
       const mockPuzzleEntity = {
         id: 100,
         date: "2026-07-30",
+        is_image_puzzle: false,
         answerGroups: [
           {
             id: 1,
             group_name: "Yellow Cat",
             level: 0,
             members: [
-              { word: "Word 1", position: 5 },
-              { word: "Word 2", position: 2 },
+              { word: "Word 1", position: 5, image_url: null },
+              { word: "Word 2", position: 2, image_url: null },
             ],
           },
           {
             id: 2,
             group_name: "Green Cat",
             level: 1,
-            members: [{ word: "Word 3", position: 0 }],
+            members: [{ word: "Word 3", position: 0, image_url: null }],
           },
           {
             id: 3,
             group_name: "Blue Cat",
             level: 2,
-            members: [{ word: "Word 4", position: 4 }],
+            members: [{ word: "Word 4", position: 4, image_url: null }],
           },
           {
             id: 4,
             group_name: "Purple Cat",
             level: 3,
-            members: [{ word: "Word 5", position: 1 }],
+            members: [{ word: "Word 5", position: 1, image_url: null }],
           },
           {
             id: 5,
             group_name: "Fallback Cat",
             level: 99,
-            members: [{ word: "Word 6", position: 3 }],
+            members: [{ word: "Word 6", position: 3, image_url: null }],
           },
         ],
       };
@@ -140,6 +143,7 @@ describe("GameService", () => {
       expect(result).toEqual({
         id: 100,
         date: "2026-07-30",
+        isImagePuzzle: false,
         categories: [
           {
             id: "cat-1",
@@ -177,6 +181,33 @@ describe("GameService", () => {
         wordOrder: ["Word 3", "Word 5", "Word 2", "Word 6", "Word 4", "Word 1"],
       });
     });
+
+    it("should populate the images map and isImagePuzzle flag for an image puzzle", async () => {
+      mockPuzzleRepo.findOne.mockResolvedValueOnce({
+        id: 200,
+        date: "2024-12-12",
+        is_image_puzzle: true,
+        answerGroups: [
+          {
+            id: 1,
+            group_name: "Fruits",
+            level: 0,
+            members: [
+              { word: "APPLE", position: 0, image_url: "https://example.com/apple.svg" },
+              { word: "BANANA", position: 1, image_url: "https://example.com/banana.svg" },
+            ],
+          },
+        ],
+      });
+
+      const result = await service.getPuzzleByDate("2024-12-12");
+
+      expect(result.isImagePuzzle).toBe(true);
+      expect(result.images).toEqual({
+        APPLE: "https://example.com/apple.svg",
+        BANANA: "https://example.com/banana.svg",
+      });
+    });
   });
 
   describe("getTodaysPuzzle", () => {
@@ -186,6 +217,7 @@ describe("GameService", () => {
       const spy = jest.spyOn(service, "getPuzzleByDate").mockResolvedValue({
         id: 1,
         date: expectedToday,
+        isImagePuzzle: false,
         categories: [],
         wordOrder: [],
       });

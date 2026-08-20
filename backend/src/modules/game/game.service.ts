@@ -17,6 +17,8 @@ export interface PuzzleResponseDto {
   date: string;
   categories: PuzzleCategoryDto[];
   wordOrder: string[];
+  isImagePuzzle: boolean;
+  images?: Record<string, string>;
 }
 
 @Injectable()
@@ -185,6 +187,15 @@ export class GameService implements OnModuleDestroy {
     }
 
     // 3. Map relations to your response DTO/format
+    const allMembers = puzzle.answerGroups.flatMap((group) => group.members);
+
+    const images: Record<string, string> = {};
+    for (const member of allMembers) {
+      if (member.image_url) {
+        images[member.word] = member.image_url;
+      }
+    }
+
     const value: PuzzleResponseDto = {
       id: puzzle.id,
       date: puzzle.date,
@@ -194,10 +205,9 @@ export class GameService implements OnModuleDestroy {
         difficulty: this.levelToColor(group.level),
         words: group.members.map((member) => member.word),
       })),
-      wordOrder: puzzle.answerGroups
-        .flatMap((group) => group.members)
-        .sort((a, b) => a.position - b.position)
-        .map((m) => m.word),
+      wordOrder: [...allMembers].sort((a, b) => a.position - b.position).map((m) => m.word),
+      isImagePuzzle: puzzle.is_image_puzzle,
+      ...(Object.keys(images).length > 0 && { images }),
     };
 
     this.puzzleCache.set(date, {
