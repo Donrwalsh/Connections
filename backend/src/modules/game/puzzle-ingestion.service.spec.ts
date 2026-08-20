@@ -474,6 +474,54 @@ describe("PuzzleIngestionService", () => {
     });
   });
 
+  describe("ingestSpecificDates", () => {
+    beforeEach(() => {
+      jest
+        .spyOn(service as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+    });
+
+    it("should insert a puzzle for each date and report the count", async () => {
+      jest
+        .spyOn(global, "fetch")
+        .mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA))
+        .mockResolvedValueOnce(fetchResponse(200, IMAGE_PUZZLE_DATA));
+
+      const result = await service.ingestSpecificDates(["2024-01-02", "2024-12-12"]);
+
+      expect(result).toEqual({ inserted: 2, skipped: [] });
+      expect(mockDataSource.transaction).toHaveBeenCalledTimes(2);
+    });
+
+    it("should skip and record a date the NYT endpoint 404s for", async () => {
+      jest.spyOn(global, "fetch").mockResolvedValueOnce(fetchResponse(404));
+
+      const result = await service.ingestSpecificDates(["2024-01-02"]);
+
+      expect(result).toEqual({ inserted: 0, skipped: ["2024-01-02"] });
+    });
+
+    it("should skip and record a date that already exists", async () => {
+      mockExecute.mockResolvedValueOnce({ identifiers: [] });
+      jest.spyOn(global, "fetch").mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA));
+
+      const result = await service.ingestSpecificDates(["2024-01-02"]);
+
+      expect(result).toEqual({ inserted: 0, skipped: ["2024-01-02"] });
+    });
+
+    it("should dispatch strategy runs for each inserted date", async () => {
+      jest
+        .spyOn(global, "fetch")
+        .mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA))
+        .mockResolvedValueOnce(fetchResponse(200, IMAGE_PUZZLE_DATA));
+
+      await service.ingestSpecificDates(["2024-01-02", "2024-12-12"]);
+
+      expect(mockStrategyQueue.addBulk).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe("getLatestDate", () => {
     it("should return the latest stored date as a Date", async () => {
       mockQuery.getRawOne.mockResolvedValueOnce({ latest: "2024-06-15" });

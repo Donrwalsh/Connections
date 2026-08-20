@@ -90,6 +90,44 @@ export class PuzzleIngestionService {
     return { inserted, upToDate: this.formatDate(latestDate) };
   }
 
+  /**
+   * Ingests a fixed list of dates directly, bypassing the "day after
+   * latest" forward walk in populateUntilCaughtUp — for backfilling
+   * specific historical gaps (e.g. dates that were previously skipped by
+   * the old AWKWARD_DATES allowlist) that the forward walk can never reach,
+   * since it only ever advances from MAX(puzzle.date).
+   */
+  async ingestSpecificDates(dates: string[]): Promise<{ inserted: number; skipped: string[] }> {
+    let inserted = 0;
+    const skipped: string[] = [];
+
+    for (const formatted of dates) {
+      const puzzleData = await this.loadPuzzleData(formatted);
+
+      if (puzzleData === null) {
+        this.logger.warn(`No NYT puzzle found for ${formatted} — skipping`);
+        skipped.push(formatted);
+        await this.delay(500);
+        continue;
+      }
+
+      const puzzleId = await this.insertPuzzle(formatted, puzzleData);
+
+      if (puzzleId !== null) {
+        await this.dispatchStrategyRuns(puzzleId, formatted);
+        this.logger.log(`Backfilled puzzle for ${formatted} (id ${puzzleId})`);
+        inserted++;
+      } else {
+        skipped.push(formatted);
+      }
+
+      await this.delay(500);
+    }
+
+    this.logger.log(`Backfill complete: inserted ${inserted}, skipped ${skipped.length}`);
+    return { inserted, skipped };
+  }
+
   private async getLatestDate(): Promise<Date> {
     const result = await this.dataSource
       .createQueryBuilder(Puzzle, "puzzle")
