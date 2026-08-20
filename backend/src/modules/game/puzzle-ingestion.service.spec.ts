@@ -435,6 +435,25 @@ describe("PuzzleIngestionService", () => {
       ]);
     });
 
+    it("should detect image puzzles by card shape, not by date", async () => {
+      // "2024-12-12" is the same date used above for IMAGE_PUZZLE_DATA (it
+      // was previously hardcoded into the old AWKWARD_DATES skip-list), but
+      // here it carries plain-text cards. If detection were still keyed off
+      // the date string, this would incorrectly come back as an image
+      // puzzle; shape detection correctly identifies it as text-only.
+      const result = await (
+        service as unknown as {
+          insertPuzzle(d: string, data: unknown): Promise<number | null>;
+        }
+      ).insertPuzzle("2024-12-12", PUZZLE_DATA);
+
+      expect(result).toBe(42);
+      expect(mockRepo.createQueryBuilder().values).toHaveBeenCalledWith({
+        date: "2024-12-12",
+        is_image_puzzle: false,
+      });
+    });
+
     it("should throw when a category mixes text and image cards", async () => {
       await expect(
         (

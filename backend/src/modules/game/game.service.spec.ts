@@ -208,6 +208,47 @@ describe("GameService", () => {
         BANANA: "https://example.com/banana.svg",
       });
     });
+
+    it("should only include members that have an image_url in the images map for a partial image puzzle", async () => {
+      // Validation in puzzle-ingestion.service.ts is per-category, so one
+      // category can be all-image while another is all-text within the same
+      // is_image_puzzle: true puzzle.
+      mockPuzzleRepo.findOne.mockResolvedValueOnce({
+        id: 300,
+        date: "2024-12-13",
+        is_image_puzzle: true,
+        answerGroups: [
+          {
+            id: 1,
+            group_name: "Fruits",
+            level: 0,
+            members: [
+              { word: "APPLE", position: 0, image_url: "https://example.com/apple.svg" },
+              { word: "BANANA", position: 1, image_url: "https://example.com/banana.svg" },
+            ],
+          },
+          {
+            id: 2,
+            group_name: "Colors",
+            level: 1,
+            members: [
+              { word: "RED", position: 2, image_url: null },
+              { word: "BLUE", position: 3, image_url: null },
+            ],
+          },
+        ],
+      });
+
+      const result = await service.getPuzzleByDate("2024-12-13");
+
+      expect(result.isImagePuzzle).toBe(true);
+      expect(result.images).toEqual({
+        APPLE: "https://example.com/apple.svg",
+        BANANA: "https://example.com/banana.svg",
+      });
+      expect(result.images).not.toHaveProperty("RED");
+      expect(result.images).not.toHaveProperty("BLUE");
+    });
   });
 
   describe("getTodaysPuzzle", () => {

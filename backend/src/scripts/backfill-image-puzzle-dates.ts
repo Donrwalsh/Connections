@@ -6,9 +6,14 @@ import { PuzzleIngestionService } from "../modules/game/puzzle-ingestion.service
 /**
  * One-off backfill for the historical dates that were previously skipped by
  * the old AWKWARD_DATES allowlist in PuzzleIngestionService, before shape
- * detection replaced it. Run once after deploying image-puzzle support:
+ * detection replaced it. Run once after deploying image-puzzle support.
  *
+ * Local dev (from backend/):
  *   npx tsx src/scripts/backfill-image-puzzle-dates.ts
+ *
+ * Production/container (after `npm run build`):
+ *   npm run backfill:image-dates
+ *   docker exec <container> npm run backfill:image-dates
  */
 const HISTORICAL_IMAGE_DATES = [
   "2024-12-12",
@@ -20,8 +25,9 @@ const HISTORICAL_IMAGE_DATES = [
   "2026-05-06",
 ];
 
+const logger = new Logger("BackfillImagePuzzleDates");
+
 async function main() {
-  const logger = new Logger("BackfillImagePuzzleDates");
   const appContext = await NestFactory.createApplicationContext(AppModule);
 
   try {
@@ -33,4 +39,12 @@ async function main() {
   }
 }
 
-main();
+// appContext.close() does not close the app's BullMQ queues (module-scope
+// singletons with no onModuleDestroy), so their ioredis connections keep the
+// event loop alive. Exit explicitly instead of relying on natural exit.
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    logger.error(error);
+    process.exit(1);
+  });
