@@ -222,6 +222,10 @@ docker compose -f docker-compose.prod.yml up -d --build
 
 `backend/Dockerfile` bakes in `NODE_ENV=production`, which turns on `DispatchAuthGuard` (`backend/src/modules/dispatch/dispatch-auth.guard.ts`): the paid-provider dispatch routes — `POST /dispatch/model/:modelName/:date`, `POST /dispatch/model/:modelName/runs/:n`, and `POST /dispatch/free-tier/:tier` — then reject any request whose JSON body doesn't include a matching `"password"` field. `loadEnv()` fails the backend/worker processes at boot if `DISPATCH_PASSWORD` isn't set once `NODE_ENV=production`, so there's no way to accidentally deploy prod without it. Local dev (`docker-compose.yml`, no `NODE_ENV=production`) never requires a password on these routes.
 
+### Reviewing production data (Adminer)
+
+`docker-compose.prod.yml` also runs [Adminer](https://www.adminer.org/), a lightweight Postgres browser, at `http://<host>:8091`. It reuses the existing `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` from `.env` — no separate credentials to set up. Unlike Bull Board (`/admin/queues`, gated by `BULL_BOARD_USER`/`BULL_BOARD_PASS` Basic Auth in front of the tool itself), Adminer runs as its own container and relies solely on its own DB-login form — publishing port 8091 makes that login page reachable by anyone with the URL, though real access still requires the Postgres password. Don't publish this port on a host without other network-level protection (a private tunnel, or Coolify/firewall access rules) — the same caution as the commented-out `db`/`redis` ports in `docker-compose.prod.yml`.
+
 ### No Ollama in the cloud — Option B (a local worker pulls jobs to your machine)
 
 The deployed stack has no Ollama service at all. Rather than exposing a local Ollama install to the internet, a second BullMQ worker runs on your own machine and *pulls* `llm-ollama-runs` jobs from the deployed Redis/Postgres over an outbound connection — nothing on your machine needs to be reachable from outside your network.

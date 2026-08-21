@@ -53,6 +53,18 @@ services:
     # ports:
     #   - "5432:5432"
 
+  adminer:
+    image: adminer:latest
+    container_name: adminer
+    restart: unless-stopped
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    ports:
+      - "8091:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
   redis:
     image: redis:7-alpine
     container_name: redis
