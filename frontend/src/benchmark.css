@@ -177,8 +177,13 @@
 }
 
 /* Tables (leaderboard + puzzle breakdown + runs). */
+.bench-table-wrap {
+  overflow-x: auto;
+}
+
 .bench-table {
   width: 100%;
+  min-width: 40rem;
   border-collapse: collapse;
   font-size: 0.9rem;
 }

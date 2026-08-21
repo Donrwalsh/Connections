@@ -59,6 +59,7 @@ export function StrategyTable({ rows, metricKey, variant, freeTierModels }: Stra
   const isDeterministic = variant === "deterministic";
 
   return (
+    <div className="bench-table-wrap">
     <table className="bench-table">
       <caption className="bench-table__caption">
         {variant === "llm" ? "LLM strategies" : "Deterministic & shuffle strategies"} ·{" "}
@@ -179,5 +180,6 @@ export function StrategyTable({ rows, metricKey, variant, freeTierModels }: Stra
         })}
       </tbody>
     </table>
+    </div>
   );
 }
