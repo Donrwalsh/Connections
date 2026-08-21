@@ -21,6 +21,48 @@ const PUZZLE_DATA = {
   ],
 };
 
+const IMAGE_PUZZLE_DATA = {
+  categories: [
+    {
+      title: "Fruits",
+      cards: [
+        { position: 0, image_url: "https://example.com/apple.svg", image_alt_text: "APPLE" },
+        { position: 1, image_url: "https://example.com/banana.svg", image_alt_text: "BANANA" },
+        { position: 2, image_url: "https://example.com/cherry.svg", image_alt_text: "CHERRY" },
+        { position: 3, image_url: "https://example.com/date.svg", image_alt_text: "DATE" },
+      ],
+    },
+  ],
+};
+
+const MIXED_SHAPE_PUZZLE_DATA = {
+  categories: [
+    {
+      title: "Mixed",
+      cards: [
+        { content: "APPLE", position: 0 },
+        { position: 1, image_url: "https://example.com/banana.svg", image_alt_text: "BANANA" },
+        { content: "CHERRY", position: 2 },
+        { content: "DATE", position: 3 },
+      ],
+    },
+  ],
+};
+
+const UNKNOWN_SHAPE_PUZZLE_DATA = {
+  categories: [
+    {
+      title: "Broken",
+      cards: [
+        { position: 0 },
+        { content: "BANANA", position: 1 },
+        { content: "CHERRY", position: 2 },
+        { content: "DATE", position: 3 },
+      ],
+    },
+  ],
+};
+
 const fetchResponse = (status: number, body?: unknown) =>
   ({
     ok: status >= 200 && status < 300,
@@ -144,21 +186,6 @@ describe("PuzzleIngestionService", () => {
         expect.objectContaining({ headers: expect.any(Object) }),
       );
       expect(mockDataSource.transaction).toHaveBeenCalledTimes(1);
-    });
-
-    it("should skip known awkward NYT dates without fetching", async () => {
-      mockLatestDate(2024, 11, 11);
-
-      const fetchSpy = jest.spyOn(global, "fetch").mockResolvedValueOnce(fetchResponse(404));
-
-      const result = await service.populateUntilCaughtUp();
-
-      expect(result).toEqual({ inserted: 0, upToDate: "2024-12-12" });
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-      expect(fetchSpy).toHaveBeenCalledWith(
-        expect.stringContaining("2024-12-13"),
-        expect.anything(),
-      );
     });
 
     it("should skip a puzzle that already exists", async () => {
@@ -369,6 +396,10 @@ describe("PuzzleIngestionService", () => {
       ).insertPuzzle("2024-01-02", PUZZLE_DATA);
 
       expect(result).toBe(42);
+      expect(mockRepo.createQueryBuilder().values).toHaveBeenCalledWith({
+        date: "2024-01-02",
+        is_image_puzzle: false,
+      });
       expect(mockRepo.save).toHaveBeenNthCalledWith(1, [
         {
           puzzle: { id: 42 },
@@ -377,11 +408,89 @@ describe("PuzzleIngestionService", () => {
         },
       ]);
       expect(mockRepo.save).toHaveBeenNthCalledWith(2, [
-        { group: { id: 1 }, word: "APPLE", position: 0 },
-        { group: { id: 1 }, word: "BANANA", position: 1 },
-        { group: { id: 1 }, word: "CHERRY", position: 2 },
-        { group: { id: 1 }, word: "DATE", position: 3 },
+        { group: { id: 1 }, word: "APPLE", position: 0, image_url: null },
+        { group: { id: 1 }, word: "BANANA", position: 1, image_url: null },
+        { group: { id: 1 }, word: "CHERRY", position: 2, image_url: null },
+        { group: { id: 1 }, word: "DATE", position: 3, image_url: null },
       ]);
+    });
+
+    it("should persist image cards with their image_url and mark the puzzle as an image puzzle", async () => {
+      const result = await (
+        service as unknown as {
+          insertPuzzle(d: string, data: unknown): Promise<number | null>;
+        }
+      ).insertPuzzle("2024-12-12", IMAGE_PUZZLE_DATA);
+
+      expect(result).toBe(42);
+      expect(mockRepo.createQueryBuilder().values).toHaveBeenCalledWith({
+        date: "2024-12-12",
+        is_image_puzzle: true,
+      });
+      expect(mockRepo.save).toHaveBeenNthCalledWith(2, [
+        { group: { id: 1 }, word: "APPLE", position: 0, image_url: "https://example.com/apple.svg" },
+        { group: { id: 1 }, word: "BANANA", position: 1, image_url: "https://example.com/banana.svg" },
+        { group: { id: 1 }, word: "CHERRY", position: 2, image_url: "https://example.com/cherry.svg" },
+        { group: { id: 1 }, word: "DATE", position: 3, image_url: "https://example.com/date.svg" },
+      ]);
+    });
+
+    it("should detect image puzzles by card shape, not by date", async () => {
+      // "2024-12-12" is the same date used above for IMAGE_PUZZLE_DATA (it
+      // was previously hardcoded into the old AWKWARD_DATES skip-list), but
+      // here it carries plain-text cards. If detection were still keyed off
+      // the date string, this would incorrectly come back as an image
+      // puzzle; shape detection correctly identifies it as text-only.
+      const result = await (
+        service as unknown as {
+          insertPuzzle(d: string, data: unknown): Promise<number | null>;
+        }
+      ).insertPuzzle("2024-12-12", PUZZLE_DATA);
+
+      expect(result).toBe(42);
+      expect(mockRepo.createQueryBuilder().values).toHaveBeenCalledWith({
+        date: "2024-12-12",
+        is_image_puzzle: false,
+      });
+    });
+
+    it("should persist a category that mixes text and image cards (real NYT dates do this — e.g. a single 'meta' image card among otherwise-text cards)", async () => {
+      const result = await (
+        service as unknown as {
+          insertPuzzle(d: string, data: unknown): Promise<number | null>;
+        }
+      ).insertPuzzle("2024-12-13", MIXED_SHAPE_PUZZLE_DATA);
+
+      expect(result).toBe(42);
+      expect(mockRepo.createQueryBuilder().values).toHaveBeenCalledWith({
+        date: "2024-12-13",
+        is_image_puzzle: true,
+      });
+      expect(mockRepo.save).toHaveBeenNthCalledWith(2, [
+        { group: { id: 1 }, word: "APPLE", position: 0, image_url: null },
+        {
+          group: { id: 1 },
+          word: "BANANA",
+          position: 1,
+          image_url: "https://example.com/banana.svg",
+        },
+        { group: { id: 1 }, word: "CHERRY", position: 2, image_url: null },
+        { group: { id: 1 }, word: "DATE", position: 3, image_url: null },
+      ]);
+    });
+
+    it("should throw when a card matches neither the text nor image shape", async () => {
+      await expect(
+        (
+          service as unknown as {
+            insertPuzzle(d: string, data: unknown): Promise<number | null>;
+          }
+        ).insertPuzzle("2024-12-14", UNKNOWN_SHAPE_PUZZLE_DATA),
+      ).rejects.toThrow(
+        "Unrecognized card shape for 2024-12-14: card has neither 'content' nor " +
+          "'image_url'/'image_alt_text'",
+      );
+      expect(mockRepo.save).not.toHaveBeenCalled();
     });
 
     it("should return null and skip saves when the puzzle already exists", async () => {
@@ -395,6 +504,72 @@ describe("PuzzleIngestionService", () => {
 
       expect(result).toBeNull();
       expect(mockRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("ingestSpecificDates", () => {
+    beforeEach(() => {
+      jest
+        .spyOn(service as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+    });
+
+    it("should insert a puzzle for each date and report the count", async () => {
+      jest
+        .spyOn(global, "fetch")
+        .mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA))
+        .mockResolvedValueOnce(fetchResponse(200, IMAGE_PUZZLE_DATA));
+
+      const result = await service.ingestSpecificDates(["2024-01-02", "2024-12-12"]);
+
+      expect(result).toEqual({ inserted: 2, skipped: [] });
+      expect(mockDataSource.transaction).toHaveBeenCalledTimes(2);
+    });
+
+    it("should skip and record a date the NYT endpoint 404s for", async () => {
+      jest.spyOn(global, "fetch").mockResolvedValueOnce(fetchResponse(404));
+
+      const result = await service.ingestSpecificDates(["2024-01-02"]);
+
+      expect(result).toEqual({ inserted: 0, skipped: ["2024-01-02"] });
+    });
+
+    it("should skip and record a date that already exists", async () => {
+      mockExecute.mockResolvedValueOnce({ identifiers: [] });
+      jest.spyOn(global, "fetch").mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA));
+
+      const result = await service.ingestSpecificDates(["2024-01-02"]);
+
+      expect(result).toEqual({ inserted: 0, skipped: ["2024-01-02"] });
+    });
+
+    it("should dispatch strategy runs for each inserted date", async () => {
+      jest
+        .spyOn(global, "fetch")
+        .mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA))
+        .mockResolvedValueOnce(fetchResponse(200, IMAGE_PUZZLE_DATA));
+
+      await service.ingestSpecificDates(["2024-01-02", "2024-12-12"]);
+
+      expect(mockStrategyQueue.addBulk).toHaveBeenCalledTimes(2);
+    });
+
+    it("should propagate an unrecognized-card-shape error and stop processing subsequent dates", async () => {
+      const fetchSpy = jest
+        .spyOn(global, "fetch")
+        .mockResolvedValueOnce(fetchResponse(200, UNKNOWN_SHAPE_PUZZLE_DATA))
+        .mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA));
+
+      await expect(
+        service.ingestSpecificDates(["2024-12-14", "2024-01-02"]),
+      ).rejects.toThrow(
+        "Unrecognized card shape for 2024-12-14: card has neither 'content' nor " +
+          "'image_url'/'image_alt_text'",
+      );
+
+      // The second date is never reached: only one fetch (for 2024-12-14)
+      // happened before the error propagated out of the loop.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
   });
 

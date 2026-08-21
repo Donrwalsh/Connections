@@ -78,4 +78,38 @@ describe("Board Component", () => {
 
     expect(container.querySelectorAll(".tile")).toHaveLength(0);
   });
+
+  it("passes each word's image URL through to its tile", () => {
+    render(
+      <Board
+        words={["APPLE"]}
+        images={{ APPLE: "https://example.com/apple.svg" }}
+        selected={[]}
+        shakeWords={[]}
+        confirmedWords={[]}
+        onToggle={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "APPLE" })).toHaveAttribute(
+      "src",
+      "https://example.com/apple.svg",
+    );
+  });
+
+  it("renders text tiles for words with no entry in images", () => {
+    render(
+      <Board
+        words={["APPLE"]}
+        images={{ BANANA: "https://example.com/banana.svg" }}
+        selected={[]}
+        shakeWords={[]}
+        confirmedWords={[]}
+        onToggle={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("APPLE")).toBeInTheDocument();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
 });

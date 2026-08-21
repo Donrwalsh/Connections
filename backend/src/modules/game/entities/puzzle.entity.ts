@@ -10,6 +10,9 @@ export class Puzzle {
   @Column({ type: "date" })
   date: string;
 
+  @Column({ type: "boolean", default: false })
+  is_image_puzzle: boolean;
+
   @OneToMany(() => AnswerGroup, (group) => group.puzzle)
   answerGroups: AnswerGroup[];
 }

@@ -37,4 +37,25 @@ describe("Tile Component", () => {
     const { container } = render(<Tile {...defaultProps} shouldShake={true} />);
     expect(container.firstChild).toBeInTheDocument();
   });
+
+  it("renders an image tile when imageUrl is provided", () => {
+    render(
+      <Tile {...defaultProps} imageUrl="https://example.com/apple.svg" />,
+    );
+
+    const img = screen.getByRole("img", { name: "APPLE" });
+    expect(img).toHaveAttribute("src", "https://example.com/apple.svg");
+  });
+
+  it("falls back to text when the image fails to load", () => {
+    render(
+      <Tile {...defaultProps} imageUrl="https://example.com/broken.svg" />,
+    );
+
+    const img = screen.getByRole("img", { name: "APPLE" });
+    fireEvent.error(img);
+
+    expect(screen.getByText("APPLE")).toBeInTheDocument();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
 });

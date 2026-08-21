@@ -13,6 +13,9 @@ export class GroupMember {
   @Column({ type: "integer" })
   position!: number;
 
+  @Column({ type: "text", nullable: true })
+  image_url!: string | null;
+
   @ManyToOne(() => AnswerGroup, (group) => group.members, {
     nullable: false,
     onDelete: "CASCADE",

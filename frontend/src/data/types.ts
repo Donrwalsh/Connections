@@ -12,6 +12,8 @@ export interface Puzzle {
   date: string;
   categories: Category[];
   wordOrder: string[];
+  isImagePuzzle: boolean;
+  images?: Record<string, string>;
 }
 
 // Flattens + shuffles the 16 words for initial board display.

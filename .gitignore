@@ -15,3 +15,5 @@ orchestrator/dist
 scripting/node_modules
 scripting/src/.env
 scripting/dist/
+# Subagent-driven-development scratch workspace (ledgers, briefs, review packages)
+.superpowers/

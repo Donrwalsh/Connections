@@ -1,8 +1,9 @@
-import { memo, useLayoutEffect, useRef } from "react";
+import { memo, useLayoutEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 
 interface TileProps {
   word: string;
+  imageUrl?: string;
   isSelected: boolean;
   isConfirmed: boolean;
   shouldShake: boolean;
@@ -18,19 +19,27 @@ const H_PAD = 12;
 
 function TileBase({
   word,
+  imageUrl,
   isSelected,
   isConfirmed,
   shouldShake,
   onToggle,
 }: TileProps) {
   const tileRef = useRef<HTMLButtonElement>(null);
+  // Some image dates' asset URLs go stale — fall back to the word's plain
+  // text rather than leaving a blank tile when the image fails to load.
+  const [imageFailed, setImageFailed] = useState(false);
+  const showImage = Boolean(imageUrl) && !imageFailed;
 
   // Fit the text to the cell. Phrases may wrap onto multiple lines at spaces
   // ("Baseball Glove" → two lines); the font only shrinks when a single
   // unbreakable word or the wrapped block would overflow the tile. Keeping the
   // text within the fixed-size cell means a long word can't widen its grid
-  // column and knock the board off-center.
+  // column and knock the board off-center. Skipped entirely for image tiles,
+  // which have no text to fit.
   useLayoutEffect(() => {
+    if (showImage) return;
+
     const tile = tileRef.current;
     if (!tile) return;
 
@@ -58,7 +67,7 @@ function TileBase({
     const observer = new ResizeObserver(fit);
     observer.observe(tile);
     return () => observer.disconnect();
-  }, [word]);
+  }, [word, showImage]);
 
   const className = [
     "tile",
@@ -90,7 +99,16 @@ function TileBase({
             : { x: 0 }
       }
     >
-      {word}
+      {showImage ? (
+        <img
+          src={imageUrl}
+          alt={word}
+          className="tile__image"
+          onError={() => setImageFailed(true)}
+        />
+      ) : (
+        word
+      )}
     </motion.button>
   );
 }

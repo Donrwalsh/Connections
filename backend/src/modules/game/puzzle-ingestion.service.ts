@@ -12,10 +12,16 @@ import { STRATEGY_QUEUE } from "../queue/queue.module";
 import { runStrategyJobId } from "../queue/strategy.queue";
 import { AUTOMATIC_STRATEGIES, strategyTrialNumbers } from "../../strategies";
 
-interface ConnectionsCard {
+interface ConnectionsTextCard {
   content: string;
   position: number;
 }
+interface ConnectionsImageCard {
+  position: number;
+  image_url: string;
+  image_alt_text: string;
+}
+type ConnectionsCard = ConnectionsTextCard | ConnectionsImageCard;
 interface ConnectionsGroup {
   title: string;
   cards: ConnectionsCard[];
@@ -24,15 +30,11 @@ interface ConnectionsPuzzle {
   categories: ConnectionsGroup[];
 }
 
-const AWKWARD_DATES = new Set([
-  "2024-12-12",
-  "2025-04-01",
-  "2025-10-31",
-  "2026-02-07",
-  "2026-03-07",
-  "2026-04-01",
-  "2026-05-06",
-]);
+interface NormalizedCard {
+  word: string;
+  position: number;
+  imageUrl: string | null;
+}
 
 @Injectable()
 export class PuzzleIngestionService {
@@ -58,12 +60,6 @@ export class PuzzleIngestionService {
     while (true) {
       const nextDate = this.addDays(latestDate, 1);
       const formatted = this.formatDate(nextDate);
-
-      if (AWKWARD_DATES.has(formatted)) {
-        this.logger.log(`Skipping ${formatted} (known irregular NYT date)`);
-        latestDate = nextDate;
-        continue;
-      }
 
       const puzzleData = await this.loadPuzzleData(formatted);
 
@@ -92,6 +88,49 @@ export class PuzzleIngestionService {
       )}`,
     );
     return { inserted, upToDate: this.formatDate(latestDate) };
+  }
+
+  /**
+   * Ingests a fixed list of dates directly, bypassing the "day after
+   * latest" forward walk in populateUntilCaughtUp — for backfilling
+   * specific historical gaps (e.g. dates that were previously skipped by
+   * the old AWKWARD_DATES allowlist) that the forward walk can never reach,
+   * since it only ever advances from MAX(puzzle.date).
+   */
+  async ingestSpecificDates(dates: string[]): Promise<{ inserted: number; skipped: string[] }> {
+    let inserted = 0;
+    const skipped: string[] = [];
+
+    for (const formatted of dates) {
+      const puzzleData = await this.loadPuzzleData(formatted);
+
+      if (puzzleData === null) {
+        this.logger.warn(`No NYT puzzle found for ${formatted} — skipping`);
+        skipped.push(formatted);
+        await this.delay(500);
+        continue;
+      }
+
+      // An unrecognized card shape here is a genuinely unprecedented data
+      // issue (not the mixed-text-and-image case, which insertPuzzle now
+      // accepts as valid) — same as populateUntilCaughtUp, that's left to
+      // throw and abort the run rather than being silently skipped, so it
+      // surfaces immediately instead of leaving a quiet gap.
+      const puzzleId = await this.insertPuzzle(formatted, puzzleData);
+
+      if (puzzleId !== null) {
+        await this.dispatchStrategyRuns(puzzleId, formatted);
+        this.logger.log(`Backfilled puzzle for ${formatted} (id ${puzzleId})`);
+        inserted++;
+      } else {
+        skipped.push(formatted);
+      }
+
+      await this.delay(500);
+    }
+
+    this.logger.log(`Backfill complete: inserted ${inserted}, skipped ${skipped.length}`);
+    return { inserted, skipped };
   }
 
   private async getLatestDate(): Promise<Date> {
@@ -267,17 +306,47 @@ export class PuzzleIngestionService {
     }
   }
 
+  private normalizeCard(card: ConnectionsCard, formattedDate: string): NormalizedCard {
+    if ("content" in card) {
+      return { word: card.content, position: card.position, imageUrl: null };
+    }
+    if ("image_url" in card && "image_alt_text" in card) {
+      return { word: card.image_alt_text, position: card.position, imageUrl: card.image_url };
+    }
+    throw new Error(
+      `Unrecognized card shape for ${formattedDate}: card has neither 'content' nor ` +
+        `'image_url'/'image_alt_text'`,
+    );
+  }
+
   private async insertPuzzle(
     formattedDate: string,
     data: ConnectionsPuzzle,
   ): Promise<number | null> {
+    const normalizedCategories = data.categories.map((category) => ({
+      title: category.title,
+      cards: category.cards.map((card) => this.normalizeCard(card, formattedDate)),
+    }));
+
+    // Each card is normalized independently above, so a category is free to
+    // mix text and image cards — and real NYT data does exactly this: e.g.
+    // 2026-03-07's "WHERE YOU MIGHT MAKE A CONNECTION" category has three
+    // ordinary text cards plus one image card whose alt text is "THIS GAME",
+    // a self-referential joke about Connections itself. An earlier version
+    // of this method rejected that as invalid; it wasn't — normalizeCard's
+    // per-card word/imageUrl split already handles it correctly on its own.
+
+    const isImagePuzzle = normalizedCategories.some((category) =>
+      category.cards.some((card) => card.imageUrl !== null),
+    );
+
     return this.dataSource.transaction(async (manager) => {
       const puzzle = await manager
         .getRepository(Puzzle)
         .createQueryBuilder()
         .insert()
         .into(Puzzle)
-        .values({ date: formattedDate })
+        .values({ date: formattedDate, is_image_puzzle: isImagePuzzle })
         .orIgnore()
         .returning("id")
         .execute();
@@ -293,18 +362,19 @@ export class PuzzleIngestionService {
       // every group's members across all 4 groups — 2 round trips instead
       // of 8 (a save() per category, plus a members save() per category).
       const groups = await manager.getRepository(AnswerGroup).save(
-        data.categories.map((category, level) => ({
+        normalizedCategories.map((category, level) => ({
           puzzle: { id: puzzleId } as Puzzle,
           level,
           group_name: category.title,
         })),
       );
 
-      const members = data.categories.flatMap((category, level) =>
+      const members = normalizedCategories.flatMap((category, level) =>
         category.cards.map((card) => ({
           group: { id: groups[level]!.id } as AnswerGroup,
-          word: card.content,
+          word: card.word,
           position: card.position,
+          image_url: card.imageUrl,
         })),
       );
       await manager.getRepository(GroupMember).save(members);

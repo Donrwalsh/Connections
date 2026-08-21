@@ -169,6 +169,7 @@ export function Game({ puzzle }: GameProps) {
 
       <Board
         words={state.remainingWords}
+        images={puzzle.images}
         selected={state.selected}
         shakeWords={state.shakeWords}
         confirmedWords={state.pendingSolve?.words ?? []}
