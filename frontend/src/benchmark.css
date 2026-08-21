@@ -183,9 +183,12 @@
 
 .bench-table {
   width: 100%;
-  min-width: 40rem;
   border-collapse: collapse;
   font-size: 0.9rem;
+}
+
+.bench-table-wrap .bench-table {
+  min-width: 40rem;
 }
 
 .bench-table__caption {
