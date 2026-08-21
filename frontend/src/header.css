@@ -114,6 +114,7 @@
   border: 1px solid var(--border);
   background-color: var(--bg);
   box-shadow: var(--shadow);
+  box-sizing: border-box;
 }
 
 .calendar-popover__header {
