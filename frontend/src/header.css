@@ -232,6 +232,10 @@
     font-size: 0.85rem;
   }
 
+  .site-header__link-label {
+    display: none;
+  }
+
   .site-header__calendar {
     order: 2;
   }

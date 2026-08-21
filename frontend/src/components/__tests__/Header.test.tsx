@@ -38,6 +38,20 @@ describe("Header", () => {
     expect(screen.getByRole("button", { name: "Calendar" })).toBeInTheDocument();
   });
 
+  it("gives icon-only nav links an explicit aria-label", () => {
+    renderHeader();
+
+    expect(screen.getByRole("link", { name: "Today's puzzle" })).toHaveAttribute(
+      "aria-label",
+      "Today's puzzle",
+    );
+    expect(screen.getByRole("link", { name: "Leaderboard" })).toHaveAttribute(
+      "aria-label",
+      "Leaderboard",
+    );
+    expect(screen.getByRole("link", { name: "Activity" })).toHaveAttribute("aria-label", "Activity");
+  });
+
   it("marks Today's puzzle active only on exactly /", () => {
     renderHeader("/");
 

@@ -100,9 +100,9 @@ export function Header() {
       </Link>
 
       <nav className="site-header__nav" aria-label="Site navigation">
-        <NavLink to="/" end className={navLinkClass}>
+        <NavLink to="/" end className={navLinkClass} aria-label="Today's puzzle">
           <GridIcon />
-          <span>Today's puzzle</span>
+          <span className="site-header__link-label">Today's puzzle</span>
         </NavLink>
 
         <div className="site-header__calendar" ref={calendarRef}>
@@ -127,14 +127,14 @@ export function Header() {
           <ShuffleIcon />
         </button>
 
-        <NavLink to="/leaderboard" className={navLinkClass}>
+        <NavLink to="/leaderboard" className={navLinkClass} aria-label="Leaderboard">
           <LeaderboardIcon />
-          <span>Leaderboard</span>
+          <span className="site-header__link-label">Leaderboard</span>
         </NavLink>
 
-        <NavLink to="/activity" className={navLinkClass}>
+        <NavLink to="/activity" className={navLinkClass} aria-label="Activity">
           <ActivityIcon />
-          <span>Activity</span>
+          <span className="site-header__link-label">Activity</span>
         </NavLink>
       </nav>
     </header>
