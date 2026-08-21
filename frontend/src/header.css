@@ -244,7 +244,10 @@
        with it since `right: 0` pins to the (possibly off-screen) icon
        wrapper regardless of this element's own width. */
     position: fixed;
-    top: 4.625rem;
+    /* top ≈ header's own height (min-height: 4rem) + its 1px border-bottom
+       + the same 0.5rem gap the desktop rule uses. If .site-header's
+       min-height changes, update this accordingly. */
+    top: 4.5625rem;
     right: 0.5rem;
     width: min(18.5rem, calc(100vw - 1rem));
   }

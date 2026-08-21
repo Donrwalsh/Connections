@@ -14,4 +14,7 @@ test("calendar popover stays within the viewport at a narrow phone width", async
   expect(box).not.toBeNull();
   expect(box!.x).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width).toBeLessThanOrEqual(320);
+
+  // Sits below the sticky header, not overlapping it.
+  expect(box!.y).toBeGreaterThanOrEqual(60);
 });
