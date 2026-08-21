@@ -238,6 +238,14 @@
   }
 
   .calendar-popover {
+    /* Anchored to the viewport, not to .site-header__calendar (its offset
+       parent at wider widths) — at narrow widths the header's own content
+       can overflow horizontally, which would otherwise drag this along
+       with it since `right: 0` pins to the (possibly off-screen) icon
+       wrapper regardless of this element's own width. */
+    position: fixed;
+    top: 4.625rem;
+    right: 0.5rem;
     width: min(18.5rem, calc(100vw - 1rem));
   }
 
