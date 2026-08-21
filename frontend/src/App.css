@@ -252,6 +252,37 @@
   padding-right: 0.5rem;
 }
 
+@media (max-width: 640px) {
+  .puzzle-page--panel-open {
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    max-width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+
+  .puzzle-page--panel-open .puzzle-page__board {
+    position: static;
+    transform: none;
+    margin-top: 0;
+    width: 100%;
+    max-width: 500px;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .puzzle-page--panel-open .puzzle-page__panel {
+    height: auto;
+    overflow-y: visible;
+    padding-right: 0;
+  }
+
+  .puzzle-page--panel-open .tile {
+    font-size: 0.95rem;
+  }
+}
+
 .guess-sequence {
   text-align: left;
   border: 1px solid #ddd;
