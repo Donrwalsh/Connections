@@ -111,6 +111,11 @@ export class PuzzleIngestionService {
         continue;
       }
 
+      // An unrecognized card shape here is a genuinely unprecedented data
+      // issue (not the mixed-text-and-image case, which insertPuzzle now
+      // accepts as valid) — same as populateUntilCaughtUp, that's left to
+      // throw and abort the run rather than being silently skipped, so it
+      // surfaces immediately instead of leaving a quiet gap.
       const puzzleId = await this.insertPuzzle(formatted, puzzleData);
 
       if (puzzleId !== null) {
@@ -323,14 +328,13 @@ export class PuzzleIngestionService {
       cards: category.cards.map((card) => this.normalizeCard(card, formattedDate)),
     }));
 
-    for (const category of normalizedCategories) {
-      const imageCount = category.cards.filter((card) => card.imageUrl !== null).length;
-      if (imageCount !== 0 && imageCount !== category.cards.length) {
-        throw new Error(
-          `Category '${category.title}' in puzzle ${formattedDate} mixes text and image cards`,
-        );
-      }
-    }
+    // Each card is normalized independently above, so a category is free to
+    // mix text and image cards — and real NYT data does exactly this: e.g.
+    // 2026-03-07's "WHERE YOU MIGHT MAKE A CONNECTION" category has three
+    // ordinary text cards plus one image card whose alt text is "THIS GAME",
+    // a self-referential joke about Connections itself. An earlier version
+    // of this method rejected that as invalid; it wasn't — normalizeCard's
+    // per-card word/imageUrl split already handles it correctly on its own.
 
     const isImagePuzzle = normalizedCategories.some((category) =>
       category.cards.some((card) => card.imageUrl !== null),

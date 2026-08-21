@@ -454,15 +454,29 @@ describe("PuzzleIngestionService", () => {
       });
     });
 
-    it("should throw when a category mixes text and image cards", async () => {
-      await expect(
-        (
-          service as unknown as {
-            insertPuzzle(d: string, data: unknown): Promise<number | null>;
-          }
-        ).insertPuzzle("2024-12-13", MIXED_SHAPE_PUZZLE_DATA),
-      ).rejects.toThrow("Category 'Mixed' in puzzle 2024-12-13 mixes text and image cards");
-      expect(mockRepo.save).not.toHaveBeenCalled();
+    it("should persist a category that mixes text and image cards (real NYT dates do this — e.g. a single 'meta' image card among otherwise-text cards)", async () => {
+      const result = await (
+        service as unknown as {
+          insertPuzzle(d: string, data: unknown): Promise<number | null>;
+        }
+      ).insertPuzzle("2024-12-13", MIXED_SHAPE_PUZZLE_DATA);
+
+      expect(result).toBe(42);
+      expect(mockRepo.createQueryBuilder().values).toHaveBeenCalledWith({
+        date: "2024-12-13",
+        is_image_puzzle: true,
+      });
+      expect(mockRepo.save).toHaveBeenNthCalledWith(2, [
+        { group: { id: 1 }, word: "APPLE", position: 0, image_url: null },
+        {
+          group: { id: 1 },
+          word: "BANANA",
+          position: 1,
+          image_url: "https://example.com/banana.svg",
+        },
+        { group: { id: 1 }, word: "CHERRY", position: 2, image_url: null },
+        { group: { id: 1 }, word: "DATE", position: 3, image_url: null },
+      ]);
     });
 
     it("should throw when a card matches neither the text nor image shape", async () => {
@@ -538,6 +552,24 @@ describe("PuzzleIngestionService", () => {
       await service.ingestSpecificDates(["2024-01-02", "2024-12-12"]);
 
       expect(mockStrategyQueue.addBulk).toHaveBeenCalledTimes(2);
+    });
+
+    it("should propagate an unrecognized-card-shape error and stop processing subsequent dates", async () => {
+      const fetchSpy = jest
+        .spyOn(global, "fetch")
+        .mockResolvedValueOnce(fetchResponse(200, UNKNOWN_SHAPE_PUZZLE_DATA))
+        .mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA));
+
+      await expect(
+        service.ingestSpecificDates(["2024-12-14", "2024-01-02"]),
+      ).rejects.toThrow(
+        "Unrecognized card shape for 2024-12-14: card has neither 'content' nor " +
+          "'image_url'/'image_alt_text'",
+      );
+
+      // The second date is never reached: only one fetch (for 2024-12-14)
+      // happened before the error propagated out of the loop.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
   });
 
