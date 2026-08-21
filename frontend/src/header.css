@@ -114,7 +114,6 @@
   border: 1px solid var(--border);
   background-color: var(--bg);
   box-shadow: var(--shadow);
-  box-sizing: border-box;
 }
 
 .calendar-popover__header {
@@ -250,6 +249,7 @@
     top: 4.5625rem;
     right: 0.5rem;
     width: min(18.5rem, calc(100vw - 1rem));
+    box-sizing: border-box;
   }
 
   .site-header__calendar {

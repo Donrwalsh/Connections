@@ -26,9 +26,25 @@ test.describe("guess-sequence panel responsiveness", () => {
     // The board keeps a normal (unscaled) width instead of the desktop
     // side-by-side layout's fixed 500px-scaled-to-80% canvas.
     expect(boardBox!.width).toBeGreaterThan(300);
-    // At mobile width, tiles should not be shrunk to 0.7rem anymore
-    // (they were sized for the desktop 0.8x scale, but mobile has no scaling)
-    await expect(page.locator(".tile").first()).not.toHaveCSS("font-size", "11.2px");
+    // At mobile width, tiles should use the mobile panel-open font-size
+    // rule (0.95rem = 15.2px at the site's 16px mobile root font-size), not
+    // the desktop 0.8x-scale value (0.7rem = 11.2px). Tile.tsx also runs its
+    // own fit-to-cell shrink on top of that CSS base once the tile's actual
+    // (font-independent, so platform-stable) box geometry is known — at this
+    // viewport the tile is narrow enough that the fitted size lands below
+    // the 15.2px CSS base, at 15.2 * (clientWidth - 2*H_PAD) / clientWidth
+    // ≈ 10.58px. Match with a regex rather than an exact string so the
+    // assertion isn't pinned to every trailing digit of that float.
+    await expect(page.locator(".tile").first()).toHaveCSS("font-size", /^10\.58\d*px$/);
+
+    // Confirm the board is still actually usable after the panel opens —
+    // a geometry-only check can pass even if tiles are visually clipped or
+    // their hit-testing is offset from their visible position (the pre-fix
+    // layout combined overflow: hidden, max-height + overflow-y: auto, and
+    // a transform: scale(0.8), any of which could produce that mismatch).
+    const firstTile = page.locator(".tile").first();
+    await firstTile.click();
+    await expect(firstTile).toHaveClass(/tile--selected/);
   });
 
   test("sits beside the board at desktop width when opened", async ({ page }) => {
