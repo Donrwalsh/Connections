@@ -5,12 +5,24 @@ import { FreeTierDispatchService } from "./free-tier-dispatch.service";
 import { FreeTierDispatchState } from "./entities/free-tier-dispatch-state.entity";
 import { FREE_TIER_DISPATCH_QUEUE } from "../queue/queue.module";
 import { StrategyService } from "../strategy/strategy.service";
-import {
-  FreeTierId,
-  FreeTierUsageService,
-  MINI_FREE_TIER,
-  FLAGSHIP_FREE_TIER,
-} from "../strategy/free-tier-usage.service";
+import { FreeTierId, FreeTierUsageService } from "../strategy/free-tier-usage.service";
+
+const FLAGSHIP_MODELS = ["gpt-5.4", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1", "gpt-4o", "o1", "o3"];
+const MINI_MODELS = [
+  "gpt-5.4-mini",
+  "gpt-5.4-nano",
+  "gpt-5-mini",
+  "gpt-4.1-mini",
+  "gpt-4.1-nano",
+  "gpt-4o-mini",
+  "o3-mini",
+  "o4-mini",
+  "gpt-5-nano",
+];
+const FLAGSHIP_LIMIT = 250_000;
+const MINI_LIMIT = 2_500_000;
+const FLAGSHIP_LABEL = "Flagship models";
+const MINI_LABEL = "Mini & nano models";
 
 describe("FreeTierDispatchService", () => {
   let service: FreeTierDispatchService;
@@ -25,21 +37,21 @@ describe("FreeTierDispatchService", () => {
   let mockFreeTierUsageService: { getUsage: jest.Mock };
 
   const zeroCounts = (tier: FreeTierId = "mini") => {
-    const models = tier === "mini" ? MINI_FREE_TIER.models : FLAGSHIP_FREE_TIER.models;
+    const models = tier === "mini" ? MINI_MODELS : FLAGSHIP_MODELS;
     return new Map(models.map((model) => [model, 0]));
   };
 
   // Default usage stub for a tier: zero spend, full budget remaining. Tests
   // override with mockResolvedValueOnce for the specific numbers they need.
   const usageStub = (tier: FreeTierId, overrides: Record<string, unknown> = {}) => {
-    const program = tier === "mini" ? MINI_FREE_TIER : FLAGSHIP_FREE_TIER;
+    const isMini = tier === "mini";
     return {
       tier,
-      label: program.label,
+      label: isMini ? MINI_LABEL : FLAGSHIP_LABEL,
       usedTokens: 0,
-      dailyLimitTokens: program.dailyLimitTokens,
-      remainingTokens: program.dailyLimitTokens,
-      models: [...program.models],
+      dailyLimitTokens: isMini ? MINI_LIMIT : FLAGSHIP_LIMIT,
+      remainingTokens: isMini ? MINI_LIMIT : FLAGSHIP_LIMIT,
+      models: [...(isMini ? MINI_MODELS : FLAGSHIP_MODELS)],
       ...overrides,
     };
   };
@@ -305,7 +317,7 @@ describe("FreeTierDispatchService", () => {
       // thresholdTokens = 2,250,000; remainingBudget = 2,250,000. With 900
       // trials in flight (100 per model) at the 4000-token estimate, that's
       // 3,600,000 reserved — already well over budget on its own.
-      const heavyInFlight = new Map(MINI_FREE_TIER.models.map((model) => [model, 100]));
+      const heavyInFlight = new Map(MINI_MODELS.map((model) => [model, 100]));
       mockStrategyService.countInFlightByModel.mockResolvedValueOnce(heavyInFlight);
 
       await service.runTick("mini");
@@ -327,7 +339,7 @@ describe("FreeTierDispatchService", () => {
 
       // Every model starts well-represented except two, which are the only
       // ones that should receive this tick's dispatches.
-      const allocation = new Map(MINI_FREE_TIER.models.map((model) => [model, 5]));
+      const allocation = new Map(MINI_MODELS.map((model) => [model, 5]));
       allocation.set("o4-mini", 0);
       allocation.set("o3-mini", 0);
       mockStrategyService.countTodayDispatchByModel.mockResolvedValueOnce(allocation);
@@ -441,7 +453,7 @@ describe("FreeTierDispatchService", () => {
         mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("flagship"));
         mockStrategyService.countInFlightByModel.mockResolvedValueOnce(zeroCounts("flagship"));
 
-        const allocation = new Map(FLAGSHIP_FREE_TIER.models.map((model) => [model, 5]));
+        const allocation = new Map(FLAGSHIP_MODELS.map((model) => [model, 5]));
         allocation.set("o1", 0);
         allocation.set("o3", 0);
         mockStrategyService.countTodayDispatchByModel.mockResolvedValueOnce(allocation);
@@ -456,7 +468,7 @@ describe("FreeTierDispatchService", () => {
           (call) => call[3],
         );
         expect(new Set(dispatchedModels)).toEqual(new Set(["o1", "o3"]));
-        // Never a mini-tier model, confirming this pulled from FLAGSHIP_FREE_TIER.
+        // Never a mini-tier model, confirming this pulled from the flagship usage stub.
         expect(dispatchedModels).not.toContain("gpt-5-nano");
       });
 
