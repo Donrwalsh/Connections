@@ -112,6 +112,41 @@ describe("Header", () => {
     expect(screen.queryByRole("dialog", { name: "Calendar" })).not.toBeInTheDocument();
   });
 
+  it("opens the calendar pre-selected on today when on the root route", async () => {
+    const user = userEvent.setup();
+    renderHeader("/");
+
+    await user.click(screen.getByRole("button", { name: "Calendar" }));
+
+    const today = todayUtcString();
+    expect(screen.getByRole("button", { name: today }).className).toContain(
+      "calendar-popover__cell--selected",
+    );
+  });
+
+  it("opens the calendar pre-selected on the current puzzle's date", async () => {
+    const user = userEvent.setup();
+    renderHeader("/puzzle/2023-06-12");
+
+    await user.click(screen.getByRole("button", { name: "Calendar" }));
+
+    expect(screen.getByRole("button", { name: "2023-06-12" }).className).toContain(
+      "calendar-popover__cell--selected",
+    );
+  });
+
+  it("opens the calendar with nothing selected outside puzzle pages", async () => {
+    const user = userEvent.setup();
+    renderHeader("/leaderboard");
+
+    await user.click(screen.getByRole("button", { name: "Calendar" }));
+
+    const today = todayUtcString();
+    expect(screen.getByRole("button", { name: today }).className).not.toContain(
+      "calendar-popover__cell--selected",
+    );
+  });
+
   it("navigates to a random puzzle from the shuffle icon", async () => {
     const user = userEvent.setup();
     render(

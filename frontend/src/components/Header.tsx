@@ -1,7 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { randomPuzzleDate } from "../data/calendarMock";
+import { randomPuzzleDate, todayUtcString } from "../data/calendarMock";
 import { CalendarPopover } from "./CalendarPopover";
+
+const PUZZLE_DATE_PATTERN = /^\/puzzle\/(\d{4}-\d{2}-\d{2})$/;
+
+/** The date of the puzzle page the user is currently on — the root route is
+ * today's puzzle, /puzzle/:date is that date, anything else has none. Used
+ * to open the calendar popover pre-selected on the current puzzle's date. */
+function currentPuzzleDate(pathname: string): string | undefined {
+  if (pathname === "/") return todayUtcString();
+  return pathname.match(PUZZLE_DATE_PATTERN)?.[1];
+}
 
 function GridIcon() {
   return (
@@ -115,7 +125,12 @@ export function Header() {
           >
             <CalendarIcon />
           </button>
-          {isCalendarOpen && <CalendarPopover onClose={() => setIsCalendarOpen(false)} />}
+          {isCalendarOpen && (
+            <CalendarPopover
+              onClose={() => setIsCalendarOpen(false)}
+              selectedDate={currentPuzzleDate(location.pathname)}
+            />
+          )}
         </div>
 
         <button

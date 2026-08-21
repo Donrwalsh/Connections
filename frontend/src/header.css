@@ -217,6 +217,14 @@
   color: var(--accent);
 }
 
+/* The puzzle page the calendar was opened from: solid accent fill, takes
+ * precedence over today's outline (DESIGN.md "Calendar popover"). */
+.calendar-popover__cell--selected {
+  background-color: var(--accent);
+  color: var(--bg);
+  box-shadow: none;
+}
+
 /* Mobile: compact the wordmark and text links; calendar icon unchanged. */
 @media (max-width: 640px) {
   .site-header {

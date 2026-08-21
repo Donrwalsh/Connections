@@ -3,10 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CalendarPopover } from "../CalendarPopover";
 import {
+  CALENDAR_MIN_DATE,
   getMonthGrid,
   isDateInRange,
   maxMonth,
   monthLabel,
+  monthOfDate,
   todayUtcString,
 } from "../../data/calendarMock";
 
@@ -100,5 +102,34 @@ describe("CalendarPopover", () => {
     await user.click(screen.getByRole("button", { name: today }));
     expect(navigateMock).toHaveBeenCalledWith(`/puzzle/${today}`);
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("opens on the selected date's month and highlights it", () => {
+    const { year, monthIndex } = monthOfDate(CALENDAR_MIN_DATE);
+
+    render(<CalendarPopover onClose={vi.fn()} selectedDate={CALENDAR_MIN_DATE} />);
+
+    expect(screen.getByText(monthLabel(year, monthIndex))).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: CALENDAR_MIN_DATE }).className).toContain(
+      "calendar-popover__cell--selected",
+    );
+  });
+
+  it("falls back to the latest month when selectedDate is out of range", () => {
+    const { year, monthIndex } = maxMonth();
+
+    render(<CalendarPopover onClose={vi.fn()} selectedDate="2000-01-01" />);
+
+    expect(screen.getByText(monthLabel(year, monthIndex))).toBeInTheDocument();
+  });
+
+  it("does not highlight any cell when selectedDate is omitted", () => {
+    const today = todayUtcString();
+
+    render(<CalendarPopover onClose={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: today }).className).not.toContain(
+      "calendar-popover__cell--selected",
+    );
   });
 });

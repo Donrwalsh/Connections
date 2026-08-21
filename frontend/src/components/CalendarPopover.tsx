@@ -6,6 +6,7 @@ import {
   maxMonth,
   minMonth,
   monthLabel,
+  monthOfDate,
   shiftMonth,
   todayUtcString,
 } from "../data/calendarMock";
@@ -14,6 +15,10 @@ const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
 
 interface CalendarPopoverProps {
   onClose: () => void;
+  /** Date (ISO string) to open the calendar on and highlight, e.g. the date
+   * of the puzzle page the user opened the calendar from. Falls back to the
+   * latest month with no highlighted cell when omitted or out of range. */
+  selectedDate?: string;
 }
 
 function sameMonth(
@@ -25,13 +30,17 @@ function sameMonth(
 
 /** Month grid behind the header's calendar icon. Shows the day numbers for
  * the visible month, restricted to the puzzle range (oldest puzzle → today).
- * In-range dates navigate to /puzzle/:date; out-of-range days are inert. */
-export function CalendarPopover({ onClose }: CalendarPopoverProps) {
+ * In-range dates navigate to /puzzle/:date; out-of-range days are inert.
+ * Opens on selectedDate's month (falling back to the latest month) and
+ * highlights that date, if given. */
+export function CalendarPopover({ onClose, selectedDate }: CalendarPopoverProps) {
   const navigate = useNavigate();
   const today = todayUtcString();
   const oldest = minMonth();
   const latest = maxMonth();
-  const [month, setMonth] = useState<{ year: number; monthIndex: number }>({ ...latest });
+  const initialMonth =
+    selectedDate && isDateInRange(selectedDate) ? monthOfDate(selectedDate) : latest;
+  const [month, setMonth] = useState<{ year: number; monthIndex: number }>({ ...initialMonth });
 
   const atOldest = sameMonth(month, oldest);
   const atLatest = sameMonth(month, latest);
@@ -120,13 +129,14 @@ export function CalendarPopover({ onClose }: CalendarPopoverProps) {
             );
           }
           const isToday = date === today;
+          const isSelected = date === selectedDate;
           return (
             <button
               key={date}
               type="button"
               className={`calendar-popover__cell calendar-popover__cell--date${
                 isToday ? " calendar-popover__cell--today" : ""
-              }`}
+              }${isSelected ? " calendar-popover__cell--selected" : ""}`}
               aria-label={date}
               onClick={() => handleSelect(date)}
             >
