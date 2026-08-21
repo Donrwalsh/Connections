@@ -48,6 +48,12 @@ export function maxMonth(): { year: number; monthIndex: number } {
   return { year: date.getUTCFullYear(), monthIndex: date.getUTCMonth() };
 }
 
+/** Month containing the given ISO date string. */
+export function monthOfDate(date: string): { year: number; monthIndex: number } {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return { year: parsed.getUTCFullYear(), monthIndex: parsed.getUTCMonth() };
+}
+
 /** Whether a date falls within the puzzle range (oldest ingested → today). */
 export function isDateInRange(date: string): boolean {
   return date >= CALENDAR_MIN_DATE && date <= todayUtcString();

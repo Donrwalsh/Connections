@@ -139,6 +139,10 @@ leaderboard area):
 - Cells show the day number and are rounded squares (~5px radius). Clicking an
   in-range date navigates to `/puzzle/:date`.
 - Today: 1.5px accent outline.
+- Opened from a puzzle page (including the root "today" route): starts on
+  that date's month with the date itself filled solid accent, taking
+  precedence over today's outline. Opened from anywhere else: starts on the
+  latest month with nothing filled.
 
 ## Layout & responsive rules
 

@@ -217,6 +217,14 @@
   color: var(--accent);
 }
 
+/* The puzzle page the calendar was opened from: solid accent fill, takes
+ * precedence over today's outline (DESIGN.md "Calendar popover"). */
+.calendar-popover__cell--selected {
+  background-color: var(--accent);
+  color: var(--bg);
+  box-shadow: none;
+}
+
 /* Mobile: compact the wordmark and text links; calendar icon unchanged. */
 @media (max-width: 640px) {
   .site-header {
@@ -230,6 +238,26 @@
   .site-header__link {
     padding: 0.6rem 0.4rem;
     font-size: 0.85rem;
+  }
+
+  .site-header__link-label {
+    display: none;
+  }
+
+  .calendar-popover {
+    /* Anchored to the viewport, not to .site-header__calendar (its offset
+       parent at wider widths) — at narrow widths the header's own content
+       can overflow horizontally, which would otherwise drag this along
+       with it since `right: 0` pins to the (possibly off-screen) icon
+       wrapper regardless of this element's own width. */
+    position: fixed;
+    /* top ≈ header's own height (min-height: 4rem) + its 1px border-bottom
+       + the same 0.5rem gap the desktop rule uses. If .site-header's
+       min-height changes, update this accordingly. */
+    top: 4.5625rem;
+    right: 0.5rem;
+    width: min(18.5rem, calc(100vw - 1rem));
+    box-sizing: border-box;
   }
 
   .site-header__calendar {

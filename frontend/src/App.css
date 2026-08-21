@@ -270,6 +270,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  min-width: 0;
   font-weight: 600;
   font-size: 0.7rem;
   letter-spacing: 0.01em;
@@ -280,7 +281,7 @@
   border: 1px solid #ccc;
   border-radius: 6px;
   padding: 0.4rem 0.25rem;
-  white-space: nowrap;
+  text-align: center;
   transition: all 0.15s ease;
 }
 
@@ -322,11 +323,13 @@
   gap: 0.6rem;
   align-items: baseline;
   width: 100%;
+  min-width: 0;
   padding: 0.4rem 0.6rem;
   border-radius: 6px;
   background-color: #f5f5f0;
   font: inherit;
   text-align: left;
+  box-sizing: border-box;
 }
 
 .guess-sequence__item--success { border-left: 4px solid #6fae4a; }
@@ -335,6 +338,7 @@
 .guess-sequence__item--duplicate { border-left: 4px dashed #8a7fb8; }
 
 .guess-sequence__seq {
+  flex-shrink: 0;
   font-weight: 700;
   color: #888;
   min-width: 2rem;
@@ -342,12 +346,21 @@
 
 .guess-sequence__words {
   flex: 1;
+  min-width: 0;
+}
+
+.guess-sequence__result {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  color: #666;
 }
 
 .guess-sequence__guess {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+  min-width: 0;
 }
 
 .guess-sequence__run-link {
@@ -397,4 +410,35 @@
 
 .puzzle-page--panel-open .tile {
   font-size: 0.7rem;
+}
+
+@media (max-width: 640px) {
+  .puzzle-page--panel-open {
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    max-width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+
+  .puzzle-page--panel-open .puzzle-page__board {
+    position: static;
+    transform: none;
+    margin-top: 0;
+    width: 100%;
+    max-width: 500px;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .puzzle-page--panel-open .puzzle-page__panel {
+    height: auto;
+    overflow-y: visible;
+    padding-right: 0;
+  }
+
+  .puzzle-page--panel-open .tile {
+    font-size: 0.95rem;
+  }
 }

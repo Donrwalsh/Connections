@@ -261,16 +261,19 @@ export function GuessSequencePanel({
                 {selectedRun.guessCount === 1 ? "" : "es"}
               </p>
 
-              {/* LLM runs only — deterministic/shuffle strategies never set
-               * modelName. Full guess-by-guess detail (prompts, candidate
-               * proposals, telemetry) now lives on the Puzzle Runs Page
-               * instead of dropping down inline here. Guard puzzleId too: a
-               * stale-cached /game/puzzle/:date response (from before this
-               * field existed) would otherwise produce a link to
-               * ".../undefined" — see PuzzlePage's fetch. */}
-              {selectedRun.modelName && Number.isInteger(puzzleId) && (
+              {/* LLM runs route on modelName (the leaderboard's :strategyId
+               * for "llm" kind rows is actually a model name — see
+               * useStrategyMeta); deterministic/shuffle runs route on their
+               * own strategyName, which is already a valid :strategyId in
+               * the mock catalog (see mockData.ts). Full guess-by-guess
+               * detail (prompts, candidate proposals, telemetry) now lives
+               * on the Puzzle Runs Page instead of dropping down inline
+               * here. Guard puzzleId too: a stale-cached /game/puzzle/:date
+               * response (from before this field existed) would otherwise
+               * produce a link to ".../undefined" — see PuzzlePage's fetch. */}
+              {Number.isInteger(puzzleId) && (
                 <Link
-                  to={`/leaderboard/${selectedRun.modelName}/${puzzleId}`}
+                  to={`/leaderboard/${selectedRun.modelName ?? selectedRun.strategyName}/${puzzleId}`}
                   className="guess-sequence__run-link"
                 >
                   View full run details →

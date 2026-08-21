@@ -1,7 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { randomPuzzleDate } from "../data/calendarMock";
+import { randomPuzzleDate, todayUtcString } from "../data/calendarMock";
 import { CalendarPopover } from "./CalendarPopover";
+
+const PUZZLE_DATE_PATTERN = /^\/puzzle\/(\d{4}-\d{2}-\d{2})$/;
+
+/** The date of the puzzle page the user is currently on — the root route is
+ * today's puzzle, /puzzle/:date is that date, anything else has none. Used
+ * to open the calendar popover pre-selected on the current puzzle's date. */
+function currentPuzzleDate(pathname: string): string | undefined {
+  if (pathname === "/") return todayUtcString();
+  return pathname.match(PUZZLE_DATE_PATTERN)?.[1];
+}
 
 function GridIcon() {
   return (
@@ -100,9 +110,9 @@ export function Header() {
       </Link>
 
       <nav className="site-header__nav" aria-label="Site navigation">
-        <NavLink to="/" end className={navLinkClass}>
+        <NavLink to="/" end className={navLinkClass} aria-label="Today's puzzle">
           <GridIcon />
-          <span>Today's puzzle</span>
+          <span className="site-header__link-label">Today's puzzle</span>
         </NavLink>
 
         <div className="site-header__calendar" ref={calendarRef}>
@@ -115,7 +125,12 @@ export function Header() {
           >
             <CalendarIcon />
           </button>
-          {isCalendarOpen && <CalendarPopover onClose={() => setIsCalendarOpen(false)} />}
+          {isCalendarOpen && (
+            <CalendarPopover
+              onClose={() => setIsCalendarOpen(false)}
+              selectedDate={currentPuzzleDate(location.pathname)}
+            />
+          )}
         </div>
 
         <button
@@ -127,14 +142,14 @@ export function Header() {
           <ShuffleIcon />
         </button>
 
-        <NavLink to="/leaderboard" className={navLinkClass}>
+        <NavLink to="/leaderboard" className={navLinkClass} aria-label="Leaderboard">
           <LeaderboardIcon />
-          <span>Leaderboard</span>
+          <span className="site-header__link-label">Leaderboard</span>
         </NavLink>
 
-        <NavLink to="/activity" className={navLinkClass}>
+        <NavLink to="/activity" className={navLinkClass} aria-label="Activity">
           <ActivityIcon />
-          <span>Activity</span>
+          <span className="site-header__link-label">Activity</span>
         </NavLink>
       </nav>
     </header>

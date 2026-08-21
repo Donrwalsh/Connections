@@ -672,7 +672,7 @@ describe("GuessSequencePanel Component", () => {
     expect(screen.queryByRole("button", { name: /A, B, C, D/ })).not.toBeInTheDocument();
   });
 
-  it("does not show a 'view full run' link for a deterministic strategy (no model)", async () => {
+  it("shows a 'view full run' link for a deterministic strategy, keyed by strategyName", async () => {
     setupFetch();
 
     renderWithRouter(
@@ -686,9 +686,8 @@ describe("GuessSequencePanel Component", () => {
 
     await screen.findByText("A, B, C, D");
 
-    expect(
-      screen.queryByRole("link", { name: /view full run/i }),
-    ).not.toBeInTheDocument();
+    const link = await screen.findByRole("link", { name: /view full run/i });
+    expect(link).toHaveAttribute("href", "/leaderboard/alphabetical/100");
   });
 
   it("shows a 'view full run' link to the Puzzle Runs Page for an LLM run, keyed by model and puzzleId", async () => {

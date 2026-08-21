@@ -177,10 +177,18 @@
 }
 
 /* Tables (leaderboard + puzzle breakdown + runs). */
+.bench-table-wrap {
+  overflow-x: auto;
+}
+
 .bench-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.9rem;
+}
+
+.bench-table-wrap .bench-table {
+  min-width: 40rem;
 }
 
 .bench-table__caption {
