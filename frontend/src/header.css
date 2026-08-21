@@ -236,6 +236,10 @@
     display: none;
   }
 
+  .calendar-popover {
+    width: min(18.5rem, calc(100vw - 1rem));
+  }
+
   .site-header__calendar {
     order: 2;
   }
