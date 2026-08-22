@@ -809,14 +809,36 @@ describe("App (e2e)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("locks Bull Board behind basic auth", async () => {
-    const unauthorized = await request(app.getHttpServer()).get("/admin/queues");
-    expect(unauthorized.status).toBe(401);
+  it("redirects an unauthenticated Bull Board request to the login page", async () => {
+    const unauthenticated = await request(app.getHttpServer()).get("/bull/queues");
+    expect(unauthenticated.status).toBe(302);
+    expect(unauthenticated.headers.location).toBe("/bull/login");
+  });
 
-    const creds = Buffer.from("test-user:test-pass").toString("base64");
+  it("rejects a login attempt with the wrong password", async () => {
+    const failedLogin = await request(app.getHttpServer())
+      .post("/bull/login")
+      .type("form")
+      .send({ username: "test-user", password: "wrong-pass" });
+
+    expect(failedLogin.status).toBe(401);
+    expect(failedLogin.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("logs in with a valid session cookie and reaches Bull Board", async () => {
+    const login = await request(app.getHttpServer())
+      .post("/bull/login")
+      .type("form")
+      .send({ username: "test-user", password: "test-pass" });
+
+    expect(login.status).toBe(302);
+    expect(login.headers.location).toBe("/bull/queues");
+    const cookie = login.headers["set-cookie"]?.[0];
+    expect(cookie).toContain("HttpOnly");
+
     const authorized = await request(app.getHttpServer())
-      .get("/admin/queues")
-      .set("Authorization", `Basic ${creds}`);
+      .get("/bull/queues")
+      .set("Cookie", cookie);
     expect(authorized.status).toBe(200);
   });
 });
