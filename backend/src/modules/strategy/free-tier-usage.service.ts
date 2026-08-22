@@ -57,6 +57,21 @@ export class FreeTierUsageService {
     const { label, dailyLimitTokens } = FREE_TIER_LIMITS[tier];
     const models = await this.supportedModelService.findModelNamesByFreeTier(tier);
 
+    // A tier with zero models configured (reachable via an ordinary Adminer
+    // edit, or a typo in the freeTier column value) must skip the query
+    // entirely: TypeORM's Postgres driver expands an empty `:...models`
+    // spread into literal `IN ()`, which Postgres rejects as a syntax error.
+    if (models.length === 0) {
+      return {
+        tier,
+        label,
+        usedTokens: 0,
+        dailyLimitTokens,
+        remainingTokens: dailyLimitTokens,
+        models,
+      };
+    }
+
     const raw = await this.solvePromptRepo
       .createQueryBuilder("prompt")
       .innerJoin("prompt.strategyRun", "run")

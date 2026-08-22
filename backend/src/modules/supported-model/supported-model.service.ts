@@ -127,14 +127,20 @@ export class SupportedModelService {
   /**
    * Model names currently assigned to a free-tier program (see FreeTierId
    * in ../strategy/free-tier-usage.service.ts), from the freeTier column —
-   * consumed only by FreeTierUsageService.getUsage. Ordered by id (matching
+   * consumed only by FreeTierUsageService.getUsage. Filtered to `supported:
+   * true`, matching getDefaultModel/resolveSupportedStrategy above, so a
+   * model marked unsupported (e.g. via Adminer) is correctly excluded from
+   * free-tier dispatch/usage accounting. Ordered by id (matching
    * getDefaultModel's convention) so the result is deterministic across
    * calls rather than depending on Postgres's unspecified default scan
    * order. Plain `string` (not FreeTierId) to avoid this module depending
    * on the strategy module's types.
    */
   async findModelNamesByFreeTier(freeTier: string): Promise<string[]> {
-    const rows = await this.repo.find({ where: { freeTier }, order: { id: "ASC" } });
+    const rows = await this.repo.find({
+      where: { freeTier, supported: true },
+      order: { id: "ASC" },
+    });
     return rows.map((row) => row.modelName);
   }
 }

@@ -177,8 +177,9 @@ export interface SupportedModelRecord {
 }
 
 /** The backend tracks two separate, non-overlapping free-token programs —
- * see FreeTierUsageService.FLAGSHIP_FREE_TIER / MINI_FREE_TIER — each with
- * its own daily limit and model list. "flagship" covers the full-size
+ * model membership lives on SupportedModel.freeTier (see
+ * backend/src/modules/supported-model/entities/supported-model.entity.ts)
+ * — each with its own daily limit and model list. "flagship" covers the full-size
  * models (gpt-5.4, gpt-4o, o1, ...); "mini" covers the mini/nano variants
  * plus gpt-5-nano. Kept as a union (not a free-form string) so a caller
  * can't accidentally ask for a tier that doesn't exist. */

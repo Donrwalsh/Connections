@@ -141,4 +141,20 @@ describe("FreeTierUsageService", () => {
     expect(result.usedTokens).toBe(0);
     expect(result.remainingTokens).toBe(250_000);
   });
+
+  it("should skip the DB query entirely and return a zero-usage DTO when the tier has no models configured", async () => {
+    mockSupportedModelService.findModelNamesByFreeTier.mockResolvedValueOnce([]);
+
+    const result = await service.getFlagshipUsage();
+
+    expect(result).toEqual({
+      tier: "flagship",
+      label: "Flagship models",
+      usedTokens: 0,
+      dailyLimitTokens: 250_000,
+      remainingTokens: 250_000,
+      models: [],
+    });
+    expect(mockSolvePromptRepo.createQueryBuilder).not.toHaveBeenCalled();
+  });
 });

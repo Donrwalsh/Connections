@@ -195,15 +195,27 @@ describe("SupportedModelService", () => {
   describe("findModelNamesByFreeTier", () => {
     it("should return only model names matching the given free tier", async () => {
       mockRepo.find.mockResolvedValueOnce([
-        { id: 1, strategyName: "llm-openai", modelName: "gpt-5.4", freeTier: "flagship" },
-        { id: 2, strategyName: "llm-openai", modelName: "gpt-4o", freeTier: "flagship" },
+        {
+          id: 1,
+          strategyName: "llm-openai",
+          modelName: "gpt-5.4",
+          freeTier: "flagship",
+          supported: true,
+        },
+        {
+          id: 2,
+          strategyName: "llm-openai",
+          modelName: "gpt-4o",
+          freeTier: "flagship",
+          supported: true,
+        },
       ]);
 
       const result = await service.findModelNamesByFreeTier("flagship");
 
       expect(result).toEqual(["gpt-5.4", "gpt-4o"]);
       expect(mockRepo.find).toHaveBeenCalledWith({
-        where: { freeTier: "flagship" },
+        where: { freeTier: "flagship", supported: true },
         order: { id: "ASC" },
       });
     });

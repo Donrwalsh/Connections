@@ -29,6 +29,8 @@ A multi-service application for playing and solving [NYT Connections](https://ww
 | **Redis** | — | Redis 7 | 6379 | BullMQ message broker |
 | **Ollama** | — | — | 11434 | Local LLM provider (default: `llama3.2`) |
 
+Production also runs an `adminer` service for database review — see [Production deployment](#production-deployment).
+
 The worker runs as a separate process from the NestJS server (started via `npx tsx --watch src/worker.ts` in dev). It bootstraps its own NestJS app context to access services. Both LLM providers are configured and used simultaneously: the `llm-openai` strategy consults OpenAI, `llm-ollama` an Ollama service. The two LLM strategies run on separate queues (`llm-openai-runs` / `llm-ollama-runs`) with their own per-provider concurrency (`LLM_OPENAI_CONCURRENCY` / `LLM_OLLAMA_CONCURRENCY`), so the providers never block each other or the deterministic strategies. Provider-less requests (e.g. the in-game AI Assist) use the `MODEL_PROVIDER` default (`openai`).
 
 This table and diagram describe local dev (`docker-compose.yml`), where Ollama runs bundled alongside everything else. The production setup (`docker-compose.prod.yml`) has no Ollama service and splits the worker in two by role — see [Production deployment](#production-deployment) below.
