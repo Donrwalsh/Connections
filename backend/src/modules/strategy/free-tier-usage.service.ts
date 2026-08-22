@@ -3,48 +3,19 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { startOfTodayUtc } from "../../strategies";
+import { SupportedModelService } from "../supported-model/supported-model.service";
 
-// Two separate provider programs, each with its own daily token allowance
-// and its own fixed model list. Membership/limits are a program fact, not
-// something the SupportedModel allowlist tracks (a model can be supported/
-// dispatchable without being part of either program) — so both are kept
-// here as plain config rather than DB columns. A model belongs to at most
-// one program; there's no overlap between the two lists below.
+// Two separate provider programs, each with its own daily token allowance.
+// Model membership lives on SupportedModel.freeTier (see
+// SupportedModelService.findModelNamesByFreeTier) so it's editable without a
+// code change or redeploy. dailyLimitTokens/label are tier-level, not
+// model-level, so they stay as the FREE_TIER_LIMITS constant below rather
+// than a column on a model-keyed table.
 export type FreeTierId = "flagship" | "mini";
 
-export interface FreeTierProgram {
-  id: FreeTierId;
-  // Human-readable description of which models this program covers —
-  // returned to callers so the frontend doesn't need its own copy of
-  // "which models are in each tier" just to explain the number it's
-  // showing.
-  label: string;
-  models: readonly string[];
-  dailyLimitTokens: number;
-}
-
-export const FLAGSHIP_FREE_TIER: FreeTierProgram = {
-  id: "flagship",
-  label: "Flagship models",
-  models: ["gpt-5.4", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1", "gpt-4o", "o1", "o3"],
-  dailyLimitTokens: 250_000,
-};
-
-export const MINI_FREE_TIER: FreeTierProgram = {
-  id: "mini",
-  label: "Mini & nano models",
-  models: [
-    "gpt-5.4-mini",
-    "gpt-5.4-nano",
-    "gpt-5-mini",
-    "gpt-4.1-mini",
-    "gpt-4.1-nano",
-    "gpt-4o-mini",
-    "o3-mini",
-    "o4-mini",
-    "gpt-5-nano",
-  ],
-  dailyLimitTokens: 2_500_000,
+export const FREE_TIER_LIMITS: Record<FreeTierId, { label: string; dailyLimitTokens: number }> = {
+  flagship: { label: "Flagship models", dailyLimitTokens: 250_000 },
+  mini: { label: "Mini & nano models", dailyLimitTokens: 2_500_000 },
 };
 
 export interface FreeTierUsageDto {
@@ -53,23 +24,16 @@ export interface FreeTierUsageDto {
   usedTokens: number;
   dailyLimitTokens: number;
   remainingTokens: number;
-  // The models counted toward usedTokens — see FreeTierProgram.models.
+  // The models counted toward usedTokens — from SupportedModel.freeTier.
   models: string[];
 }
-
-// Every program, keyed by id — the lookup getUsage(tier) and
-// FreeTierDispatchService both use to go from "which tier" to "which models/
-// limit" without a switch statement at each call site.
-export const FREE_TIER_PROGRAMS: Record<FreeTierId, FreeTierProgram> = {
-  flagship: FLAGSHIP_FREE_TIER,
-  mini: MINI_FREE_TIER,
-};
 
 @Injectable()
 export class FreeTierUsageService {
   constructor(
     @InjectRepository(SolvePrompt)
     private readonly solvePromptRepo: Repository<SolvePrompt>,
+    private readonly supportedModelService: SupportedModelService,
   ) {}
 
   async getFlagshipUsage(): Promise<FreeTierUsageDto> {
@@ -90,11 +54,28 @@ export class FreeTierUsageService {
    * look usage up by whichever tier it's currently ticking.
    */
   async getUsage(tier: FreeTierId): Promise<FreeTierUsageDto> {
-    const program = FREE_TIER_PROGRAMS[tier];
+    const { label, dailyLimitTokens } = FREE_TIER_LIMITS[tier];
+    const models = await this.supportedModelService.findModelNamesByFreeTier(tier);
+
+    // A tier with zero models configured (reachable via an ordinary Adminer
+    // edit, or a typo in the freeTier column value) must skip the query
+    // entirely: TypeORM's Postgres driver expands an empty `:...models`
+    // spread into literal `IN ()`, which Postgres rejects as a syntax error.
+    if (models.length === 0) {
+      return {
+        tier,
+        label,
+        usedTokens: 0,
+        dailyLimitTokens,
+        remainingTokens: dailyLimitTokens,
+        models,
+      };
+    }
+
     const raw = await this.solvePromptRepo
       .createQueryBuilder("prompt")
       .innerJoin("prompt.strategyRun", "run")
-      .where("run.modelName IN (:...models)", { models: program.models })
+      .where("run.modelName IN (:...models)", { models })
       .andWhere("prompt.createdAt >= :startOfTodayUtc", { startOfTodayUtc: startOfTodayUtc() })
       .select("COALESCE(SUM(prompt.totalTokens), 0)", "totalTokens")
       .getRawOne<{ totalTokens: string }>();
@@ -102,12 +83,12 @@ export class FreeTierUsageService {
     const usedTokens = Number(raw?.totalTokens ?? 0);
 
     return {
-      tier: program.id,
-      label: program.label,
+      tier,
+      label,
       usedTokens,
-      dailyLimitTokens: program.dailyLimitTokens,
-      remainingTokens: Math.max(0, program.dailyLimitTokens - usedTokens),
-      models: [...program.models],
+      dailyLimitTokens,
+      remainingTokens: Math.max(0, dailyLimitTokens - usedTokens),
+      models,
     };
   }
 }

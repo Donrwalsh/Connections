@@ -5,11 +5,7 @@ import { Queue } from "bullmq";
 import { FREE_TIER_DISPATCH_QUEUE } from "../queue/queue.module";
 import { FreeTierDispatchState } from "./entities/free-tier-dispatch-state.entity";
 import { StrategyService } from "../strategy/strategy.service";
-import {
-  FreeTierUsageService,
-  FreeTierId,
-  FREE_TIER_PROGRAMS,
-} from "../strategy/free-tier-usage.service";
+import { FreeTierUsageService, FreeTierId } from "../strategy/free-tier-usage.service";
 import {
   LLM_OPENAI,
   freeTierDispatchMaxBatch,
@@ -28,8 +24,8 @@ export interface FreeTierDispatchStatusDto {
 }
 
 // Both programs support continuous dispatch. Kept as an explicit allowlist
-// (not "every FreeTierId") rather than deriving it from FREE_TIER_PROGRAMS,
-// so adding a future program to that config doesn't silently start
+// (not "every FreeTierId") rather than deriving it from the DB-backed
+// free-tier config, so adding a future program there doesn't silently start
 // auto-dispatching against it before that's actually decided.
 const DISPATCHABLE_TIERS: readonly FreeTierId[] = ["flagship", "mini"];
 
@@ -152,9 +148,8 @@ export class FreeTierDispatchService {
       return;
     }
 
-    const program = FREE_TIER_PROGRAMS[tier];
     const usage = await this.freeTierUsageService.getUsage(tier);
-    const thresholdTokens = Math.floor(program.dailyLimitTokens * (state.thresholdPercent / 100));
+    const thresholdTokens = Math.floor(usage.dailyLimitTokens * (state.thresholdPercent / 100));
 
     if (usage.usedTokens >= thresholdTokens) {
       await this.stateRepo.update({ tier }, { active: false });
@@ -167,7 +162,7 @@ export class FreeTierDispatchService {
 
     const tokenEstimate = freeTierDispatchTokenEstimate();
     const maxInFlight = freeTierDispatchMaxInFlight();
-    const inFlight = await this.strategyService.countInFlightByModel(LLM_OPENAI, program.models);
+    const inFlight = await this.strategyService.countInFlightByModel(LLM_OPENAI, usage.models);
     const inFlightTotal = [...inFlight.values()].reduce((sum, count) => sum + count, 0);
 
     if (inFlightTotal >= maxInFlight) {
@@ -205,11 +200,11 @@ export class FreeTierDispatchService {
       maxInFlight - inFlightTotal,
     );
 
-    const allocation = await this.strategyService.countTodayDispatchByModel(LLM_OPENAI, program.models);
+    const allocation = await this.strategyService.countTodayDispatchByModel(LLM_OPENAI, usage.models);
     const exhausted = new Set<string>();
     let dispatched = 0;
 
-    while (dispatched < maxNewTrials && exhausted.size < program.models.length) {
+    while (dispatched < maxNewTrials && exhausted.size < usage.models.length) {
       const model = FreeTierDispatchService.leastAllocatedModel(allocation, exhausted);
 
       let target: { puzzleId: number; date: string } | undefined;
@@ -249,7 +244,7 @@ export class FreeTierDispatchService {
 
     this.logger.log(`free-tier dispatch tick for '${tier}': queued ${dispatched} new trial(s)`);
 
-    if (exhausted.size === program.models.length) {
+    if (exhausted.size === usage.models.length) {
       await this.stateRepo.update({ tier }, { active: false });
       this.logger.log(
         `free-tier dispatch for '${tier}' ran out of unrun puzzles for every model — stopping`,

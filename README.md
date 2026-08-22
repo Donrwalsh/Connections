@@ -29,6 +29,8 @@ A multi-service application for playing and solving [NYT Connections](https://ww
 | **Redis** | — | Redis 7 | 6379 | BullMQ message broker |
 | **Ollama** | — | — | 11434 | Local LLM provider (default: `llama3.2`) |
 
+Production also runs an `adminer` service for database review — see [Production deployment](#production-deployment).
+
 The worker runs as a separate process from the NestJS server (started via `npx tsx --watch src/worker.ts` in dev). It bootstraps its own NestJS app context to access services. Both LLM providers are configured and used simultaneously: the `llm-openai` strategy consults OpenAI, `llm-ollama` an Ollama service. The two LLM strategies run on separate queues (`llm-openai-runs` / `llm-ollama-runs`) with their own per-provider concurrency (`LLM_OPENAI_CONCURRENCY` / `LLM_OLLAMA_CONCURRENCY`), so the providers never block each other or the deterministic strategies. Provider-less requests (e.g. the in-game AI Assist) use the `MODEL_PROVIDER` default (`openai`).
 
 This table and diagram describe local dev (`docker-compose.yml`), where Ollama runs bundled alongside everything else. The production setup (`docker-compose.prod.yml`) has no Ollama service and splits the worker in two by role — see [Production deployment](#production-deployment) below.
@@ -80,7 +82,7 @@ docker compose up
 |-----|------|
 | `http://localhost:5173` | Frontend |
 | `http://localhost:4000/api/docs` | Swagger API docs |
-| `http://localhost:4000/admin/queues` | Bull Board queue dashboard (basic auth — `BULL_BOARD_USER` / `BULL_BOARD_PASS`, defaults `admin` / `bullboard`) |
+| `http://localhost:4000/bull/login` | Bull Board queue dashboard login (`BULL_BOARD_USER` / `BULL_BOARD_PASS`, defaults `admin` / `bullboard`) |
 
 On first startup the worker fetches all historical puzzles and runs every deterministic and shuffle strategy on each (four deterministic runs plus `SHUFFLE_TRIALS` shuffle-smart trials and `SHUFFLE_TRIALS` shuffle-foolish trials). This can take a while for large backlogs. LLM strategies are never dispatched automatically, and `/dispatch/strategy` does not accept them either — dispatch a supported model explicitly via `/dispatch/model/:modelName/:date` when you want to spend tokens.
 
@@ -97,7 +99,7 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server base URL (used by the `llm-ollama` strategy) |
 | `OLLAMA_MODEL` | `llama3.2` | Ollama model id (used by the `llm-ollama` strategy) |
 | `MODEL_CONTEXT_WINDOW` | `8192` | Context window (in tokens) used to size the LLM solver prompt for both providers |
-| `BULL_BOARD_USER` / `BULL_BOARD_PASS` | `admin` / `bullboard` | Basic-auth credentials for the Bull Board dashboard (must be set together, or not at all) |
+| `BULL_BOARD_USER` / `BULL_BOARD_PASS` | `admin` / `bullboard` | Login credentials for the Bull Board dashboard's login page at `/bull/login` (must be set together, or not at all) |
 | `DISPATCH_PASSWORD` | — | Password checked against the `password` field on `POST /dispatch/model/:modelName/:date`, `POST /dispatch/model/:modelName/runs/:n`, and `POST /dispatch/free-tier/:tier` — the dispatch routes that queue paid LLM calls. Only enforced when `NODE_ENV=production` (baked into `backend/Dockerfile`); **required** once it is — the backend/worker refuse to boot without it |
 | `CORS_ORIGIN` | `http://localhost:5173` | Comma-separated list of allowed frontend origins |
 | `ORCHESTRATOR_URL` | `http://orchestrator:3001` | Backend's URL for reaching the orchestrator |
@@ -221,6 +223,10 @@ docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 `backend/Dockerfile` bakes in `NODE_ENV=production`, which turns on `DispatchAuthGuard` (`backend/src/modules/dispatch/dispatch-auth.guard.ts`): the paid-provider dispatch routes — `POST /dispatch/model/:modelName/:date`, `POST /dispatch/model/:modelName/runs/:n`, and `POST /dispatch/free-tier/:tier` — then reject any request whose JSON body doesn't include a matching `"password"` field. `loadEnv()` fails the backend/worker processes at boot if `DISPATCH_PASSWORD` isn't set once `NODE_ENV=production`, so there's no way to accidentally deploy prod without it. Local dev (`docker-compose.yml`, no `NODE_ENV=production`) never requires a password on these routes.
+
+### Reviewing production data (Adminer)
+
+`docker-compose.prod.yml` also runs [Adminer](https://www.adminer.org/), a lightweight Postgres browser, at `http://<host>:8091`. It reuses the existing `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` from `.env` — no separate credentials to set up. Unlike Bull Board (`/bull/login`, gated by a login form checked against `BULL_BOARD_USER`/`BULL_BOARD_PASS` before the dashboard itself is reachable), Adminer runs as its own container and relies solely on its own DB-login form — publishing port 8091 makes that login page reachable by anyone with the URL, though real access still requires the Postgres password. Don't publish this port on a host without other network-level protection (a private tunnel, or Coolify/firewall access rules) — the same caution as the commented-out `db`/`redis` ports in `docker-compose.prod.yml`.
 
 ### No Ollama in the cloud — Option B (a local worker pulls jobs to your machine)
 

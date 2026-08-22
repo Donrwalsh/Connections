@@ -14,7 +14,7 @@ async function bootstrap() {
   await app.listen(env.PORT, "0.0.0.0");
   logger.log(`NestJS backend running on http://localhost:${env.PORT}`);
   logger.log(`Swagger docs available at http://localhost:${env.PORT}/api/docs`);
-  logger.log(`Bull Board available at http://localhost:${env.PORT}/admin/queues`);
+  logger.log(`Bull Board available at http://localhost:${env.PORT}/bull/login`);
 }
 
 bootstrap();

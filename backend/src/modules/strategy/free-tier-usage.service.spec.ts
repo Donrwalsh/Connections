@@ -2,10 +2,25 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { getRepositoryToken } from "@nestjs/typeorm";
 import { FreeTierUsageService } from "./free-tier-usage.service";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
+import { SupportedModelService } from "../supported-model/supported-model.service";
+
+const FLAGSHIP_MODELS = ["gpt-5.4", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1", "gpt-4o", "o1", "o3"];
+const MINI_MODELS = [
+  "gpt-5.4-mini",
+  "gpt-5.4-nano",
+  "gpt-5-mini",
+  "gpt-4.1-mini",
+  "gpt-4.1-nano",
+  "gpt-4o-mini",
+  "o3-mini",
+  "o4-mini",
+  "gpt-5-nano",
+];
 
 describe("FreeTierUsageService", () => {
   let service: FreeTierUsageService;
   let mockSolvePromptRepo: { createQueryBuilder: jest.Mock };
+  let mockSupportedModelService: { findModelNamesByFreeTier: jest.Mock };
 
   function mockUsageQuery(totalTokens: string | null) {
     const qb = {
@@ -21,11 +36,19 @@ describe("FreeTierUsageService", () => {
 
   beforeEach(async () => {
     mockSolvePromptRepo = { createQueryBuilder: jest.fn() };
+    mockSupportedModelService = {
+      findModelNamesByFreeTier: jest
+        .fn()
+        .mockImplementation(async (tier: string) =>
+          tier === "flagship" ? [...FLAGSHIP_MODELS] : [...MINI_MODELS],
+        ),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FreeTierUsageService,
         { provide: getRepositoryToken(SolvePrompt), useValue: mockSolvePromptRepo },
+        { provide: SupportedModelService, useValue: mockSupportedModelService },
       ],
     }).compile();
 
@@ -43,10 +66,11 @@ describe("FreeTierUsageService", () => {
 
       await service.getFlagshipUsage();
 
+      expect(mockSupportedModelService.findModelNamesByFreeTier).toHaveBeenCalledWith("flagship");
       expect(mockSolvePromptRepo.createQueryBuilder).toHaveBeenCalledWith("prompt");
       expect(qb.innerJoin).toHaveBeenCalledWith("prompt.strategyRun", "run");
       expect(qb.where).toHaveBeenCalledWith("run.modelName IN (:...models)", {
-        models: ["gpt-5.4", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1", "gpt-4o", "o1", "o3"],
+        models: FLAGSHIP_MODELS,
       });
     });
 
@@ -61,7 +85,7 @@ describe("FreeTierUsageService", () => {
         usedTokens: 62340,
         dailyLimitTokens: 250_000,
         remainingTokens: 187_660,
-        models: ["gpt-5.4", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1", "gpt-4o", "o1", "o3"],
+        models: FLAGSHIP_MODELS,
       });
     });
 
@@ -81,21 +105,8 @@ describe("FreeTierUsageService", () => {
 
       await service.getMiniUsage();
 
-      const miniModels = [
-        "gpt-5.4-mini",
-        "gpt-5.4-nano",
-        "gpt-5-mini",
-        "gpt-4.1-mini",
-        "gpt-4.1-nano",
-        "gpt-4o-mini",
-        "o3-mini",
-        "o4-mini",
-        "gpt-5-nano",
-      ];
-      expect(qb.where).toHaveBeenCalledWith("run.modelName IN (:...models)", { models: miniModels });
-
-      const flagshipModels = ["gpt-5.4", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1", "gpt-4o", "o1", "o3"];
-      expect(miniModels.some((model) => flagshipModels.includes(model))).toBe(false);
+      expect(qb.where).toHaveBeenCalledWith("run.modelName IN (:...models)", { models: MINI_MODELS });
+      expect(MINI_MODELS.some((model) => FLAGSHIP_MODELS.includes(model))).toBe(false);
     });
 
     it("should return used/limit/remaining, tier id, and label for the 2.5M budget", async () => {
@@ -129,5 +140,21 @@ describe("FreeTierUsageService", () => {
 
     expect(result.usedTokens).toBe(0);
     expect(result.remainingTokens).toBe(250_000);
+  });
+
+  it("should skip the DB query entirely and return a zero-usage DTO when the tier has no models configured", async () => {
+    mockSupportedModelService.findModelNamesByFreeTier.mockResolvedValueOnce([]);
+
+    const result = await service.getFlagshipUsage();
+
+    expect(result).toEqual({
+      tier: "flagship",
+      label: "Flagship models",
+      usedTokens: 0,
+      dailyLimitTokens: 250_000,
+      remainingTokens: 250_000,
+      models: [],
+    });
+    expect(mockSolvePromptRepo.createQueryBuilder).not.toHaveBeenCalled();
   });
 });

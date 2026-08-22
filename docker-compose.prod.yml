@@ -15,6 +15,9 @@
 #     you're running the local Ollama worker and have no private tunnel
 #     (Tailscale/WireGuard) between it and this host — and if you do,
 #     REDIS_PASSWORD (below) becomes mandatory, not optional.
+#   - adminer's port (8091) IS published by default and has no additional
+#     auth gate beyond its own DB login — see README.md's "Reviewing
+#     production data (Adminer)" section for the full security note.
 #
 # Required in your .env (Coolify: set these as the app's environment
 # variables — see .env.sample for the full list and defaults):
@@ -52,6 +55,18 @@ services:
     # a non-default POSTGRES_PASSWORD before doing so.
     # ports:
     #   - "5432:5432"
+
+  adminer:
+    image: adminer:latest
+    container_name: adminer
+    restart: unless-stopped
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    ports:
+      - "8091:8080"
+    depends_on:
+      db:
+        condition: service_healthy
 
   redis:
     image: redis:7-alpine

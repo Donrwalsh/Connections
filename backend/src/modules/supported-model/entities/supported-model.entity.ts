@@ -30,6 +30,15 @@ export class SupportedModel {
   @Column({ type: "boolean", default: true })
   supported: boolean;
 
+  // Which free-tier program (see FreeTierId in
+  // modules/strategy/free-tier-usage.service.ts) this model counts toward,
+  // if any — null for a model that isn't part of either program. Editable
+  // directly (e.g. via Adminer) with no redeploy required; the tier-level
+  // token limits/labels stay as code constants (FREE_TIER_LIMITS) since
+  // they're per-tier, not per-model.
+  @Column({ type: "text", nullable: true })
+  freeTier: string | null;
+
   @CreateDateColumn({
     type: "timestamptz",
     default: () => "CURRENT_TIMESTAMP",
