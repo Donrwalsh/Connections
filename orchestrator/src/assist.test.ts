@@ -9,12 +9,16 @@ const MESSAGES = [
 describe("runAssistStep", () => {
   const generateTextMock = vi.hoisted(() => vi.fn());
 
-  vi.mock("ai", () => ({
-    generateText: generateTextMock,
-    NoObjectGeneratedError: class NoObjectGeneratedError extends Error {},
-    TypeValidationError: class TypeValidationError extends Error {},
-    JSONParseError: class JSONParseError extends Error {},
-  }));
+  vi.mock("ai", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("ai")>();
+    return {
+      ...actual,
+      generateText: generateTextMock,
+      NoObjectGeneratedError: class NoObjectGeneratedError extends Error {},
+      TypeValidationError: class TypeValidationError extends Error {},
+      JSONParseError: class JSONParseError extends Error {},
+    };
+  });
 
   beforeEach(() => {
     generateTextMock.mockReset();
