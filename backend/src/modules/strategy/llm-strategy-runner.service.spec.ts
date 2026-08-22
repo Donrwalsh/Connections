@@ -22,9 +22,7 @@ describe("LlmStrategyRunner", () => {
     count: jest.Mock;
     find: jest.Mock;
   };
-  let mockSolvePromptRepo: {
-    count: jest.Mock;
-  };
+  let mockSolvePromptRepo: { createQueryBuilder: jest.Mock };
   let mockOrchestratorService: {
     solveAssist: jest.Mock<Promise<SolveAssistOutcome>, unknown[]>;
   };
@@ -73,7 +71,11 @@ describe("LlmStrategyRunner", () => {
       find: jest.fn(),
     };
     mockSolvePromptRepo = {
-      count: jest.fn().mockResolvedValue(0),
+      createQueryBuilder: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ max: null }),
+      }),
     };
     mockOrchestratorService = {
       solveAssist: jest.fn(),

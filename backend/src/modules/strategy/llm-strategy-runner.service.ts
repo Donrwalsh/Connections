@@ -213,7 +213,7 @@ export class LlmStrategyRunner {
     const pendingGuesses: Partial<Guess>[] = [];
     const pendingProposals: Partial<LlmProposal>[] = [];
     const pendingPrompts: Partial<SolvePrompt>[] = [];
-    let globalPromptNumber = await this.store.countPrompts(run.id);
+    let globalPromptNumber = await this.store.lastPromptNumber(run.id);
 
     while (true) {
       const N = run.availableWords.length / GROUP_SIZE;
