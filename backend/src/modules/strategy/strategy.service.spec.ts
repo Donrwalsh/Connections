@@ -1,6 +1,6 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { BadRequestException, NotFoundException } from "@nestjs/common";
-import { DataSource, Not } from "typeorm";
+import { DataSource } from "typeorm";
 import { getRepositoryToken } from "@nestjs/typeorm";
 import { STRATEGY_QUEUE, LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE } from "../queue/queue.module";
 import { StrategyService } from "./strategy.service";
@@ -8,7 +8,7 @@ import { StrategyRunStore } from "./strategy-run-store.service";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
-import { SolvePrompt, SolvePromptStatus } from "./entities/solve-prompt.entity";
+import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { LlmProposal } from "./entities/llm-proposal.entity";
 import { GameService } from "../game/game.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
@@ -492,13 +492,11 @@ describe("StrategyService", () => {
       expect(result.solvePrompts[0]!.reconstructedPrompt).toContain("APPLE");
     });
 
-    it("should exclude CALL_ERROR rows from the SolvePrompt query used for reconstruction, with a deterministic attemptNumber tiebreak", async () => {
-      // Regression test for the final-review finding: a CALL_ERROR row (an
-      // OpenAI call attempt that never produced usable model text) folded
-      // into reconstructSolvePrompts's `history` used to corrupt every
-      // subsequent step's reconstructedPrompt for the rest of the run.
-      // Filtering these out at the query layer, before they ever reach
-      // reconstructSolvePrompts, is the fix.
+    it("should fetch every SolvePrompt row for the run, including CALL_ERROR ones, with a deterministic attemptNumber tiebreak", async () => {
+      // CALL_ERROR rows (an OpenAI call attempt that never produced usable
+      // model text) are shown on the run detail page alongside successful
+      // steps — reconstructSolvePrompts knows to skip them when advancing
+      // conversation state, so the query here fetches everything.
       mockStrategyRunRepo.findOne.mockResolvedValueOnce(
         makeRun({ id: 7, strategyName: "llm-openai", availableWords: [] }),
       );
@@ -510,7 +508,7 @@ describe("StrategyService", () => {
       await service.getRunDetailByRunId(7);
 
       expect(mockSolvePromptRepo.find).toHaveBeenCalledWith({
-        where: { strategyRunId: 7, status: Not(SolvePromptStatus.CALL_ERROR) },
+        where: { strategyRunId: 7 },
         order: { promptNumber: "ASC", attemptNumber: "ASC" },
       });
     });

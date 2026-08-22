@@ -282,9 +282,8 @@ export type SolvePromptStatusValue =
   | "malformedGroupCount"
   | "malformedOther"
   // The OpenAI call itself never produced usable model text (backend:
-  // SolvePromptStatus.CALL_ERROR). These rows are excluded from the
-  // reconstructed guess chain server-side (see prompt-reconstruction.ts),
-  // but the type stays in sync in case they're ever surfaced directly.
+  // SolvePromptStatus.CALL_ERROR). Shown inline in the guess chain like
+  // any other step — see errorName/errorMessage/etc. below.
   | "callError";
 
 /** One step of an LLM run's solve loop. `reconstructedPrompt` is inferred by
@@ -309,6 +308,14 @@ export interface SolvePromptRecord {
   wordsHadParenthetical: boolean;
   reconstructedPrompt: string | null;
   proposals: LlmProposalRecord[];
+  // Populated only when status is 'callError'. requestBody/responseBody
+  // are the raw payloads captured at the orchestrator.
+  errorName: string | null;
+  errorMessage: string | null;
+  statusCode: number | null;
+  isRetryable: boolean | null;
+  requestBody: unknown | null;
+  responseBody: unknown | null;
 }
 
 /** Full detail from GET /strategy/run/:runId. `solvePrompts` is empty for

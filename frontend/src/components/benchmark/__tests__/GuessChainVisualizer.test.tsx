@@ -41,6 +41,12 @@ const llmDetail: StrategyRunDetail = {
       createdAt: "2025-01-01T00:00:00Z",
       wordsHadParenthetical: false,
       reconstructedPrompt: "You are an expert solver...",
+      errorName: null,
+      errorMessage: null,
+      statusCode: null,
+      isRetryable: null,
+      requestBody: null,
+      responseBody: null,
       proposals: [
         {
           id: 1,
@@ -172,6 +178,55 @@ describe("GuessChainVisualizer", () => {
     render(<GuessChainVisualizer runId={12345} />);
 
     expect(await screen.findByText("Call failed")).toBeInTheDocument();
+  });
+
+  it("shows the error message, status, and raw request/response for a callError row, instead of the empty-proposals message", async () => {
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [
+        {
+          ...llmDetail.solvePrompts[0]!,
+          status: "callError",
+          rawResponseText: null,
+          proposals: [],
+          errorName: "AI_APICallError",
+          errorMessage: "Rate limit exceeded",
+          statusCode: 429,
+          isRetryable: true,
+          requestBody: { model: "gpt-4.1-nano" },
+          responseBody: { error: { message: "Rate limit exceeded" } },
+        },
+      ],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Rate limit exceeded")).toBeInTheDocument();
+    expect(screen.getByText("AI_APICallError · HTTP 429 · retryable")).toBeInTheDocument();
+    expect(screen.getByText("Raw request sent to OpenAI")).toBeInTheDocument();
+    expect(screen.getByText("Raw response from OpenAI")).toBeInTheDocument();
+    expect(screen.queryByText("No candidate groups parsed.")).not.toBeInTheDocument();
+  });
+
+  it("skips the raw request/response disclosures when a callError row has no detail captured", async () => {
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [
+        {
+          ...llmDetail.solvePrompts[0]!,
+          status: "callError",
+          rawResponseText: null,
+          proposals: [],
+          errorMessage: "Request timed out",
+        },
+      ],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Request timed out")).toBeInTheDocument();
+    expect(screen.queryByText("Raw request sent to OpenAI")).not.toBeInTheDocument();
+    expect(screen.queryByText("Raw response from OpenAI")).not.toBeInTheDocument();
   });
 
   it("falls back to a plain guess list for strategies with no solve-prompt chain", async () => {

@@ -3,12 +3,12 @@ import { Queue } from "bullmq";
 import { STRATEGY_QUEUE, LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE } from "../queue/queue.module";
 import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/strategy-run.entity";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Not, Repository } from "typeorm";
+import { Repository } from "typeorm";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { combinationToWords, firstCombination, nextCombination } from "./combinatorics";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { LlmProposal } from "./entities/llm-proposal.entity";
-import { SolvePrompt, SolvePromptStatus } from "./entities/solve-prompt.entity";
+import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { SupportedModel } from "../supported-model/entities/supported-model.entity";
 import { ModelPrice } from "../supported-model/entities/model-price.entity";
 import { GameService } from "../game/game.service";
@@ -739,22 +739,17 @@ export class StrategyService {
    * of guesses was requested; LLM run guess counts are small (bounded by the
    * duplicate/failure/malformed limits), so this stays cheap.
    *
-   * The SolvePrompt query below excludes CALL_ERROR rows (a call attempt
-   * that never produced usable model text) — reconstructSolvePrompts only
-   * makes sense for rows that mutated the runner's conversation state.
+   * Includes CALL_ERROR rows (a call attempt that never produced usable
+   * model text) so a failed step is visible alongside successful ones —
+   * reconstructSolvePrompts knows to skip them when advancing conversation
+   * state (see its own docblock). The attemptNumber tiebreak keeps a step's
+   * own multiple rows in call order, since several can share one
+   * promptNumber.
    */
   private async buildSolvePromptDtos(run: StrategyRun) {
     const [solvePrompts, proposals, allGuesses, puzzle] = await Promise.all([
-      // CALL_ERROR rows (an OpenAI call attempt that never produced usable
-      // model text) never mutated the runner's conversation state, so they
-      // don't correspond to a real transcript turn — reconstructSolvePrompts
-      // assumes it's only ever given rows that do. Excluding them here,
-      // upstream of that function, is the fix (see prompt-reconstruction.ts's
-      // docblock). The attemptNumber tiebreak keeps a step's own multiple
-      // real-call rows (retried-then-succeeded) in call order, since several
-      // rows can now share one promptNumber.
       this.solvePromptRepo.find({
-        where: { strategyRunId: run.id, status: Not(SolvePromptStatus.CALL_ERROR) },
+        where: { strategyRunId: run.id },
         order: { promptNumber: "ASC", attemptNumber: "ASC" },
       }),
       this.llmProposalRepo.find({ where: { strategyRunId: run.id } }),

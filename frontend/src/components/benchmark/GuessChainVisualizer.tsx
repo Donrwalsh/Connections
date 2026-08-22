@@ -77,6 +77,7 @@ function PromptChain({ solvePrompts }: { solvePrompts: SolvePromptRecord[] }) {
 }
 
 function PromptStep({ prompt }: { prompt: SolvePromptRecord }) {
+  const isCallError = prompt.status === "callError";
   const telemetry = [
     prompt.totalTokens !== null ? `${prompt.totalTokens.toLocaleString()} tok` : null,
     prompt.latencyMs !== null ? formatDuration(prompt.latencyMs) : null,
@@ -127,14 +128,55 @@ function PromptStep({ prompt }: { prompt: SolvePromptRecord }) {
         </details>
       ) : null}
 
-      <ul className="bench-proposals">
-        {prompt.proposals.map((proposal) => (
-          <ProposalRow key={proposal.id} proposal={proposal} />
-        ))}
-        {prompt.proposals.length === 0 ? (
-          <li className="bench-muted bench-proposals__empty">No candidate groups parsed.</li>
-        ) : null}
-      </ul>
+      {isCallError ? (
+        <CallErrorDetail prompt={prompt} />
+      ) : (
+        <ul className="bench-proposals">
+          {prompt.proposals.map((proposal) => (
+            <ProposalRow key={proposal.id} proposal={proposal} />
+          ))}
+          {prompt.proposals.length === 0 ? (
+            <li className="bench-muted bench-proposals__empty">No candidate groups parsed.</li>
+          ) : null}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** The OpenAI call itself failed — no model text at all, so there's nothing
+ * to show in the usual proposals list. Surfaces the error message/status
+ * plus the raw request/response the orchestrator captured, in the same
+ * collapsible-detail style as the prompt/response blocks above. */
+function CallErrorDetail({ prompt }: { prompt: SolvePromptRecord }) {
+  const summary = [
+    prompt.errorName,
+    prompt.statusCode !== null ? `HTTP ${prompt.statusCode}` : null,
+    prompt.isRetryable !== null ? (prompt.isRetryable ? "retryable" : "not retryable") : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div className="bench-call-error">
+      <p className="bench-call-error__message">
+        {prompt.errorMessage ?? "The call failed with no further detail recorded."}
+      </p>
+      {summary ? <p className="bench-mono bench-muted">{summary}</p> : null}
+
+      {prompt.requestBody !== null ? (
+        <details className="bench-step__detail">
+          <summary>Raw request sent to OpenAI</summary>
+          <pre className="bench-step__pre">{JSON.stringify(prompt.requestBody, null, 2)}</pre>
+        </details>
+      ) : null}
+
+      {prompt.responseBody !== null ? (
+        <details className="bench-step__detail">
+          <summary>Raw response from OpenAI</summary>
+          <pre className="bench-step__pre">{JSON.stringify(prompt.responseBody, null, 2)}</pre>
+        </details>
+      ) : null}
     </div>
   );
 }
