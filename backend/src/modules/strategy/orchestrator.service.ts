@@ -14,17 +14,48 @@ export interface ChatMessage {
   content: string;
 }
 
+/**
+ * One real call attempt to OpenAI that failed and got retried before this
+ * request's outcome (success or terminal failure) was reached. Previously
+ * these left no trace at all — only the last attempt's bare error message
+ * survived. `attemptNumber` is 1-based within this OrchestratorService call.
+ */
+export interface OpenAiCallAttempt {
+  attemptNumber: number;
+  requestBody?: unknown;
+  responseId?: string;
+  responseHeaders?: Record<string, string>;
+  responseBody?: unknown;
+  statusCode?: number;
+  errorName?: string;
+  errorMessage?: string;
+  isRetryable?: boolean;
+}
+
 export interface SolveAssistSuccess {
   response: string;
   groups: string[][];
   model: string;
   latencyMs: number;
   usage?: SolveUsage;
+  requestBody?: unknown;
+  responseId?: string;
+  responseHeaders?: Record<string, string>;
+  responseBody?: unknown;
+  retriedAttempts?: OpenAiCallAttempt[];
 }
 
 export interface SolveAssistFailure {
   error: string;
   code: SolveErrorCode;
+  requestBody?: unknown;
+  responseId?: string;
+  responseHeaders?: Record<string, string>;
+  responseBody?: unknown;
+  statusCode?: number;
+  errorName?: string;
+  isRetryable?: boolean;
+  retriedAttempts?: OpenAiCallAttempt[];
 }
 
 export type SolveAssistOutcome =
@@ -72,6 +103,10 @@ export class OrchestratorService {
         model: raw.model,
         latencyMs: raw.latencyMs ?? 0,
         usage: raw.usage,
+        requestBody: raw.requestBody,
+        responseId: raw.responseId,
+        responseHeaders: raw.responseHeaders,
+        responseBody: raw.responseBody,
       }),
     );
   }
@@ -89,6 +124,7 @@ export class OrchestratorService {
     mapSuccess: (raw: any) => T, // eslint-disable-line @typescript-eslint/no-explicit-any
   ): Promise<{ ok: true; data: T } | { ok: false; error: SolveAssistFailure }> {
     let lastError: unknown;
+    const retriedAttempts: OpenAiCallAttempt[] = [];
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
@@ -96,22 +132,36 @@ export class OrchestratorService {
 
         if (response.ok) {
           const raw = await response.json();
-          return { ok: true, data: mapSuccess(raw) };
+          const data = mapSuccess(raw) as T & { retriedAttempts?: OpenAiCallAttempt[] };
+          if (retriedAttempts.length > 0) {
+            data.retriedAttempts = retriedAttempts;
+          }
+          return { ok: true, data };
         }
 
+        const failureBody = (await response.json().catch(() => null)) as
+          | (Partial<SolveAssistFailure> & { code?: string; details?: Record<string, unknown> })
+          | null;
+
         if (response.status === 400 || response.status === 409) {
-          const failureBody = (await response.json().catch(() => null)) as
-            (Partial<SolveAssistFailure> & { code?: string }) | null;
           return {
             ok: false,
             error: {
               error: failureBody?.error ?? `HTTP ${response.status}`,
               code: this.isKnownErrorCode(failureBody?.code) ? failureBody.code : "model_error",
+              ...this.extractCallDetail(failureBody?.details),
+              retriedAttempts: retriedAttempts.length > 0 ? retriedAttempts : undefined,
             },
           };
         }
 
         lastError = new Error(`HTTP ${response.status} ${response.statusText}`);
+        retriedAttempts.push({
+          attemptNumber: attempt + 1,
+          errorMessage: failureBody?.error ?? this.describeError(lastError),
+          statusCode: response.status,
+          ...this.extractCallDetail(failureBody?.details),
+        });
       } catch (err) {
         if (err instanceof Error && err.name === "AbortError") {
           return {
@@ -119,10 +169,15 @@ export class OrchestratorService {
             error: {
               error: "Request timed out",
               code: "model_error",
+              retriedAttempts: retriedAttempts.length > 0 ? retriedAttempts : undefined,
             },
           };
         }
         lastError = err;
+        retriedAttempts.push({
+          attemptNumber: attempt + 1,
+          errorMessage: this.describeError(err),
+        });
       }
 
       if (attempt < MAX_RETRIES) {
@@ -140,7 +195,33 @@ export class OrchestratorService {
       error: {
         error: `Orchestrator ${path} failed after ${MAX_RETRIES + 1} attempts: ${this.describeError(lastError)}`,
         code: "model_error",
+        retriedAttempts,
       },
+    };
+  }
+
+  /** Pulls the known raw-detail keys off a SolveError `details` bag (see solver.ts on the orchestrator side), ignoring anything else it might carry. */
+  private extractCallDetail(
+    details?: Record<string, unknown>,
+  ): Pick<
+    OpenAiCallAttempt,
+    | "requestBody"
+    | "responseId"
+    | "responseHeaders"
+    | "responseBody"
+    | "statusCode"
+    | "errorName"
+    | "isRetryable"
+  > {
+    if (!details) return {};
+    return {
+      requestBody: details.requestBody,
+      responseId: details.responseId as string | undefined,
+      responseHeaders: details.responseHeaders as Record<string, string> | undefined,
+      responseBody: details.responseBody,
+      statusCode: details.statusCode as number | undefined,
+      errorName: details.errorName as string | undefined,
+      isRetryable: details.isRetryable as boolean | undefined,
     };
   }
 

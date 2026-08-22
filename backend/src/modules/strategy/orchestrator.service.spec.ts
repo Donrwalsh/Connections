@@ -48,7 +48,16 @@ describe("OrchestratorService", () => {
 
     const outcome = await service.solveAssist(messages);
 
-    expect(outcome).toEqual({ ok: true, data: successBody });
+    expect(outcome).toEqual({
+      ok: true,
+      data: {
+        ...successBody,
+        requestBody: undefined,
+        responseId: undefined,
+        responseHeaders: undefined,
+        responseBody: undefined,
+      },
+    });
     expect(mockFetch).toHaveBeenCalledWith(
       "http://orchestrator.test/solve-assist",
       expect.objectContaining({
@@ -92,7 +101,17 @@ describe("OrchestratorService", () => {
 
     expect(outcome).toEqual({
       ok: true,
-      data: { response: "text", groups: [], model: "mistral", latencyMs: 0, usage: undefined },
+      data: {
+        response: "text",
+        groups: [],
+        model: "mistral",
+        latencyMs: 0,
+        usage: undefined,
+        requestBody: undefined,
+        responseId: undefined,
+        responseHeaders: undefined,
+        responseBody: undefined,
+      },
     });
   });
 
@@ -110,7 +129,11 @@ describe("OrchestratorService", () => {
 
     expect(outcome).toEqual({
       ok: false,
-      error: { error: "malformed", code: "invalid_group" },
+      error: {
+        error: "malformed",
+        code: "invalid_group",
+        retriedAttempts: undefined,
+      },
     });
   });
 
@@ -128,7 +151,23 @@ describe("OrchestratorService", () => {
 
     const outcome = await service.solveAssist(messages);
 
-    expect(outcome).toEqual({ ok: true, data: successBody });
+    expect(outcome).toEqual({
+      ok: true,
+      data: {
+        ...successBody,
+        requestBody: undefined,
+        responseId: undefined,
+        responseHeaders: undefined,
+        responseBody: undefined,
+        retriedAttempts: [
+          {
+            attemptNumber: 1,
+            errorMessage: "model down",
+            statusCode: 502,
+          },
+        ],
+      },
+    });
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
@@ -147,7 +186,31 @@ describe("OrchestratorService", () => {
     expect(mockFetch).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
     expect(outcome).toMatchObject({
       ok: false,
-      error: { code: "model_error" },
+      error: {
+        code: "model_error",
+        retriedAttempts: expect.arrayContaining([
+          expect.objectContaining({
+            attemptNumber: 1,
+            errorMessage: "model down",
+            statusCode: 502,
+          }),
+          expect.objectContaining({
+            attemptNumber: 2,
+            errorMessage: "model down",
+            statusCode: 502,
+          }),
+          expect.objectContaining({
+            attemptNumber: 3,
+            errorMessage: "model down",
+            statusCode: 502,
+          }),
+          expect.objectContaining({
+            attemptNumber: 4,
+            errorMessage: "model down",
+            statusCode: 502,
+          }),
+        ]),
+      },
     });
   });
 
@@ -159,7 +222,27 @@ describe("OrchestratorService", () => {
     expect(mockFetch).toHaveBeenCalledTimes(4);
     expect(outcome).toMatchObject({
       ok: false,
-      error: { code: "model_error" },
+      error: {
+        code: "model_error",
+        retriedAttempts: expect.arrayContaining([
+          expect.objectContaining({
+            attemptNumber: 1,
+            errorMessage: "ECONNREFUSED",
+          }),
+          expect.objectContaining({
+            attemptNumber: 2,
+            errorMessage: "ECONNREFUSED",
+          }),
+          expect.objectContaining({
+            attemptNumber: 3,
+            errorMessage: "ECONNREFUSED",
+          }),
+          expect.objectContaining({
+            attemptNumber: 4,
+            errorMessage: "ECONNREFUSED",
+          }),
+        ]),
+      },
     });
     if (!outcome.ok) {
       expect(outcome.error.error).toContain("ECONNREFUSED");
@@ -179,7 +262,117 @@ describe("OrchestratorService", () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(outcome).toEqual({
       ok: false,
-      error: { error: "Request timed out", code: "model_error" },
+      error: { error: "Request timed out", code: "model_error", retriedAttempts: undefined },
     });
+  });
+
+  it("should include the raw request/response detail on a 200", async () => {
+    const successBodyWithDetail = {
+      ...successBody,
+      requestBody: { model: "gpt-4.1-nano", messages },
+      responseId: "resp_123",
+      responseHeaders: { "x-request-id": "req_123" },
+      responseBody: { id: "resp_123", choices: [] },
+    };
+    mockFetch.mockResolvedValueOnce(
+      mockResponse({ ok: true, status: 200, body: successBodyWithDetail }),
+    );
+
+    const outcome = await service.solveAssist(messages);
+
+    expect(outcome).toEqual({ ok: true, data: successBodyWithDetail });
+  });
+
+  it("should surface the raw call detail from a terminal 400/409 error's details bag", async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockResponse({
+        ok: false,
+        status: 400,
+        statusText: "Bad Request",
+        body: {
+          error: "malformed",
+          code: "invalid_group",
+          details: {
+            requestBody: { model: "gpt-4.1-nano" },
+            responseId: "resp_456",
+            responseHeaders: { "x-request-id": "req_456" },
+            responseBody: { id: "resp_456", choices: [] },
+          },
+        },
+      }),
+    );
+
+    const outcome = await service.solveAssist(messages);
+
+    expect(outcome).toEqual({
+      ok: false,
+      error: {
+        error: "malformed",
+        code: "invalid_group",
+        requestBody: { model: "gpt-4.1-nano" },
+        responseId: "resp_456",
+        responseHeaders: { "x-request-id": "req_456" },
+        responseBody: { id: "resp_456", choices: [] },
+        retriedAttempts: undefined,
+      },
+    });
+  });
+
+  it("should record each failed 5xx attempt as a retried attempt before eventually succeeding", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        mockResponse({
+          ok: false,
+          status: 502,
+          statusText: "Bad Gateway",
+          body: {
+            error: "model down",
+            code: "model_error",
+            details: { statusCode: 502, errorName: "AI_APICallError", isRetryable: true },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
+
+    const outcome = await service.solveAssist(messages);
+
+    expect(outcome).toEqual({
+      ok: true,
+      data: {
+        ...successBody,
+        retriedAttempts: [
+          {
+            attemptNumber: 1,
+            errorMessage: "model down",
+            statusCode: 502,
+            errorName: "AI_APICallError",
+            isRetryable: true,
+            requestBody: undefined,
+            responseId: undefined,
+            responseHeaders: undefined,
+            responseBody: undefined,
+          },
+        ],
+      },
+    });
+  });
+
+  it("should record every attempt when retries are exhausted", async () => {
+    mockFetch.mockResolvedValue(
+      mockResponse({
+        ok: false,
+        status: 502,
+        statusText: "Bad Gateway",
+        body: { error: "model down", code: "model_error" },
+      }),
+    );
+
+    const outcome = await service.solveAssist(messages);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.error.retriedAttempts).toHaveLength(4);
+      expect(outcome.error.retriedAttempts?.map((a) => a.attemptNumber)).toEqual([1, 2, 3, 4]);
+    }
   });
 });
