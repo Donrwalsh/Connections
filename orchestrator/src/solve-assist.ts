@@ -19,6 +19,10 @@ export interface SolveAssistResult {
     completionTokens?: number;
     totalTokens?: number;
   };
+  requestBody?: unknown;
+  responseId?: string;
+  responseHeaders?: Record<string, string>;
+  responseBody?: unknown;
 }
 
 const SOLVE_ASSIST_TEMPERATURE = 0.7;
@@ -108,6 +112,10 @@ export async function solveAssist(
   let text: string;
   let modelId: string;
   let usage: SolveAssistResult["usage"];
+  let requestBody: unknown;
+  let responseId: string | undefined;
+  let responseHeaders: Record<string, string> | undefined;
+  let responseBody: unknown;
   const startTime = Date.now();
   let latencyMs: number;
 
@@ -120,6 +128,10 @@ export async function solveAssist(
     latencyMs = Date.now() - startTime;
     text = result.text;
     modelId = result.response.modelId;
+    requestBody = result.request.body;
+    responseId = result.response.id;
+    responseHeaders = result.response.headers;
+    responseBody = result.response.body;
 
     if (result.usage) {
       const u: LanguageModelUsage = result.usage;
@@ -130,7 +142,10 @@ export async function solveAssist(
       };
     }
   } catch (err) {
-    throw classifyModelCallError(err, { model: getModelName(resolvedProvider, model) });
+    throw classifyModelCallError(err, {
+      model: getModelName(resolvedProvider, model),
+      latencyMs: Date.now() - startTime,
+    });
   }
 
   // 1. Extract proposals (Reasoning + Words) from the ### GROUPS section
@@ -150,7 +165,7 @@ export async function solveAssist(
     throw new SolveError(
       "invalid_group",
       'Model response contained no parseable group proposals or "ANSWER:" section',
-      { model: modelId },
+      { model: modelId, latencyMs, requestBody, responseId, responseHeaders, responseBody },
     );
   }
 
@@ -161,5 +176,9 @@ export async function solveAssist(
     model: modelId,
     latencyMs,
     usage,
+    requestBody,
+    responseId,
+    responseHeaders,
+    responseBody,
   };
 }

@@ -738,12 +738,19 @@ export class StrategyService {
    * because reconstruction needs the full sequence regardless of which page
    * of guesses was requested; LLM run guess counts are small (bounded by the
    * duplicate/failure/malformed limits), so this stays cheap.
+   *
+   * Includes CALL_ERROR rows (a call attempt that never produced usable
+   * model text) so a failed step is visible alongside successful ones —
+   * reconstructSolvePrompts knows to skip them when advancing conversation
+   * state (see its own docblock). The attemptNumber tiebreak keeps a step's
+   * own multiple rows in call order, since several can share one
+   * promptNumber.
    */
   private async buildSolvePromptDtos(run: StrategyRun) {
     const [solvePrompts, proposals, allGuesses, puzzle] = await Promise.all([
       this.solvePromptRepo.find({
         where: { strategyRunId: run.id },
-        order: { promptNumber: "ASC" },
+        order: { promptNumber: "ASC", attemptNumber: "ASC" },
       }),
       this.llmProposalRepo.find({ where: { strategyRunId: run.id } }),
       this.guessRepo.find({

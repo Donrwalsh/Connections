@@ -17,3 +17,4 @@ scripting/src/.env
 scripting/dist/
 # Subagent-driven-development scratch workspace (ledgers, briefs, review packages)
 .superpowers/
+.worktrees/

@@ -18,7 +18,7 @@ describe("StrategyRunStore", () => {
   };
   let mockPuzzleRepo: { findOne: jest.Mock };
   let mockGuessRepo: { count: jest.Mock };
-  let mockSolvePromptRepo: { count: jest.Mock };
+  let mockSolvePromptRepo: { createQueryBuilder: jest.Mock };
   let mockManager: { insert: jest.Mock; save: jest.Mock };
   let mockDataSource: { transaction: jest.Mock };
 
@@ -49,7 +49,7 @@ describe("StrategyRunStore", () => {
       count: jest.fn().mockResolvedValue(0),
     };
     mockSolvePromptRepo = {
-      count: jest.fn().mockResolvedValue(0),
+      createQueryBuilder: jest.fn(),
     };
     mockManager = {
       insert: jest.fn().mockResolvedValue({ identifiers: [{ id: 1 }] }),
@@ -188,16 +188,28 @@ describe("StrategyRunStore", () => {
     });
   });
 
-  describe("countPrompts", () => {
-    it("should count SolvePrompt rows scoped to the strategy run", async () => {
-      mockSolvePromptRepo.count.mockResolvedValueOnce(5);
+  describe("lastPromptNumber", () => {
+    it("should return the highest promptNumber recorded for the strategy run", async () => {
+      const getRawOne = jest.fn().mockResolvedValueOnce({ max: "5" });
+      const where = jest.fn().mockReturnValue({ getRawOne });
+      const select = jest.fn().mockReturnValue({ where });
+      mockSolvePromptRepo.createQueryBuilder.mockReturnValueOnce({ select });
 
-      const result = await store.countPrompts(7);
+      const result = await store.lastPromptNumber(7);
 
       expect(result).toBe(5);
-      expect(mockSolvePromptRepo.count).toHaveBeenCalledWith({
-        where: { strategyRunId: 7 },
-      });
+      expect(where).toHaveBeenCalledWith("prompt.strategyRunId = :strategyRunId", { strategyRunId: 7 });
+    });
+
+    it("should return 0 when the strategy run has no prompts yet", async () => {
+      const getRawOne = jest.fn().mockResolvedValueOnce({ max: null });
+      const where = jest.fn().mockReturnValue({ getRawOne });
+      const select = jest.fn().mockReturnValue({ where });
+      mockSolvePromptRepo.createQueryBuilder.mockReturnValueOnce({ select });
+
+      const result = await store.lastPromptNumber(7);
+
+      expect(result).toBe(0);
     });
   });
 

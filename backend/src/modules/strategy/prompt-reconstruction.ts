@@ -3,7 +3,7 @@ import { GuessResult } from "./entities/guess.entity";
 import type { LlmProposal } from "./entities/llm-proposal.entity";
 import { LlmProposalStatus } from "./entities/llm-proposal.entity";
 import type { SolvePrompt } from "./entities/solve-prompt.entity";
-import { SolvePromptType } from "./entities/solve-prompt.entity";
+import { SolvePromptStatus, SolvePromptType } from "./entities/solve-prompt.entity";
 import { buildInitialPrompt, buildRetryPrompt } from "./llm-strategy-runner.service";
 import type { LlmProposalDto, SolvePromptDto } from "./dto/strategy.dto";
 
@@ -31,11 +31,18 @@ export function formatConversation(turns: ConversationTurn[]): string {
  * with the same inputs the runner had in memory at that point: the run's
  * starting word order (computeInitialWordOrder) plus whatever
  * availableWords/lockedInGroups/lastFailedGuess state the *stored* guesses
- * imply. Reconstruction only depends on solve steps that produced a
- * SolvePrompt row (i.e. the orchestrator call returned a parseable
- * response) — a step whose call failed outright (timeout/model error) never
- * got a row and never mutated runner state either, so skipping it here is
- * exactly correct, not a gap.
+ * imply. Every real OpenAI call attempt gets its own SolvePrompt row,
+ * including ones that failed outright and never produced model text
+ * (SolvePromptStatus.CALL_ERROR — rawResponseText stays null for those).
+ * Those rows never mutated the runner's conversation state (no assistant
+ * reply, no proposals, no guess), so they don't correspond to a real
+ * transcript turn — but they're still worth showing, since a run's chain is
+ * otherwise hard to make sense of with a gap in it. Each one still gets a
+ * `reconstructedPrompt` (what would have been sent, given state up to that
+ * point) so it reads in context alongside the successful steps; it just
+ * never gets folded into `history` or advances availableWords/
+ * lockedInGroups/lastFailedGuess, since doing that with no real response
+ * text would corrupt every later step's reconstruction.
  *
  * The runner sends the *entire* conversation history on every call (it's a
  * chat completion, not a one-shot prompt), so `reconstructedPrompt` for step
@@ -56,19 +63,25 @@ export function reconstructSolvePrompts(
     proposalsByPrompt.set(proposal.solvePromptId, list);
   }
 
-  const orderedPrompts = [...solvePrompts].sort((a, b) => a.promptNumber - b.promptNumber);
+  // Multiple rows can share one promptNumber (a step's retried-then-
+  // succeeded attempts, or a CALL_ERROR row alongside the step's later
+  // success), so attemptNumber is a tiebreak keeping a step's own rows in
+  // call order.
+  const orderedPrompts = [...solvePrompts].sort(
+    (a, b) => a.promptNumber - b.promptNumber || a.attemptNumber - b.attemptNumber,
+  );
 
   let availableWords = [...originalWords];
   const lockedInGroups: string[][] = [];
   let lastFailedGuess: { items: string[]; result: string } | null = null;
   // Every earlier step's (user, assistant) turn pair, in order — mirrors the
-  // runner's own `messages` array. A step whose orchestrator call failed
-  // outright never got appended to the live `messages` either (the runner
-  // pops it back off), so — same as the solve state above — only persisted
-  // SolvePrompt rows ever contribute a turn here.
+  // runner's own `messages` array. A CALL_ERROR row never got appended to
+  // the live `messages` either (the runner pops the user turn back off on a
+  // failed call), so only non-CALL_ERROR rows push onto this below.
   const history: ConversationTurn[] = [];
 
   return orderedPrompts.map((prompt) => {
+    const isCallError = prompt.status === SolvePromptStatus.CALL_ERROR;
     const N = availableWords.length / GROUP_SIZE;
 
     // The live runner only ever builds a RETRY prompt when lastFailedGuess is
@@ -86,8 +99,13 @@ export function reconstructSolvePrompts(
       { role: "user", content: currentPrompt },
     ]);
 
-    history.push({ role: "user", content: currentPrompt });
-    history.push({ role: "assistant", content: prompt.rawResponseText ?? "" });
+    // A CALL_ERROR row produced no assistant reply — folding a phantom
+    // (user, empty-assistant) pair into history here would corrupt every
+    // later step's reconstructedPrompt for the rest of the run.
+    if (!isCallError) {
+      history.push({ role: "user", content: currentPrompt });
+      history.push({ role: "assistant", content: prompt.rawResponseText ?? "" });
+    }
 
     const promptProposals: LlmProposalDto[] = (proposalsByPrompt.get(prompt.id) ?? [])
       .slice()
@@ -145,6 +163,12 @@ export function reconstructSolvePrompts(
       wordsHadParenthetical: prompt.wordsHadParenthetical,
       reconstructedPrompt,
       proposals: promptProposals,
+      errorName: prompt.errorName,
+      errorMessage: prompt.errorMessage,
+      statusCode: prompt.statusCode,
+      isRetryable: prompt.isRetryable,
+      requestBody: prompt.requestBody,
+      responseBody: prompt.responseBody,
     };
   });
 }

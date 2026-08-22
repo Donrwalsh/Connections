@@ -112,10 +112,21 @@ export class StrategyRunStore {
     });
   }
 
-  async countPrompts(strategyRunId: number): Promise<number> {
-    return this.solvePromptRepo.count({
-      where: { strategyRunId },
-    });
+  /**
+   * The highest promptNumber already recorded for this run, or 0 if none
+   * exist yet. Used to resume numbering after a worker restart. A MAX
+   * rather than a row COUNT because a single step can now produce more
+   * than one SolvePrompt row (an earlier failed-and-retried OpenAI call
+   * attempt plus the step's own final row — see llm-strategy-runner.service.ts),
+   * all sharing that step's promptNumber.
+   */
+  async lastPromptNumber(strategyRunId: number): Promise<number> {
+    const result = await this.solvePromptRepo
+      .createQueryBuilder("prompt")
+      .select('MAX(prompt."promptNumber")', "max")
+      .where("prompt.strategyRunId = :strategyRunId", { strategyRunId })
+      .getRawOne<{ max: string | null }>();
+    return Number(result?.max ?? 0);
   }
 
   async flushBatch(

@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
@@ -33,6 +33,7 @@ export class FreeTierUsageService {
   constructor(
     @InjectRepository(SolvePrompt)
     private readonly solvePromptRepo: Repository<SolvePrompt>,
+    @Inject(SupportedModelService)
     private readonly supportedModelService: SupportedModelService,
   ) {}
 

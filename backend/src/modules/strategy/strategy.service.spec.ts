@@ -491,6 +491,27 @@ describe("StrategyService", () => {
       expect(typeof result.solvePrompts[0]!.reconstructedPrompt).toBe("string");
       expect(result.solvePrompts[0]!.reconstructedPrompt).toContain("APPLE");
     });
+
+    it("should fetch every SolvePrompt row for the run, including CALL_ERROR ones, with a deterministic attemptNumber tiebreak", async () => {
+      // CALL_ERROR rows (an OpenAI call attempt that never produced usable
+      // model text) are shown on the run detail page alongside successful
+      // steps — reconstructSolvePrompts knows to skip them when advancing
+      // conversation state, so the query here fetches everything.
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ id: 7, strategyName: "llm-openai", availableWords: [] }),
+      );
+      mockGuessRepo.count.mockResolvedValueOnce(0);
+      mockGuessRepo.find.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      mockPuzzleRepo.findOne.mockResolvedValueOnce(solvePuzzle);
+      mockSolvePromptRepo.find.mockResolvedValueOnce([]);
+
+      await service.getRunDetailByRunId(7);
+
+      expect(mockSolvePromptRepo.find).toHaveBeenCalledWith({
+        where: { strategyRunId: 7 },
+        order: { promptNumber: "ASC", attemptNumber: "ASC" },
+      });
+    });
   });
 
   describe("getRunsForPuzzleId", () => {
