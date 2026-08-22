@@ -373,6 +373,72 @@ describe("OrchestratorService", () => {
     if (!outcome.ok) {
       expect(outcome.error.retriedAttempts).toHaveLength(4);
       expect(outcome.error.retriedAttempts?.map((a) => a.attemptNumber)).toEqual([1, 2, 3, 4]);
+      // Signals to callers (llm-strategy-runner.service.ts) that the last
+      // entry above IS this failure — see retriedAttemptsIncludeFinal's
+      // docblock — so they don't record it a second time.
+      expect(outcome.error.retriedAttemptsIncludeFinal).toBe(true);
+    }
+  });
+
+  it("should not set retriedAttemptsIncludeFinal for a terminal 400/409 reached after some retries", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        mockResponse({
+          ok: false,
+          status: 502,
+          statusText: "Bad Gateway",
+          body: { error: "model down", code: "model_error" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          ok: false,
+          status: 400,
+          statusText: "Bad Request",
+          body: { error: "duplicate", code: "duplicate_group" },
+        }),
+      );
+
+    const outcome = await service.solveAssist(messages);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.error.retriedAttempts).toHaveLength(1);
+      expect(outcome.error.retriedAttemptsIncludeFinal).toBeUndefined();
+    }
+  });
+
+  it("should preserve the real HTTP status of a 5xx retry attempt whose details bag has no statusCode of its own", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        mockResponse({
+          ok: false,
+          status: 502,
+          statusText: "Bad Gateway",
+          body: {
+            error: "model down",
+            code: "model_error",
+            // details is present (so extractCallDetail returns a real
+            // object, its own statusCode key just undefined) — this is the
+            // case that used to clobber response.status with undefined.
+            details: { errorName: "FetchError", isRetryable: true },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
+
+    const outcome = await service.solveAssist(messages);
+
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.data.retriedAttempts).toEqual([
+        expect.objectContaining({
+          attemptNumber: 1,
+          statusCode: 502,
+          errorName: "FetchError",
+          isRetryable: true,
+        }),
+      ]);
     }
   });
 });

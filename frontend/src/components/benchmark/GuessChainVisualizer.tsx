@@ -190,6 +190,8 @@ function solvePromptStatusLabel(status: SolvePromptRecord["status"]): string {
       return "Bad group count";
     case "malformedOther":
       return "Malformed";
+    case "callError":
+      return "Call failed";
     case "parsed":
       return "Parsed";
   }

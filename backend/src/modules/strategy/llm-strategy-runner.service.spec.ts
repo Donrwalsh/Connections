@@ -710,6 +710,55 @@ describe("LlmStrategyRunner", () => {
       );
     });
 
+    it("should write exactly 4 CALL_ERROR rows (not 5) when the orchestrator's own retry loop is exhausted", async () => {
+      // Simulates orchestrator.service.ts's executeWithRetry exhaustion
+      // return: 4 real OpenAI call attempts (0..MAX_RETRIES), all recorded
+      // in retriedAttempts, with retriedAttemptsIncludeFinal signaling that
+      // the last of those 4 IS this failure — not a distinct 5th call. Cap
+      // maxModelErrors at 1 so the run terminates after this single
+      // orchestrator.solveAssist call.
+      process.env.LLM_MAX_MODEL_ERRORS = "1";
+      try {
+        mockOrchestratorService.solveAssist.mockResolvedValueOnce({
+          ok: false,
+          error: {
+            error: "Orchestrator /solve-assist failed after 4 attempts: model down",
+            code: "model_error",
+            retriedAttemptsIncludeFinal: true,
+            retriedAttempts: [
+              { attemptNumber: 1, errorMessage: "model down", statusCode: 502 },
+              { attemptNumber: 2, errorMessage: "model down", statusCode: 502 },
+              { attemptNumber: 3, errorMessage: "model down", statusCode: 502 },
+              { attemptNumber: 4, errorMessage: "model down", statusCode: 502 },
+            ],
+          },
+        });
+
+        await runner.runLlmStrategy(100, "llm-openai");
+
+        expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
+
+        const promptRows = mockManager.insert.mock.calls
+          .filter((call) => call[0] === "SolvePrompt")
+          .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+
+        // 4 rows for 4 real calls, not 5 — no extra row duplicating the
+        // last attempt via the generic aggregate error message.
+        expect(promptRows).toHaveLength(4);
+        expect(promptRows.map((row) => row.attemptNumber)).toEqual([1, 2, 3, 4]);
+        expect(promptRows.every((row) => row.status === "callError")).toBe(true);
+        expect(promptRows.every((row) => row.promptNumber === 1)).toBe(true);
+        expect(
+          promptRows.some(
+            (row) =>
+              typeof row.errorMessage === "string" && row.errorMessage.includes("failed after"),
+          ),
+        ).toBe(false);
+      } finally {
+        delete process.env.LLM_MAX_MODEL_ERRORS;
+      }
+    });
+
     it("should parse a string responseBody into JSON when writing a CALL_ERROR row, and fall back to the raw string when it isn't valid JSON", async () => {
       jest
         .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")

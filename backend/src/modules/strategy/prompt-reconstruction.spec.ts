@@ -219,6 +219,59 @@ describe("reconstructSolvePrompts", () => {
     );
   });
 
+  it("ignores a stray CALL_ERROR row even if the caller fails to filter it out", () => {
+    // strategy.service.ts's buildSolvePromptDtos is expected to exclude
+    // CALL_ERROR rows before calling this function (see its query and this
+    // function's own docblock) — this is the belt-and-suspenders check that
+    // reconstructSolvePrompts doesn't fall over (or, worse, silently
+    // corrupt every later step's reconstructedPrompt) if one slips through
+    // anyway. A CALL_ERROR row has rawResponseText === null and would
+    // otherwise inject a phantom duplicated user turn plus an empty
+    // assistant turn into `history`.
+    const prompt1 = makeSolvePrompt({
+      id: 1,
+      promptNumber: 1,
+      promptType: SolvePromptType.INITIAL_SOLVE,
+      rawResponseText: "response-1",
+    });
+    const callErrorPrompt = makeSolvePrompt({
+      id: 2,
+      promptNumber: 1,
+      attemptNumber: 2,
+      promptType: SolvePromptType.RETRY,
+      status: SolvePromptStatus.CALL_ERROR,
+      rawResponseText: null,
+    });
+    const prompt2 = makeSolvePrompt({
+      id: 3,
+      promptNumber: 2,
+      promptType: SolvePromptType.INITIAL_SOLVE,
+      rawResponseText: "response-2",
+    });
+
+    const result = reconstructSolvePrompts(
+      originalWords,
+      [prompt1, callErrorPrompt, prompt2],
+      [],
+      new Map(),
+    );
+
+    // The CALL_ERROR row contributes no entry to the output at all...
+    expect(result).toHaveLength(2);
+    expect(result.map((r) => r.id)).toEqual([1, 3]);
+
+    // ...and, critically, no phantom turn to `history` — prompt2's
+    // reconstructedPrompt is exactly [prompt1's turn, prompt2's own
+    // message], not corrupted by an extra empty-assistant turn in between.
+    expect(result[1]!.reconstructedPrompt).toBe(
+      formatConversation([
+        { role: "user", content: buildInitialPrompt(originalWords, 2) },
+        { role: "assistant", content: "response-1" },
+        { role: "user", content: buildInitialPrompt(originalWords, 2) },
+      ]),
+    );
+  });
+
   it("falls back to an INITIAL prompt if a RETRY step has no prior failure on record", () => {
     // Defensive case: shouldn't happen with real data, but guards against a
     // crash if it ever does.

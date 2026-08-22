@@ -56,6 +56,17 @@ export interface SolveAssistFailure {
   errorName?: string;
   isRetryable?: boolean;
   retriedAttempts?: OpenAiCallAttempt[];
+  /**
+   * True only on the retry loop's own exhaustion return (every attempt
+   * 0..MAX_RETRIES failed with a 5xx/network error) — in that case
+   * `retriedAttempts` already includes the LAST attempt's own failure,
+   * unlike every other failure path (a terminal 400/409, a timeout, or a
+   * mid-retry terminal error), where `retriedAttempts` holds only the
+   * attempts that happened BEFORE this one. Lets callers avoid recording
+   * this failure's own aggregate summary message as if it were a distinct
+   * extra call attempt — see llm-strategy-runner.service.ts.
+   */
+  retriedAttemptsIncludeFinal?: boolean;
 }
 
 export type SolveAssistOutcome =
@@ -156,11 +167,18 @@ export class OrchestratorService {
         }
 
         lastError = new Error(`HTTP ${response.status} ${response.statusText}`);
+        // response.status is the authoritative HTTP status this call just
+        // observed — it must win over extractCallDetail's own `statusCode`
+        // key, which is only present when the orchestrator's error details
+        // bag happened to carry one (e.g. from an APICallError) and is
+        // `undefined` otherwise. Spreading callDetail AFTER statusCode would
+        // let that `undefined` silently clobber the real status.
+        const callDetail = this.extractCallDetail(failureBody?.details);
         retriedAttempts.push({
           attemptNumber: attempt + 1,
           errorMessage: failureBody?.error ?? this.describeError(lastError),
-          statusCode: response.status,
-          ...this.extractCallDetail(failureBody?.details),
+          ...callDetail,
+          statusCode: callDetail.statusCode ?? response.status,
         });
       } catch (err) {
         if (err instanceof Error && err.name === "AbortError") {
@@ -196,6 +214,10 @@ export class OrchestratorService {
         error: `Orchestrator ${path} failed after ${MAX_RETRIES + 1} attempts: ${this.describeError(lastError)}`,
         code: "model_error",
         retriedAttempts,
+        // retriedAttempts already recorded all MAX_RETRIES + 1 real
+        // attempts, including this last one — see retriedAttemptsIncludeFinal's
+        // own docblock.
+        retriedAttemptsIncludeFinal: true,
       },
     };
   }

@@ -3,7 +3,7 @@ import { GuessResult } from "./entities/guess.entity";
 import type { LlmProposal } from "./entities/llm-proposal.entity";
 import { LlmProposalStatus } from "./entities/llm-proposal.entity";
 import type { SolvePrompt } from "./entities/solve-prompt.entity";
-import { SolvePromptType } from "./entities/solve-prompt.entity";
+import { SolvePromptStatus, SolvePromptType } from "./entities/solve-prompt.entity";
 import { buildInitialPrompt, buildRetryPrompt } from "./llm-strategy-runner.service";
 import type { LlmProposalDto, SolvePromptDto } from "./dto/strategy.dto";
 
@@ -31,11 +31,16 @@ export function formatConversation(turns: ConversationTurn[]): string {
  * with the same inputs the runner had in memory at that point: the run's
  * starting word order (computeInitialWordOrder) plus whatever
  * availableWords/lockedInGroups/lastFailedGuess state the *stored* guesses
- * imply. Reconstruction only depends on solve steps that produced a
- * SolvePrompt row (i.e. the orchestrator call returned a parseable
- * response) — a step whose call failed outright (timeout/model error) never
- * got a row and never mutated runner state either, so skipping it here is
- * exactly correct, not a gap.
+ * imply. Every real OpenAI call attempt now gets its own SolvePrompt row,
+ * including ones that failed outright and never produced model text
+ * (SolvePromptStatus.CALL_ERROR — rawResponseText stays null for those).
+ * Those rows never mutated the runner's conversation state, so they don't
+ * correspond to a real transcript turn; the caller (strategy.service.ts's
+ * buildSolvePromptDtos) excludes them from the query before handing prompts
+ * here, and this function additionally filters them out itself below, since
+ * folding one into `history` would corrupt every later step's
+ * reconstructedPrompt for the rest of the run — cheap enough to guard
+ * against directly rather than relying solely on the caller.
  *
  * The runner sends the *entire* conversation history on every call (it's a
  * chat completion, not a one-shot prompt), so `reconstructedPrompt` for step
@@ -56,7 +61,14 @@ export function reconstructSolvePrompts(
     proposalsByPrompt.set(proposal.solvePromptId, list);
   }
 
-  const orderedPrompts = [...solvePrompts].sort((a, b) => a.promptNumber - b.promptNumber);
+  // See the docblock above: a CALL_ERROR row shouldn't be here (the caller
+  // is expected to have already excluded them), but skip any anyway rather
+  // than trust that invariant blindly. Multiple rows can now share one
+  // promptNumber (a step's retried-then-succeeded attempts), so attemptNumber
+  // is a tiebreak keeping a step's own rows in call order.
+  const orderedPrompts = [...solvePrompts]
+    .filter((prompt) => prompt.status !== SolvePromptStatus.CALL_ERROR)
+    .sort((a, b) => a.promptNumber - b.promptNumber || a.attemptNumber - b.attemptNumber);
 
   let availableWords = [...originalWords];
   const lockedInGroups: string[][] = [];
@@ -64,8 +76,9 @@ export function reconstructSolvePrompts(
   // Every earlier step's (user, assistant) turn pair, in order — mirrors the
   // runner's own `messages` array. A step whose orchestrator call failed
   // outright never got appended to the live `messages` either (the runner
-  // pops it back off), so — same as the solve state above — only persisted
-  // SolvePrompt rows ever contribute a turn here.
+  // pops it back off) — CALL_ERROR rows are filtered out of `orderedPrompts`
+  // above for exactly this reason, so every row seen here corresponds to a
+  // real turn.
   const history: ConversationTurn[] = [];
 
   return orderedPrompts.map((prompt) => {

@@ -156,6 +156,24 @@ describe("GuessChainVisualizer", () => {
     expect(screen.queryByText("Parenthetical stripped")).not.toBeInTheDocument();
   });
 
+  it("labels a callError row instead of rendering a blank status pill", async () => {
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [
+        {
+          ...llmDetail.solvePrompts[0]!,
+          status: "callError",
+          rawResponseText: null,
+          proposals: [],
+        },
+      ],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Call failed")).toBeInTheDocument();
+  });
+
   it("falls back to a plain guess list for strategies with no solve-prompt chain", async () => {
     stubFetch(plainDetail);
 

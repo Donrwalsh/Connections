@@ -280,7 +280,12 @@ export type SolvePromptStatusValue =
   | "parsed"
   | "malformedNoAnswerBlock"
   | "malformedGroupCount"
-  | "malformedOther";
+  | "malformedOther"
+  // The OpenAI call itself never produced usable model text (backend:
+  // SolvePromptStatus.CALL_ERROR). These rows are excluded from the
+  // reconstructed guess chain server-side (see prompt-reconstruction.ts),
+  // but the type stays in sync in case they're ever surfaced directly.
+  | "callError";
 
 /** One step of an LLM run's solve loop. `reconstructedPrompt` is inferred by
  * the backend on the fly (prompt text itself isn't stored) — see

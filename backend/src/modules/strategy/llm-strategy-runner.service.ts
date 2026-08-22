@@ -327,20 +327,32 @@ export class LlmStrategyRunner {
         messages.pop();
 
         // The step's terminal failure gets its own row too — previously
-        // this outcome left zero trace in the database.
-        pendingPrompts.push(
-          this.buildCallErrorPromptRow(run.id, globalPromptNumber, promptType, {
-            attemptNumber: finalAttemptNumber,
-            requestBody: outcome.error.requestBody,
-            responseId: outcome.error.responseId,
-            responseHeaders: outcome.error.responseHeaders,
-            responseBody: outcome.error.responseBody,
-            statusCode: outcome.error.statusCode,
-            errorName: outcome.error.errorName,
-            errorMessage: outcome.error.error,
-            isRetryable: outcome.error.isRetryable,
-          }),
-        );
+        // this outcome left zero trace in the database. Skip this when the
+        // orchestrator's own retry loop was exhausted
+        // (outcome.error.retriedAttemptsIncludeFinal) — in that case the
+        // loop above already wrote a CALL_ERROR row for this exact failed
+        // call as the last entry of retriedAttempts, and this aggregate
+        // outcome.error is just a summary of the whole call ("Orchestrator
+        // /solve-assist failed after N attempts: ..."), not a distinct
+        // extra attempt. Every other failure path (terminal 400/409,
+        // timeout, or a terminal error reached after some retries) doesn't
+        // set this flag, since retriedAttempts there holds only attempts
+        // that happened BEFORE this one and still needs its own row.
+        if (!outcome.error.retriedAttemptsIncludeFinal) {
+          pendingPrompts.push(
+            this.buildCallErrorPromptRow(run.id, globalPromptNumber, promptType, {
+              attemptNumber: finalAttemptNumber,
+              requestBody: outcome.error.requestBody,
+              responseId: outcome.error.responseId,
+              responseHeaders: outcome.error.responseHeaders,
+              responseBody: outcome.error.responseBody,
+              statusCode: outcome.error.statusCode,
+              errorName: outcome.error.errorName,
+              errorMessage: outcome.error.error,
+              isRetryable: outcome.error.isRetryable,
+            }),
+          );
+        }
 
         this.classifyFailedCall(outcome.error.code, run, state, maxModelErrors, maxDuplicates, maxMalformed);
       }
