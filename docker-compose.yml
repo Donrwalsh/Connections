@@ -163,7 +163,9 @@ services:
       - backend
 
   worker:
-    build: ./backend
+    build:
+      context: ./backend
+      target: build
     container_name: strategy_worker
     restart: unless-stopped
     environment:
