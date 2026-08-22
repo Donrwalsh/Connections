@@ -228,26 +228,15 @@ export class LlmStrategyRunner {
 
       const outcome = await this.orchestratorService.solveAssist(messages, model, provider);
 
-      // One promptNumber per loop iteration regardless of outcome, so a
-      // step's earlier failed-and-retried OpenAI calls (below) and its
-      // final row all record under the same step number.
+      // One promptNumber per loop iteration.
       globalPromptNumber++;
       const promptType = state.lastFailedGuess
         ? SolvePromptType.RETRY
         : SolvePromptType.INITIAL_SOLVE;
-
-      // Record every OpenAI call attempt that failed and got retried before
-      // this iteration's final outcome — previously discarded entirely, now
-      // each gets its own row so a flaky OpenAI call leaves a trace.
-      const retriedAttempts = outcome.ok
-        ? outcome.data.retriedAttempts
-        : outcome.error.retriedAttempts;
-      for (const attempt of retriedAttempts ?? []) {
-        pendingPrompts.push(
-          this.buildCallErrorPromptRow(run.id, globalPromptNumber, promptType, attempt),
-        );
-      }
-      const finalAttemptNumber = (retriedAttempts?.length ?? 0) + 1;
+      // The orchestrator makes exactly one real OpenAI call per solveAssist
+      // invocation (no client-side retry — see orchestrator.service.ts), so
+      // every step's row is always its own first and only attempt.
+      const attemptNumber = 1;
 
       if (outcome.ok) {
         const data = outcome.data;
@@ -265,7 +254,7 @@ export class LlmStrategyRunner {
         const currentPrompt: Partial<SolvePrompt> = {
           strategyRunId: run.id,
           promptNumber: globalPromptNumber,
-          attemptNumber: finalAttemptNumber,
+          attemptNumber,
           promptType,
           status: SolvePromptStatus.PARSED,
           rawResponseText: data.response,
@@ -326,33 +315,21 @@ export class LlmStrategyRunner {
         // the next retry stack a second consecutive user turn on top of it.
         messages.pop();
 
-        // The step's terminal failure gets its own row too — previously
-        // this outcome left zero trace in the database. Skip this when the
-        // orchestrator's own retry loop was exhausted
-        // (outcome.error.retriedAttemptsIncludeFinal) — in that case the
-        // loop above already wrote a CALL_ERROR row for this exact failed
-        // call as the last entry of retriedAttempts, and this aggregate
-        // outcome.error is just a summary of the whole call ("Orchestrator
-        // /solve-assist failed after N attempts: ..."), not a distinct
-        // extra attempt. Every other failure path (terminal 400/409,
-        // timeout, or a terminal error reached after some retries) doesn't
-        // set this flag, since retriedAttempts there holds only attempts
-        // that happened BEFORE this one and still needs its own row.
-        if (!outcome.error.retriedAttemptsIncludeFinal) {
-          pendingPrompts.push(
-            this.buildCallErrorPromptRow(run.id, globalPromptNumber, promptType, {
-              attemptNumber: finalAttemptNumber,
-              requestBody: outcome.error.requestBody,
-              responseId: outcome.error.responseId,
-              responseHeaders: outcome.error.responseHeaders,
-              responseBody: outcome.error.responseBody,
-              statusCode: outcome.error.statusCode,
-              errorName: outcome.error.errorName,
-              errorMessage: outcome.error.error,
-              isRetryable: outcome.error.isRetryable,
-            }),
-          );
-        }
+        // The step's failure gets its own row too — previously this
+        // outcome left zero trace in the database.
+        pendingPrompts.push(
+          this.buildCallErrorPromptRow(run.id, globalPromptNumber, promptType, {
+            attemptNumber,
+            requestBody: outcome.error.requestBody,
+            responseId: outcome.error.responseId,
+            responseHeaders: outcome.error.responseHeaders,
+            responseBody: outcome.error.responseBody,
+            statusCode: outcome.error.statusCode,
+            errorName: outcome.error.errorName,
+            errorMessage: outcome.error.error,
+            isRetryable: outcome.error.isRetryable,
+          }),
+        );
 
         this.classifyFailedCall(outcome.error.code, run, state, maxModelErrors, maxDuplicates, maxMalformed);
       }
@@ -374,12 +351,11 @@ export class LlmStrategyRunner {
   }
 
   /**
-   * Builds a SolvePrompt row for an OpenAI call attempt that never produced
-   * usable model text — either an earlier attempt this step's backend retry
-   * loop discarded, or the step's own terminal failure. Carries whatever
-   * raw request/response detail the orchestrator captured, so a failed call
-   * still leaves enough to diagnose it (previously these left no row at
-   * all — see orchestrator.service.ts and solver.ts).
+   * Builds a SolvePrompt row for a step's OpenAI call that never produced
+   * usable model text. Carries whatever raw request/response detail the
+   * orchestrator captured, so a failed call still leaves enough to
+   * diagnose it (previously these left no row at all — see
+   * orchestrator.service.ts and solver.ts).
    */
   private buildCallErrorPromptRow(
     strategyRunId: number,

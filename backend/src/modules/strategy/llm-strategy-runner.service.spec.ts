@@ -640,41 +640,34 @@ describe("LlmStrategyRunner", () => {
       }
     });
 
-    it("should write one row per retried attempt plus the successful final attempt, all sharing the step's promptNumber", async () => {
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce({
-        ok: true,
-        data: {
-          response: "### ANSWER\nAPPLE, BANANA, CHERRY, DATE",
-          groups: [["APPLE", "BANANA", "CHERRY", "DATE"]],
-          model: "mistral",
-          latencyMs: 500,
-          retriedAttempts: [
-            { attemptNumber: 1, errorMessage: "model down", statusCode: 502 },
-          ],
-        },
-      });
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
-        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
-      );
+    it("should record attemptNumber 1 on every row, even across repeated outer-loop retries of the same failing step", async () => {
+      jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      process.env.LLM_MAX_MODEL_ERRORS = "3";
+      try {
+        mockOrchestratorService.solveAssist.mockResolvedValue({
+          ok: false,
+          error: { error: "model down", code: "model_error", statusCode: 502 },
+        });
 
-      await runner.runLlmStrategy(100, "llm-openai");
+        await runner.runLlmStrategy(100, "llm-openai");
 
-      const promptRows = mockManager.insert.mock.calls
-        .filter((call) => call[0] === "SolvePrompt")
-        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+        expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(3);
 
-      // Step 1 produced 2 rows (the retried failure + the eventual success),
-      // step 2 produced 1 — 3 total.
-      expect(promptRows).toHaveLength(3);
-      expect(promptRows[0]).toEqual(
-        expect.objectContaining({ promptNumber: 1, attemptNumber: 1, status: "callError" }),
-      );
-      expect(promptRows[1]).toEqual(
-        expect.objectContaining({ promptNumber: 1, attemptNumber: 2, status: "parsed" }),
-      );
-      expect(promptRows[2]).toEqual(
-        expect.objectContaining({ promptNumber: 2, attemptNumber: 1, status: "parsed" }),
-      );
+        const promptRows = mockManager.insert.mock.calls
+          .filter((call) => call[0] === "SolvePrompt")
+          .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+
+        // One row per outer-loop step (no client-side HTTP retry anymore),
+        // each its own promptNumber, every one attemptNumber 1.
+        expect(promptRows).toHaveLength(3);
+        expect(promptRows.map((row) => row.promptNumber)).toEqual([1, 2, 3]);
+        expect(promptRows.every((row) => row.attemptNumber === 1)).toBe(true);
+        expect(promptRows.every((row) => row.status === "callError")).toBe(true);
+      } finally {
+        delete process.env.LLM_MAX_MODEL_ERRORS;
+      }
     });
 
     it("should persist requestBody/responseId/responseHeaders/responseBody on the successful row", async () => {
@@ -708,55 +701,6 @@ describe("LlmStrategyRunner", () => {
           responseBody: { id: "resp_789" },
         }),
       );
-    });
-
-    it("should write exactly 4 CALL_ERROR rows (not 5) when the orchestrator's own retry loop is exhausted", async () => {
-      // Simulates orchestrator.service.ts's executeWithRetry exhaustion
-      // return: 4 real OpenAI call attempts (0..MAX_RETRIES), all recorded
-      // in retriedAttempts, with retriedAttemptsIncludeFinal signaling that
-      // the last of those 4 IS this failure — not a distinct 5th call. Cap
-      // maxModelErrors at 1 so the run terminates after this single
-      // orchestrator.solveAssist call.
-      process.env.LLM_MAX_MODEL_ERRORS = "1";
-      try {
-        mockOrchestratorService.solveAssist.mockResolvedValueOnce({
-          ok: false,
-          error: {
-            error: "Orchestrator /solve-assist failed after 4 attempts: model down",
-            code: "model_error",
-            retriedAttemptsIncludeFinal: true,
-            retriedAttempts: [
-              { attemptNumber: 1, errorMessage: "model down", statusCode: 502 },
-              { attemptNumber: 2, errorMessage: "model down", statusCode: 502 },
-              { attemptNumber: 3, errorMessage: "model down", statusCode: 502 },
-              { attemptNumber: 4, errorMessage: "model down", statusCode: 502 },
-            ],
-          },
-        });
-
-        await runner.runLlmStrategy(100, "llm-openai");
-
-        expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
-
-        const promptRows = mockManager.insert.mock.calls
-          .filter((call) => call[0] === "SolvePrompt")
-          .flatMap((call) => call[1] as Array<Record<string, unknown>>);
-
-        // 4 rows for 4 real calls, not 5 — no extra row duplicating the
-        // last attempt via the generic aggregate error message.
-        expect(promptRows).toHaveLength(4);
-        expect(promptRows.map((row) => row.attemptNumber)).toEqual([1, 2, 3, 4]);
-        expect(promptRows.every((row) => row.status === "callError")).toBe(true);
-        expect(promptRows.every((row) => row.promptNumber === 1)).toBe(true);
-        expect(
-          promptRows.some(
-            (row) =>
-              typeof row.errorMessage === "string" && row.errorMessage.includes("failed after"),
-          ),
-        ).toBe(false);
-      } finally {
-        delete process.env.LLM_MAX_MODEL_ERRORS;
-      }
     });
 
     it("should parse a string responseBody into JSON when writing a CALL_ERROR row, and fall back to the raw string when it isn't valid JSON", async () => {
