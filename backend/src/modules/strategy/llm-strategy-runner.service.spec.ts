@@ -422,7 +422,14 @@ describe("LlmStrategyRunner", () => {
 
         expect(result).toEqual({ status: StrategyRunStatus.DUPLICATE, guessCount: 0 });
         expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(3);
-        expect(mockManager.insert).not.toHaveBeenCalled();
+        // Every failed call now gets its own CALL_ERROR SolvePrompt row —
+        // previously a duplicate_group failure left no trace at all.
+        const promptRows = mockManager.insert.mock.calls
+          .filter((call) => call[0] === "SolvePrompt")
+          .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+        expect(promptRows).toHaveLength(3);
+        expect(promptRows.every((row) => row.status === "callError")).toBe(true);
+        expect(mockManager.insert).not.toHaveBeenCalledWith("Guess", expect.anything());
         expect(mockManager.save).toHaveBeenCalledWith(
           StrategyRun,
           expect.objectContaining({ status: StrategyRunStatus.DUPLICATE }),
@@ -533,7 +540,12 @@ describe("LlmStrategyRunner", () => {
 
       expect(result).toEqual({ status: StrategyRunStatus.MALFORMED_RESPONSE, guessCount: 0 });
       expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(3);
-      expect(mockManager.insert).not.toHaveBeenCalled();
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows).toHaveLength(3);
+      expect(promptRows.every((row) => row.status === "callError")).toBe(true);
+      expect(mockManager.insert).not.toHaveBeenCalledWith("Guess", expect.anything());
       expect(mockManager.save).toHaveBeenCalledWith(
         StrategyRun,
         expect.objectContaining({ status: StrategyRunStatus.MALFORMED_RESPONSE }),
@@ -577,11 +589,158 @@ describe("LlmStrategyRunner", () => {
 
         expect(result).toEqual({ status: StrategyRunStatus.ERROR, guessCount: 0 });
         expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(2);
-        expect(mockManager.insert).not.toHaveBeenCalled();
+        const promptRows = mockManager.insert.mock.calls
+          .filter((call) => call[0] === "SolvePrompt")
+          .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+        expect(promptRows).toHaveLength(2);
+        expect(promptRows.every((row) => row.status === "callError")).toBe(true);
+        expect(mockManager.insert).not.toHaveBeenCalledWith("Guess", expect.anything());
         expect(mockManager.save).toHaveBeenCalledWith(
           StrategyRun,
           expect.objectContaining({ status: StrategyRunStatus.ERROR }),
         );
+      } finally {
+        delete process.env.LLM_MAX_MODEL_ERRORS;
+      }
+    });
+
+    it("should write a CALL_ERROR row for a terminal failure, carrying whatever raw detail the orchestrator returned", async () => {
+      // Cap at 1 so the run terminates after the single failed call below,
+      // rather than retrying into real (unmocked) exponential backoff delays.
+      process.env.LLM_MAX_MODEL_ERRORS = "1";
+      try {
+        mockOrchestratorService.solveAssist.mockResolvedValue({
+          ok: false,
+          error: {
+            error: "model down",
+            code: "model_error",
+            statusCode: 502,
+            errorName: "AI_APICallError",
+            isRetryable: true,
+          },
+        });
+
+        await runner.runLlmStrategy(100, "llm-openai");
+
+        const promptRows = mockManager.insert.mock.calls
+          .filter((call) => call[0] === "SolvePrompt")
+          .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+        expect(promptRows[0]).toEqual(
+          expect.objectContaining({
+            status: "callError",
+            attemptNumber: 1,
+            statusCode: 502,
+            errorName: "AI_APICallError",
+            errorMessage: "model down",
+            isRetryable: true,
+          }),
+        );
+      } finally {
+        delete process.env.LLM_MAX_MODEL_ERRORS;
+      }
+    });
+
+    it("should write one row per retried attempt plus the successful final attempt, all sharing the step's promptNumber", async () => {
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce({
+        ok: true,
+        data: {
+          response: "### ANSWER\nAPPLE, BANANA, CHERRY, DATE",
+          groups: [["APPLE", "BANANA", "CHERRY", "DATE"]],
+          model: "mistral",
+          latencyMs: 500,
+          retriedAttempts: [
+            { attemptNumber: 1, errorMessage: "model down", statusCode: 502 },
+          ],
+        },
+      });
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      );
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+
+      // Step 1 produced 2 rows (the retried failure + the eventual success),
+      // step 2 produced 1 — 3 total.
+      expect(promptRows).toHaveLength(3);
+      expect(promptRows[0]).toEqual(
+        expect.objectContaining({ promptNumber: 1, attemptNumber: 1, status: "callError" }),
+      );
+      expect(promptRows[1]).toEqual(
+        expect.objectContaining({ promptNumber: 1, attemptNumber: 2, status: "parsed" }),
+      );
+      expect(promptRows[2]).toEqual(
+        expect.objectContaining({ promptNumber: 2, attemptNumber: 1, status: "parsed" }),
+      );
+    });
+
+    it("should persist requestBody/responseId/responseHeaders/responseBody on the successful row", async () => {
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce({
+        ok: true,
+        data: {
+          response: "### ANSWER\nAPPLE, BANANA, CHERRY, DATE",
+          groups: [["APPLE", "BANANA", "CHERRY", "DATE"]],
+          model: "mistral",
+          latencyMs: 500,
+          requestBody: { model: "mistral" },
+          responseId: "resp_789",
+          responseHeaders: { "x-request-id": "req_789" },
+          responseBody: { id: "resp_789" },
+        },
+      });
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      );
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(
+        expect.objectContaining({
+          requestBody: { model: "mistral" },
+          responseId: "resp_789",
+          responseHeaders: { "x-request-id": "req_789" },
+          responseBody: { id: "resp_789" },
+        }),
+      );
+    });
+
+    it("should parse a string responseBody into JSON when writing a CALL_ERROR row, and fall back to the raw string when it isn't valid JSON", async () => {
+      jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      process.env.LLM_MAX_MODEL_ERRORS = "2";
+      try {
+        mockOrchestratorService.solveAssist
+          .mockResolvedValueOnce({
+            ok: false,
+            error: {
+              error: "rate limited",
+              code: "model_error",
+              responseBody: '{"error":{"message":"Rate limit exceeded"}}',
+            },
+          })
+          .mockResolvedValueOnce({
+            ok: false,
+            error: {
+              error: "gateway error",
+              code: "model_error",
+              responseBody: "<html>502 Bad Gateway</html>",
+            },
+          });
+
+        await runner.runLlmStrategy(100, "llm-openai");
+
+        const promptRows = mockManager.insert.mock.calls
+          .filter((call) => call[0] === "SolvePrompt")
+          .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+        expect(promptRows[0].responseBody).toEqual({ error: { message: "Rate limit exceeded" } });
+        expect(promptRows[1].responseBody).toBe("<html>502 Bad Gateway</html>");
       } finally {
         delete process.env.LLM_MAX_MODEL_ERRORS;
       }

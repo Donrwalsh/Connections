@@ -228,6 +228,27 @@ export class LlmStrategyRunner {
 
       const outcome = await this.orchestratorService.solveAssist(messages, model, provider);
 
+      // One promptNumber per loop iteration regardless of outcome, so a
+      // step's earlier failed-and-retried OpenAI calls (below) and its
+      // final row all record under the same step number.
+      globalPromptNumber++;
+      const promptType = state.lastFailedGuess
+        ? SolvePromptType.RETRY
+        : SolvePromptType.INITIAL_SOLVE;
+
+      // Record every OpenAI call attempt that failed and got retried before
+      // this iteration's final outcome — previously discarded entirely, now
+      // each gets its own row so a flaky OpenAI call leaves a trace.
+      const retriedAttempts = outcome.ok
+        ? outcome.data.retriedAttempts
+        : outcome.error.retriedAttempts;
+      for (const attempt of retriedAttempts ?? []) {
+        pendingPrompts.push(
+          this.buildCallErrorPromptRow(run.id, globalPromptNumber, promptType, attempt),
+        );
+      }
+      const finalAttemptNumber = (retriedAttempts?.length ?? 0) + 1;
+
       if (outcome.ok) {
         const data = outcome.data;
         state.consecutiveModelErrors = 0;
@@ -241,13 +262,10 @@ export class LlmStrategyRunner {
         messages.push({ role: "assistant", content: data.response });
 
         // Create a SolvePrompt row for this LLM call.
-        globalPromptNumber++;
-        const promptType = state.lastFailedGuess
-          ? SolvePromptType.RETRY
-          : SolvePromptType.INITIAL_SOLVE;
         const currentPrompt: Partial<SolvePrompt> = {
           strategyRunId: run.id,
           promptNumber: globalPromptNumber,
+          attemptNumber: finalAttemptNumber,
           promptType,
           status: SolvePromptStatus.PARSED,
           rawResponseText: data.response,
@@ -257,6 +275,10 @@ export class LlmStrategyRunner {
           completionTokens: data.usage?.completionTokens ?? null,
           totalTokens: data.usage?.totalTokens ?? null,
           latencyMs: data.latencyMs,
+          requestBody: data.requestBody ?? null,
+          responseId: data.responseId ?? null,
+          responseHeaders: data.responseHeaders ?? null,
+          responseBody: this.toJsonbResponseBody(data.responseBody),
         };
         pendingPrompts.push(currentPrompt);
 
@@ -304,6 +326,22 @@ export class LlmStrategyRunner {
         // the next retry stack a second consecutive user turn on top of it.
         messages.pop();
 
+        // The step's terminal failure gets its own row too — previously
+        // this outcome left zero trace in the database.
+        pendingPrompts.push(
+          this.buildCallErrorPromptRow(run.id, globalPromptNumber, promptType, {
+            attemptNumber: finalAttemptNumber,
+            requestBody: outcome.error.requestBody,
+            responseId: outcome.error.responseId,
+            responseHeaders: outcome.error.responseHeaders,
+            responseBody: outcome.error.responseBody,
+            statusCode: outcome.error.statusCode,
+            errorName: outcome.error.errorName,
+            errorMessage: outcome.error.error,
+            isRetryable: outcome.error.isRetryable,
+          }),
+        );
+
         this.classifyFailedCall(outcome.error.code, run, state, maxModelErrors, maxDuplicates, maxMalformed);
       }
 
@@ -321,6 +359,66 @@ export class LlmStrategyRunner {
     }
 
     return { status: run.status, guessCount: state.guessCount };
+  }
+
+  /**
+   * Builds a SolvePrompt row for an OpenAI call attempt that never produced
+   * usable model text — either an earlier attempt this step's backend retry
+   * loop discarded, or the step's own terminal failure. Carries whatever
+   * raw request/response detail the orchestrator captured, so a failed call
+   * still leaves enough to diagnose it (previously these left no row at
+   * all — see orchestrator.service.ts and solver.ts).
+   */
+  private buildCallErrorPromptRow(
+    strategyRunId: number,
+    promptNumber: number,
+    promptType: SolvePromptType,
+    attempt: {
+      attemptNumber: number;
+      requestBody?: unknown;
+      responseId?: string;
+      responseHeaders?: Record<string, string>;
+      responseBody?: unknown;
+      statusCode?: number;
+      errorName?: string;
+      errorMessage?: string;
+      isRetryable?: boolean;
+    },
+  ): Partial<SolvePrompt> {
+    return {
+      strategyRunId,
+      promptNumber,
+      attemptNumber: attempt.attemptNumber,
+      promptType,
+      status: SolvePromptStatus.CALL_ERROR,
+      requestBody: attempt.requestBody ?? null,
+      responseId: attempt.responseId ?? null,
+      responseHeaders: attempt.responseHeaders ?? null,
+      responseBody: this.toJsonbResponseBody(attempt.responseBody),
+      statusCode: attempt.statusCode ?? null,
+      errorName: attempt.errorName ?? null,
+      errorMessage: attempt.errorMessage ?? null,
+      isRetryable: attempt.isRetryable ?? null,
+    };
+  }
+
+  /**
+   * `responseBody` is a `jsonb` column, which requires a valid JSON value.
+   * On success it's always an object (AI SDK gives back the parsed OpenAI
+   * response). On failure it's `APICallError.responseBody` — a raw string
+   * with no guarantee of being valid JSON (could be a gateway HTML error
+   * page, plain text, etc). Parse it when possible so the column stays
+   * queryable, since real OpenAI error bodies are JSON; otherwise store the
+   * raw string itself, which is still valid jsonb — this never fails to
+   * write and never silently drops the original text.
+   */
+  private toJsonbResponseBody(value: unknown): unknown {
+    if (typeof value !== "string") return value ?? null;
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
   }
 
   /**
