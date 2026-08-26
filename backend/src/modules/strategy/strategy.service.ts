@@ -37,6 +37,7 @@ import { reconstructSolvePrompts } from "./prompt-reconstruction";
 import {
   SupportedModelService,
   PriceHistoryEntry,
+  SupportedModelWithRate,
 } from "../supported-model/supported-model.service";
 
 const GROUP_SIZE = 4;
@@ -456,7 +457,15 @@ export class StrategyService {
       return cached.value;
     }
 
-    const [runs, guessCountRows, tokenRows, priceHistory, queuedCounts, totalPuzzles] = await Promise.all([
+    const [
+      runs,
+      guessCountRows,
+      tokenRows,
+      priceHistory,
+      currentModels,
+      queuedCounts,
+      totalPuzzles,
+    ] = await Promise.all([
       this.strategyRunRepo.find({
         select: {
           id: true,
@@ -489,6 +498,7 @@ export class StrategyService {
           completionTokens: string | null;
         }>(),
       this.supportedModelService.findPriceHistory(),
+      this.supportedModelService.findAll(),
       this.queuedCountsByKey(),
       this.puzzleRepo.count(),
     ]);
@@ -504,6 +514,11 @@ export class StrategyService {
         promptTokens: Number(row.promptTokens ?? 0),
         completionTokens: Number(row.completionTokens ?? 0),
       });
+    }
+
+    const metadataByModel = new Map<string, SupportedModelWithRate>();
+    for (const model of currentModels) {
+      metadataByModel.set(leaderboardKey(model.strategyName, model.modelName), model);
     }
 
     const priceHistoryByModel = new Map<string, PriceHistoryEntry[]>();
@@ -595,6 +610,7 @@ export class StrategyService {
       // Failed. Deterministic/shuffle strategies are unaffected.
       const displayCompleted = acc.completed + (isLlmRow ? acc.lostRuns : 0);
       const displayFailed = acc.failed - (isLlmRow ? acc.lostRuns : 0);
+      const metadata = metadataByModel.get(leaderboardKey(acc.strategyName, acc.modelName));
 
       return {
         id: acc.modelName ?? acc.strategyName,
@@ -622,6 +638,9 @@ export class StrategyService {
             : acc.durationsMs.reduce((a, b) => a + b, 0) / acc.durationsMs.length,
         avgCostUsd: totalCostUsd === null ? null : totalCostUsd / acc.costsUsd.length,
         totalCostUsd,
+        contextWindow: metadata?.contextWindow ?? null,
+        paramCount: metadata?.paramCount ?? null,
+        providerDescription: metadata?.providerDescription ?? null,
       };
     });
 

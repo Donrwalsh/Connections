@@ -98,6 +98,12 @@ export interface LeaderboardRow {
    * tokens. */
   avgCostUsd: number | null;
   totalCostUsd: number | null;
+  /** Current model metadata (not run-time-historical, unlike cost) — see
+   * SupportedModel on the backend. null until the model has been through a
+   * metadata refresh, or for deterministic/shuffle rows. */
+  contextWindow: number | null;
+  paramCount: number | null;
+  providerDescription: string | null;
 }
 
 export interface Leaderboard {
@@ -174,6 +180,10 @@ export interface SupportedModelRecord {
   inputCostPerMillionTokens: number | null;
   outputCostPerMillionTokens: number | null;
   supported: boolean;
+  contextWindow: number | null;
+  paramCount: number | null;
+  providerDescription: string | null;
+  releaseDate: string | null;
 }
 
 /** The backend tracks two separate, non-overlapping free-token programs —

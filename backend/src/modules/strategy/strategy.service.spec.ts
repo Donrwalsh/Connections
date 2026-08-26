@@ -1462,6 +1462,40 @@ describe("StrategyService", () => {
       expect(row.avgCostUsd).toBeNull();
     });
 
+    it("should include each row's current context window, param count, and provider description", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([
+        {
+          id: 1,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          status: StrategyRunStatus.COMPLETED,
+          puzzleId: 1,
+          startedAt: new Date("2026-01-01T00:00:00Z"),
+          finishedAt: new Date("2026-01-01T00:01:00Z"),
+        },
+      ]);
+      mockGuessCounts([]);
+      mockPuzzleRepo.count.mockResolvedValueOnce(10);
+      mockSupportedModelService.findAll.mockResolvedValueOnce([
+        {
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          contextWindow: 128000,
+          paramCount: null,
+          providerDescription: "Fast and cheap.",
+        },
+      ]);
+
+      const result = await service.getLeaderboard();
+
+      const row = result.llm.find((r) => r.id === "gpt-4.1-nano")!;
+      expect(row).toMatchObject({
+        contextWindow: 128000,
+        paramCount: null,
+        providerDescription: "Fast and cheap.",
+      });
+    });
+
     it("should merge queued BullMQ counts onto existing rows only, never inventing new ones", async () => {
       mockStrategyRunRepo.find.mockResolvedValueOnce([
         {
