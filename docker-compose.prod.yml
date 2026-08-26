@@ -53,8 +53,8 @@ services:
     # Only publish if the local Ollama worker needs to reach this database
     # directly (no private tunnel available) — and set REDIS_PASSWORD +
     # a non-default POSTGRES_PASSWORD before doing so.
-    # ports:
-    #   - "5432:5432"
+    ports:
+      - "5432:5432"
 
   adminer:
     image: adminer:latest
@@ -94,8 +94,8 @@ services:
       retries: 5
     # Only publish if the local Ollama worker has no private tunnel to this
     # host — see the note above db's ports.
-    # ports:
-    #   - "6379:6379"
+    ports:
+      - "6379:6379"
 
   orchestrator:
     build: ./orchestrator
