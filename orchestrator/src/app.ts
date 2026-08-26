@@ -109,6 +109,7 @@ app.post(
         parsed.data.messages,
         parsed.data.model,
         parsed.data.provider,
+        parsed.data.contextWindow,
         c.req.raw.signal,
       );
       const response: SolveAssistResponse = result;

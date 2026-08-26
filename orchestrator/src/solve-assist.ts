@@ -100,12 +100,14 @@ export function parseAnswerGroups(responseText: string): string[][] {
  * `model`/`provider` override the env-configured default — the backend
  * strategy runner sends both on every call, since it's already validated
  * `model` against its own SupportedModel table before this endpoint is ever
- * hit.
+ * hit. `contextWindow` similarly overrides MODEL_CONTEXT_WINDOW for Ollama's
+ * num_ctx (see provider.ts's getModel).
  */
 export async function solveAssist(
   messages: ChatMessage[],
   model?: string,
   provider?: ModelProvider,
+  contextWindow?: number,
   abortSignal?: AbortSignal,
 ): Promise<SolveAssistResult> {
   const resolvedProvider = provider ?? defaultProvider();
@@ -122,7 +124,7 @@ export async function solveAssist(
 
   try {
     const result = await generateText({
-      model: getModel(resolvedProvider, model),
+      model: getModel(resolvedProvider, model, contextWindow),
       messages,
       temperature: SOLVE_ASSIST_TEMPERATURE,
       // Both default to false — without this, result.request.body and

@@ -48,6 +48,17 @@ describe("getModel", () => {
     });
   });
 
+  it("uses an explicit contextWindow over MODEL_CONTEXT_WINDOW when given", () => {
+    vi.stubEnv("MODEL_CONTEXT_WINDOW", "2048");
+
+    getModel("ollama", undefined, 131072);
+
+    const modelFactory = createOllamaMock.mock.results[0].value;
+    expect(modelFactory).toHaveBeenCalledWith("llama3.2", {
+      options: { num_ctx: 131072 },
+    });
+  });
+
   it("resolves the OpenAI model without num_ctx", () => {
     vi.stubEnv("MODEL_CONTEXT_WINDOW", "2048");
 
