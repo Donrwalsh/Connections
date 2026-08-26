@@ -584,10 +584,21 @@ export class LlmStrategyRunner {
     for (const currentProposal of proposalEntries) {
       const guessWords = currentProposal.words!;
 
-      // Skip proposals containing words that were already solved by an
-      // earlier guess in this loop.
-      const isWordAlreadySolved = guessWords.some((w) => !run.availableWords.includes(w));
-      if (isWordAlreadySolved) {
+      // A word missing from run.availableWords is either already solved by
+      // an earlier guess in this loop (expected, boring — every word in
+      // state.lockedInGroups is still a real puzzle word) or was never part
+      // of the puzzle at all (a genuine model hallucination). Both skip the
+      // proposal the same way today; only the second is worth flagging.
+      const isWordMissingFromAvailable = guessWords.some((w) => !run.availableWords.includes(w));
+      if (isWordMissingFromAvailable) {
+        const originalPuzzleWords = [...run.availableWords, ...state.lockedInGroups.flat()];
+        const hasHallucinatedWord = guessWords.some((w) => !originalPuzzleWords.includes(w));
+        if (hasHallucinatedWord) {
+          const issueTags = currentProposal.solvePrompt!.issueTags;
+          if (!issueTags.includes(SolvePromptIssueTag.WORD_NOT_ON_LIST)) {
+            issueTags.push(SolvePromptIssueTag.WORD_NOT_ON_LIST);
+          }
+        }
         continue;
       }
 

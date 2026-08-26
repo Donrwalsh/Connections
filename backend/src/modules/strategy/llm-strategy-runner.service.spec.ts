@@ -427,6 +427,87 @@ describe("LlmStrategyRunner", () => {
       expect(promptRows[0]).toEqual(expect.objectContaining({ issueTags: [] }));
     });
 
+    it("should flag wordNotOnList when a proposed word was never part of the puzzle", async () => {
+      // OCEAN was never one of the puzzle's 8 words — the proposal is
+      // skipped exactly as it is today (silently, no guess produced), but
+      // now the prompt gets flagged. The run only finishes once the second
+      // call proposes both real groups correctly.
+      mockOrchestratorService.solveAssist
+        .mockResolvedValueOnce(makeAssistResponse([["OCEAN", "BANANA", "CHERRY", "DATE"]]))
+        .mockResolvedValueOnce(
+          makeAssistResponse([
+            ["APPLE", "BANANA", "CHERRY", "DATE"],
+            ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+          ]),
+        );
+
+      const result = await runner.runLlmStrategy(100, "llm-openai");
+
+      expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
+
+      const inserted = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "Guess")
+        .flatMap((call) => call[1] as Array<{ words: string[] }>);
+      // The hallucinated-word proposal from call 1 never became a guess.
+      expect(inserted.every((g) => !g.words.includes("OCEAN"))).toBe(true);
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(expect.objectContaining({ issueTags: ["wordNotOnList"] }));
+      expect(promptRows[1]).toEqual(expect.objectContaining({ issueTags: [] }));
+    });
+
+    it("should not flag a proposal that only reuses an already-solved word", async () => {
+      // Call 1 solves group 1 (APPLE/BANANA/CHERRY/DATE). Call 2 proposes a
+      // group that reuses APPLE (now already solved, not hallucinated) plus
+      // 3 of the remaining real words — still skipped the same way today
+      // (APPLE is missing from the now-shrunk availableWords), but this is
+      // an expected, boring case and must NOT get wordNotOnList. Call 3
+      // finishes the run by proposing group 2 correctly.
+      mockOrchestratorService.solveAssist
+        .mockResolvedValueOnce(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]))
+        .mockResolvedValueOnce(makeAssistResponse([["APPLE", "EGGPLANT", "FIG", "GRAPE"]]))
+        .mockResolvedValueOnce(makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]));
+
+      const result = await runner.runLlmStrategy(100, "llm-openai");
+
+      expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      // promptRows[1] is call 2's row — the reused-word call.
+      expect(promptRows[1]).toEqual(expect.objectContaining({ issueTags: [] }));
+    });
+
+    it("should carry both parentheticalStripped and wordNotOnList when a response trips both at once", async () => {
+      const response =
+        "### GROUPS\n#### Group 1\nCategory: Fruits\n" +
+        "Words: OCEAN, BANANA, CHERRY, DATE (a hallucinated word here)\n\n" +
+        "### ANSWER\nOCEAN, BANANA, CHERRY, DATE";
+      mockOrchestratorService.solveAssist
+        .mockResolvedValueOnce(makeAssistResponse([["OCEAN", "BANANA", "CHERRY", "DATE"]], response))
+        .mockResolvedValueOnce(
+          makeAssistResponse([
+            ["APPLE", "BANANA", "CHERRY", "DATE"],
+            ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+          ]),
+        );
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(
+        expect.objectContaining({
+          issueTags: expect.arrayContaining(["parentheticalStripped", "wordNotOnList"]),
+        }),
+      );
+      expect((promptRows[0].issueTags as string[])).toHaveLength(2);
+    });
+
     it("should send conversation history with prior guesses as RETRY prompts", async () => {
       // First call proposes a group that spans both answer categories, so
       // it fails and triggers a RETRY prompt on the next call.
