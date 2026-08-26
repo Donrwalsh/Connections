@@ -36,6 +36,12 @@ describe("solveAssist", () => {
 
     const result = await solveAssist(MESSAGES);
 
+    // The mock ignores `include`, so this only guards against the option
+    // being dropped — the real AI SDK gates request/response body behind it
+    // (default false) and would silently leave both undefined without it.
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ include: { requestBody: true, responseBody: true } }),
+    );
     expect(result.requestBody).toEqual({
       model: "gpt-4.1-nano",
       messages: [{ role: "user", content: "solve this puzzle" }],

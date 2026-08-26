@@ -124,6 +124,11 @@ export async function solveAssist(
       model: getModel(resolvedProvider, model),
       messages,
       temperature: SOLVE_ASSIST_TEMPERATURE,
+      // Both default to false — without this, result.request.body and
+      // result.response.body stay undefined on a successful call (the
+      // rejection path's APICallError.responseBody isn't gated the same
+      // way, which is why only failures were landing in SolvePrompt).
+      include: { requestBody: true, responseBody: true },
     });
     latencyMs = Date.now() - startTime;
     text = result.text;
