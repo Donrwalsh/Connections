@@ -276,6 +276,26 @@ describe("SupportedModelService", () => {
     });
   });
 
+  describe("getContextWindow", () => {
+    it("should return the model's contextWindow when the row exists", async () => {
+      mockRepo.findOne.mockResolvedValueOnce({ contextWindow: 131072 });
+      expect(await service.getContextWindow("llm-ollama", "mistral-nemo")).toBe(131072);
+      expect(mockRepo.findOne).toHaveBeenCalledWith({
+        where: { strategyName: "llm-ollama", modelName: "mistral-nemo" },
+      });
+    });
+
+    it("should return null when the model has no known context window yet", async () => {
+      mockRepo.findOne.mockResolvedValueOnce({ contextWindow: null });
+      expect(await service.getContextWindow("llm-ollama", "mistral-nemo")).toBeNull();
+    });
+
+    it("should return null when no such model exists", async () => {
+      mockRepo.findOne.mockResolvedValueOnce(null);
+      expect(await service.getContextWindow("llm-ollama", "unknown")).toBeNull();
+    });
+  });
+
   describe("findModelNamesByFreeTier", () => {
     it("should return only model names matching the given free tier", async () => {
       mockRepo.find.mockResolvedValueOnce([

@@ -170,6 +170,17 @@ export class SupportedModelService {
   }
 
   /**
+   * The model's real context window, if known — used to configure Ollama's
+   * num_ctx per-model instead of the flat MODEL_CONTEXT_WINDOW default. null
+   * when the model doesn't exist or hasn't been refreshed yet; callers fall
+   * back to the env default in that case (see provider.ts).
+   */
+  async getContextWindow(strategyName: string, modelName: string): Promise<number | null> {
+    const row = await this.repo.findOne({ where: { strategyName, modelName } });
+    return row?.contextWindow ?? null;
+  }
+
+  /**
    * Model names currently assigned to a free-tier program (see FreeTierId
    * in ../strategy/free-tier-usage.service.ts), from the freeTier column —
    * consumed only by FreeTierUsageService.getUsage. Filtered to `supported:
