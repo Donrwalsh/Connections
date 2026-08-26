@@ -13,7 +13,12 @@ import {
 } from "../../strategies";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { LlmProposal, LlmProposalStatus } from "./entities/llm-proposal.entity";
-import { SolvePrompt, SolvePromptType, SolvePromptStatus } from "./entities/solve-prompt.entity";
+import {
+  SolvePrompt,
+  SolvePromptType,
+  SolvePromptStatus,
+  SolvePromptIssueTag,
+} from "./entities/solve-prompt.entity";
 import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/strategy-run.entity";
 import { OrchestratorService, type ChatMessage, type SolveErrorCode } from "./orchestrator.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
@@ -270,7 +275,7 @@ export class LlmStrategyRunner {
           promptType,
           status: SolvePromptStatus.PARSED,
           rawResponseText: data.response,
-          wordsHadParenthetical: false,
+          issueTags: [],
           temperature,
           promptTokens: data.usage?.promptTokens ?? null,
           completionTokens: data.usage?.completionTokens ?? null,
@@ -294,13 +299,13 @@ export class LlmStrategyRunner {
             run.finishedAt = new Date();
           }
         } else {
-          const { proposalWords, categoryMap, hadParenthetical } = this.parseGroupsSection(
+          const { proposalWords, categoryMap, issueTags } = this.parseGroupsSection(
             data.response ?? "",
             groups,
           );
           // currentPrompt is the same object already queued in
           // pendingPrompts, so mutating it here still reflects at flush time.
-          currentPrompt.wordsHadParenthetical = hadParenthetical;
+          currentPrompt.issueTags = issueTags;
 
           const proposalEntries = this.buildProposalEntries(
             proposalWords,
@@ -432,10 +437,17 @@ export class LlmStrategyRunner {
   private parseGroupsSection(
     responseText: string,
     fallbackGroups: string[][],
-  ): { proposalWords: string[][]; categoryMap: Map<number, string>; hadParenthetical: boolean } {
+  ): { proposalWords: string[][]; categoryMap: Map<number, string>; issueTags: string[] } {
     const categoryMap = new Map<number, string>();
     const parsedGroupWords: string[][] = [];
-    let hadParenthetical = false;
+    const tags = new Set<string>();
+    const wrongCountGroupNumbers = new Set<number>();
+    // Highest "Group N" heading number the response itself mentioned — the
+    // catch-all below checks against this, never against the puzzle's
+    // total remaining group count. The model normally addresses just one
+    // group per call (the common case, not an error), so a response that
+    // simply doesn't mention a group at all must never be flagged.
+    let maxGroupNum = 0;
 
     // Scope parsing to the ### GROUPS section so scratchpad content
     // (which may itself mention "Group" or contain stray colons) can't
@@ -453,6 +465,7 @@ export class LlmStrategyRunner {
       if (!headingMatch) continue;
 
       const groupNum = parseInt(headingMatch[1], 10);
+      maxGroupNum = Math.max(maxGroupNum, groupNum);
       const categoryMatch = chunk.match(/Category:\s*([^\n]+)/i);
       const wordsMatch = chunk.match(/Words:\s*([^\n]+)/i);
 
@@ -469,7 +482,7 @@ export class LlmStrategyRunner {
         // avoids that stateful pitfall entirely.
         const strippedWordsLine = rawWordsLine.replace(WORDS_PARENTHETICAL_RE, "");
         if (strippedWordsLine !== rawWordsLine) {
-          hadParenthetical = true;
+          tags.add(SolvePromptIssueTag.PARENTHETICAL_STRIPPED);
         }
 
         const wordsLine = strippedWordsLine
@@ -479,16 +492,39 @@ export class LlmStrategyRunner {
 
         if (wordsLine.length === GROUP_SIZE) {
           parsedGroupWords[groupNum - 1] = wordsLine;
+        } else {
+          // A Words: line was found and split, but produced the wrong word
+          // count — the group is dropped (same as before), now flagged so
+          // it's queryable rather than silently vanishing.
+          tags.add(SolvePromptIssueTag.GROUP_COUNT_OFF);
+          wrongCountGroupNumbers.add(groupNum);
         }
       }
     }
 
     // Use parsed words from the GROUPS block if available; fall back to the
     // already-parsed ### ANSWER lines.
-    const sourceGroups = parsedGroupWords.length > 0 ? parsedGroupWords : fallbackGroups;
+    const usedStructuredParse = parsedGroupWords.length > 0;
+    const sourceGroups = usedStructuredParse ? parsedGroupWords : fallbackGroups;
     const proposalWords = sourceGroups.map((group) => group.map((item) => item.trim()));
 
-    return { proposalWords, categoryMap, hadParenthetical };
+    // Catch-all: within the range of group numbers this response's own
+    // headings actually mentioned (1..maxGroupNum), a group number that
+    // never landed in parsedGroupWords and isn't already explained by a
+    // wrong word count is a failure shape this parser doesn't have a name
+    // for yet — e.g. a heading with no Words: line at all, or a skipped
+    // number between two real headings. Only checked when the structured
+    // GROUPS-block parse actually found something to work with — a total
+    // fallback to the ### ANSWER block has no per-group visibility to check.
+    if (usedStructuredParse) {
+      for (let groupNum = 1; groupNum <= maxGroupNum; groupNum++) {
+        if (!parsedGroupWords[groupNum - 1] && !wrongCountGroupNumbers.has(groupNum)) {
+          tags.add(SolvePromptIssueTag.UNCLASSIFIED);
+        }
+      }
+    }
+
+    return { proposalWords, categoryMap, issueTags: Array.from(tags) };
   }
 
   /**

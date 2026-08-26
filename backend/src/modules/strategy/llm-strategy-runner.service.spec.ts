@@ -295,8 +295,8 @@ describe("LlmStrategyRunner", () => {
         .filter((call) => call[0] === "SolvePrompt")
         .flatMap((call) => call[1] as Array<Record<string, unknown>>);
       expect(promptRows).toEqual([
-        expect.objectContaining({ wordsHadParenthetical: true, rawResponseText: responseOne }),
-        expect.objectContaining({ wordsHadParenthetical: true, rawResponseText: responseTwo }),
+        expect.objectContaining({ issueTags: ["parentheticalStripped"], rawResponseText: responseOne }),
+        expect.objectContaining({ issueTags: ["parentheticalStripped"], rawResponseText: responseTwo }),
       ]);
     });
 
@@ -316,7 +316,91 @@ describe("LlmStrategyRunner", () => {
       const promptRows = mockManager.insert.mock.calls
         .filter((call) => call[0] === "SolvePrompt")
         .flatMap((call) => call[1] as Array<Record<string, unknown>>);
-      expect(promptRows[0]).toEqual(expect.objectContaining({ wordsHadParenthetical: false }));
+      expect(promptRows[0]).toEqual(expect.objectContaining({ issueTags: [] }));
+    });
+
+    it("should flag groupCountOff when a Words: line splits to the wrong word count, and still solve from the group that parsed fine", async () => {
+      // Group 1's Words: line is missing DATE (3 words, not 4) — dropped
+      // from proposals, same as today, but now flagged. Group 2 parses
+      // fine and still becomes a guess.
+      const response =
+        "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY\n\n" +
+        "#### Group 2\nCategory: Misc\nWords: EGGPLANT, FIG, GRAPE, HONEY\n\n" +
+        "### ANSWER\nEGGPLANT, FIG, GRAPE, HONEY";
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]], response),
+      );
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]),
+      );
+
+      const result = await runner.runLlmStrategy(100, "llm-openai");
+
+      expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
+
+      const proposalRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "LlmProposal")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      // Only group 2 ever became a proposal from the first call.
+      expect(proposalRows.filter((p) => p.words === undefined)).toHaveLength(0);
+      expect(proposalRows[0]).toEqual(
+        expect.objectContaining({ words: ["EGGPLANT", "FIG", "GRAPE", "HONEY"] }),
+      );
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(expect.objectContaining({ issueTags: ["groupCountOff"] }));
+    });
+
+    it("should flag unclassified when a group heading has no matching Words: line at all", async () => {
+      // Group 2 has a heading and a Category but no Words: line whatsoever
+      // — a different shape than a wrong word count, and one the parser
+      // has no specific name for. Group 2's own heading is what makes it
+      // "expected" here (not the puzzle's total remaining group count,
+      // which the model is never required to fully address in one call —
+      // see the single-group parenthetical test above, which must NOT
+      // trip this).
+      const response =
+        "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n\n" +
+        "#### Group 2\nCategory: Misc\n\n" +
+        "### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]], response),
+      );
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      );
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(expect.objectContaining({ issueTags: ["unclassified"] }));
+    });
+
+    it("should NOT flag unclassified when a response only addresses one of the puzzle's remaining groups", async () => {
+      // The model solving one group per call is the normal, common case
+      // (see "should solve a puzzle through iterative orchestrator calls"
+      // above) — group 2 isn't mentioned anywhere in this response at all,
+      // so it must never be treated as "missing."
+      const response =
+        "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n\n" +
+        "### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]], response),
+      );
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      );
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(expect.objectContaining({ issueTags: [] }));
     });
 
     it("should send conversation history with prior guesses as RETRY prompts", async () => {
