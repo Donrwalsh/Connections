@@ -82,7 +82,7 @@ export const SolveAssistRequestSchema = AssistRequestSchema.extend({
     .optional()
     .describe("Model to call, overriding the orchestrator's env-configured default"),
   provider: z
-    .enum(["openai", "ollama"])
+    .enum(["openai", "ollama", "google"])
     .optional()
     .describe("Provider to call, overriding MODEL_PROVIDER"),
   contextWindow: z

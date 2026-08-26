@@ -7,6 +7,7 @@ export const SUPPORTED_STRATEGIES = [
   "shuffle-foolish",
   "llm-openai",
   "llm-ollama",
+  "llm-google",
 ] as const;
 
 export type SupportedStrategy = (typeof SUPPORTED_STRATEGIES)[number];
@@ -17,8 +18,9 @@ export const SHUFFLE_SMART = "shuffle-smart" as const;
 export const SHUFFLE_FOOLISH = "shuffle-foolish" as const;
 export const LLM_OPENAI = "llm-openai" as const;
 export const LLM_OLLAMA = "llm-ollama" as const;
+export const LLM_GOOGLE = "llm-google" as const;
 
-export const LLM_STRATEGIES = [LLM_OPENAI, LLM_OLLAMA] as const;
+export const LLM_STRATEGIES = [LLM_OPENAI, LLM_OLLAMA, LLM_GOOGLE] as const;
 
 export function isLlmStrategy(strategyName: string): boolean {
   return (LLM_STRATEGIES as readonly string[]).includes(strategyName);
@@ -55,6 +57,7 @@ export const MAX_LLM_NUM_RESPONSES = 10;
 // starts at most this many jobs concurrently (default 1 = fully serialized).
 export const DEFAULT_LLM_OPENAI_CONCURRENCY = 1;
 export const DEFAULT_LLM_OLLAMA_CONCURRENCY = 1;
+export const DEFAULT_LLM_GOOGLE_CONCURRENCY = 1;
 
 // How many prompts a single solve step may make before the orchestrator
 // gives up on a fresh candidate and reports a duplicate/invalid failure.
@@ -133,6 +136,15 @@ export function llmOpenAIConcurrency(env: NodeJS.ProcessEnv = process.env): numb
  */
 export function llmOllamaConcurrency(env: NodeJS.ProcessEnv = process.env): number {
   return positiveTrialCount(env.LLM_OLLAMA_CONCURRENCY, DEFAULT_LLM_OLLAMA_CONCURRENCY);
+}
+
+/**
+ * How many llm-google runs the worker may process at once, from
+ * LLM_GOOGLE_CONCURRENCY. Falls back to DEFAULT_LLM_GOOGLE_CONCURRENCY for
+ * missing/invalid values.
+ */
+export function llmGoogleConcurrency(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.LLM_GOOGLE_CONCURRENCY, DEFAULT_LLM_GOOGLE_CONCURRENCY);
 }
 
 /**

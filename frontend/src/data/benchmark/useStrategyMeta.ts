@@ -10,7 +10,12 @@ import type { StrategyMeta, SupportedModelRecord } from "./types";
  * mock catalog already. `runsPerPuzzle` is a placeholder: nothing derives
  * layout from it, so it isn't load-bearing here. */
 function buildDynamicMeta(model: SupportedModelRecord): StrategyMeta {
-  const providerLabel = model.strategyName === "llm-ollama" ? "Ollama" : "OpenAI";
+  const providerLabel =
+    model.strategyName === "llm-ollama"
+      ? "Ollama"
+      : model.strategyName === "llm-google"
+        ? "Google"
+        : "OpenAI";
   return {
     id: model.modelName,
     name: `LLM · ${model.modelName}`,

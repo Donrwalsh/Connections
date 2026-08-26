@@ -128,7 +128,12 @@ export function describeLeaderboardRow(row: LeaderboardRow): { name: string; des
   const meta = getStrategyMeta(row.id);
 
   if (row.kind === "llm") {
-    const providerLabel = row.strategyName === "llm-ollama" ? "Ollama" : "OpenAI";
+    const providerLabel =
+      row.strategyName === "llm-ollama"
+        ? "Ollama"
+        : row.strategyName === "llm-google"
+          ? "Google"
+          : "OpenAI";
     return {
       name: meta?.name ?? `LLM · ${row.modelName}`,
       description: formatModelStatsDescription(

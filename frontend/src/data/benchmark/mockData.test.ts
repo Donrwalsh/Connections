@@ -64,6 +64,20 @@ describe("describeLeaderboardRow", () => {
     expect(description).toBe("Ollama mistral-nemo · 131K context · 12B params");
   });
 
+  it("labels the provider correctly for a Google row", () => {
+    const row = makeLlmRow({
+      id: "gemini-3.6-flash",
+      strategyName: "llm-google",
+      modelName: "gemini-3.6-flash",
+      contextWindow: 1048576,
+      paramCount: null,
+    });
+
+    const { description } = describeLeaderboardRow(row);
+
+    expect(description).toBe("Google gemini-3.6-flash · 1049K context");
+  });
+
   it("leaves deterministic rows unaffected", () => {
     const row: LeaderboardRow = {
       id: "alphabetical",

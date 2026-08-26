@@ -5,6 +5,7 @@ import { Puzzle } from "../game/entities/puzzle.entity";
 import { GameService } from "../game/game.service";
 import {
   LLM_OLLAMA,
+  LLM_GOOGLE,
   llmMaxDuplicateGuesses,
   llmMaxFailedGuesses,
   llmMaxMalformedResponses,
@@ -167,7 +168,8 @@ export class LlmStrategyRunner {
     // The strategy name alone determines the provider (there's no per-run
     // choice of provider today, only of model within it) — resolved once so
     // every orchestrator call for this run tells it which client to use.
-    const provider = strategyName === LLM_OLLAMA ? "ollama" : "openai";
+    const provider =
+      strategyName === LLM_OLLAMA ? "ollama" : strategyName === LLM_GOOGLE ? "google" : "openai";
 
     const contextWindow = model
       ? await this.supportedModelService.getContextWindow(strategyName, model)

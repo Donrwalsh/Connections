@@ -10,10 +10,12 @@ import {
   DEFAULT_LLM_TRIALS_PER_MODEL,
   DEFAULT_LLM_OPENAI_CONCURRENCY,
   DEFAULT_LLM_OLLAMA_CONCURRENCY,
+  DEFAULT_LLM_GOOGLE_CONCURRENCY,
   DEFAULT_SHUFFLE_TRIALS,
   isLlmStrategy,
   LLM_OPENAI,
   LLM_OLLAMA,
+  LLM_GOOGLE,
   LLM_STRATEGIES,
   llmMaxDuplicateGuesses,
   llmMaxFailedGuesses,
@@ -23,6 +25,7 @@ import {
   llmNumResponses,
   llmOllamaConcurrency,
   llmOpenAIConcurrency,
+  llmGoogleConcurrency,
   llmTemperature,
   llmMaxTrialsPerModel,
   shuffleTrialCount,
@@ -109,6 +112,25 @@ describe("strategies", () => {
 
     it("should read a valid positive integer", () => {
       expect(llmOllamaConcurrency({ LLM_OLLAMA_CONCURRENCY: "2" })).toBe(2);
+    });
+  });
+
+  describe("llmGoogleConcurrency", () => {
+    it("should default when the env var is missing", () => {
+      expect(llmGoogleConcurrency({})).toBe(DEFAULT_LLM_GOOGLE_CONCURRENCY);
+    });
+
+    it("should default when the env var is invalid", () => {
+      expect(llmGoogleConcurrency({ LLM_GOOGLE_CONCURRENCY: "abc" })).toBe(
+        DEFAULT_LLM_GOOGLE_CONCURRENCY,
+      );
+      expect(llmGoogleConcurrency({ LLM_GOOGLE_CONCURRENCY: "0" })).toBe(
+        DEFAULT_LLM_GOOGLE_CONCURRENCY,
+      );
+    });
+
+    it("should read a valid positive integer", () => {
+      expect(llmGoogleConcurrency({ LLM_GOOGLE_CONCURRENCY: "4" })).toBe(4);
     });
   });
 
@@ -249,9 +271,10 @@ describe("strategies", () => {
   });
 
   describe("isLlmStrategy", () => {
-    it("should identify both LLM strategies", () => {
+    it("should identify all three LLM strategies", () => {
       expect(isLlmStrategy(LLM_OPENAI)).toBe(true);
       expect(isLlmStrategy(LLM_OLLAMA)).toBe(true);
+      expect(isLlmStrategy(LLM_GOOGLE)).toBe(true);
     });
 
     it("should reject non-LLM strategies", () => {

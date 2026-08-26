@@ -368,6 +368,26 @@ describe("LlmStrategyRunner", () => {
       );
     });
 
+    it("should consult the Google provider for the llm-google strategy", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-google" }));
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([
+          ["APPLE", "BANANA", "CHERRY", "DATE"],
+          ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        ]),
+      );
+
+      await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledWith(
+        expect.any(Array),
+        "gemini-3.6-flash",
+        "google",
+        null,
+      );
+    });
+
     it("should pass the requested model and the openai provider for llm-openai", async () => {
       mockOrchestratorService.solveAssist.mockResolvedValueOnce(
         makeAssistResponse([

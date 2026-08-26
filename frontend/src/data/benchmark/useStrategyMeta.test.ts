@@ -45,6 +45,32 @@ describe("useStrategyMeta", () => {
     expect(result.current.meta?.strategyName).toBe("llm-openai");
   });
 
+  it("resolves a Google model's provider label correctly", async () => {
+    stubModelsFetch([
+      {
+        id: 2,
+        strategyName: "llm-google",
+        modelName: "gemini-3.6-flash",
+        inputCostPerMillionTokens: 0.3,
+        outputCostPerMillionTokens: 2.5,
+        supported: true,
+        contextWindow: 1048576,
+        paramCount: null,
+        providerDescription: null,
+        releaseDate: null,
+      },
+    ]);
+
+    const { result } = renderHook(() => useStrategyMeta("gemini-3.6-flash"));
+
+    await waitFor(() => {
+      expect(result.current.meta?.description).toBe("Google gemini-3.6-flash · 1049K context");
+    });
+
+    expect(result.current.meta?.name).toBe("LLM · gemini-3.6-flash");
+    expect(result.current.meta?.strategyName).toBe("llm-google");
+  });
+
   it("does not fetch live model data for a non-LLM strategyId", async () => {
     stubModelsFetch([]);
 

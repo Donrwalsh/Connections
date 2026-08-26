@@ -1,17 +1,20 @@
 import { openai } from "@ai-sdk/openai";
 import { createOllama } from "ai-sdk-ollama";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { LanguageModel } from "ai";
 
 export const DEFAULT_OPENAI_MODEL = "gpt-4.1-nano";
 export const DEFAULT_OLLAMA_MODEL = "llama3.2";
+export const DEFAULT_GOOGLE_MODEL = "gemini-3.6-flash";
 export const DEFAULT_CONTEXT_WINDOW = 8192;
 
-export type ModelProvider = "openai" | "ollama";
+export type ModelProvider = "openai" | "ollama" | "google";
 
 /**
  * Resolves the default model provider from the MODEL_PROVIDER env var.
  * Defaults to OpenAI to keep existing behavior unchanged; set it to
- * "ollama" to run models locally against the bundled Ollama service.
+ * "ollama" to run models locally against the bundled Ollama service, or
+ * "google" to call Google AI Studio's Gemini models.
  *
  * Unlike the strategy runs (which select their provider explicitly by
  * strategy name), this default is only used for provider-less requests —
@@ -19,13 +22,15 @@ export type ModelProvider = "openai" | "ollama";
  */
 export function defaultProvider(): ModelProvider {
   const provider = process.env.MODEL_PROVIDER?.toLowerCase();
-  return provider === "ollama" ? "ollama" : "openai";
+  if (provider === "ollama") return "ollama";
+  if (provider === "google") return "google";
+  return "openai";
 }
 
 /**
  * Returns the AI SDK language model for the given provider.
- * Both providers are exposed through the same LanguageModel interface, so
- * solver.ts (and any future callers) never need to know which backend is
+ * All three providers are exposed through the same LanguageModel interface,
+ * so solver.ts (and any future callers) never need to know which backend is
  * active. Config is read on every call so a restart isn't needed to flip
  * providers in development.
  *
@@ -41,7 +46,9 @@ export function defaultProvider(): ModelProvider {
  * model) can OOM-kill Ollama on memory-constrained hardware even though
  * real prompts never come close to using it. The model's true spec still
  * shows correctly everywhere else (SupportedModel.contextWindow, the
- * leaderboard) — only what's actually sent to Ollama is capped.
+ * leaderboard) — only what's actually sent to Ollama is capped. Google has
+ * no per-call context-window setting at all, so `contextWindow` is accepted
+ * for signature consistency but unused there.
  */
 export function getModel(
   provider: ModelProvider,
@@ -55,6 +62,11 @@ export function getModel(
     return ollama(modelOverride ?? process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL, {
       options: { num_ctx: effectiveContextWindow("ollama", contextWindow) },
     });
+  }
+
+  if (provider === "google") {
+    const google = createGoogleGenerativeAI({ apiKey: process.env.GOOGLE_API_KEY });
+    return google(modelOverride ?? process.env.GOOGLE_MODEL ?? DEFAULT_GOOGLE_MODEL);
   }
 
   return openai(modelOverride ?? process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL);
@@ -78,13 +90,16 @@ export function effectiveContextWindow(
 
 /**
  * Returns the model name that will be (or was) used for the given provider —
- * `modelOverride` if given, else OPENAI_MODEL/OLLAMA_MODEL. Unlike
- * `result.response.modelId` this is known even for a failed call, so
+ * `modelOverride` if given, else OPENAI_MODEL/OLLAMA_MODEL/GOOGLE_MODEL.
+ * Unlike `result.response.modelId` this is known even for a failed call, so
  * per-prompt telemetry can always name the model the prompt was sent to.
  */
 export function getModelName(provider: ModelProvider, modelOverride?: string): string {
   if (provider === "ollama") {
     return modelOverride ?? process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL;
+  }
+  if (provider === "google") {
+    return modelOverride ?? process.env.GOOGLE_MODEL ?? DEFAULT_GOOGLE_MODEL;
   }
   return modelOverride ?? process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL;
 }

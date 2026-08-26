@@ -13,8 +13,10 @@ import {
   isLlmStrategy,
   LLM_OPENAI,
   LLM_OLLAMA,
+  LLM_GOOGLE,
   llmOllamaConcurrency,
   llmOpenAIConcurrency,
+  llmGoogleConcurrency,
   STRATEGY_SET,
   workerRole,
 } from "./strategies";
@@ -111,7 +113,7 @@ async function bootstrap() {
    * limit (default 1 = fully serialized). Concurrency is read once at boot.
    */
   const createLlmWorker = (
-    queueName: "llm-openai-runs" | "llm-ollama-runs",
+    queueName: "llm-openai-runs" | "llm-ollama-runs" | "llm-google-runs",
     expectedStrategy: string,
     concurrency: number,
   ) => {
@@ -179,6 +181,14 @@ async function bootstrap() {
     );
     activeWorkers.push(llmOpenAIWorker);
     activeQueueNames.push("llm-openai-runs");
+
+    const llmGoogleWorker = createLlmWorker(
+      "llm-google-runs",
+      LLM_GOOGLE,
+      llmGoogleConcurrency(),
+    );
+    activeWorkers.push(llmGoogleWorker);
+    activeQueueNames.push("llm-google-runs");
 
     const puzzleWorker = new Worker(
       "puzzle-population",
