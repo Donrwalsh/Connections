@@ -159,19 +159,25 @@ other reason" (not yet explained).
 Either way the proposal is still skipped exactly as it is today — this
 only changes whether/how it gets flagged, not the solve behavior.
 
-**`unclassified`** (the novelty catch-all) — after `parseGroupsSection`
-finishes, for each of the puzzle's `N` expected group numbers (passed in
-as a new parameter, computed the same way it already is at the call site:
-`run.availableWords.length / GROUP_SIZE`), if no entry landed in
-`parsedGroupWords` for that number *and* that number wasn't already
-recorded as a `groupCountOff` case, tag `unclassified`. This covers
-whatever unnamed way a future model response could leave a group missing
-— a `Group N` heading that never appears, a `Words:` line the regex
-doesn't match, or any other shape nobody has seen yet — without needing to
-anticipate it. New failure varieties surface as `unclassified` first;
-once a pattern in those rows' `rawResponseText` looks common enough,
-promote it to its own named tag the same way `groupCountOff` and
-`wordNotOnList` are being added now.
+**`unclassified`** (the novelty catch-all) — checked against the group
+numbers the response's own `Group N` headings actually mentioned, **not**
+the puzzle's total remaining group count. The model normally addresses
+just one group per call (the common, correct case — see the "should solve
+a puzzle through iterative orchestrator calls" test) rather than every
+group the puzzle still needs, so comparing against the puzzle's expected
+count would misfire on every ordinary single-group response. Instead,
+`parseGroupsSection` tracks the highest `Group N` heading number the
+response itself mentioned (`maxGroupNum`); after the parse, for each
+number from 1 to `maxGroupNum`, if no entry landed in `parsedGroupWords`
+for that number *and* it wasn't already recorded as a `groupCountOff`
+case, tag `unclassified`. This covers a `Group N` heading with no matching
+`Words:` line, a number skipped between two real headings, or any other
+shape nobody has seen yet — without needing to anticipate it, and without
+false-flagging a response that simply hasn't gotten to a later group yet.
+New failure varieties surface as `unclassified` first; once a pattern in
+those rows' `rawResponseText` looks common enough, promote it to its own
+named tag the same way `groupCountOff` and `wordNotOnList` are being added
+now.
 
 ### 3. Run-level rollup: `issueCount` in the run-history listing
 
@@ -204,7 +210,7 @@ becomes a badge rendered when `row.issueCount > 0`, labeled with the count.
 ### 4. Data flow summary
 
 ```
-parseGroupsSection(responseText, fallbackGroups, N)
+parseGroupsSection(responseText, fallbackGroups)
   -> tags groupCountOff / unclassified onto currentPrompt.issueTags
        -> buildProposalEntries(...)              [unchanged shape]
             -> evaluateProposals(...)
@@ -237,6 +243,10 @@ or to the orchestrator process — this is entirely contained to
   - New: a `Group N` heading with no matching `Words:` line at all (no
     count mismatch — the line just never matched) → `unclassified` tagged,
     that group absent from proposals.
+  - New: a response that only addresses one of the puzzle's still-unsolved
+    groups (the model's normal, common behavior) → **no** `unclassified`
+    tag, confirming the catch-all checks against the response's own
+    headings, not the puzzle's total remaining group count.
   - New: a response tripping both `parentheticalStripped` and
     `wordNotOnList` at once → both present in `issueTags`.
 - `strategy.service.spec.ts`: replace the existing
