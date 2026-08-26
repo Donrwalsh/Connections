@@ -61,6 +61,17 @@ export interface SolvePromptDto {
   // prompt-reconstruction.ts.
   reconstructedPrompt: string | null;
   proposals: LlmProposalDto[];
+  // Populated only when status is 'callError' — the OpenAI call itself
+  // never produced usable model text. requestBody/responseBody are the raw
+  // payloads captured at the orchestrator (see solve-prompt.entity.ts) —
+  // shown in the same collapsible-detail style as reconstructedPrompt/
+  // rawResponseText above.
+  errorName: string | null;
+  errorMessage: string | null;
+  statusCode: number | null;
+  isRetryable: boolean | null;
+  requestBody: unknown | null;
+  responseBody: unknown | null;
 }
 
 export interface StrategyRunDetailMeta {

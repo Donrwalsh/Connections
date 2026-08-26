@@ -1,5 +1,89 @@
-import { describe, expect, it } from "vitest";
-import { parseGroupProposals } from "./solve-assist.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { parseGroupProposals, solveAssist } from "./solve-assist.js";
+
+describe("solveAssist", () => {
+  const generateTextMock = vi.hoisted(() => vi.fn());
+
+  vi.mock("ai", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("ai")>();
+    return { ...actual, generateText: generateTextMock };
+  });
+
+  const MESSAGES = [{ role: "user" as const, content: "solve this puzzle" }];
+
+  beforeEach(() => {
+    generateTextMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("captures the raw request/response detail on a successful call", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
+      response: {
+        modelId: "gpt-4.1-nano",
+        id: "resp_123",
+        headers: { "x-request-id": "req_123" },
+        body: { id: "resp_123", choices: [{ message: { content: "### ANSWER..." } }] },
+      },
+      request: {
+        body: { model: "gpt-4.1-nano", messages: [{ role: "user", content: "solve this puzzle" }] },
+      },
+      usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+    });
+
+    const result = await solveAssist(MESSAGES);
+
+    expect(result.requestBody).toEqual({
+      model: "gpt-4.1-nano",
+      messages: [{ role: "user", content: "solve this puzzle" }],
+    });
+    expect(result.responseId).toBe("resp_123");
+    expect(result.responseHeaders).toEqual({ "x-request-id": "req_123" });
+    expect(result.responseBody).toEqual({
+      id: "resp_123",
+      choices: [{ message: { content: "### ANSWER..." } }],
+    });
+  });
+
+  it("surfaces APICallError detail instead of discarding it", async () => {
+    const { APICallError } = await import("ai");
+    generateTextMock.mockRejectedValueOnce(
+      new APICallError({
+        message: "Rate limit exceeded",
+        url: "https://api.openai.com/v1/chat/completions",
+        requestBodyValues: { model: "gpt-4.1-nano" },
+        statusCode: 429,
+        responseHeaders: { "retry-after": "30" },
+        responseBody: '{"error":{"message":"Rate limit exceeded"}}',
+        isRetryable: true,
+      }),
+    );
+
+    await expect(solveAssist(MESSAGES)).rejects.toMatchObject({
+      code: "model_error",
+      details: {
+        requestBody: { model: "gpt-4.1-nano" },
+        statusCode: 429,
+        responseHeaders: { "retry-after": "30" },
+        responseBody: '{"error":{"message":"Rate limit exceeded"}}',
+        isRetryable: true,
+        errorName: "AI_APICallError",
+      },
+    });
+  });
+
+  it("still classifies a plain non-API error as model_error with no call detail", async () => {
+    generateTextMock.mockRejectedValueOnce(new Error("fetch failed"));
+
+    await expect(solveAssist(MESSAGES)).rejects.toMatchObject({
+      code: "model_error",
+      details: { requestBody: undefined, statusCode: undefined },
+    });
+  });
+});
 
 describe("parseGroupProposals", () => {
   it("parses a well-formed Words: line", () => {

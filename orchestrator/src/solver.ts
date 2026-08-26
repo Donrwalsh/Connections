@@ -1,4 +1,5 @@
 import {
+  APICallError,
   JSONParseError,
   NoObjectGeneratedError,
   TypeValidationError,
@@ -11,6 +12,13 @@ export interface SolveErrorDetails {
   contextWindow?: number;
   latencyMs?: number;
   temperature?: number;
+  requestBody?: unknown;
+  responseId?: string;
+  responseHeaders?: Record<string, string>;
+  responseBody?: unknown;
+  statusCode?: number;
+  errorName?: string;
+  isRetryable?: boolean;
 }
 
 /**
@@ -33,6 +41,12 @@ export class SolveError extends Error {
  * Classifies an AI SDK failure from generateObject/generateText into a typed
  * SolveError. Malformed-but-present output (no/undecodable object) is
  * recoverable — callers may re-prompt. Provider/network failures are not.
+ *
+ * When the failure is an APICallError (a real OpenAI request that got a
+ * non-2xx response, or a network-level failure the AI SDK wraps the same
+ * way), its raw request/response detail — otherwise lost the moment this
+ * function returns — rides along on the thrown SolveError's `details`, so
+ * the backend can persist it for troubleshooting.
  */
 export function classifyModelCallError(
   err: unknown,
@@ -52,9 +66,22 @@ export function classifyModelCallError(
     );
   }
 
-  return new SolveError(
-    "model_error",
-    `Model call failed: ${message}`,
-    details,
-  );
+  const apiDetails: SolveErrorDetails = APICallError.isInstance(err)
+    ? {
+        requestBody: err.requestBodyValues,
+        statusCode: err.statusCode,
+        responseHeaders: err.responseHeaders,
+        responseBody: err.responseBody,
+        isRetryable: err.isRetryable,
+      }
+    : {
+        requestBody: undefined,
+        statusCode: undefined,
+      };
+
+  return new SolveError("model_error", `Model call failed: ${message}`, {
+    ...details,
+    ...apiDetails,
+    errorName: err instanceof Error ? err.name : undefined,
+  });
 }

@@ -12,6 +12,7 @@ function makeSolvePrompt(overrides: Partial<SolvePrompt>): SolvePrompt {
     id: 0,
     strategyRunId: 1,
     promptNumber: 0,
+    attemptNumber: 1,
     promptType: SolvePromptType.INITIAL_SOLVE,
     status: SolvePromptStatus.PARSED,
     rawResponseText: null,
@@ -21,6 +22,12 @@ function makeSolvePrompt(overrides: Partial<SolvePrompt>): SolvePrompt {
     latencyMs: null,
     temperature: 0.2,
     createdAt: new Date("2024-01-01T00:00:00Z"),
+    errorName: null,
+    errorMessage: null,
+    statusCode: null,
+    isRetryable: null,
+    requestBody: null,
+    responseBody: null,
     ...overrides,
   } as SolvePrompt;
 }
@@ -215,6 +222,89 @@ describe("reconstructSolvePrompts", () => {
             2,
           ),
         },
+      ]),
+    );
+  });
+
+  it("includes a CALL_ERROR row in the output, with its own reconstructedPrompt, but never lets it corrupt later steps", () => {
+    // A CALL_ERROR row (the call itself failed, no model text at all) is
+    // now shown in the run's chain like any other step — but it never
+    // produced a real assistant reply, so it must not be folded into
+    // `history`: doing that would inject a phantom duplicated user turn
+    // plus an empty assistant turn, corrupting every later step's
+    // reconstructedPrompt for the rest of the run.
+    const prompt1 = makeSolvePrompt({
+      id: 1,
+      promptNumber: 1,
+      promptType: SolvePromptType.INITIAL_SOLVE,
+      rawResponseText: "response-1",
+    });
+    const callErrorPrompt = makeSolvePrompt({
+      id: 2,
+      promptNumber: 1,
+      attemptNumber: 2,
+      promptType: SolvePromptType.RETRY,
+      status: SolvePromptStatus.CALL_ERROR,
+      rawResponseText: null,
+      errorName: "AI_APICallError",
+      errorMessage: "model down",
+      statusCode: 502,
+      isRetryable: true,
+      requestBody: { model: "gpt-4.1-nano" },
+      responseBody: { error: { message: "model down" } },
+    });
+    const prompt2 = makeSolvePrompt({
+      id: 3,
+      promptNumber: 2,
+      promptType: SolvePromptType.INITIAL_SOLVE,
+      rawResponseText: "response-2",
+    });
+
+    const result = reconstructSolvePrompts(
+      originalWords,
+      [prompt1, callErrorPrompt, prompt2],
+      [],
+      new Map(),
+    );
+
+    // All three rows appear, in call order.
+    expect(result).toHaveLength(3);
+    expect(result.map((r) => r.id)).toEqual([1, 2, 3]);
+
+    // The CALL_ERROR row carries its error detail through, has no proposals,
+    // and still gets a reconstructedPrompt reflecting the conversation up to
+    // that point (prompt1's turn, then its own attempted message).
+    const callErrorDto = result[1]!;
+    expect(callErrorDto.status).toBe(SolvePromptStatus.CALL_ERROR);
+    expect(callErrorDto.rawResponseText).toBeNull();
+    expect(callErrorDto.proposals).toEqual([]);
+    expect(callErrorDto.errorName).toBe("AI_APICallError");
+    expect(callErrorDto.errorMessage).toBe("model down");
+    expect(callErrorDto.statusCode).toBe(502);
+    expect(callErrorDto.isRetryable).toBe(true);
+    expect(callErrorDto.requestBody).toEqual({ model: "gpt-4.1-nano" });
+    expect(callErrorDto.responseBody).toEqual({ error: { message: "model down" } });
+    // No guess ever failed before this row (no proposals were passed at
+    // all), so lastFailedGuess is still null when it's built — the
+    // function's defensive fallback uses buildInitialPrompt even though
+    // this row's own promptType is RETRY (see its docblock).
+    expect(callErrorDto.reconstructedPrompt).toBe(
+      formatConversation([
+        { role: "user", content: buildInitialPrompt(originalWords, 2) },
+        { role: "assistant", content: "response-1" },
+        { role: "user", content: buildInitialPrompt(originalWords, 2) },
+      ]),
+    );
+
+    // ...and, critically, contributed no phantom turn to `history` —
+    // prompt2's reconstructedPrompt is exactly [prompt1's turn, prompt2's
+    // own message], not corrupted by an extra empty-assistant turn in
+    // between from the CALL_ERROR row.
+    expect(result[2]!.reconstructedPrompt).toBe(
+      formatConversation([
+        { role: "user", content: buildInitialPrompt(originalWords, 2) },
+        { role: "assistant", content: "response-1" },
+        { role: "user", content: buildInitialPrompt(originalWords, 2) },
       ]),
     );
   });

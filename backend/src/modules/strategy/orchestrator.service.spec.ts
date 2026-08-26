@@ -33,8 +33,6 @@ describe("OrchestratorService", () => {
     mockFetch = jest.fn();
     global.fetch = mockFetch as unknown as typeof fetch;
     service = new OrchestratorService();
-    // Don't actually sleep between retries in tests.
-    (service as unknown as { sleep: (ms: number) => Promise<void> }).sleep = jest.fn();
   });
 
   afterEach(() => {
@@ -48,7 +46,17 @@ describe("OrchestratorService", () => {
 
     const outcome = await service.solveAssist(messages);
 
-    expect(outcome).toEqual({ ok: true, data: successBody });
+    expect(outcome).toEqual({
+      ok: true,
+      data: {
+        ...successBody,
+        requestBody: undefined,
+        responseId: undefined,
+        responseHeaders: undefined,
+        responseBody: undefined,
+      },
+    });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(mockFetch).toHaveBeenCalledWith(
       "http://orchestrator.test/solve-assist",
       expect.objectContaining({
@@ -92,7 +100,17 @@ describe("OrchestratorService", () => {
 
     expect(outcome).toEqual({
       ok: true,
-      data: { response: "text", groups: [], model: "mistral", latencyMs: 0, usage: undefined },
+      data: {
+        response: "text",
+        groups: [],
+        model: "mistral",
+        latencyMs: 0,
+        usage: undefined,
+        requestBody: undefined,
+        responseId: undefined,
+        responseHeaders: undefined,
+        responseBody: undefined,
+      },
     });
   });
 
@@ -110,30 +128,17 @@ describe("OrchestratorService", () => {
 
     expect(outcome).toEqual({
       ok: false,
-      error: { error: "malformed", code: "invalid_group" },
+      error: {
+        error: "malformed",
+        code: "invalid_group",
+        statusCode: 400,
+      },
     });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
-  it("should retry 5xx responses and succeed on a later attempt", async () => {
-    mockFetch
-      .mockResolvedValueOnce(
-        mockResponse({
-          ok: false,
-          status: 502,
-          statusText: "Bad Gateway",
-          body: { error: "model down", code: "model_error" },
-        }),
-      )
-      .mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
-
-    const outcome = await service.solveAssist(messages);
-
-    expect(outcome).toEqual({ ok: true, data: successBody });
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-  });
-
-  it("should give up with model_error after repeated 5xx responses", async () => {
-    mockFetch.mockResolvedValue(
+  it("should classify a 5xx response as model_error with no retry", async () => {
+    mockFetch.mockResolvedValueOnce(
       mockResponse({
         ok: false,
         status: 502,
@@ -144,19 +149,23 @@ describe("OrchestratorService", () => {
 
     const outcome = await service.solveAssist(messages);
 
-    expect(mockFetch).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
-    expect(outcome).toMatchObject({
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(outcome).toEqual({
       ok: false,
-      error: { code: "model_error" },
+      error: {
+        error: "model down",
+        code: "model_error",
+        statusCode: 502,
+      },
     });
   });
 
-  it("should give up with model_error after network failures", async () => {
-    mockFetch.mockRejectedValue(new Error("ECONNREFUSED"));
+  it("should classify a network failure as model_error with no retry", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
 
     const outcome = await service.solveAssist(messages);
 
-    expect(mockFetch).toHaveBeenCalledTimes(4);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(outcome).toMatchObject({
       ok: false,
       error: { code: "model_error" },
@@ -166,20 +175,100 @@ describe("OrchestratorService", () => {
     }
   });
 
-  it("should not retry after a request times out", async () => {
+  it("should classify a timeout as model_error with no retry", async () => {
     const abortError = new Error("The operation was aborted.");
     abortError.name = "AbortError";
-    mockFetch.mockRejectedValue(abortError);
+    mockFetch.mockRejectedValueOnce(abortError);
 
     const outcome = await service.solveAssist(messages);
 
-    // A timeout means the orchestrator is likely still working on the
-    // aborted request, so retrying would just queue behind it. The strategy
-    // worker re-runs the step on its own backoff schedule instead.
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(outcome).toEqual({
       ok: false,
       error: { error: "Request timed out", code: "model_error" },
+    });
+  });
+
+  it("should include the raw request/response detail on a 200", async () => {
+    const successBodyWithDetail = {
+      ...successBody,
+      requestBody: { model: "gpt-4.1-nano", messages },
+      responseId: "resp_123",
+      responseHeaders: { "x-request-id": "req_123" },
+      responseBody: { id: "resp_123", choices: [] },
+    };
+    mockFetch.mockResolvedValueOnce(
+      mockResponse({ ok: true, status: 200, body: successBodyWithDetail }),
+    );
+
+    const outcome = await service.solveAssist(messages);
+
+    expect(outcome).toEqual({ ok: true, data: successBodyWithDetail });
+  });
+
+  it("should surface the raw call detail from a terminal error's details bag", async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockResponse({
+        ok: false,
+        status: 400,
+        statusText: "Bad Request",
+        body: {
+          error: "malformed",
+          code: "invalid_group",
+          details: {
+            requestBody: { model: "gpt-4.1-nano" },
+            responseId: "resp_456",
+            responseHeaders: { "x-request-id": "req_456" },
+            responseBody: { id: "resp_456", choices: [] },
+          },
+        },
+      }),
+    );
+
+    const outcome = await service.solveAssist(messages);
+
+    expect(outcome).toEqual({
+      ok: false,
+      error: {
+        error: "malformed",
+        code: "invalid_group",
+        requestBody: { model: "gpt-4.1-nano" },
+        responseId: "resp_456",
+        responseHeaders: { "x-request-id": "req_456" },
+        responseBody: { id: "resp_456", choices: [] },
+        statusCode: 400,
+      },
+    });
+  });
+
+  it("should preserve the real HTTP status when the details bag has no statusCode of its own", async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockResponse({
+        ok: false,
+        status: 502,
+        statusText: "Bad Gateway",
+        body: {
+          error: "model down",
+          code: "model_error",
+          // details is present (so extractCallDetail returns a real object,
+          // its own statusCode key just undefined) — this is the case that
+          // used to clobber response.status with undefined.
+          details: { errorName: "FetchError", isRetryable: true },
+        },
+      }),
+    );
+
+    const outcome = await service.solveAssist(messages);
+
+    expect(outcome).toEqual({
+      ok: false,
+      error: {
+        error: "model down",
+        code: "model_error",
+        statusCode: 502,
+        errorName: "FetchError",
+        isRetryable: true,
+      },
     });
   });
 });

@@ -588,6 +588,18 @@
   font-size: 0.85rem;
 }
 
+/* Call-failed step (SolvePromptStatus.CALL_ERROR) — no proposals to show,
+ * so the error message stands in their place. */
+.bench-call-error {
+  margin: 0.6rem 0 0;
+}
+
+.bench-call-error__message {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #b04a3f;
+}
+
 /* Plain guess list — non-LLM strategies (no prompt/proposal chain to show). */
 .bench-guess-list {
   display: flex;

@@ -20,19 +20,28 @@ export interface SolveAssistSuccess {
   model: string;
   latencyMs: number;
   usage?: SolveUsage;
+  requestBody?: unknown;
+  responseId?: string;
+  responseHeaders?: Record<string, string>;
+  responseBody?: unknown;
 }
 
 export interface SolveAssistFailure {
   error: string;
   code: SolveErrorCode;
+  requestBody?: unknown;
+  responseId?: string;
+  responseHeaders?: Record<string, string>;
+  responseBody?: unknown;
+  statusCode?: number;
+  errorName?: string;
+  isRetryable?: boolean;
 }
 
 export type SolveAssistOutcome =
   | { ok: true; data: SolveAssistSuccess }
   | { ok: false; error: SolveAssistFailure };
 
-const MAX_RETRIES = 3;
-const INITIAL_DELAY_MS = 1000;
 const TIMEOUT_MS = orchestratorTimeoutMs();
 
 /**
@@ -63,7 +72,7 @@ export class OrchestratorService {
     model?: string,
     provider?: "openai" | "ollama",
   ): Promise<SolveAssistOutcome> {
-    return this.executeWithRetry<SolveAssistSuccess>(
+    return this.executeCall<SolveAssistSuccess>(
       "/solve-assist",
       { messages, model, provider },
       (raw) => ({
@@ -72,75 +81,85 @@ export class OrchestratorService {
         model: raw.model,
         latencyMs: raw.latencyMs ?? 0,
         usage: raw.usage,
+        requestBody: raw.requestBody,
+        responseId: raw.responseId,
+        responseHeaders: raw.responseHeaders,
+        responseBody: raw.responseBody,
       }),
     );
   }
 
   /**
-   * Retry-with-exponential-backoff loop shared by every orchestrator call:
-   * retries on 5xx/network failures up to MAX_RETRIES, treats 400/409 as a
-   * terminal (non-retried) failure, and classifies a timed-out request as a
-   * non-retried model_error. `mapSuccess` adapts the raw JSON body into the
-   * endpoint's own success-data shape.
+   * Makes a single call to the orchestrator — no client-side retry. Every
+   * attempt, successful or not, is persisted as its own SolvePrompt row by
+   * the caller (see llm-strategy-runner.service.ts), so a failed call is
+   * captured rather than silently retried here; the strategy run's own step
+   * loop (LLM_MAX_MODEL_ERRORS) is the only retry layer left. `mapSuccess`
+   * adapts the raw JSON body into the endpoint's own success-data shape.
    */
-  private async executeWithRetry<T>(
+  private async executeCall<T>(
     path: string,
     body: unknown,
     mapSuccess: (raw: any) => T, // eslint-disable-line @typescript-eslint/no-explicit-any
   ): Promise<{ ok: true; data: T } | { ok: false; error: SolveAssistFailure }> {
-    let lastError: unknown;
+    try {
+      const response = await this.fetchOnce(path, body);
 
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const response = await this.fetchOnce(path, body);
-
-        if (response.ok) {
-          const raw = await response.json();
-          return { ok: true, data: mapSuccess(raw) };
-        }
-
-        if (response.status === 400 || response.status === 409) {
-          const failureBody = (await response.json().catch(() => null)) as
-            (Partial<SolveAssistFailure> & { code?: string }) | null;
-          return {
-            ok: false,
-            error: {
-              error: failureBody?.error ?? `HTTP ${response.status}`,
-              code: this.isKnownErrorCode(failureBody?.code) ? failureBody.code : "model_error",
-            },
-          };
-        }
-
-        lastError = new Error(`HTTP ${response.status} ${response.statusText}`);
-      } catch (err) {
-        if (err instanceof Error && err.name === "AbortError") {
-          return {
-            ok: false,
-            error: {
-              error: "Request timed out",
-              code: "model_error",
-            },
-          };
-        }
-        lastError = err;
+      if (response.ok) {
+        const raw = await response.json();
+        return { ok: true, data: mapSuccess(raw) };
       }
 
-      if (attempt < MAX_RETRIES) {
-        const delay = INITIAL_DELAY_MS * 2 ** attempt;
-        this.logger.warn(
-          `Orchestrator ${path} attempt ${attempt + 1} of ${MAX_RETRIES + 1} failed` +
-            ` (${this.describeError(lastError)}). Retrying in ${delay}ms...`,
-        );
-        await this.sleep(delay);
+      const failureBody = (await response.json().catch(() => null)) as
+        | (Partial<SolveAssistFailure> & { code?: string; details?: Record<string, unknown> })
+        | null;
+      const callDetail = this.extractCallDetail(failureBody?.details);
+
+      return {
+        ok: false,
+        error: {
+          error: failureBody?.error ?? `HTTP ${response.status}`,
+          code: this.isKnownErrorCode(failureBody?.code) ? failureBody.code : "model_error",
+          ...callDetail,
+          // response.status is the authoritative HTTP status this call just
+          // observed — it must win over extractCallDetail's own `statusCode`
+          // key, which is only present when the orchestrator's error details
+          // bag happened to carry one and is `undefined` otherwise.
+          statusCode: callDetail.statusCode ?? response.status,
+        },
+      };
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return { ok: false, error: { error: "Request timed out", code: "model_error" } };
       }
+      const message = this.describeError(err);
+      this.logger.warn(`Orchestrator ${path} call failed: ${message}`);
+      return { ok: false, error: { error: message, code: "model_error" } };
     }
+  }
 
+  /** Pulls the known raw-detail keys off a SolveError `details` bag (see solver.ts on the orchestrator side), ignoring anything else it might carry. */
+  private extractCallDetail(
+    details?: Record<string, unknown>,
+  ): Pick<
+    SolveAssistFailure,
+    | "requestBody"
+    | "responseId"
+    | "responseHeaders"
+    | "responseBody"
+    | "statusCode"
+    | "errorName"
+    | "isRetryable"
+  > {
+    if (!details) return {};
     return {
-      ok: false,
-      error: {
-        error: `Orchestrator ${path} failed after ${MAX_RETRIES + 1} attempts: ${this.describeError(lastError)}`,
-        code: "model_error",
-      },
+      requestBody: details.requestBody,
+      responseId: details.responseId as string | undefined,
+      responseHeaders: details.responseHeaders as Record<string, string> | undefined,
+      responseBody: details.responseBody,
+      statusCode: details.statusCode as number | undefined,
+      errorName: details.errorName as string | undefined,
+      isRetryable: details.isRetryable as boolean | undefined,
     };
   }
 
@@ -172,9 +191,5 @@ export class OrchestratorService {
       return err.name === "AbortError" ? "Request timed out" : err.message;
     }
     return String(err);
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
