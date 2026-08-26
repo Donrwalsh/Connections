@@ -64,6 +64,11 @@ export function PuzzleRunsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [date, setDate] = useState<string | null>(null);
+  // Bumped after a run is deleted (see GuessChainVisualizer's "Delete this
+  // run" button) to force the runs-list effect below to refetch — same
+  // refreshSignal convention FreeTierDispatchModal/FreeTierBudgetWidget use
+  // elsewhere in this codebase.
+  const [runsRefreshSignal, setRunsRefreshSignal] = useState(0);
 
   useEffect(() => {
     if (!resolvedStrategyName || !isValidPuzzleId) return;
@@ -105,7 +110,16 @@ export function PuzzleRunsPage() {
       });
 
     return () => controller.abort();
-  }, [resolvedStrategyName, resolvedKind, resolvedModelId, puzzleId, isValidPuzzleId]);
+  }, [
+    resolvedStrategyName,
+    resolvedKind,
+    resolvedModelId,
+    puzzleId,
+    isValidPuzzleId,
+    runsRefreshSignal,
+  ]);
+
+  const handleRunDeleted = () => setRunsRefreshSignal((n) => n + 1);
 
   if (!strategyId) {
     return (
@@ -189,7 +203,11 @@ export function PuzzleRunsPage() {
       ) : null}
 
       {!isLoading && !error && runs && runs.length > 0 ? (
-        runs.length === 1 ? <SingleRunView runs={runs} /> : <MultiRunView runs={runs} />
+        runs.length === 1 ? (
+          <SingleRunView runs={runs} onRunDeleted={handleRunDeleted} />
+        ) : (
+          <MultiRunView runs={runs} onRunDeleted={handleRunDeleted} />
+        )
       ) : null}
     </div>
   );
@@ -202,16 +220,16 @@ function derivePuzzleStatus(runs: RunRecord[]): PuzzleRunStatus {
 }
 
 /** A single fetched run: skip the picker and render its visualizer directly. */
-function SingleRunView({ runs }: { runs: RunRecord[] }) {
+function SingleRunView({ runs, onRunDeleted }: { runs: RunRecord[]; onRunDeleted: () => void }) {
   const run = runs[0];
   if (!run) {
     return <p className="bench-muted">No runs yet.</p>;
   }
-  return <GuessChainVisualizer runId={run.runId} />;
+  return <GuessChainVisualizer runId={run.runId} onDeleted={onRunDeleted} />;
 }
 
 /** More than one fetched run: pick a run, then inspect its guess chain. */
-function MultiRunView({ runs }: { runs: RunRecord[] }) {
+function MultiRunView({ runs, onRunDeleted }: { runs: RunRecord[]; onRunDeleted: () => void }) {
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const selectedRun = runs.find((run) => run.runId === selectedRunId) ?? runs[0] ?? null;
 
@@ -222,7 +240,7 @@ function MultiRunView({ runs }: { runs: RunRecord[] }) {
         selectedRunId={selectedRun?.runId ?? null}
         onSelectRun={setSelectedRunId}
       />
-      {selectedRun ? <GuessChainVisualizer runId={selectedRun.runId} /> : null}
+      {selectedRun ? <GuessChainVisualizer runId={selectedRun.runId} onDeleted={onRunDeleted} /> : null}
     </div>
   );
 }

@@ -289,4 +289,28 @@ export class DispatchController {
   async getFreeTierDispatchStatus(@Param("tier") tier: string) {
     return this.freeTierDispatchService.getStatus(tier as FreeTierId);
   }
+
+  // Permanently deletes a strategy run and every row that belongs to it —
+  // for scrubbing a run that errored out after the underlying bug is fixed
+  // in code, so a rerun doesn't leave the broken attempt cluttering its
+  // history. Guarded like the other mutating dispatch routes: rejects a
+  // still-'running' run (see StrategyRunStore.deleteRun) rather than racing
+  // whatever worker is still writing to it.
+  @Delete("run/:runId")
+  @UseGuards(DispatchAuthGuard)
+  @ApiParam({
+    name: "runId",
+    type: Number,
+    description: "The strategy run's numeric id",
+    example: 12292,
+  })
+  @ApiBody({ type: DispatchAuthDto })
+  async deleteRun(@Param("runId", ParseIntPipe) runId: number) {
+    const result = await this.strategyService.deleteRun(runId);
+    return {
+      message: `Deleted strategy run ${runId} and all related data`,
+      runId,
+      ...result,
+    };
+  }
 }

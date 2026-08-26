@@ -100,7 +100,7 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `OLLAMA_MODEL` | `llama3.2` | Ollama model id (used by the `llm-ollama` strategy) |
 | `MODEL_CONTEXT_WINDOW` | `8192` | Context window (in tokens) used to size the LLM solver prompt for both providers |
 | `BULL_BOARD_USER` / `BULL_BOARD_PASS` | `admin` / `bullboard` | Login credentials for the Bull Board dashboard's login page at `/bull/login` (must be set together, or not at all) |
-| `DISPATCH_PASSWORD` | — | Password checked against the `password` field on `POST /dispatch/model/:modelName/:date`, `POST /dispatch/model/:modelName/runs/:n`, and `POST /dispatch/free-tier/:tier` — the dispatch routes that queue paid LLM calls. Only enforced when `NODE_ENV=production` (baked into `backend/Dockerfile`); **required** once it is — the backend/worker refuse to boot without it |
+| `DISPATCH_PASSWORD` | — | Password checked against the `password` field on `POST /dispatch/model/:modelName/:date`, `POST /dispatch/model/:modelName/runs/:n`, `POST /dispatch/free-tier/:tier`, and `DELETE /dispatch/run/:runId` — the dispatch routes that queue paid LLM calls or permanently delete a run. Only enforced when `NODE_ENV=production` (baked into `backend/Dockerfile`); **required** once it is — the backend/worker refuse to boot without it |
 | `CORS_ORIGIN` | `http://localhost:5173` | Comma-separated list of allowed frontend origins |
 | `ORCHESTRATOR_URL` | `http://orchestrator:3001` | Backend's URL for reaching the orchestrator |
 | `ORCHESTRATOR_TIMEOUT_MS` | `600000` | Per-attempt HTTP timeout for solve calls, since timeouts are not retried — a firing timeout now also cancels the orchestrator's in-flight OpenAI call |
@@ -138,6 +138,7 @@ Postgres and Redis connection settings (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PAS
 | `POST` | `/dispatch/strategy/:strategyName/:date` | Enqueue a strategy run (or `all`; the LLM strategies are not accepted) |
 | `POST` | `/dispatch/model/:modelName/:date` | Enqueue an LLM trial for a supported model — strategy is resolved from the model's `SupportedModel` row |
 | `POST` | `/dispatch/model/:modelName/runs/:n` | Enqueue `n` trials for a supported model, one on each of `n` randomly chosen puzzle dates that model hasn't run yet — rejects if fewer than `n` such dates exist |
+| `DELETE` | `/dispatch/run/:runId` | Permanently delete a strategy run and everything tied to it (guesses, solve prompts, LLM proposals) — rejects a still-`running` run |
 | `GET` | `/strategy/:strategyName/puzzle/:date` | All runs for a strategy — ordered guesses per trial |
 | `POST` | `/api/diagnose` | AI Assist — proxy to orchestrator (throttled to 5/min/IP) |
 | `GET` | `/health` | Liveness/readiness probe (503 when the DB is down) |
@@ -222,7 +223,7 @@ cp .env.sample .env   # fill in INTERNAL_API_KEY, OPENAI_API_KEY, POSTGRES_PASSW
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-`backend/Dockerfile` bakes in `NODE_ENV=production`, which turns on `DispatchAuthGuard` (`backend/src/modules/dispatch/dispatch-auth.guard.ts`): the paid-provider dispatch routes — `POST /dispatch/model/:modelName/:date`, `POST /dispatch/model/:modelName/runs/:n`, and `POST /dispatch/free-tier/:tier` — then reject any request whose JSON body doesn't include a matching `"password"` field. `loadEnv()` fails the backend/worker processes at boot if `DISPATCH_PASSWORD` isn't set once `NODE_ENV=production`, so there's no way to accidentally deploy prod without it. Local dev (`docker-compose.yml`, no `NODE_ENV=production`) never requires a password on these routes.
+`backend/Dockerfile` bakes in `NODE_ENV=production`, which turns on `DispatchAuthGuard` (`backend/src/modules/dispatch/dispatch-auth.guard.ts`): the paid-provider dispatch routes — `POST /dispatch/model/:modelName/:date`, `POST /dispatch/model/:modelName/runs/:n`, `POST /dispatch/free-tier/:tier` — and the run-deletion route, `DELETE /dispatch/run/:runId`, then reject any request whose JSON body doesn't include a matching `"password"` field. `loadEnv()` fails the backend/worker processes at boot if `DISPATCH_PASSWORD` isn't set once `NODE_ENV=production`, so there's no way to accidentally deploy prod without it. Local dev (`docker-compose.yml`, no `NODE_ENV=production`) never requires a password on these routes.
 
 ### Reviewing production data (Adminer)
 

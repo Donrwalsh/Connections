@@ -300,4 +300,44 @@ describe("PuzzleRunsPage", () => {
     expect(backLink).toHaveAttribute("href", "/leaderboard/alphabetical");
     expect(puzzleLink).toHaveAttribute("href", "/puzzle/2023-06-12");
   });
+
+  it("refetches the run list after a run is deleted, so the deleted run drops out of view", async () => {
+    const user = userEvent.setup();
+    const errorRun: StrategyRunListItem[] = [{ ...singleRun[0]!, status: "error" }];
+    let runsCallCount = 0;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown, init?: RequestInit) => {
+        const href = String(url);
+        if (init?.method === "DELETE") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              message: "Deleted strategy run 501 and all related data",
+              runId: 501,
+              deletedGuesses: 0,
+              deletedSolvePrompts: 0,
+              deletedLlmProposals: 0,
+            }),
+          });
+        }
+        if (href.includes("/strategy/") && href.includes("/puzzle-id/")) {
+          runsCallCount += 1;
+          return Promise.resolve({ ok: true, json: async () => (runsCallCount === 1 ? errorRun : []) });
+        }
+        // /strategy/run/:runId
+        const runId = Number(href.match(/\/run\/(\d+)/)?.[1]);
+        return Promise.resolve({ ok: true, json: async () => ({ ...runDetailFor(runId), status: "error" }) });
+      }),
+    );
+
+    renderRuns("/leaderboard/alphabetical/1");
+
+    await user.click(await screen.findByRole("button", { name: "Delete this run" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(await screen.findByText(/hasn't been run for this puzzle yet/)).toBeInTheDocument();
+    expect(runsCallCount).toBe(2);
+  });
 });

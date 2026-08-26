@@ -1,5 +1,5 @@
 import { Test, TestingModule } from "@nestjs/testing";
-import { NotFoundException } from "@nestjs/common";
+import { ConflictException, NotFoundException } from "@nestjs/common";
 import { DataSource } from "typeorm";
 import { getRepositoryToken } from "@nestjs/typeorm";
 import { StrategyRunStore } from "./strategy-run-store.service";
@@ -7,7 +7,7 @@ import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { Guess } from "./entities/guess.entity";
 import { SolvePrompt, SolvePromptType } from "./entities/solve-prompt.entity";
-import { LlmProposalStatus } from "./entities/llm-proposal.entity";
+import { LlmProposal, LlmProposalStatus } from "./entities/llm-proposal.entity";
 
 describe("StrategyRunStore", () => {
   let store: StrategyRunStore;
@@ -19,7 +19,7 @@ describe("StrategyRunStore", () => {
   let mockPuzzleRepo: { findOne: jest.Mock };
   let mockGuessRepo: { count: jest.Mock };
   let mockSolvePromptRepo: { createQueryBuilder: jest.Mock };
-  let mockManager: { insert: jest.Mock; save: jest.Mock };
+  let mockManager: { insert: jest.Mock; save: jest.Mock; count: jest.Mock; delete: jest.Mock };
   let mockDataSource: { transaction: jest.Mock };
 
   const makeRun = (overrides: Partial<StrategyRun> = {}) => ({
@@ -54,6 +54,8 @@ describe("StrategyRunStore", () => {
     mockManager = {
       insert: jest.fn().mockResolvedValue({ identifiers: [{ id: 1 }] }),
       save: jest.fn().mockResolvedValue(undefined),
+      count: jest.fn().mockResolvedValue(0),
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     mockDataSource = {
       transaction: jest.fn(async (cb: (manager: unknown) => Promise<unknown>) => cb(mockManager)),
@@ -277,6 +279,44 @@ describe("StrategyRunStore", () => {
         solvePromptId: 11,
         guessId: 20,
       });
+    });
+  });
+
+  describe("deleteRun", () => {
+    it("should throw NotFoundException when the run does not exist", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(null);
+
+      await expect(store.deleteRun(999)).rejects.toThrow(
+        new NotFoundException("No strategy run with id: 999"),
+      );
+      expect(mockDataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it("should throw ConflictException when the run is still running", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ status: StrategyRunStatus.RUNNING }));
+
+      await expect(store.deleteRun(7)).rejects.toThrow(ConflictException);
+      expect(mockDataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it("should delete the run's guesses before the run itself, and return each table's deleted count", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ status: StrategyRunStatus.ERROR }));
+      mockManager.count
+        .mockResolvedValueOnce(3) // Guess
+        .mockResolvedValueOnce(5) // SolvePrompt
+        .mockResolvedValueOnce(2); // LlmProposal
+
+      const result = await store.deleteRun(7);
+
+      expect(result).toEqual({ deletedGuesses: 3, deletedSolvePrompts: 5, deletedLlmProposals: 2 });
+      expect(mockManager.count).toHaveBeenNthCalledWith(1, Guess, { where: { strategyRunId: 7 } });
+      expect(mockManager.count).toHaveBeenNthCalledWith(2, SolvePrompt, { where: { strategyRunId: 7 } });
+      expect(mockManager.count).toHaveBeenNthCalledWith(3, LlmProposal, { where: { strategyRunId: 7 } });
+      // Guess.strategyRunId is ON DELETE SET NULL (not CASCADE) — deleting
+      // StrategyRun first would just null it out instead of removing the
+      // row, so the explicit Guess delete must run first.
+      expect(mockManager.delete).toHaveBeenNthCalledWith(1, Guess, { strategyRunId: 7 });
+      expect(mockManager.delete).toHaveBeenNthCalledWith(2, StrategyRun, { id: 7 });
     });
   });
 });

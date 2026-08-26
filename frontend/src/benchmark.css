@@ -310,6 +310,15 @@
   cursor: not-allowed;
 }
 
+/* Outlined-red variant of .bench-sort-btn for a destructive-but-secondary
+ * action (e.g. "Delete this run") — same pill shape/sizing as the plain
+ * sort/filter controls, just recolored so it reads as dangerous without
+ * competing with .bench-btn-primary's filled "main action" treatment. */
+.bench-sort-btn--danger {
+  border-color: #b04a3f;
+  color: #b04a3f;
+}
+
 /* Filled-accent variant of .bench-sort-btn for a page's one primary action
  * (e.g. "Enable Auto-Dispatch") — same pill shape/sizing, but a solid fill
  * so it reads as the thing to click rather than blending in with the
@@ -335,6 +344,27 @@
   cursor: not-allowed;
 }
 
+/* Destructive counterpart to .bench-btn-primary (e.g. the delete-run modal's
+ * confirm button) — same shape, filled with .bench-error's red instead of
+ * the accent color. */
+.bench-btn-danger {
+  border: 1px solid #b04a3f;
+  border-radius: 999px;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.85rem;
+  background: #b04a3f;
+  color: #fff;
+  cursor: pointer;
+}
+
+.bench-btn-danger:hover {
+  opacity: 0.9;
+}
+
+.bench-btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 .bench-filter {
   display: inline-flex;
@@ -458,6 +488,13 @@
   border-radius: 12px;
   padding: 1.25rem;
   min-height: 160px;
+}
+
+.bench-visualizer__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
 .bench-visualizer__title {

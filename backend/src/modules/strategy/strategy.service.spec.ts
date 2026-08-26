@@ -48,7 +48,7 @@ describe("StrategyService", () => {
     getDefaultModel: jest.Mock;
     findAll: jest.Mock;
   };
-  let mockManager: { insert: jest.Mock; save: jest.Mock };
+  let mockManager: { insert: jest.Mock; save: jest.Mock; count: jest.Mock; delete: jest.Mock };
   let mockDataSource: { transaction: jest.Mock };
 
   const makeRun = (overrides: Partial<StrategyRun> = {}) => ({
@@ -148,6 +148,8 @@ describe("StrategyService", () => {
     mockManager = {
       insert: jest.fn().mockResolvedValue({ identifiers: [{ id: 1 }] }),
       save: jest.fn().mockResolvedValue(undefined),
+      count: jest.fn().mockResolvedValue(0),
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     mockDataSource = {
       transaction: jest.fn(async (cb: (manager: unknown) => Promise<unknown>) => cb(mockManager)),
@@ -511,6 +513,21 @@ describe("StrategyService", () => {
         where: { strategyRunId: 7 },
         order: { promptNumber: "ASC", attemptNumber: "ASC" },
       });
+    });
+  });
+
+  describe("deleteRun", () => {
+    it("should delegate to the run store and return its deleted counts", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ id: 7, status: StrategyRunStatus.ERROR }));
+      mockManager.count
+        .mockResolvedValueOnce(3) // Guess
+        .mockResolvedValueOnce(5) // SolvePrompt
+        .mockResolvedValueOnce(2); // LlmProposal
+
+      const result = await service.deleteRun(7);
+
+      expect(result).toEqual({ deletedGuesses: 3, deletedSolvePrompts: 5, deletedLlmProposals: 2 });
+      expect(mockStrategyRunRepo.findOne).toHaveBeenCalledWith({ where: { id: 7 } });
     });
   });
 
