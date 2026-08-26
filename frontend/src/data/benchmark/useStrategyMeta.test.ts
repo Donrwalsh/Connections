@@ -50,7 +50,7 @@ describe("useStrategyMeta", () => {
       {
         id: 2,
         strategyName: "llm-google",
-        modelName: "gemini-2.5-flash",
+        modelName: "gemini-3.6-flash",
         inputCostPerMillionTokens: 0.3,
         outputCostPerMillionTokens: 2.5,
         supported: true,
@@ -61,13 +61,13 @@ describe("useStrategyMeta", () => {
       },
     ]);
 
-    const { result } = renderHook(() => useStrategyMeta("gemini-2.5-flash"));
+    const { result } = renderHook(() => useStrategyMeta("gemini-3.6-flash"));
 
     await waitFor(() => {
-      expect(result.current.meta?.description).toBe("Google gemini-2.5-flash · 1049K context");
+      expect(result.current.meta?.description).toBe("Google gemini-3.6-flash · 1049K context");
     });
 
-    expect(result.current.meta?.name).toBe("LLM · gemini-2.5-flash");
+    expect(result.current.meta?.name).toBe("LLM · gemini-3.6-flash");
     expect(result.current.meta?.strategyName).toBe("llm-google");
   });
 

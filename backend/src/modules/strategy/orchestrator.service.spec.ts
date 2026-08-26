@@ -121,14 +121,14 @@ describe("OrchestratorService", () => {
   it("should include the google provider in the request body when given", async () => {
     mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
 
-    await service.solveAssist(messages, "gemini-2.5-flash", "google");
+    await service.solveAssist(messages, "gemini-3.6-flash", "google");
 
     expect(mockFetch).toHaveBeenCalledWith(
       "http://orchestrator.test/solve-assist",
       expect.objectContaining({
         body: JSON.stringify({
           messages,
-          model: "gemini-2.5-flash",
+          model: "gemini-3.6-flash",
           provider: "google",
         }),
       }),

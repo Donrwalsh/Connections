@@ -248,20 +248,20 @@ describe("orchestrator app", () => {
         response: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
         groups: [["AAAA", "BBBB", "CCCC", "DDDD"]],
         proposals: [],
-        model: "gemini-2.5-flash",
+        model: "gemini-3.6-flash",
         latencyMs: 5,
       });
 
       const res = await solveAssistRequest({
         messages: SOLVE_ASSIST_BODY.messages,
-        model: "gemini-2.5-flash",
+        model: "gemini-3.6-flash",
         provider: "google",
       });
 
       expect(res.status).toBe(200);
       expect(solveAssistMock).toHaveBeenCalledWith(
         SOLVE_ASSIST_BODY.messages,
-        "gemini-2.5-flash",
+        "gemini-3.6-flash",
         "google",
         undefined,
         expect.any(AbortSignal),

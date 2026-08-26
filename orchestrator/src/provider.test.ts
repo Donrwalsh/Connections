@@ -118,7 +118,7 @@ describe("getModel", () => {
 
     expect(createGoogleGenerativeAIMock).toHaveBeenCalledTimes(1);
     const modelFactory = createGoogleGenerativeAIMock.mock.results[0].value;
-    expect(modelFactory).toHaveBeenCalledWith("gemini-2.5-flash");
+    expect(modelFactory).toHaveBeenCalledWith("gemini-3.6-flash");
     expect(openaiMock).not.toHaveBeenCalled();
     expect(createOllamaMock).not.toHaveBeenCalled();
   });
@@ -132,7 +132,7 @@ describe("getModel", () => {
   });
 
   it("uses the model override instead of GOOGLE_MODEL when given", () => {
-    vi.stubEnv("GOOGLE_MODEL", "gemini-2.5-flash-lite");
+    vi.stubEnv("GOOGLE_MODEL", "gemini-3.5-flash-lite");
 
     getModel("google", "gemini-2.5-pro");
 
@@ -144,7 +144,7 @@ describe("getModel", () => {
     getModel("google", undefined, 1048576);
 
     const modelFactory = createGoogleGenerativeAIMock.mock.results[0].value;
-    expect(modelFactory).toHaveBeenCalledWith("gemini-2.5-flash");
+    expect(modelFactory).toHaveBeenCalledWith("gemini-3.6-flash");
   });
 });
 
@@ -174,16 +174,16 @@ describe("getModelName", () => {
   });
 
   it("returns the configured Google model for the google provider", () => {
-    vi.stubEnv("GOOGLE_MODEL", "gemini-2.5-flash-lite");
-    expect(getModelName("google")).toBe("gemini-2.5-flash-lite");
+    vi.stubEnv("GOOGLE_MODEL", "gemini-3.5-flash-lite");
+    expect(getModelName("google")).toBe("gemini-3.5-flash-lite");
   });
 
   it("falls back to the Google default when unset", () => {
-    expect(getModelName("google")).toBe("gemini-2.5-flash");
+    expect(getModelName("google")).toBe("gemini-3.6-flash");
   });
 
   it("prefers the model override over GOOGLE_MODEL", () => {
-    vi.stubEnv("GOOGLE_MODEL", "gemini-2.5-flash-lite");
+    vi.stubEnv("GOOGLE_MODEL", "gemini-3.5-flash-lite");
     expect(getModelName("google", "gemini-2.5-pro")).toBe("gemini-2.5-pro");
   });
 });

@@ -377,12 +377,12 @@ describe("LlmStrategyRunner", () => {
         ]),
       );
 
-      await runner.runLlmStrategy(100, "llm-google", 0, "gemini-2.5-flash");
+      await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
 
       expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
       expect(mockOrchestratorService.solveAssist).toHaveBeenCalledWith(
         expect.any(Array),
-        "gemini-2.5-flash",
+        "gemini-3.6-flash",
         "google",
         null,
       );

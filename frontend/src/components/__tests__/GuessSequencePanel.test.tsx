@@ -508,7 +508,7 @@ describe("GuessSequencePanel Component", () => {
               strategyName: "llm-google",
               trialNumber: 1,
               status: "completed",
-              modelName: "gemini-2.5-flash",
+              modelName: "gemini-3.6-flash",
               contextWindow: 1048576,
               startedAt: "2024-01-15T00:00:00Z",
               finishedAt: "2024-01-15T00:05:00Z",
@@ -536,7 +536,7 @@ describe("GuessSequencePanel Component", () => {
               strategyName: "llm-google",
               trialNumber: 1,
               status: "completed",
-              modelName: "gemini-2.5-flash",
+              modelName: "gemini-3.6-flash",
               contextWindow: 1048576,
               guessCount: 1,
             },
@@ -560,7 +560,7 @@ describe("GuessSequencePanel Component", () => {
 
     expect(
       await screen.findByText(
-        "Strategy: LLM · Google · Model: gemini-2.5-flash (1,048,576 ctx) · Status: completed · 1 guess",
+        "Strategy: LLM · Google · Model: gemini-3.6-flash (1,048,576 ctx) · Status: completed · 1 guess",
       ),
     ).toBeInTheDocument();
   });

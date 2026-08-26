@@ -66,16 +66,16 @@ describe("describeLeaderboardRow", () => {
 
   it("labels the provider correctly for a Google row", () => {
     const row = makeLlmRow({
-      id: "gemini-2.5-flash",
+      id: "gemini-3.6-flash",
       strategyName: "llm-google",
-      modelName: "gemini-2.5-flash",
+      modelName: "gemini-3.6-flash",
       contextWindow: 1048576,
       paramCount: null,
     });
 
     const { description } = describeLeaderboardRow(row);
 
-    expect(description).toBe("Google gemini-2.5-flash · 1049K context");
+    expect(description).toBe("Google gemini-3.6-flash · 1049K context");
   });
 
   it("leaves deterministic rows unaffected", () => {
