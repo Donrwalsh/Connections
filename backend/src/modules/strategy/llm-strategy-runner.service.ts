@@ -16,6 +16,7 @@ import { LlmProposal, LlmProposalStatus } from "./entities/llm-proposal.entity";
 import { SolvePrompt, SolvePromptType, SolvePromptStatus } from "./entities/solve-prompt.entity";
 import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/strategy-run.entity";
 import { OrchestratorService, type ChatMessage, type SolveErrorCode } from "./orchestrator.service";
+import { SupportedModelService } from "../supported-model/supported-model.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { firstCombination } from "./combinatorics";
 
@@ -159,6 +160,7 @@ export class LlmStrategyRunner {
     @InjectRepository(SolvePrompt)
     private readonly solvePromptRepo: Repository<SolvePrompt>,
     @Inject(OrchestratorService) private readonly orchestratorService: OrchestratorService,
+    @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
   ) {}
 
   async runLlmStrategy(puzzleId: number, strategyName: string, trialNumber = 0, model?: string) {
@@ -167,11 +169,16 @@ export class LlmStrategyRunner {
     // every orchestrator call for this run tells it which client to use.
     const provider = strategyName === LLM_OLLAMA ? "ollama" : "openai";
 
+    const contextWindow = model
+      ? await this.supportedModelService.getContextWindow(strategyName, model)
+      : null;
+
     const { run, puzzle } = await this.store.loadOrCreateRun(
       puzzleId,
       strategyName,
       trialNumber,
       model,
+      contextWindow,
     );
 
     if (TERMINAL_STATUSES.has(run.status)) {
@@ -226,7 +233,12 @@ export class LlmStrategyRunner {
       // Append the user message to conversation history.
       messages.push({ role: "user", content: prompt });
 
-      const outcome = await this.orchestratorService.solveAssist(messages, model, provider);
+      const outcome = await this.orchestratorService.solveAssist(
+        messages,
+        model,
+        provider,
+        contextWindow,
+      );
 
       // One promptNumber per loop iteration.
       globalPromptNumber++;

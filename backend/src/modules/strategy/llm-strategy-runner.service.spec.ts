@@ -9,6 +9,7 @@ import { Guess, GuessResult } from "./entities/guess.entity";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { LlmProposalStatus } from "./entities/llm-proposal.entity";
 import { OrchestratorService, type SolveAssistOutcome, type ChatMessage } from "./orchestrator.service";
+import { SupportedModelService } from "../supported-model/supported-model.service";
 
 describe("LlmStrategyRunner", () => {
   let runner: LlmStrategyRunner;
@@ -26,6 +27,7 @@ describe("LlmStrategyRunner", () => {
   let mockOrchestratorService: {
     solveAssist: jest.Mock<Promise<SolveAssistOutcome>, unknown[]>;
   };
+  let mockSupportedModelService: { getContextWindow: jest.Mock };
   let mockManager: { insert: jest.Mock; save: jest.Mock };
   let mockDataSource: { transaction: jest.Mock };
 
@@ -80,6 +82,9 @@ describe("LlmStrategyRunner", () => {
     mockOrchestratorService = {
       solveAssist: jest.fn(),
     };
+    mockSupportedModelService = {
+      getContextWindow: jest.fn().mockResolvedValue(null),
+    };
     mockManager = {
       insert: jest.fn().mockImplementation((entity: string, data?: unknown[]) => {
         if (entity === "SolvePrompt")
@@ -104,6 +109,7 @@ describe("LlmStrategyRunner", () => {
         { provide: getRepositoryToken(Guess), useValue: mockGuessRepo },
         { provide: getRepositoryToken(SolvePrompt), useValue: mockSolvePromptRepo },
         { provide: OrchestratorService, useValue: mockOrchestratorService },
+        { provide: SupportedModelService, useValue: mockSupportedModelService },
       ],
     }).compile();
 
@@ -358,6 +364,7 @@ describe("LlmStrategyRunner", () => {
         expect.any(Array),
         "mistral",
         "ollama",
+        null,
       );
     });
 
@@ -379,7 +386,45 @@ describe("LlmStrategyRunner", () => {
         expect.any(Array),
         "gpt-4.1-nano-2025-04-14",
         "openai",
+        null,
       );
+    });
+
+    it("should look up and thread the model's contextWindow through to solveAssist", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-ollama" }));
+      mockSupportedModelService.getContextWindow.mockResolvedValueOnce(131072);
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([
+          ["APPLE", "BANANA", "CHERRY", "DATE"],
+          ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        ]),
+      );
+
+      await runner.runLlmStrategy(100, "llm-ollama", 0, "mistral-nemo");
+
+      expect(mockSupportedModelService.getContextWindow).toHaveBeenCalledWith(
+        "llm-ollama",
+        "mistral-nemo",
+      );
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledWith(
+        expect.any(Array),
+        "mistral-nemo",
+        "ollama",
+        131072,
+      );
+    });
+
+    it("should not look up a contextWindow when no model is given", async () => {
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([
+          ["APPLE", "BANANA", "CHERRY", "DATE"],
+          ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        ]),
+      );
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      expect(mockSupportedModelService.getContextWindow).not.toHaveBeenCalled();
     });
 
     it("should resume with prior guesses loaded from the database", async () => {
