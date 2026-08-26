@@ -98,14 +98,15 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `OPENAI_MODEL` | `gpt-4.1-nano` | OpenAI model id (used by the `llm-openai` strategy and provider-less requests) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server base URL (used by the `llm-ollama` strategy) |
 | `OLLAMA_MODEL` | `llama3.2` | Ollama model id (used by the `llm-ollama` strategy) |
-| `MODEL_CONTEXT_WINDOW` | `8192` | Context window (in tokens) used to size the LLM solver prompt for both providers |
+| `MODEL_CONTEXT_WINDOW` | `8192` | Fallback context window (in tokens) for Ollama's `num_ctx` when a model has no per-model `contextWindow` yet (see `SupportedModel`) — e.g. the provider-less AI Assist path, or an Ollama model that hasn't been through a metadata refresh |
 | `BULL_BOARD_USER` / `BULL_BOARD_PASS` | `admin` / `bullboard` | Login credentials for the Bull Board dashboard's login page at `/bull/login` (must be set together, or not at all) |
-| `DISPATCH_PASSWORD` | — | Password checked against the `password` field on `POST /dispatch/model/:modelName/:date`, `POST /dispatch/model/:modelName/runs/:n`, `POST /dispatch/free-tier/:tier`, and `DELETE /dispatch/run/:runId` — the dispatch routes that queue paid LLM calls or permanently delete a run. Only enforced when `NODE_ENV=production` (baked into `backend/Dockerfile`); **required** once it is — the backend/worker refuse to boot without it |
+| `DISPATCH_PASSWORD` | — | Password checked against the `password` field on `POST /dispatch/model/:modelName/:date`, `POST /dispatch/model/:modelName/runs/:n`, `POST /dispatch/free-tier/:tier`, `DELETE /dispatch/run/:runId`, and `POST /dispatch/refresh-model-metadata` — the dispatch routes that queue paid LLM calls, permanently delete a run, or trigger an on-demand metadata refresh. Only enforced when `NODE_ENV=production` (baked into `backend/Dockerfile`); **required** once it is — the backend/worker refuse to boot without it |
 | `CORS_ORIGIN` | `http://localhost:5173` | Comma-separated list of allowed frontend origins |
 | `ORCHESTRATOR_URL` | `http://orchestrator:3001` | Backend's URL for reaching the orchestrator |
 | `ORCHESTRATOR_TIMEOUT_MS` | `600000` | Per-attempt HTTP timeout for solve calls, since timeouts are not retried — a firing timeout now also cancels the orchestrator's in-flight OpenAI call |
 | `PUZZLE_POPULATION_CRON` | `0 6 * * *` | Cron pattern for daily puzzle fetch (UTC by default) |
 | `PUZZLE_POPULATION_TZ` | `UTC` | Timezone for the puzzle population cron |
+| `MODEL_METADATA_REFRESH_CRON` | `0 7 * * *` | Cron pattern for the daily OpenRouter model-metadata/pricing refresh (UTC by default) |
 | `PUZZLE_CACHE_DIR` | `/app/.puzzle-cache` | Directory used as a local cache of raw NYT puzzle payloads (bound to `./.puzzle-cache` on the host) |
 | `SHUFFLE_TRIALS` | `3` | Number of trials run per puzzle for each shuffle strategy — shuffle-smart and shuffle-foolish share this one value. shuffle-foolish keeps sampling (repeats included) with no duplicate limit until it solves |
 | `LLM_TRIALS_PER_MODEL` | `3` | Maximum number of independent trials a single LLM model may accumulate per puzzle. Applies per model, not per strategy run — each LLM dispatch queues one new trial (rejecting once a model hits this cap), and a different model gets its own independent budget |

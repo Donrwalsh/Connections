@@ -14,6 +14,7 @@ import { ApiBody, ApiParam, ApiQuery } from "@nestjs/swagger";
 import { StrategyService } from "../strategy/strategy.service";
 import { GameService } from "../game/game.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
+import { ModelMetadataRefreshService } from "../supported-model/model-metadata-refresh.service";
 import {
   FreeTierDispatchService,
   FreeTierDispatchStatusDto,
@@ -45,6 +46,8 @@ export class DispatchController {
     @Inject(GameService) private readonly gameService: GameService,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
     @Inject(FreeTierDispatchService) private readonly freeTierDispatchService: FreeTierDispatchService,
+    @Inject(ModelMetadataRefreshService)
+    private readonly modelMetadataRefreshService: ModelMetadataRefreshService,
   ) {}
 
   @Post("strategy/:strategyName/:date")
@@ -312,5 +315,15 @@ export class DispatchController {
       runId,
       ...result,
     };
+  }
+
+  // Runs the same refresh ModelMetadataRefreshBootstrap schedules daily, on
+  // demand — e.g. right after registering a new model's openRouterSlug.
+  @Post("refresh-model-metadata")
+  @UseGuards(DispatchAuthGuard)
+  @ApiBody({ type: DispatchAuthDto })
+  async refreshModelMetadata() {
+    const result = await this.modelMetadataRefreshService.refreshAll();
+    return { message: "Model metadata refresh complete", ...result };
   }
 }

@@ -2,12 +2,14 @@ import { Module } from "@nestjs/common";
 import { strategyQueue, llmOpenAIQueue, llmOllamaQueue } from "./strategy.queue";
 import { puzzleQueue } from "./puzzle.queue";
 import { freeTierDispatchQueue } from "./free-tier-dispatch.queue";
+import { modelMetadataQueue } from "./model-metadata.queue";
 
 export const STRATEGY_QUEUE = "STRATEGY_QUEUE";
 export const LLM_OPENAI_QUEUE = "LLM_OPENAI_QUEUE";
 export const LLM_OLLAMA_QUEUE = "LLM_OLLAMA_QUEUE";
 export const PUZZLE_QUEUE = "PUZZLE_QUEUE";
 export const FREE_TIER_DISPATCH_QUEUE = "FREE_TIER_DISPATCH_QUEUE";
+export const MODEL_METADATA_QUEUE = "MODEL_METADATA_QUEUE";
 
 @Module({
   providers: [
@@ -16,6 +18,7 @@ export const FREE_TIER_DISPATCH_QUEUE = "FREE_TIER_DISPATCH_QUEUE";
     { provide: LLM_OLLAMA_QUEUE, useValue: llmOllamaQueue },
     { provide: PUZZLE_QUEUE, useValue: puzzleQueue },
     { provide: FREE_TIER_DISPATCH_QUEUE, useValue: freeTierDispatchQueue },
+    { provide: MODEL_METADATA_QUEUE, useValue: modelMetadataQueue },
   ],
   exports: [
     STRATEGY_QUEUE,
@@ -23,6 +26,7 @@ export const FREE_TIER_DISPATCH_QUEUE = "FREE_TIER_DISPATCH_QUEUE";
     LLM_OLLAMA_QUEUE,
     PUZZLE_QUEUE,
     FREE_TIER_DISPATCH_QUEUE,
+    MODEL_METADATA_QUEUE,
   ],
 })
 export class QueueModule {}
