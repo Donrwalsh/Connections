@@ -32,10 +32,16 @@ export function defaultProvider(): ModelProvider {
  * `modelOverride` names the exact model to call — set on every strategy-run
  * call (the backend validates it against SupportedModel first), omitted on
  * the provider-less /diagnose AI Assist path, which falls back to the
- * env-configured default. `contextWindow` similarly overrides
- * MODEL_CONTEXT_WINDOW for Ollama's num_ctx — the backend sends the calling
- * model's real context window (from SupportedModel) when it knows one;
- * omitted, this falls back to the flat env default same as before.
+ * env-configured default. `contextWindow` is the calling model's real
+ * context window (from SupportedModel) when the backend knows one — but
+ * Ollama's num_ctx is always capped at MODEL_CONTEXT_WINDOW regardless,
+ * never requested in full: llama.cpp reserves num_ctx's *entire* KV-cache
+ * footprint at model-load time (not scaled to actual prompt length), so
+ * requesting a model's real context window verbatim (e.g. a 131K-context
+ * model) can OOM-kill Ollama on memory-constrained hardware even though
+ * real prompts never come close to using it. The model's true spec still
+ * shows correctly everywhere else (SupportedModel.contextWindow, the
+ * leaderboard) — only what's actually sent to Ollama is capped.
  */
 export function getModel(
   provider: ModelProvider,
@@ -46,8 +52,9 @@ export function getModel(
     const ollama = createOllama({
       baseURL: process.env.OLLAMA_BASE_URL ?? "http://localhost:11434",
     });
+    const ceiling = getContextWindow();
     return ollama(modelOverride ?? process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL, {
-      options: { num_ctx: contextWindow ?? getContextWindow() },
+      options: { num_ctx: Math.min(contextWindow ?? ceiling, ceiling) },
     });
   }
 
@@ -68,9 +75,11 @@ export function getModelName(provider: ModelProvider, modelOverride?: string): s
 }
 
 /**
- * Returns the configured context window for the active model, from
- * MODEL_CONTEXT_WINDOW. Used both to constrain the Ollama model (num_ctx)
- * and to report per-run context capacity in telemetry. Defaults to 8192
+ * The Ollama num_ctx ceiling, from MODEL_CONTEXT_WINDOW — never exceeded
+ * regardless of a model's real (possibly much larger) context window, since
+ * llama.cpp reserves num_ctx's full KV-cache footprint at model-load time
+ * rather than scaling it to actual usage. Doubles as the fallback when no
+ * per-model contextWindow is known at all (see getModel). Defaults to 8192
  * when not configured.
  */
 export function getContextWindow(): number {
