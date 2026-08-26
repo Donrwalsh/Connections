@@ -262,6 +262,14 @@
   color: var(--text);
 }
 
+.bench-strategy-provider-desc {
+  display: block;
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text);
+  opacity: 0.75;
+}
+
 .bench-metric-value {
   display: block;
 }

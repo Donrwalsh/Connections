@@ -39,6 +39,9 @@ function makeLeaderboardRow(overrides: Partial<LeaderboardRow> = {}): Leaderboar
     avgDurationMs: 12,
     avgCostUsd: null,
     totalCostUsd: null,
+    contextWindow: null,
+    paramCount: null,
+    providerDescription: null,
     ...overrides,
   };
 }
@@ -382,5 +385,65 @@ describe("StrategyPuzzlePage", () => {
     renderStrategy("alphabetical");
 
     expect(await screen.findByText("boom")).toBeInTheDocument();
+  });
+
+  it("shows the provider's own description below the stats line for an LLM model", async () => {
+    stubFetch({
+      leaderboard: {
+        deterministic: [],
+        llm: [
+          makeLeaderboardRow({
+            id: "gpt-4.1-nano-2025-04-14",
+            strategyName: "llm-openai",
+            modelName: "gpt-4.1-nano-2025-04-14",
+            kind: "llm",
+            providerDescription: "For tasks that demand low latency, GPT-4.1 nano is the fastest.",
+          }),
+        ],
+      },
+    });
+
+    renderStrategy("gpt-4.1-nano-2025-04-14");
+
+    expect(
+      await screen.findByText(
+        "For tasks that demand low latency, GPT-4.1 nano is the fastest.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows no provider-description paragraph for a deterministic strategy", async () => {
+    stubFetch({
+      leaderboard: { deterministic: [makeLeaderboardRow()], llm: [] },
+    });
+
+    renderStrategy("alphabetical");
+
+    await screen.findByRole("heading", { name: "Alphabetical" });
+    expect(
+      screen.queryByText("For tasks that demand low latency, GPT-4.1 nano is the fastest."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows no provider-description paragraph for an LLM model with no description yet", async () => {
+    stubFetch({
+      leaderboard: {
+        deterministic: [],
+        llm: [
+          makeLeaderboardRow({
+            id: "gpt-4.1-nano-2025-04-14",
+            strategyName: "llm-openai",
+            modelName: "gpt-4.1-nano-2025-04-14",
+            kind: "llm",
+            providerDescription: null,
+          }),
+        ],
+      },
+    });
+
+    renderStrategy("gpt-4.1-nano-2025-04-14");
+
+    await screen.findByRole("heading", { name: "LLM · gpt-4.1-nano-2025-04-14" });
+    expect(screen.queryByText(/^For tasks/)).not.toBeInTheDocument();
   });
 });
