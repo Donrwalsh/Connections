@@ -71,6 +71,7 @@ export class StrategyRunStore {
     strategyName: string,
     trialNumber = 0,
     model?: string,
+    contextWindow?: number | null,
   ): Promise<{ run: StrategyRun; puzzle: Puzzle }> {
     const puzzle = await this.puzzleRepo.findOne({
       where: { id: puzzleId },
@@ -100,6 +101,7 @@ export class StrategyRunStore {
       // accurate than waiting for the first orchestrator response to report
       // it (the previous behavior, still the fallback when model is unset).
       modelName: model ?? null,
+      contextWindow: contextWindow ?? null,
     });
 
     const saved = await this.strategyRunRepo.save(run);
