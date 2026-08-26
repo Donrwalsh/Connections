@@ -148,13 +148,25 @@ other reason" (not yet explained).
 `isWordAlreadySolved` check splits into two:
 
 - word missing from `run.availableWords` **and** missing from the full
-  original puzzle set (`run.availableWords ∪ flatten(state.lockedInGroups)`
-  — both already held in memory, no extra query needed) → genuine
-  hallucination, tag `wordNotOnList` on `currentPrompt.issueTags`.
-- word missing from `run.availableWords` but present in
-  `state.lockedInGroups` → already solved by an earlier guess in this run,
-  same silent-skip behavior as today, **no tag** (expected, not a model
+  original puzzle set → genuine hallucination, tag `wordNotOnList` on
+  `currentPrompt.issueTags`.
+- word missing from `run.availableWords` but present in the full original
+  puzzle set → already solved by an earlier guess in this run, same
+  silent-skip behavior as today, **no tag** (expected, not a model
   failure).
+
+The full original puzzle set is derived from `puzzle.answerGroups`/
+`GroupMember.word` (already eagerly loaded by
+`StrategyRunStore.loadOrCreateRun`'s `relations: { answerGroups: { members:
+true } }`), **not** from `run.availableWords ∪ flatten(state.lockedInGroups)`
+as an earlier draft of this design had it. `state.lockedInGroups` is
+unconditionally reset to `[]` at the top of every call to
+`runLlmStrategy` — including a resumed run, whose `priorGuesses` is
+rebuilt from stored `Guess` rows but whose `lockedInGroups` is not — so a
+run resumed after a worker restart would derive an incomplete "original
+puzzle set" from it and falsely tag an already-solved word as
+`wordNotOnList`. Deriving from the puzzle's own DB-backed answer groups is
+resume-safe regardless of in-memory loop state.
 
 Either way the proposal is still skipped exactly as it is today — this
 only changes whether/how it gets flagged, not the solve behavior.
