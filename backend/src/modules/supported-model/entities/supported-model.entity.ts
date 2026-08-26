@@ -39,6 +39,35 @@ export class SupportedModel {
   @Column({ type: "text", nullable: true })
   freeTier: string | null;
 
+  // OpenRouter's model id, e.g. "openai/gpt-4.1-nano" — set manually per
+  // model (same place a model is registered). null means "not mapped, skip
+  // this row on refresh" — see ModelMetadataRefreshService.
+  @Column({ type: "text", nullable: true })
+  openRouterSlug: string | null;
+
+  // From OpenRouter's context_length. Also used as the real per-model
+  // context window for Ollama's num_ctx — see provider.ts.
+  @Column({ type: "int", nullable: true })
+  contextWindow: number | null;
+
+  // Best-effort: parsed from the OpenRouter slug/name or description prose.
+  // null for most OpenAI rows — OpenAI doesn't publish parameter counts.
+  @Column({ type: "bigint", nullable: true })
+  paramCount: number | null;
+
+  // OpenRouter's own natural-language description of the model, verbatim.
+  @Column({ type: "text", nullable: true })
+  providerDescription: string | null;
+
+  // From OpenRouter's created (Unix timestamp) — the model's real release
+  // date, not just when OpenRouter listed it.
+  @Column({ type: "timestamptz", nullable: true })
+  releaseDate: Date | null;
+
+  // Set on every successful refresh match; null until the first one.
+  @Column({ type: "timestamptz", nullable: true })
+  metadataUpdatedAt: Date | null;
+
   @CreateDateColumn({
     type: "timestamptz",
     default: () => "CURRENT_TIMESTAMP",

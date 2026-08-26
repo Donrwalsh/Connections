@@ -177,6 +177,31 @@ describe("SupportedModelService", () => {
       ]);
     });
 
+    it("should include the metadata fields on every row", async () => {
+      mockRepo.find.mockResolvedValueOnce([
+        {
+          id: 1,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          supported: true,
+          contextWindow: 128000,
+          paramCount: null,
+          providerDescription: "Fast and cheap.",
+          releaseDate: new Date("2025-04-14T00:00:00Z"),
+        },
+      ]);
+      mockPriceRepo.find.mockResolvedValueOnce([]);
+
+      const result = await service.findAll();
+
+      expect(result[0]).toMatchObject({
+        contextWindow: 128000,
+        paramCount: null,
+        providerDescription: "Fast and cheap.",
+        releaseDate: new Date("2025-04-14T00:00:00Z"),
+      });
+    });
+
     it("should leave cost fields null for a model with no ModelPrice row", async () => {
       mockRepo.find.mockResolvedValueOnce([
         { id: 1, strategyName: "llm-openai", modelName: "brand-new-model", supported: true },
@@ -189,6 +214,85 @@ describe("SupportedModelService", () => {
         inputCostPerMillionTokens: null,
         outputCostPerMillionTokens: null,
       });
+    });
+  });
+
+  describe("findPriceHistory", () => {
+    it("should return every price row, joined with its model's strategyName/modelName", async () => {
+      mockRepo.find.mockResolvedValueOnce([
+        { id: 1, strategyName: "llm-openai", modelName: "gpt-4.1-nano" },
+      ]);
+      mockPriceRepo.find.mockResolvedValueOnce([
+        {
+          id: 10,
+          supportedModelId: 1,
+          inputCostPerMillionTokens: 0.05,
+          outputCostPerMillionTokens: 0.2,
+          createdAt: new Date("2026-01-01T00:00:00Z"),
+        },
+        {
+          id: 11,
+          supportedModelId: 1,
+          inputCostPerMillionTokens: 0.1,
+          outputCostPerMillionTokens: 0.4,
+          createdAt: new Date("2026-06-01T00:00:00Z"),
+        },
+      ]);
+
+      const result = await service.findPriceHistory();
+
+      expect(result).toEqual([
+        {
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          createdAt: new Date("2026-01-01T00:00:00Z"),
+          inputCostPerMillionTokens: 0.05,
+          outputCostPerMillionTokens: 0.2,
+        },
+        {
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          createdAt: new Date("2026-06-01T00:00:00Z"),
+          inputCostPerMillionTokens: 0.1,
+          outputCostPerMillionTokens: 0.4,
+        },
+      ]);
+      expect(mockPriceRepo.find).toHaveBeenCalledWith({ order: { id: "ASC" } });
+    });
+
+    it("should omit a price row whose model no longer exists", async () => {
+      mockRepo.find.mockResolvedValueOnce([]);
+      mockPriceRepo.find.mockResolvedValueOnce([
+        {
+          id: 10,
+          supportedModelId: 999,
+          inputCostPerMillionTokens: 0.05,
+          outputCostPerMillionTokens: 0.2,
+          createdAt: new Date("2026-01-01T00:00:00Z"),
+        },
+      ]);
+
+      expect(await service.findPriceHistory()).toEqual([]);
+    });
+  });
+
+  describe("getContextWindow", () => {
+    it("should return the model's contextWindow when the row exists", async () => {
+      mockRepo.findOne.mockResolvedValueOnce({ contextWindow: 131072 });
+      expect(await service.getContextWindow("llm-ollama", "mistral-nemo")).toBe(131072);
+      expect(mockRepo.findOne).toHaveBeenCalledWith({
+        where: { strategyName: "llm-ollama", modelName: "mistral-nemo" },
+      });
+    });
+
+    it("should return null when the model has no known context window yet", async () => {
+      mockRepo.findOne.mockResolvedValueOnce({ contextWindow: null });
+      expect(await service.getContextWindow("llm-ollama", "mistral-nemo")).toBeNull();
+    });
+
+    it("should return null when no such model exists", async () => {
+      mockRepo.findOne.mockResolvedValueOnce(null);
+      expect(await service.getContextWindow("llm-ollama", "unknown")).toBeNull();
     });
   });
 

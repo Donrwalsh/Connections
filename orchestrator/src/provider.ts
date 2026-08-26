@@ -32,17 +32,22 @@ export function defaultProvider(): ModelProvider {
  * `modelOverride` names the exact model to call — set on every strategy-run
  * call (the backend validates it against SupportedModel first), omitted on
  * the provider-less /diagnose AI Assist path, which falls back to the
- * env-configured default.
+ * env-configured default. `contextWindow` similarly overrides
+ * MODEL_CONTEXT_WINDOW for Ollama's num_ctx — the backend sends the calling
+ * model's real context window (from SupportedModel) when it knows one;
+ * omitted, this falls back to the flat env default same as before.
  */
-export function getModel(provider: ModelProvider, modelOverride?: string): LanguageModel {
+export function getModel(
+  provider: ModelProvider,
+  modelOverride?: string,
+  contextWindow?: number,
+): LanguageModel {
   if (provider === "ollama") {
     const ollama = createOllama({
       baseURL: process.env.OLLAMA_BASE_URL ?? "http://localhost:11434",
     });
-    // Pass the configured context window through as num_ctx so Ollama's real
-    // context matches the reported MODEL_CONTEXT_WINDOW telemetry value.
     return ollama(modelOverride ?? process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL, {
-      options: { num_ctx: getContextWindow() },
+      options: { num_ctx: contextWindow ?? getContextWindow() },
     });
   }
 

@@ -7,6 +7,7 @@
 // was last updated) falls back to a synthesized label — see
 // describeLeaderboardRow and useStrategyMeta's buildDynamicMeta.
 
+import { formatModelStatsDescription } from "./formatModelStats";
 import type { LeaderboardRow, StrategyMeta } from "./types";
 
 const STRATEGY_DEFS: StrategyMeta[] = [
@@ -125,15 +126,21 @@ export function humanizeStrategyName(strategyName: string): string {
  * buildDynamicMeta fallback for that same gap. */
 export function describeLeaderboardRow(row: LeaderboardRow): { name: string; description: string } {
   const meta = getStrategyMeta(row.id);
-  if (meta) return { name: meta.name, description: meta.description };
 
   if (row.kind === "llm") {
     const providerLabel = row.strategyName === "llm-ollama" ? "Ollama" : "OpenAI";
     return {
-      name: `LLM · ${row.modelName}`,
-      description: `${providerLabel} model proposes candidate groups`,
+      name: meta?.name ?? `LLM · ${row.modelName}`,
+      description: formatModelStatsDescription(
+        providerLabel,
+        row.modelName ?? row.id,
+        row.contextWindow,
+        row.paramCount,
+      ),
     };
   }
+
+  if (meta) return { name: meta.name, description: meta.description };
 
   return {
     name: humanizeStrategyName(row.strategyName),

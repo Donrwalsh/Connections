@@ -186,6 +186,28 @@ describe("orchestrator app", () => {
         SOLVE_ASSIST_BODY.messages,
         "gpt-4.1-nano-2025-04-14",
         "openai",
+        undefined,
+        expect.any(AbortSignal),
+      );
+    });
+
+    it("passes contextWindow through to solveAssist when given", async () => {
+      solveAssistMock.mockResolvedValueOnce({
+        response: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
+        groups: [["AAAA", "BBBB", "CCCC", "DDDD"]],
+        proposals: [],
+        model: "mistral-nemo",
+        latencyMs: 5,
+      });
+
+      const res = await solveAssistRequest({ ...SOLVE_ASSIST_BODY, contextWindow: 131072 });
+
+      expect(res.status).toBe(200);
+      expect(solveAssistMock).toHaveBeenCalledWith(
+        SOLVE_ASSIST_BODY.messages,
+        "gpt-4.1-nano-2025-04-14",
+        "openai",
+        131072,
         expect.any(AbortSignal),
       );
     });
@@ -204,6 +226,7 @@ describe("orchestrator app", () => {
       expect(res.status).toBe(200);
       expect(solveAssistMock).toHaveBeenCalledWith(
         SOLVE_ASSIST_BODY.messages,
+        undefined,
         undefined,
         undefined,
         expect.any(AbortSignal),

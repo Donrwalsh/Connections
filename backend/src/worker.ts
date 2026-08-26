@@ -8,6 +8,7 @@ import { FreeTierDispatchService } from "./modules/free-tier-dispatch/free-tier-
 import type { FreeTierId } from "./modules/strategy/free-tier-usage.service";
 import { redisConnection } from "./modules/queue/redis.config";
 import { PuzzleIngestionService } from "./modules/game/puzzle-ingestion.service";
+import { ModelMetadataRefreshService } from "./modules/supported-model/model-metadata-refresh.service";
 import {
   isLlmStrategy,
   LLM_OPENAI,
@@ -43,6 +44,7 @@ async function bootstrap() {
   const llmStrategyRunner = appContext.get(LlmStrategyRunner);
   const puzzleIngestionService = appContext.get(PuzzleIngestionService);
   const freeTierDispatchService = appContext.get(FreeTierDispatchService);
+  const modelMetadataRefreshService = appContext.get(ModelMetadataRefreshService);
 
   const activeWorkers: Worker[] = [];
   const activeQueueNames: string[] = [];
@@ -198,6 +200,27 @@ async function bootstrap() {
 
     activeWorkers.push(puzzleWorker);
     activeQueueNames.push("puzzle-population");
+
+    const modelMetadataWorker = new Worker(
+      "model-metadata-refresh",
+      async (job) => {
+        logger.log(`starting model-metadata refresh job ${job.id}`);
+        const result = await modelMetadataRefreshService.refreshAll();
+        logger.log(`finished model-metadata refresh job ${job.id}: ${JSON.stringify(result)}`);
+        return result;
+      },
+      {
+        connection: redisConnection,
+        concurrency: 1,
+      },
+    );
+
+    modelMetadataWorker.on("failed", (job, err) => {
+      logger.error(`model-metadata refresh job ${job?.id} failed`, err?.stack || err);
+    });
+
+    activeWorkers.push(modelMetadataWorker);
+    activeQueueNames.push("model-metadata-refresh");
 
     // Each job is one tick of a free-tier dispatch cycle (see
     // FreeTierDispatchService) — it queues this tick's batch onto

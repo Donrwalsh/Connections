@@ -3,16 +3,29 @@ import { parseGroupProposals, solveAssist } from "./solve-assist.js";
 
 describe("solveAssist", () => {
   const generateTextMock = vi.hoisted(() => vi.fn());
+  const getModelSpy = vi.hoisted(() => vi.fn());
 
   vi.mock("ai", async (importOriginal) => {
     const actual = await importOriginal<typeof import("ai")>();
     return { ...actual, generateText: generateTextMock };
   });
 
+  vi.mock("./provider.js", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("./provider.js")>();
+    return {
+      ...actual,
+      getModel: (...args: Parameters<typeof actual.getModel>) => {
+        getModelSpy(...args);
+        return actual.getModel(...args);
+      },
+    };
+  });
+
   const MESSAGES = [{ role: "user" as const, content: "solve this puzzle" }];
 
   beforeEach(() => {
     generateTextMock.mockReset();
+    getModelSpy.mockReset();
   });
 
   afterEach(() => {
@@ -35,7 +48,7 @@ describe("solveAssist", () => {
     });
 
     const controller = new AbortController();
-    const result = await solveAssist(MESSAGES, undefined, undefined, controller.signal);
+    const result = await solveAssist(MESSAGES, undefined, undefined, undefined, controller.signal);
 
     // The mock ignores `include`/`abortSignal`, so this only guards against
     // the options being dropped — the real AI SDK gates request/response
@@ -58,6 +71,18 @@ describe("solveAssist", () => {
       id: "resp_123",
       choices: [{ message: { content: "### ANSWER..." } }],
     });
+  });
+
+  it("passes contextWindow through to getModel", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
+      response: { modelId: "mistral-nemo" },
+      request: {},
+    });
+
+    await solveAssist(MESSAGES, "mistral-nemo", "ollama", 131072);
+
+    expect(getModelSpy).toHaveBeenCalledWith("ollama", "mistral-nemo", 131072);
   });
 
   it("surfaces APICallError detail instead of discarding it", async () => {

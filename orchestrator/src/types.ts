@@ -85,6 +85,14 @@ export const SolveAssistRequestSchema = AssistRequestSchema.extend({
     .enum(["openai", "ollama"])
     .optional()
     .describe("Provider to call, overriding MODEL_PROVIDER"),
+  contextWindow: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      "This model's real context window, overriding MODEL_CONTEXT_WINDOW for Ollama's num_ctx",
+    ),
 });
 export type SolveAssistRequest = z.infer<typeof SolveAssistRequestSchema>;
 

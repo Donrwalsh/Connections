@@ -151,6 +151,12 @@ export interface LeaderboardRowDto {
   // spent tokens.
   avgCostUsd: number | null;
   totalCostUsd: number | null;
+  // Current (not run-time-historical, unlike cost) model metadata — see
+  // SupportedModel. null until the model has been through a metadata
+  // refresh, or for deterministic/shuffle rows.
+  contextWindow: number | null;
+  paramCount: number | null;
+  providerDescription: string | null;
 }
 
 export interface LeaderboardDto {
@@ -230,4 +236,8 @@ export interface SupportedModelDto {
   inputCostPerMillionTokens: number | null;
   outputCostPerMillionTokens: number | null;
   supported: boolean;
+  contextWindow: number | null;
+  paramCount: number | null;
+  providerDescription: string | null;
+  releaseDate: Date | null;
 }

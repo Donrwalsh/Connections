@@ -150,6 +150,9 @@ export function StrategyPuzzlePage() {
         </Link>
         <h1 className="bench-page-header__title">{meta.name}</h1>
         <p className="bench-strategy-desc">{meta.description}</p>
+        {meta.kind === "llm" && leaderboardRow?.providerDescription ? (
+          <p className="bench-strategy-provider-desc">{leaderboardRow.providerDescription}</p>
+        ) : null}
 
         {leaderboardRow ? (
           <>

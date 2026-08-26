@@ -8,6 +8,14 @@ import { ModelPrice } from "./entities/model-price.entity";
 // row — the shape GET /strategy/models returns and getLeaderboard/
 // getRunHistory price runs from. Cost fields are nullable: a model can exist
 // (and be dispatchable) before it's ever been given a price row.
+export interface PriceHistoryEntry {
+  strategyName: string;
+  modelName: string;
+  createdAt: Date;
+  inputCostPerMillionTokens: number;
+  outputCostPerMillionTokens: number;
+}
+
 export interface SupportedModelWithRate {
   id: number;
   strategyName: string;
@@ -15,6 +23,10 @@ export interface SupportedModelWithRate {
   supported: boolean;
   inputCostPerMillionTokens: number | null;
   outputCostPerMillionTokens: number | null;
+  contextWindow: number | null;
+  paramCount: number | null;
+  providerDescription: string | null;
+  releaseDate: Date | null;
 }
 
 @Injectable()
@@ -120,8 +132,52 @@ export class SupportedModelService {
         supported: model.supported,
         inputCostPerMillionTokens: price?.inputCostPerMillionTokens ?? null,
         outputCostPerMillionTokens: price?.outputCostPerMillionTokens ?? null,
+        contextWindow: model.contextWindow,
+        paramCount: model.paramCount,
+        providerDescription: model.providerDescription,
+        releaseDate: model.releaseDate,
       };
     });
+  }
+
+  /**
+   * Every ModelPrice row ever inserted, joined with its model's
+   * strategyName/modelName, ordered oldest-first per model — lets a caller
+   * find "the price in effect at time T" for a given run, rather than only
+   * ever seeing the current price. See getLeaderboard/getRunHistory.
+   */
+  async findPriceHistory(): Promise<PriceHistoryEntry[]> {
+    const [models, prices] = await Promise.all([
+      this.repo.find(),
+      this.priceRepo.find({ order: { id: "ASC" } }),
+    ]);
+
+    const modelById = new Map(models.map((model) => [model.id, model]));
+
+    const entries: PriceHistoryEntry[] = [];
+    for (const price of prices) {
+      const model = modelById.get(price.supportedModelId);
+      if (!model) continue;
+      entries.push({
+        strategyName: model.strategyName,
+        modelName: model.modelName,
+        createdAt: price.createdAt,
+        inputCostPerMillionTokens: price.inputCostPerMillionTokens,
+        outputCostPerMillionTokens: price.outputCostPerMillionTokens,
+      });
+    }
+    return entries;
+  }
+
+  /**
+   * The model's real context window, if known — used to configure Ollama's
+   * num_ctx per-model instead of the flat MODEL_CONTEXT_WINDOW default. null
+   * when the model doesn't exist or hasn't been refreshed yet; callers fall
+   * back to the env default in that case (see provider.ts).
+   */
+  async getContextWindow(strategyName: string, modelName: string): Promise<number | null> {
+    const row = await this.repo.findOne({ where: { strategyName, modelName } });
+    return row?.contextWindow ?? null;
   }
 
   /**

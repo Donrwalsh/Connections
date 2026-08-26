@@ -147,6 +147,7 @@ describe("StrategyRunStore", () => {
           availableWords: expectedWords,
           currentCombination: [0, 1, 2, 3],
           modelName: null,
+          contextWindow: null,
         });
       },
     );
@@ -162,6 +163,34 @@ describe("StrategyRunStore", () => {
 
       expect(mockStrategyRunRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ modelName: "gpt-4.1-nano-2025-04-14" }),
+      );
+    });
+
+    it("should set contextWindow on a newly created run when given", async () => {
+      mockPuzzleRepo.findOne.mockResolvedValueOnce(puzzle);
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(null);
+      const created = makeRun();
+      mockStrategyRunRepo.create.mockReturnValueOnce(created);
+      mockStrategyRunRepo.save.mockResolvedValueOnce(created);
+
+      await store.loadOrCreateRun(100, "llm-ollama", 0, "mistral-nemo", 131072);
+
+      expect(mockStrategyRunRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ contextWindow: 131072 }),
+      );
+    });
+
+    it("should leave contextWindow null when not given", async () => {
+      mockPuzzleRepo.findOne.mockResolvedValueOnce(puzzle);
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(null);
+      const created = makeRun();
+      mockStrategyRunRepo.create.mockReturnValueOnce(created);
+      mockStrategyRunRepo.save.mockResolvedValueOnce(created);
+
+      await store.loadOrCreateRun(100, "alphabetical");
+
+      expect(mockStrategyRunRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ contextWindow: null }),
       );
     });
 

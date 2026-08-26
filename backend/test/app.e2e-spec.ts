@@ -192,7 +192,7 @@ describe("App (e2e)", () => {
       expect.arrayContaining([
         expect.objectContaining({
           strategyName: "llm-openai",
-          modelName: "gpt-4.1-nano-2025-04-14",
+          modelName: "gpt-4.1-nano",
           supported: true,
           inputCostPerMillionTokens: expect.any(Number),
           outputCostPerMillionTokens: expect.any(Number),
@@ -224,13 +224,13 @@ describe("App (e2e)", () => {
         inputCostPerMillionTokens: number;
         outputCostPerMillionTokens: number;
       }>
-    ).find((m) => m.modelName === "gpt-4.1-nano-2025-04-14")!;
+    ).find((m) => m.modelName === "gpt-4.1-nano")!;
 
     const puzzle = await dataSource.getRepository(Puzzle).findOneByOrFail({ date: TEST_DATE });
     const cheapRun = await dataSource.getRepository(StrategyRun).save({
       puzzle,
       strategyName: "llm-openai",
-      modelName: "gpt-4.1-nano-2025-04-14",
+      modelName: "gpt-4.1-nano",
       trialNumber: 201,
       availableWords: ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"],
       currentCombination: [0, 1, 2, 3],
@@ -238,7 +238,7 @@ describe("App (e2e)", () => {
     const expensiveRun = await dataSource.getRepository(StrategyRun).save({
       puzzle,
       strategyName: "llm-openai",
-      modelName: "gpt-4.1-nano-2025-04-14",
+      modelName: "gpt-4.1-nano",
       trialNumber: 202,
       availableWords: ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH"],
       currentCombination: [0, 1, 2, 3],
@@ -259,7 +259,7 @@ describe("App (e2e)", () => {
     });
 
     const res = await request(app.getHttpServer()).get(
-      "/strategy/llm-openai/runs?model=gpt-4.1-nano-2025-04-14&sortBy=tokenCost&sortDir=asc&limit=500",
+      "/strategy/llm-openai/runs?model=gpt-4.1-nano&sortBy=tokenCost&sortDir=asc&limit=500",
     );
 
     expect(res.status).toBe(200);
@@ -409,18 +409,18 @@ describe("App (e2e)", () => {
 
   it("POST /dispatch/model/:modelName/:date resolves the strategy from SupportedModel and queues a trial", async () => {
     const res = await request(app.getHttpServer()).post(
-      `/dispatch/model/gpt-4.1-nano-2025-04-14/${TEST_DATE}`,
+      `/dispatch/model/gpt-4.1-nano/${TEST_DATE}`,
     );
 
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({
       message:
-        "Jobs queued for model 'gpt-4.1-nano-2025-04-14' (strategy 'llm-openai')" +
+        "Jobs queued for model 'gpt-4.1-nano' (strategy 'llm-openai')" +
         ` on puzzle date ${TEST_DATE}`,
       puzzleId: expect.any(Number),
       date: TEST_DATE,
       strategyName: "llm-openai",
-      modelName: "gpt-4.1-nano-2025-04-14",
+      modelName: "gpt-4.1-nano",
     });
 
     for (const trialNumber of [1, 2, 3]) {
