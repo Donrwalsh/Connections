@@ -19,6 +19,7 @@ const STRATEGIES = [
   { id: "shuffle-foolish", label: "Shuffle-Foolish" },
   { id: "llm-openai", label: "LLM · OpenAI" },
   { id: "llm-ollama", label: "LLM · Ollama" },
+  { id: "llm-google", label: "LLM · Google" },
 ];
 
 export function GuessSequencePanel({
@@ -336,6 +337,7 @@ function formatResult(result: GuessResultValue): string {
 function formatStrategyName(strategyName: string): string {
   if (strategyName === "llm-openai") return "LLM · OpenAI";
   if (strategyName === "llm-ollama") return "LLM · Ollama";
+  if (strategyName === "llm-google") return "LLM · Google";
   return strategyName
     .split("-")
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))

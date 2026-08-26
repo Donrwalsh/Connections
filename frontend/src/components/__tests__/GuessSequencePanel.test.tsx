@@ -493,6 +493,78 @@ describe("GuessSequencePanel Component", () => {
     expect(screen.getByText("✓ Correct")).toBeInTheDocument();
   });
 
+  it("shows the Google LLM tab with its own label", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        const urlStr = String(url);
+        const strategyId =
+          urlStr.match(/\/strategy\/([^/]+)\//)?.[1] ?? "alphabetical";
+        if (urlStr.includes("/run/")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              id: 41,
+              strategyName: "llm-google",
+              trialNumber: 1,
+              status: "completed",
+              modelName: "gemini-2.5-flash",
+              contextWindow: 1048576,
+              startedAt: "2024-01-15T00:00:00Z",
+              finishedAt: "2024-01-15T00:05:00Z",
+              guessCount: 1,
+              meta: { total: 1, page: 1, limit: 200 },
+              guesses: [
+                {
+                  sequenceNumber: 1,
+                  words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+                  result: "success",
+                  guessedAt: "2024-01-15T00:00:00Z",
+                },
+              ],
+            }),
+          });
+        }
+        if (strategyId !== "llm-google") {
+          return Promise.resolve({ ok: true, json: async () => [] });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => [
+            {
+              id: 41,
+              strategyName: "llm-google",
+              trialNumber: 1,
+              status: "completed",
+              modelName: "gemini-2.5-flash",
+              contextWindow: 1048576,
+              guessCount: 1,
+            },
+          ],
+        });
+      }),
+    );
+
+    renderWithRouter(
+      <GuessSequencePanel
+        date="2024-01-15"
+        puzzleId={100}
+        isOpen={true}
+        onToggle={() => {}}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Show LLM · Google/ }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Strategy: LLM · Google · Model: gemini-2.5-flash (1,048,576 ctx) · Status: completed · 1 guess",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("differentiates between LLM trials and switches between them", async () => {
     const llmRuns = [
       {
