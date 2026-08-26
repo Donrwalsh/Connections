@@ -28,6 +28,7 @@ function makeSolvePrompt(overrides: Partial<SolvePrompt>): SolvePrompt {
     isRetryable: null,
     requestBody: null,
     responseBody: null,
+    issueTags: [],
     ...overrides,
   } as SolvePrompt;
 }

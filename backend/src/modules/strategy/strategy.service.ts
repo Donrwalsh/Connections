@@ -1007,11 +1007,9 @@ export class StrategyService {
         "guessCount",
       )
       .addSelect(
-        `EXISTS (
-          SELECT 1 FROM "SolvePrompt" sp
-          WHERE sp."strategyRunId" = run.id AND sp."wordsHadParenthetical" = true
-        )`,
-        "hadWordsParenthetical",
+        `(SELECT COUNT(*)::int FROM "SolvePrompt" sp
+          WHERE sp."strategyRunId" = run.id AND array_length(sp."issueTags", 1) > 0)`,
+        "issueCount",
       )
       // Each row's own model's rate as of that row's own startedAt (the
       // highest-id ModelPrice row for the model with createdAt <=
@@ -1066,7 +1064,7 @@ export class StrategyService {
         startedAt: Date | string;
         finishedAt: Date | string | null;
         guessCount: number;
-        hadWordsParenthetical: boolean;
+        issueCount: number;
         tokenCostUsd: string | number | null;
       }>();
 
@@ -1082,7 +1080,7 @@ export class StrategyService {
       finishedAt: row.finishedAt ? new Date(row.finishedAt) : null,
       guessCount: Number(row.guessCount),
       tokenCostUsd: row.tokenCostUsd === null ? null : Number(row.tokenCostUsd),
-      hadWordsParenthetical: row.hadWordsParenthetical,
+      issueCount: Number(row.issueCount),
     }));
 
     return { rows, meta: { total, page: safePage, limit: safeLimit } };

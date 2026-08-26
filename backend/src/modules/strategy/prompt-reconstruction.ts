@@ -160,7 +160,7 @@ export function reconstructSolvePrompts(
       latencyMs: prompt.latencyMs,
       temperature: prompt.temperature,
       createdAt: prompt.createdAt,
-      wordsHadParenthetical: prompt.wordsHadParenthetical,
+      issueTags: prompt.issueTags,
       reconstructedPrompt,
       proposals: promptProposals,
       errorName: prompt.errorName,
