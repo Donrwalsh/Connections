@@ -8,6 +8,14 @@ import { ModelPrice } from "./entities/model-price.entity";
 // row — the shape GET /strategy/models returns and getLeaderboard/
 // getRunHistory price runs from. Cost fields are nullable: a model can exist
 // (and be dispatchable) before it's ever been given a price row.
+export interface PriceHistoryEntry {
+  strategyName: string;
+  modelName: string;
+  createdAt: Date;
+  inputCostPerMillionTokens: number;
+  outputCostPerMillionTokens: number;
+}
+
 export interface SupportedModelWithRate {
   id: number;
   strategyName: string;
@@ -130,6 +138,35 @@ export class SupportedModelService {
         releaseDate: model.releaseDate,
       };
     });
+  }
+
+  /**
+   * Every ModelPrice row ever inserted, joined with its model's
+   * strategyName/modelName, ordered oldest-first per model — lets a caller
+   * find "the price in effect at time T" for a given run, rather than only
+   * ever seeing the current price. See getLeaderboard/getRunHistory.
+   */
+  async findPriceHistory(): Promise<PriceHistoryEntry[]> {
+    const [models, prices] = await Promise.all([
+      this.repo.find(),
+      this.priceRepo.find({ order: { id: "ASC" } }),
+    ]);
+
+    const modelById = new Map(models.map((model) => [model.id, model]));
+
+    const entries: PriceHistoryEntry[] = [];
+    for (const price of prices) {
+      const model = modelById.get(price.supportedModelId);
+      if (!model) continue;
+      entries.push({
+        strategyName: model.strategyName,
+        modelName: model.modelName,
+        createdAt: price.createdAt,
+        inputCostPerMillionTokens: price.inputCostPerMillionTokens,
+        outputCostPerMillionTokens: price.outputCostPerMillionTokens,
+      });
+    }
+    return entries;
   }
 
   /**

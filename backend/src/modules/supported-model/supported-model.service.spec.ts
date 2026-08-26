@@ -217,6 +217,65 @@ describe("SupportedModelService", () => {
     });
   });
 
+  describe("findPriceHistory", () => {
+    it("should return every price row, joined with its model's strategyName/modelName", async () => {
+      mockRepo.find.mockResolvedValueOnce([
+        { id: 1, strategyName: "llm-openai", modelName: "gpt-4.1-nano" },
+      ]);
+      mockPriceRepo.find.mockResolvedValueOnce([
+        {
+          id: 10,
+          supportedModelId: 1,
+          inputCostPerMillionTokens: 0.05,
+          outputCostPerMillionTokens: 0.2,
+          createdAt: new Date("2026-01-01T00:00:00Z"),
+        },
+        {
+          id: 11,
+          supportedModelId: 1,
+          inputCostPerMillionTokens: 0.1,
+          outputCostPerMillionTokens: 0.4,
+          createdAt: new Date("2026-06-01T00:00:00Z"),
+        },
+      ]);
+
+      const result = await service.findPriceHistory();
+
+      expect(result).toEqual([
+        {
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          createdAt: new Date("2026-01-01T00:00:00Z"),
+          inputCostPerMillionTokens: 0.05,
+          outputCostPerMillionTokens: 0.2,
+        },
+        {
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          createdAt: new Date("2026-06-01T00:00:00Z"),
+          inputCostPerMillionTokens: 0.1,
+          outputCostPerMillionTokens: 0.4,
+        },
+      ]);
+      expect(mockPriceRepo.find).toHaveBeenCalledWith({ order: { id: "ASC" } });
+    });
+
+    it("should omit a price row whose model no longer exists", async () => {
+      mockRepo.find.mockResolvedValueOnce([]);
+      mockPriceRepo.find.mockResolvedValueOnce([
+        {
+          id: 10,
+          supportedModelId: 999,
+          inputCostPerMillionTokens: 0.05,
+          outputCostPerMillionTokens: 0.2,
+          createdAt: new Date("2026-01-01T00:00:00Z"),
+        },
+      ]);
+
+      expect(await service.findPriceHistory()).toEqual([]);
+    });
+  });
+
   describe("findModelNamesByFreeTier", () => {
     it("should return only model names matching the given free tier", async () => {
       mockRepo.find.mockResolvedValueOnce([
