@@ -242,5 +242,30 @@ describe("orchestrator app", () => {
       expect(res.status).toBe(400);
       expect(solveAssistMock).not.toHaveBeenCalled();
     });
+
+    it("accepts google as a provider value", async () => {
+      solveAssistMock.mockResolvedValueOnce({
+        response: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
+        groups: [["AAAA", "BBBB", "CCCC", "DDDD"]],
+        proposals: [],
+        model: "gemini-2.5-flash",
+        latencyMs: 5,
+      });
+
+      const res = await solveAssistRequest({
+        messages: SOLVE_ASSIST_BODY.messages,
+        model: "gemini-2.5-flash",
+        provider: "google",
+      });
+
+      expect(res.status).toBe(200);
+      expect(solveAssistMock).toHaveBeenCalledWith(
+        SOLVE_ASSIST_BODY.messages,
+        "gemini-2.5-flash",
+        "google",
+        undefined,
+        expect.any(AbortSignal),
+      );
+    });
   });
 });
