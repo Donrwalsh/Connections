@@ -118,7 +118,7 @@ export class DispatchController {
       "A model name from the SupportedModel table. Its strategyName column determines which" +
       " strategy queue the run is dispatched on — the caller does not name the strategy directly." +
       " Rejected if the model is unknown or not currently marked supported.",
-    example: "gpt-4.1-nano-2025-04-14",
+    example: "gpt-4.1-nano",
   })
   @ApiParam({
     name: "date",
@@ -151,7 +151,7 @@ export class DispatchController {
       "A model name from the SupportedModel table. Its strategyName column determines which" +
       " strategy queue the runs are dispatched on. Rejected if the model is unknown or not" +
       " currently marked supported.",
-    example: "gpt-4.1-nano-2025-04-14",
+    example: "gpt-4.1-nano",
   })
   @ApiParam({
     name: "n",
