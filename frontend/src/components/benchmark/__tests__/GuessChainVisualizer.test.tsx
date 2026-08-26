@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GuessChainVisualizer } from "../GuessChainVisualizer";
 import type { StrategyRunDetail } from "../../../data/benchmark/types";
@@ -253,5 +254,34 @@ describe("GuessChainVisualizer", () => {
     render(<GuessChainVisualizer runId={12345} />);
 
     expect(await screen.findByText("No guesses recorded for this run.")).toBeInTheDocument();
+  });
+
+  it("shows a 'Delete this run' button only when the run's status is 'error'", async () => {
+    stubFetch({ ...plainDetail, status: "error" });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByRole("button", { name: "Delete this run" })).toBeInTheDocument();
+  });
+
+  it("does not show the delete button for a non-error status", async () => {
+    stubFetch({ ...plainDetail, status: "completed" });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    await screen.findByText("APPLE, BANANA, CHERRY, DATE");
+    expect(screen.queryByRole("button", { name: "Delete this run" })).not.toBeInTheDocument();
+  });
+
+  it("opens the delete-run modal when the delete button is clicked", async () => {
+    const user = userEvent.setup();
+    stubFetch({ ...plainDetail, status: "error" });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    await user.click(await screen.findByRole("button", { name: "Delete this run" }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /12345/ })).toBeInTheDocument();
   });
 });

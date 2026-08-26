@@ -691,6 +691,15 @@ export class StrategyService {
     return this.buildRunDetail(run, page, limit);
   }
 
+  /**
+   * Permanently deletes a strategy run and every row that belongs to it —
+   * see StrategyRunStore.deleteRun for what that covers and why a plain
+   * cascade delete isn't enough on its own.
+   */
+  async deleteRun(runId: number) {
+    return this.store.deleteRun(runId);
+  }
+
   private async buildRunDetail(
     run: StrategyRun,
     page: number,

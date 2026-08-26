@@ -3,15 +3,23 @@ import { fetchRunDetail } from "../../data/benchmark/api";
 import { formatDuration } from "../../data/benchmark/metrics";
 import { guessResultLabel, guessResultTone } from "../../data/benchmark/runStatus";
 import type {
+  DeleteRunResult,
   GuessRecord,
   LlmProposalRecord,
   SolvePromptRecord,
   StrategyRunDetail,
 } from "../../data/benchmark/types";
+import { DeleteRunModal } from "./DeleteRunModal";
 import { StatusPill } from "./StatusPill";
 
 export interface GuessChainVisualizerProps {
   runId: number;
+  /** Called after the run is actually deleted (via the header's "Delete this
+   * run" button, shown only for status 'error') — the parent page uses this
+   * to refresh its own run list rather than leaving a stale, now-deleted run
+   * in view. Optional: callers that don't offer deletion (none currently)
+   * can omit it. */
+  onDeleted?: (result: DeleteRunResult) => void;
 }
 
 /** Full detail for one run: for LLM strategies, the reconstructed
@@ -19,10 +27,11 @@ export interface GuessChainVisualizerProps {
  * populated); for everything else, a plain ordered guess list. Fetches its
  * own detail per runId so a multi-run picker can swap the visualized run
  * without the parent page owning the fetch/loading state. */
-export function GuessChainVisualizer({ runId }: GuessChainVisualizerProps) {
+export function GuessChainVisualizer({ runId, onDeleted }: GuessChainVisualizerProps) {
   const [detail, setDetail] = useState<StrategyRunDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   useEffect(() => {
     setIsLoading(true);
@@ -46,8 +55,21 @@ export function GuessChainVisualizer({ runId }: GuessChainVisualizerProps) {
 
   return (
     <section className="bench-visualizer" aria-label={`Guess chain for run ${runId}`}>
-      <h2 className="bench-visualizer__title">Guess chain</h2>
-      <p className="bench-mono bench-visualizer__runid">#{runId}</p>
+      <div className="bench-visualizer__head">
+        <div>
+          <h2 className="bench-visualizer__title">Guess chain</h2>
+          <p className="bench-mono bench-visualizer__runid">#{runId}</p>
+        </div>
+        {detail?.status === "error" ? (
+          <button
+            type="button"
+            className="bench-sort-btn bench-sort-btn--danger"
+            onClick={() => setShowDeleteModal(true)}
+          >
+            Delete this run
+          </button>
+        ) : null}
+      </div>
 
       {isLoading ? <p className="bench-muted">Loading guess chain…</p> : null}
       {error && !isLoading ? <p className="bench-error">{error}</p> : null}
@@ -58,6 +80,14 @@ export function GuessChainVisualizer({ runId }: GuessChainVisualizerProps) {
         ) : (
           <PlainGuessList guesses={detail.guesses} />
         )
+      ) : null}
+
+      {showDeleteModal ? (
+        <DeleteRunModal
+          runId={runId}
+          onClose={() => setShowDeleteModal(false)}
+          onDeleted={(result) => onDeleted?.(result)}
+        />
       ) : null}
     </section>
   );

@@ -4,6 +4,7 @@
 // which parts of the benchmark UI are still mock-driven.
 
 import type {
+  DeleteRunResult,
   FreeTierDispatchBothStartResult,
   FreeTierDispatchBothStopResult,
   FreeTierDispatchStatus,
@@ -220,6 +221,23 @@ export function fetchRunDetail(runId: number, signal?: AbortSignal): Promise<Str
   return fetchAllRunDetailPages((page) =>
     fetchJson<StrategyRunDetail>(`/strategy/run/${runId}?page=${page}&limit=${DETAIL_PAGE_SIZE}`, signal),
   );
+}
+
+/** Permanently deletes a run and everything tied to it (guesses, solve
+ * prompts, LLM proposals). Rejects (thrown Error, message from the backend)
+ * if the run is still running, or doesn't exist. `password` is only checked
+ * by the backend in production (DispatchAuthGuard) — harmless to send blank
+ * elsewhere. */
+export function deleteRun(
+  runId: number,
+  password: string,
+  signal?: AbortSignal,
+): Promise<DeleteRunResult> {
+  return fetchJson(`/dispatch/run/${runId}`, signal, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
 }
 
 /** Same detail payload as fetchRunDetail, keyed by (strategyName, date,

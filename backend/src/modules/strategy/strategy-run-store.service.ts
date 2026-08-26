@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 import { DataSource, Repository } from "typeorm";
 import { Puzzle } from "../game/entities/puzzle.entity";
@@ -215,6 +215,45 @@ export class StrategyRunStore {
       }
 
       await manager.save(StrategyRun, run);
+    });
+  }
+
+  /**
+   * Permanently deletes a strategy run and every row that belongs to it.
+   * SolvePrompt and LlmProposal are ON DELETE CASCADE from StrategyRun, so
+   * deleting the run alone would remove those automatically — but
+   * Guess.strategyRunId is ON DELETE SET NULL (a human guess can outlive its
+   * run), so Guess rows must be deleted explicitly, and *before* the
+   * StrategyRun row goes: deleting StrategyRun first would just null out
+   * strategyRunId on its guesses instead of removing them, leaving them
+   * behind as orphaned rows still attached to the puzzle's guess history.
+   */
+  async deleteRun(
+    runId: number,
+  ): Promise<{ deletedGuesses: number; deletedSolvePrompts: number; deletedLlmProposals: number }> {
+    const run = await this.strategyRunRepo.findOne({ where: { id: runId } });
+
+    if (!run) {
+      throw new NotFoundException(`No strategy run with id: ${runId}`);
+    }
+
+    if (run.status === StrategyRunStatus.RUNNING) {
+      throw new ConflictException(
+        `Strategy run ${runId} is still running; stop it before deleting.`,
+      );
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const [deletedGuesses, deletedSolvePrompts, deletedLlmProposals] = await Promise.all([
+        manager.count(Guess, { where: { strategyRunId: runId } }),
+        manager.count(SolvePrompt, { where: { strategyRunId: runId } }),
+        manager.count(LlmProposal, { where: { strategyRunId: runId } }),
+      ]);
+
+      await manager.delete(Guess, { strategyRunId: runId });
+      await manager.delete(StrategyRun, { id: runId });
+
+      return { deletedGuesses, deletedSolvePrompts, deletedLlmProposals };
     });
   }
 }

@@ -325,3 +325,13 @@ export interface StrategyRunDetail extends StrategyRunListItem {
   solvePrompts: SolvePromptRecord[];
   meta: { total: number; page: number; limit: number };
 }
+
+/** Response from DELETE /dispatch/run/:runId — counts confirm exactly what
+ * was purged, per table. */
+export interface DeleteRunResult {
+  message: string;
+  runId: number;
+  deletedGuesses: number;
+  deletedSolvePrompts: number;
+  deletedLlmProposals: number;
+}
