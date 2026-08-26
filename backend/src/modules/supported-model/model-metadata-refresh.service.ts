@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { SupportedModel } from "./entities/supported-model.entity";
@@ -31,7 +31,7 @@ export class ModelMetadataRefreshService {
   constructor(
     @InjectRepository(SupportedModel) private readonly modelRepo: Repository<SupportedModel>,
     @InjectRepository(ModelPrice) private readonly priceRepo: Repository<ModelPrice>,
-    private readonly client: OpenRouterClient,
+    @Inject(OpenRouterClient) private readonly client: OpenRouterClient,
   ) {}
 
   async refreshAll(): Promise<RefreshSummary> {
