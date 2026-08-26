@@ -404,6 +404,28 @@ describe("LlmStrategyRunner", () => {
       expect(promptRows[0]).toEqual(expect.objectContaining({ issueTags: ["unclassified"] }));
     });
 
+    it("should flag unclassified even when the only group in the response has no Words: line at all", async () => {
+      // Only one heading in the whole response, and it never produces a
+      // Words: line — parsedGroupWords stays completely empty, which must
+      // NOT suppress the catch-all (that was the bug: an empty
+      // parsedGroupWords was wrongly treated as "nothing to check" instead
+      // of "this response's one heading never panned out").
+      const response = "### GROUPS\n#### Group 1\nCategory: Fruits\n\n### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]], response),
+      );
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      );
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(expect.objectContaining({ issueTags: ["unclassified"] }));
+    });
+
     it("should NOT flag unclassified when a response only addresses one of the puzzle's remaining groups", async () => {
       // The model solving one group per call is the normal, common case
       // (see "should solve a puzzle through iterative orchestrator calls"
@@ -479,6 +501,34 @@ describe("LlmStrategyRunner", () => {
         .flatMap((call) => call[1] as Array<Record<string, unknown>>);
       // promptRows[1] is call 2's row — the reused-word call.
       expect(promptRows[1]).toEqual(expect.objectContaining({ issueTags: [] }));
+    });
+
+    it("should not flag wordNotOnList for an already-solved word even on a resumed run with no in-memory lockedInGroups history", async () => {
+      // Simulates a worker restart: availableWords already reflects group 1
+      // being solved (as it would after a resume — see
+      // StrategyRunStore.loadOrCreateRun), but state.lockedInGroups always
+      // starts empty regardless of resume. APPLE is a real, already-solved
+      // puzzle word — not a hallucination — even though it's missing from
+      // both availableWords and (on a resumed run) lockedInGroups.
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({
+          strategyName: "llm-openai",
+          availableWords: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        }),
+      );
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([["APPLE", "EGGPLANT", "FIG", "GRAPE"]]),
+      );
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      );
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(expect.objectContaining({ issueTags: [] }));
     });
 
     it("should carry both parentheticalStripped and wordNotOnList when a response trips both at once", async () => {

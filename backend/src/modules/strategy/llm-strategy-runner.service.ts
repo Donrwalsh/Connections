@@ -513,14 +513,15 @@ export class LlmStrategyRunner {
     // never landed in parsedGroupWords and isn't already explained by a
     // wrong word count is a failure shape this parser doesn't have a name
     // for yet — e.g. a heading with no Words: line at all, or a skipped
-    // number between two real headings. Only checked when the structured
-    // GROUPS-block parse actually found something to work with — a total
-    // fallback to the ### ANSWER block has no per-group visibility to check.
-    if (usedStructuredParse) {
-      for (let groupNum = 1; groupNum <= maxGroupNum; groupNum++) {
-        if (!parsedGroupWords[groupNum - 1] && !wrongCountGroupNumbers.has(groupNum)) {
-          tags.add(SolvePromptIssueTag.UNCLASSIFIED);
-        }
+    // number between two real headings. No gate on usedStructuredParse
+    // needed here: maxGroupNum only increments when a "Group N" heading
+    // actually matched, so when a response has zero such headings anywhere
+    // (the true "totally different format" fallback case), maxGroupNum
+    // stays 0 and this loop's own bound means the body never runs — the
+    // loop's range is already the correct gate on its own.
+    for (let groupNum = 1; groupNum <= maxGroupNum; groupNum++) {
+      if (!parsedGroupWords[groupNum - 1] && !wrongCountGroupNumbers.has(groupNum)) {
+        tags.add(SolvePromptIssueTag.UNCLASSIFIED);
       }
     }
 
@@ -581,6 +582,24 @@ export class LlmStrategyRunner {
     maxDuplicates: number,
     maxFailedGuesses: number,
   ): void {
+    // The full original puzzle word set, used below to tell "already solved
+    // by an earlier guess" apart from "genuine hallucination." Derived from
+    // the puzzle's own DB-backed answer groups (already eagerly loaded by
+    // StrategyRunStore.loadOrCreateRun's `relations: { answerGroups: {
+    // members: true } }`) rather than
+    // `run.availableWords ∪ flatten(state.lockedInGroups)`, because
+    // state.lockedInGroups is unconditionally reset to [] at the top of
+    // every call to runLlmStrategy — including a resumed run, whose
+    // priorGuesses is rebuilt from stored Guess rows but whose
+    // lockedInGroups is not — so deriving from in-memory loop state would
+    // falsely tag an already-solved word as wordNotOnList after a worker
+    // restart. This is loop-invariant (the puzzle's answer groups never
+    // change during a run), so it's computed once here rather than fresh
+    // per proposal.
+    const originalPuzzleWords = new Set(
+      puzzle.answerGroups.flatMap((group) => group.members.map((member) => member.word)),
+    );
+
     for (const currentProposal of proposalEntries) {
       const guessWords = currentProposal.words!;
 
@@ -591,8 +610,7 @@ export class LlmStrategyRunner {
       // proposal the same way today; only the second is worth flagging.
       const isWordMissingFromAvailable = guessWords.some((w) => !run.availableWords.includes(w));
       if (isWordMissingFromAvailable) {
-        const originalPuzzleWords = [...run.availableWords, ...state.lockedInGroups.flat()];
-        const hasHallucinatedWord = guessWords.some((w) => !originalPuzzleWords.includes(w));
+        const hasHallucinatedWord = guessWords.some((w) => !originalPuzzleWords.has(w));
         if (hasHallucinatedWord) {
           const issueTags = currentProposal.solvePrompt!.issueTags;
           if (!issueTags.includes(SolvePromptIssueTag.WORD_NOT_ON_LIST)) {
