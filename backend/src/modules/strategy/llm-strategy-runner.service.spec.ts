@@ -353,6 +353,30 @@ describe("LlmStrategyRunner", () => {
       expect(promptRows[0]).toEqual(expect.objectContaining({ issueTags: ["groupCountOff"] }));
     });
 
+    it("should still flag groupCountOff when every group in the response has the wrong word count", async () => {
+      // Only group in the response has 3 words, not 4. parsedGroupWords ends
+      // up empty (usedStructuredParse === false), so the response falls back
+      // to the orchestrator's ### ANSWER groups entirely — but groupCountOff
+      // must still fire for the malformed group, since that's true regardless
+      // of whether any other group in the response parsed cleanly.
+      const response =
+        "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY\n\n" +
+        "### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]], response),
+      );
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      );
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(expect.objectContaining({ issueTags: ["groupCountOff"] }));
+    });
+
     it("should flag unclassified when a group heading has no matching Words: line at all", async () => {
       // Group 2 has a heading and a Category but no Words: line whatsoever
       // — a different shape than a wrong word count, and one the parser
