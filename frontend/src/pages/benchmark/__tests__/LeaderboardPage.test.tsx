@@ -50,6 +50,9 @@ function makeRow(overrides: Partial<LeaderboardRow> = {}): LeaderboardRow {
     avgDurationMs: 12,
     avgCostUsd: null,
     totalCostUsd: null,
+    contextWindow: null,
+    paramCount: null,
+    providerDescription: null,
     ...overrides,
   };
 }
@@ -146,7 +149,14 @@ describe("LeaderboardPage", () => {
     expect(within(tables[0]!).getAllByRole("link")).toHaveLength(1);
     expect(within(tables[1]!).getAllByRole("link")).toHaveLength(2);
     expect(screen.getByText("Alphabetical")).toBeInTheDocument();
-    expect(screen.getByText(/gpt-4\.1-nano-2025-04-14/)).toBeInTheDocument();
+    // The row's own name and its live-data description now both legitimately
+    // contain the model name (see formatModelStatsDescription), so scope to
+    // the row's link — its accessible name is "View {name} details", which
+    // doesn't include the description text — rather than a page-wide text
+    // match that would now find both.
+    expect(
+      within(tables[0]!).getByRole("link", { name: /gpt-4\.1-nano-2025-04-14/ }),
+    ).toBeInTheDocument();
   });
 
   it("shows the right column set per table: LLM gets success rate/avg duration/avg cost, deterministic gets avg speed/guesses/range", async () => {
