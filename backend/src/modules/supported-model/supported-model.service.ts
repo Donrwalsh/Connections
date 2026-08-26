@@ -15,6 +15,10 @@ export interface SupportedModelWithRate {
   supported: boolean;
   inputCostPerMillionTokens: number | null;
   outputCostPerMillionTokens: number | null;
+  contextWindow: number | null;
+  paramCount: number | null;
+  providerDescription: string | null;
+  releaseDate: Date | null;
 }
 
 @Injectable()
@@ -120,6 +124,10 @@ export class SupportedModelService {
         supported: model.supported,
         inputCostPerMillionTokens: price?.inputCostPerMillionTokens ?? null,
         outputCostPerMillionTokens: price?.outputCostPerMillionTokens ?? null,
+        contextWindow: model.contextWindow,
+        paramCount: model.paramCount,
+        providerDescription: model.providerDescription,
+        releaseDate: model.releaseDate,
       };
     });
   }

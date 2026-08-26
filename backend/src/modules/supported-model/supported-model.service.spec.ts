@@ -177,6 +177,31 @@ describe("SupportedModelService", () => {
       ]);
     });
 
+    it("should include the metadata fields on every row", async () => {
+      mockRepo.find.mockResolvedValueOnce([
+        {
+          id: 1,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          supported: true,
+          contextWindow: 128000,
+          paramCount: null,
+          providerDescription: "Fast and cheap.",
+          releaseDate: new Date("2025-04-14T00:00:00Z"),
+        },
+      ]);
+      mockPriceRepo.find.mockResolvedValueOnce([]);
+
+      const result = await service.findAll();
+
+      expect(result[0]).toMatchObject({
+        contextWindow: 128000,
+        paramCount: null,
+        providerDescription: "Fast and cheap.",
+        releaseDate: new Date("2025-04-14T00:00:00Z"),
+      });
+    });
+
     it("should leave cost fields null for a model with no ModelPrice row", async () => {
       mockRepo.find.mockResolvedValueOnce([
         { id: 1, strategyName: "llm-openai", modelName: "brand-new-model", supported: true },
