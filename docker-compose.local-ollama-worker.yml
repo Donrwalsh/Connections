@@ -92,6 +92,11 @@ services:
       REDIS_PORT: ${REMOTE_REDIS_PORT:-6379}
       REDIS_PASSWORD: ${REMOTE_REDIS_PASSWORD}
       INTERNAL_API_KEY: ${LOCAL_INTERNAL_API_KEY}
+      # backend/Dockerfile bakes NODE_ENV=production into this image, and
+      # loadEnv() requires DISPATCH_PASSWORD whenever NODE_ENV=production —
+      # even though this worker never serves the /dispatch/* routes that
+      # actually check it. Any non-empty value satisfies the boot check.
+      DISPATCH_PASSWORD: ${DISPATCH_PASSWORD}
       ORCHESTRATOR_URL: http://orchestrator:3001
       ORCHESTRATOR_TIMEOUT_MS: ${ORCHESTRATOR_TIMEOUT_MS:-600000}
       LLM_OLLAMA_CONCURRENCY: ${LLM_OLLAMA_CONCURRENCY:-1}
