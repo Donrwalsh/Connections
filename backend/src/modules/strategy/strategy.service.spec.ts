@@ -12,6 +12,7 @@ import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { LlmProposal } from "./entities/llm-proposal.entity";
 import { GameService } from "../game/game.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
+import { ModelPrice } from "../supported-model/entities/model-price.entity";
 
 describe("StrategyService", () => {
   let service: StrategyService;
@@ -47,6 +48,7 @@ describe("StrategyService", () => {
     assertSupported: jest.Mock;
     getDefaultModel: jest.Mock;
     findAll: jest.Mock;
+    findPriceHistory: jest.Mock;
   };
   let mockManager: { insert: jest.Mock; save: jest.Mock; count: jest.Mock; delete: jest.Mock };
   let mockDataSource: { transaction: jest.Mock };
@@ -144,6 +146,7 @@ describe("StrategyService", () => {
       assertSupported: jest.fn().mockResolvedValue(undefined),
       getDefaultModel: jest.fn(),
       findAll: jest.fn().mockResolvedValue([]),
+      findPriceHistory: jest.fn().mockResolvedValue([]),
     };
     mockManager = {
       insert: jest.fn().mockResolvedValue({ identifiers: [{ id: 1 }] }),
@@ -1346,13 +1349,13 @@ describe("StrategyService", () => {
           { strategyRunId: 4, promptTokens: "1000000", completionTokens: "0" },
         ]),
       });
-      mockSupportedModelService.findAll.mockResolvedValueOnce([
+      mockSupportedModelService.findPriceHistory.mockResolvedValueOnce([
         {
           strategyName: "llm-openai",
           modelName: "gpt-4.1-nano",
+          createdAt: new Date("2023-01-01T00:00:00Z"),
           inputCostPerMillionTokens: 0.1,
           outputCostPerMillionTokens: 0.4,
-          supported: true,
         },
       ]);
 
@@ -1370,6 +1373,93 @@ describe("StrategyService", () => {
       const gptMini = result.llm.find((row) => row.id === "gpt-4o-mini")!;
       expect(gptMini.avgCostUsd).toBeNull();
       expect(gptMini.totalCostUsd).toBeNull();
+    });
+
+    it("should price each run at the rate in effect when that run started, not the current rate", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([
+        {
+          id: 1,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          status: StrategyRunStatus.COMPLETED,
+          puzzleId: 1,
+          startedAt: new Date("2026-03-01T00:00:00Z"),
+          finishedAt: new Date("2026-03-01T00:01:00Z"),
+        },
+      ]);
+      mockGuessCounts([]);
+      mockPuzzleRepo.count.mockResolvedValueOnce(10);
+      mockSolvePromptRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          { strategyRunId: 1, promptTokens: "1000000", completionTokens: "1000000" },
+        ]),
+      });
+      mockSupportedModelService.findPriceHistory.mockResolvedValueOnce([
+        {
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          createdAt: new Date("2026-01-01T00:00:00Z"),
+          inputCostPerMillionTokens: 0.05,
+          outputCostPerMillionTokens: 0.2,
+        },
+        {
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          createdAt: new Date("2026-06-01T00:00:00Z"),
+          inputCostPerMillionTokens: 0.1,
+          outputCostPerMillionTokens: 0.4,
+        },
+      ]);
+
+      const result = await service.getLeaderboard();
+
+      const row = result.llm.find((r) => r.id === "gpt-4.1-nano")!;
+      // 1M prompt tokens * 0.05 + 1M completion tokens * 0.2 = 0.25, the
+      // January rate (in effect at startedAt) — not the June rate, which
+      // would give 0.05 + 0.4 = 0.45.
+      expect(row.totalCostUsd).toBeCloseTo(0.25);
+    });
+
+    it("should leave a run's cost null when it predates the model's first price row", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([
+        {
+          id: 1,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          status: StrategyRunStatus.COMPLETED,
+          puzzleId: 1,
+          startedAt: new Date("2025-01-01T00:00:00Z"),
+          finishedAt: new Date("2025-01-01T00:01:00Z"),
+        },
+      ]);
+      mockGuessCounts([]);
+      mockPuzzleRepo.count.mockResolvedValueOnce(10);
+      mockSolvePromptRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          { strategyRunId: 1, promptTokens: "1000000", completionTokens: "1000000" },
+        ]),
+      });
+      mockSupportedModelService.findPriceHistory.mockResolvedValueOnce([
+        {
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          createdAt: new Date("2026-01-01T00:00:00Z"),
+          inputCostPerMillionTokens: 0.05,
+          outputCostPerMillionTokens: 0.2,
+        },
+      ]);
+
+      const result = await service.getLeaderboard();
+
+      const row = result.llm.find((r) => r.id === "gpt-4.1-nano")!;
+      expect(row.totalCostUsd).toBeNull();
+      expect(row.avgCostUsd).toBeNull();
     });
 
     it("should merge queued BullMQ counts onto existing rows only, never inventing new ones", async () => {
@@ -1627,6 +1717,18 @@ describe("StrategyService", () => {
 
       expect(result.rows[0].tokenCostUsd).toBe(0.5);
       expect(result.rows[1].tokenCostUsd).toBeNull();
+    });
+
+    it("should price each row's ModelPrice as of its own startedAt, not the current price", async () => {
+      const qb = mockRunHistoryQuery(1, [rawRun()]);
+
+      await service.getRunHistory("llm-openai", {});
+
+      expect(qb.leftJoin).toHaveBeenCalledWith(
+        ModelPrice,
+        "mp",
+        expect.stringContaining('"createdAt" <= run."startedAt"'),
+      );
     });
 
     it("should not run a separate token-cost lookup query — cost comes from the main query's join", async () => {

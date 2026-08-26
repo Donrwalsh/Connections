@@ -36,7 +36,7 @@ import { StrategyRunStore, computeInitialWordOrder } from "./strategy-run-store.
 import { reconstructSolvePrompts } from "./prompt-reconstruction";
 import {
   SupportedModelService,
-  SupportedModelWithRate,
+  PriceHistoryEntry,
 } from "../supported-model/supported-model.service";
 
 const GROUP_SIZE = 4;
@@ -85,10 +85,11 @@ interface ModelRate {
 }
 
 /**
- * USD cost of one run's token usage, from its model's current per-million-
- * token rate (ModelPrice). Shared by getLeaderboard (cost across every run
- * of a model) and tokenCostByRun (cost of one page of runs) so the pricing
- * formula lives in exactly one place.
+ * USD cost of one run's token usage, from a per-million-token rate
+ * (ModelPrice) — the rate actually in effect when the run happened, not
+ * necessarily the model's current rate; see priceAsOf. Shared by
+ * getLeaderboard (cost across every run of a model) and getRunHistory (cost
+ * of one page of runs) so the pricing formula lives in exactly one place.
  */
 function computeTokenCostUsd(
   promptTokens: number,
@@ -101,10 +102,21 @@ function computeTokenCostUsd(
   );
 }
 
-// A model only prices runs once it's been given at least one ModelPrice row
-// — SupportedModelService.findAll leaves both fields null until then.
-function hasPrice(model: SupportedModelWithRate): model is SupportedModelWithRate & ModelRate {
-  return model.inputCostPerMillionTokens !== null && model.outputCostPerMillionTokens !== null;
+/**
+ * The price in effect at `at` — the latest entry in `history` (assumed
+ * sorted ascending by createdAt, which findPriceHistory guarantees) whose
+ * createdAt is <= at. null when `at` predates the model's first price row —
+ * that run has no known cost, same as a model with no price at all, rather
+ * than borrowing a later price for it.
+ */
+function priceAsOf(history: PriceHistoryEntry[] | undefined, at: Date): ModelRate | null {
+  if (!history) return null;
+  let rate: ModelRate | null = null;
+  for (const entry of history) {
+    if (entry.createdAt.getTime() > at.getTime()) break;
+    rate = entry;
+  }
+  return rate;
 }
 
 interface LeaderboardAccumulator {
@@ -444,7 +456,7 @@ export class StrategyService {
       return cached.value;
     }
 
-    const [runs, guessCountRows, tokenRows, models, queuedCounts, totalPuzzles] = await Promise.all([
+    const [runs, guessCountRows, tokenRows, priceHistory, queuedCounts, totalPuzzles] = await Promise.all([
       this.strategyRunRepo.find({
         select: {
           id: true,
@@ -476,7 +488,7 @@ export class StrategyService {
           promptTokens: string | null;
           completionTokens: string | null;
         }>(),
-      this.supportedModelService.findAll(),
+      this.supportedModelService.findPriceHistory(),
       this.queuedCountsByKey(),
       this.puzzleRepo.count(),
     ]);
@@ -494,9 +506,15 @@ export class StrategyService {
       });
     }
 
-    const rateByModel = new Map<string, SupportedModelWithRate>();
-    for (const model of models) {
-      rateByModel.set(leaderboardKey(model.strategyName, model.modelName), model);
+    const priceHistoryByModel = new Map<string, PriceHistoryEntry[]>();
+    for (const entry of priceHistory) {
+      const key = leaderboardKey(entry.strategyName, entry.modelName);
+      const list = priceHistoryByModel.get(key);
+      if (list) {
+        list.push(entry);
+      } else {
+        priceHistoryByModel.set(key, [entry]);
+      }
     }
 
     const aggregates = new Map<string, LeaderboardAccumulator>();
@@ -552,8 +570,9 @@ export class StrategyService {
       // status branches above.
       if (run.modelName) {
         const tokens = tokensByRun.get(run.id);
-        const rate = rateByModel.get(leaderboardKey(run.strategyName, run.modelName));
-        if (tokens && rate && hasPrice(rate)) {
+        const history = priceHistoryByModel.get(leaderboardKey(run.strategyName, run.modelName));
+        const rate = priceAsOf(history, run.startedAt);
+        if (tokens && rate) {
           acc.costsUsd.push(computeTokenCostUsd(tokens.promptTokens, tokens.completionTokens, rate));
         }
       }
@@ -905,9 +924,10 @@ export class StrategyService {
    * columns — see RUN_HISTORY_SORT_EXPR. `guessCount` is a correlated
    * scalar subquery rather than a JOIN+GROUP BY specifically to avoid a
    * Guess-row fan-out multiplying the page's row count; `tokenCostUsd` is
-   * computed the same way (via a CASE over each row's own model's *current*
-   * ModelPrice, left-joined so a run whose model has no price stays NULL)
-   * so it's both priceable per-row *and* sortable — an earlier version of
+   * computed the same way (via a CASE over each row's own model's ModelPrice
+   * as of that row's own startedAt, left-joined so a run whose model has no
+   * price yet at that point stays NULL) so it's both priceable per-row *and*
+   * sortable — an earlier version of
    * this priced rows in JS after pagination, which worked for display but
    * couldn't be sorted on.
    */
@@ -974,12 +994,14 @@ export class StrategyService {
         )`,
         "hadWordsParenthetical",
       )
-      // Each row's own model's *current* rate (ModelPrice's highest-id row
-      // per model — see that entity's comment) via plain left joins, so a
-      // mixed-model result set still prices each row from its own model.
-      // Both joins are 1:1 (SupportedModel is unique on (strategyName,
-      // modelName); the ModelPrice subquery picks exactly one row), so
-      // neither can fan out a run into multiple result rows.
+      // Each row's own model's rate as of that row's own startedAt (the
+      // highest-id ModelPrice row for the model with createdAt <=
+      // run.startedAt — see that entity's comment) via plain left joins, so
+      // a mixed-model result set still prices each row from its own model,
+      // and a price change doesn't retroactively re-price runs that
+      // happened before it. Both joins are 1:1 (SupportedModel is unique on
+      // (strategyName, modelName); the ModelPrice subquery picks exactly
+      // one row), so neither can fan out a run into multiple result rows.
       .leftJoin(
         SupportedModel,
         "sm",
@@ -989,7 +1011,9 @@ export class StrategyService {
         ModelPrice,
         "mp",
         `mp.id = (
-          SELECT id FROM "ModelPrice" WHERE "supportedModelId" = sm.id ORDER BY id DESC LIMIT 1
+          SELECT id FROM "ModelPrice"
+          WHERE "supportedModelId" = sm.id AND "createdAt" <= run."startedAt"
+          ORDER BY id DESC LIMIT 1
         )`,
       )
       .addSelect(
