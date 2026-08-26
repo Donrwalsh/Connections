@@ -9,6 +9,7 @@ import {
 
 const createOllamaMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 const openaiMock = vi.hoisted(() => vi.fn(() => vi.fn()));
+const createGoogleGenerativeAIMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 
 vi.mock("ai-sdk-ollama", () => ({
   createOllama: createOllamaMock,
@@ -18,11 +19,16 @@ vi.mock("@ai-sdk/openai", () => ({
   openai: openaiMock,
 }));
 
+vi.mock("@ai-sdk/google", () => ({
+  createGoogleGenerativeAI: createGoogleGenerativeAIMock,
+}));
+
 describe("getModel", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     createOllamaMock.mockClear();
     openaiMock.mockClear();
+    createGoogleGenerativeAIMock.mockClear();
   });
 
   it("passes num_ctx from MODEL_CONTEXT_WINDOW to the Ollama model", () => {
@@ -106,6 +112,40 @@ describe("getModel", () => {
       options: { num_ctx: 8192 },
     });
   });
+
+  it("resolves the Google model without num_ctx", () => {
+    getModel("google");
+
+    expect(createGoogleGenerativeAIMock).toHaveBeenCalledTimes(1);
+    const modelFactory = createGoogleGenerativeAIMock.mock.results[0].value;
+    expect(modelFactory).toHaveBeenCalledWith("gemini-2.5-flash");
+    expect(openaiMock).not.toHaveBeenCalled();
+    expect(createOllamaMock).not.toHaveBeenCalled();
+  });
+
+  it("passes GOOGLE_API_KEY to createGoogleGenerativeAI", () => {
+    vi.stubEnv("GOOGLE_API_KEY", "test-google-key");
+
+    getModel("google");
+
+    expect(createGoogleGenerativeAIMock).toHaveBeenCalledWith({ apiKey: "test-google-key" });
+  });
+
+  it("uses the model override instead of GOOGLE_MODEL when given", () => {
+    vi.stubEnv("GOOGLE_MODEL", "gemini-2.5-flash-lite");
+
+    getModel("google", "gemini-2.5-pro");
+
+    const modelFactory = createGoogleGenerativeAIMock.mock.results[0].value;
+    expect(modelFactory).toHaveBeenCalledWith("gemini-2.5-pro");
+  });
+
+  it("accepts a contextWindow for google without using it", () => {
+    getModel("google", undefined, 1048576);
+
+    const modelFactory = createGoogleGenerativeAIMock.mock.results[0].value;
+    expect(modelFactory).toHaveBeenCalledWith("gemini-2.5-flash");
+  });
 });
 
 describe("getModelName", () => {
@@ -132,6 +172,20 @@ describe("getModelName", () => {
     vi.stubEnv("OPENAI_MODEL", "gpt-4o-mini");
     expect(getModelName("openai", "gpt-5-nano")).toBe("gpt-5-nano");
   });
+
+  it("returns the configured Google model for the google provider", () => {
+    vi.stubEnv("GOOGLE_MODEL", "gemini-2.5-flash-lite");
+    expect(getModelName("google")).toBe("gemini-2.5-flash-lite");
+  });
+
+  it("falls back to the Google default when unset", () => {
+    expect(getModelName("google")).toBe("gemini-2.5-flash");
+  });
+
+  it("prefers the model override over GOOGLE_MODEL", () => {
+    vi.stubEnv("GOOGLE_MODEL", "gemini-2.5-flash-lite");
+    expect(getModelName("google", "gemini-2.5-pro")).toBe("gemini-2.5-pro");
+  });
 });
 
 describe("defaultProvider", () => {
@@ -148,6 +202,11 @@ describe("defaultProvider", () => {
   it("returns ollama when MODEL_PROVIDER is set to ollama", () => {
     vi.stubEnv("MODEL_PROVIDER", "ollama");
     expect(defaultProvider()).toBe("ollama");
+  });
+
+  it("returns google when MODEL_PROVIDER is set to google", () => {
+    vi.stubEnv("MODEL_PROVIDER", "google");
+    expect(defaultProvider()).toBe("google");
   });
 });
 
