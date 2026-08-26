@@ -118,6 +118,23 @@ describe("OrchestratorService", () => {
     );
   });
 
+  it("should include the google provider in the request body when given", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
+
+    await service.solveAssist(messages, "gemini-2.5-flash", "google");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://orchestrator.test/solve-assist",
+      expect.objectContaining({
+        body: JSON.stringify({
+          messages,
+          model: "gemini-2.5-flash",
+          provider: "google",
+        }),
+      }),
+    );
+  });
+
   it("should default latencyMs to 0 when the orchestrator omits it", async () => {
     mockFetch.mockResolvedValueOnce(
       mockResponse({

@@ -80,7 +80,7 @@ export class OrchestratorService {
   async solveAssist(
     messages: ChatMessage[],
     model?: string,
-    provider?: "openai" | "ollama",
+    provider?: "openai" | "ollama" | "google",
     contextWindow?: number | null,
   ): Promise<SolveAssistOutcome> {
     return this.executeCall<SolveAssistSuccess>(
