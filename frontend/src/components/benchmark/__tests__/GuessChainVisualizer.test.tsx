@@ -40,7 +40,7 @@ const llmDetail: StrategyRunDetail = {
       latencyMs: 1200,
       temperature: 0.2,
       createdAt: "2025-01-01T00:00:00Z",
-      wordsHadParenthetical: false,
+      issueTags: [],
       reconstructedPrompt: "You are an expert solver...",
       errorName: null,
       errorMessage: null,
@@ -143,10 +143,10 @@ describe("GuessChainVisualizer", () => {
     expect(screen.getByText("You are an expert solver...")).toBeInTheDocument();
   });
 
-  it("flags a step whose Words: line needed a parenthetical stripped", async () => {
+  it("flags a step with a parentheticalStripped issue tag", async () => {
     stubFetch({
       ...llmDetail,
-      solvePrompts: [{ ...llmDetail.solvePrompts[0]!, wordsHadParenthetical: true }],
+      solvePrompts: [{ ...llmDetail.solvePrompts[0]!, issueTags: ["parentheticalStripped"] }],
     });
 
     render(<GuessChainVisualizer runId={12345} />);
@@ -154,13 +154,25 @@ describe("GuessChainVisualizer", () => {
     expect(await screen.findByText("Parenthetical stripped")).toBeInTheDocument();
   });
 
-  it("does not flag a step whose Words: line had no parenthetical", async () => {
+  it("flags a step with a wordNotOnList issue tag", async () => {
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [{ ...llmDetail.solvePrompts[0]!, issueTags: ["wordNotOnList"] }],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Hallucinated word")).toBeInTheDocument();
+  });
+
+  it("does not render an issue badge for a step with no issue tags", async () => {
     stubFetch(llmDetail);
 
     render(<GuessChainVisualizer runId={12345} />);
 
     await screen.findByText("Initial solve");
     expect(screen.queryByText("Parenthetical stripped")).not.toBeInTheDocument();
+    expect(screen.queryByText("Hallucinated word")).not.toBeInTheDocument();
   });
 
   it("labels a callError row instead of rendering a blank status pill", async () => {

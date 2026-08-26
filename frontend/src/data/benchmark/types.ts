@@ -132,11 +132,9 @@ export interface RunHistoryRow {
    * per-million-token rates. Null for non-LLM strategies and for a run whose
    * model's rate can no longer be resolved. */
   tokenCostUsd: number | null;
-  /** True if any solve step in this run hit the "Words:" trailing-
-   * parenthetical parsing quirk (see SolvePromptRecord.wordsHadParenthetical)
-   * — some models glue their reasoning onto the words line instead of
-   * keeping it in the scratchpad. Always false for non-LLM strategies. */
-  hadWordsParenthetical: boolean;
+  /** Count of this run's solve steps with at least one issue tag (see
+   * SolvePromptRecord.issueTags). Always 0 for non-LLM strategies. */
+  issueCount: number;
 }
 
 export interface RunHistoryMeta {
@@ -153,7 +151,7 @@ export interface RunHistory {
 /** One row of GET /strategy/runs/recent: the most recent StrategyRun rows
  * across *every* strategy/model (unlike RunHistoryRow, which is scoped to
  * one strategy) — backs the Activity page's live feed. Deliberately slimmer
- * than RunHistoryRow (no guessCount/tokenCostUsd/hadWordsParenthetical)
+ * than RunHistoryRow (no guessCount/tokenCostUsd/issueCount)
  * since this is polled repeatedly. */
 export interface RecentRun {
   id: number;
@@ -289,8 +287,6 @@ export type SolvePromptTypeValue = "initialSolve" | "retry";
 export type SolvePromptStatusValue =
   | "parsed"
   | "malformedNoAnswerBlock"
-  | "malformedGroupCount"
-  | "malformedOther"
   // The OpenAI call itself never produced usable model text (backend:
   // SolvePromptStatus.CALL_ERROR). Shown inline in the guess chain like
   // any other step — see errorName/errorMessage/etc. below.
@@ -311,11 +307,11 @@ export interface SolvePromptRecord {
   latencyMs: number | null;
   temperature: number | null;
   createdAt: string;
-  /** True when this response's "Words:" line had a trailing parenthetical
-   * explanation (e.g. "LOOK, TOUCH, SIGHT, SMELL (these are all senses)")
-   * that had to be stripped before it would parse as 4 clean words.
-   * rawResponseText above is always the untouched original text. */
-  wordsHadParenthetical: boolean;
+  /** Every model-response quality issue detected for this prompt — see
+   * SolvePromptIssueTag on the backend (solve-prompt.entity.ts).
+   * rawResponseText above is always the untouched original text regardless
+   * of what's flagged here. */
+  issueTags: string[];
   reconstructedPrompt: string | null;
   proposals: LlmProposalRecord[];
   // Populated only when status is 'callError'. requestBody/responseBody

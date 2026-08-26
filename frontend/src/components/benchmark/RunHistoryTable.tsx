@@ -128,9 +128,12 @@ export function RunHistoryTable({
               <td>
                 <span className="bench-badges">
                   <StatusPill label={runStatusLabel(row.status)} tone={runStatusTone(row.status)} />
-                  {row.hadWordsParenthetical ? (
-                    <span title="At least one model response tucked an explanation into the Words: line — the parser stripped it before guessing.">
-                      <StatusPill label="Parenthetical stripped" tone="neutral" />
+                  {row.issueCount > 0 ? (
+                    <span title="At least one solve step in this run had a detected model-response issue — see the run's detail view for which.">
+                      <StatusPill
+                        label={`${row.issueCount} issue${row.issueCount === 1 ? "" : "s"}`}
+                        tone="neutral"
+                      />
                     </span>
                   ) : null}
                 </span>
