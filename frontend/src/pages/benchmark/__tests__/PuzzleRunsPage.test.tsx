@@ -169,6 +169,10 @@ describe("PuzzleRunsPage", () => {
           inputCostPerMillionTokens: 0.05,
           outputCostPerMillionTokens: 0.4,
           supported: true,
+          contextWindow: null,
+          paramCount: null,
+          providerDescription: null,
+          releaseDate: null,
         },
       ],
     });
