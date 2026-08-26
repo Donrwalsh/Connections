@@ -186,6 +186,7 @@ describe("orchestrator app", () => {
         SOLVE_ASSIST_BODY.messages,
         "gpt-4.1-nano-2025-04-14",
         "openai",
+        expect.any(AbortSignal),
       );
     });
 
@@ -201,7 +202,12 @@ describe("orchestrator app", () => {
       const res = await solveAssistRequest({ messages: SOLVE_ASSIST_BODY.messages });
 
       expect(res.status).toBe(200);
-      expect(solveAssistMock).toHaveBeenCalledWith(SOLVE_ASSIST_BODY.messages, undefined, undefined);
+      expect(solveAssistMock).toHaveBeenCalledWith(
+        SOLVE_ASSIST_BODY.messages,
+        undefined,
+        undefined,
+        expect.any(AbortSignal),
+      );
     });
 
     it("rejects an unknown provider value", async () => {

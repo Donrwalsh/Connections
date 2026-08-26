@@ -34,13 +34,19 @@ describe("solveAssist", () => {
       usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
     });
 
-    const result = await solveAssist(MESSAGES);
+    const controller = new AbortController();
+    const result = await solveAssist(MESSAGES, undefined, undefined, controller.signal);
 
-    // The mock ignores `include`, so this only guards against the option
-    // being dropped — the real AI SDK gates request/response body behind it
-    // (default false) and would silently leave both undefined without it.
+    // The mock ignores `include`/`abortSignal`, so this only guards against
+    // the options being dropped — the real AI SDK gates request/response
+    // body behind `include` (default false) and would silently leave both
+    // undefined without it, and would never see a client's abort without
+    // `abortSignal`, running (and billing) the call to completion instead.
     expect(generateTextMock).toHaveBeenCalledWith(
-      expect.objectContaining({ include: { requestBody: true, responseBody: true } }),
+      expect.objectContaining({
+        include: { requestBody: true, responseBody: true },
+        abortSignal: controller.signal,
+      }),
     );
     expect(result.requestBody).toEqual({
       model: "gpt-4.1-nano",

@@ -58,9 +58,9 @@ export function Game({ puzzle }: GameProps) {
 
     setAiStatus("loading");
     // The backend gives the AI Assist step a single attempt with a generous
-    // budget (ORCHESTRATOR_TIMEOUT_MS, default 120s), so we wait for its final
-    // answer. If nothing has resolved after 2s we assume the model call is
-    // still in flight and surface that in the status.
+    // budget (ORCHESTRATOR_TIMEOUT_MS, default 600s), so we wait for its
+    // final answer. If nothing has resolved after 2s we assume the model
+    // call is still in flight and surface that in the status.
     const retryNoticeTimer = setTimeout(() => setAiStatus("retrying"), 2000);
 
     const controller = new AbortController();

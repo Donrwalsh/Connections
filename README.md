@@ -103,7 +103,7 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `DISPATCH_PASSWORD` | — | Password checked against the `password` field on `POST /dispatch/model/:modelName/:date`, `POST /dispatch/model/:modelName/runs/:n`, and `POST /dispatch/free-tier/:tier` — the dispatch routes that queue paid LLM calls. Only enforced when `NODE_ENV=production` (baked into `backend/Dockerfile`); **required** once it is — the backend/worker refuse to boot without it |
 | `CORS_ORIGIN` | `http://localhost:5173` | Comma-separated list of allowed frontend origins |
 | `ORCHESTRATOR_URL` | `http://orchestrator:3001` | Backend's URL for reaching the orchestrator |
-| `ORCHESTRATOR_TIMEOUT_MS` | `120000` | Per-attempt HTTP timeout for solve calls — must cover a whole multi-prompt step (up to `LLM_MAX_PROMPTS` model calls), since timeouts are not retried |
+| `ORCHESTRATOR_TIMEOUT_MS` | `600000` | Per-attempt HTTP timeout for solve calls, since timeouts are not retried — a firing timeout now also cancels the orchestrator's in-flight OpenAI call |
 | `PUZZLE_POPULATION_CRON` | `0 6 * * *` | Cron pattern for daily puzzle fetch (UTC by default) |
 | `PUZZLE_POPULATION_TZ` | `UTC` | Timezone for the puzzle population cron |
 | `PUZZLE_CACHE_DIR` | `/app/.puzzle-cache` | Directory used as a local cache of raw NYT puzzle payloads (bound to `./.puzzle-cache` on the host) |

@@ -106,6 +106,7 @@ export async function solveAssist(
   messages: ChatMessage[],
   model?: string,
   provider?: ModelProvider,
+  abortSignal?: AbortSignal,
 ): Promise<SolveAssistResult> {
   const resolvedProvider = provider ?? defaultProvider();
 
@@ -129,6 +130,11 @@ export async function solveAssist(
       // rejection path's APICallError.responseBody isn't gated the same
       // way, which is why only failures were landing in SolvePrompt).
       include: { requestBody: true, responseBody: true },
+      // Forwards the incoming HTTP request's own abort signal (see app.ts),
+      // so a client that gives up (e.g. the backend's ORCHESTRATOR_TIMEOUT_MS)
+      // actually cancels this call instead of leaving it running server-side
+      // to complete — and bill tokens for — a result nobody will ever read.
+      abortSignal,
     });
     latencyMs = Date.now() - startTime;
     text = result.text;

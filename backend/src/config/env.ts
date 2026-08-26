@@ -33,14 +33,17 @@ function optionalInt(name: string, value: string | undefined, fallback: number):
 
 /**
  * Per-attempt HTTP timeout for backend→orchestrator solve calls, from
- * ORCHESTRATOR_TIMEOUT_MS. A single solve step makes up to LLM_MAX_PROMPTS
- * (default 19) sequential model calls with escalating candidate counts, so the
- * budget must cover a whole multi-prompt step, not one model call. The value
- * is applied to every attempt — timeout failures are not retried by the
- * caller (see orchestrator/app.service), which keeps the wait bounded.
+ * ORCHESTRATOR_TIMEOUT_MS. Some models legitimately take several minutes to
+ * finish a single call, so the budget is generous — 10 minutes by default.
+ * The value is applied to every attempt — timeout failures are not retried
+ * by the caller (see orchestrator/app.service), which keeps the wait
+ * bounded. When it does fire, the abort now propagates all the way to the
+ * orchestrator's outbound OpenAI call (see orchestrator/app.ts and
+ * solve-assist.ts) instead of just dropping the HTTP connection to the
+ * orchestrator while that call keeps running — and billing — unseen.
  */
 export function orchestratorTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  return optionalInt("ORCHESTRATOR_TIMEOUT_MS", env.ORCHESTRATOR_TIMEOUT_MS, 120000);
+  return optionalInt("ORCHESTRATOR_TIMEOUT_MS", env.ORCHESTRATOR_TIMEOUT_MS, 600000);
 }
 
 /**
