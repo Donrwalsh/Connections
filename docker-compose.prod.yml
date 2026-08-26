@@ -51,10 +51,13 @@ services:
       timeout: 3s
       retries: 5
     # Only publish if the local Ollama worker needs to reach this database
-    # directly (no private tunnel available) — and set REDIS_PASSWORD +
-    # a non-default POSTGRES_PASSWORD before doing so.
+    # directly. Bound to the host's Tailscale IP specifically (not
+    # "5432:5432", which binds 0.0.0.0 — every interface, including any
+    # public one) so the port is reachable only from the tailnet, never the
+    # public internet. Set REDIS_PASSWORD + a non-default POSTGRES_PASSWORD
+    # too, as defense in depth on top of the interface restriction.
     ports:
-      - "5432:5432"
+      - "100.122.242.72:5432:5432"
 
   adminer:
     image: adminer:latest
@@ -92,10 +95,11 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
-    # Only publish if the local Ollama worker has no private tunnel to this
-    # host — see the note above db's ports.
+    # Only publish if the local Ollama worker needs to reach Redis directly.
+    # Bound to the host's Tailscale IP specifically — see the note above
+    # db's ports for why (0.0.0.0 vs. tailnet-only).
     ports:
-      - "6379:6379"
+      - "100.122.242.72:6379:6379"
 
   orchestrator:
     build: ./orchestrator
