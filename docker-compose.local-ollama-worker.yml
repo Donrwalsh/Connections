@@ -29,6 +29,15 @@ services:
     image: ollama/ollama:latest
     container_name: ollama
     restart: unless-stopped
+    environment:
+      # How many requests Ollama serves in parallel per loaded model —
+      # separate from LLM_OLLAMA_CONCURRENCY (the worker's job-pull rate).
+      # Without this, Ollama falls back to its own auto-scaling default,
+      # which can silently serialize requests even if the worker pulls
+      # several jobs at once. Matches LLM_OLLAMA_CONCURRENCY by default;
+      # each parallel slot needs its own MODEL_CONTEXT_WINDOW-sized KV
+      # cache, so raise both together with your available RAM/VRAM in mind.
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-3}
     ports:
       - "11434:11434"
     volumes:

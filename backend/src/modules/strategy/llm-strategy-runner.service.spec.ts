@@ -414,6 +414,34 @@ describe("LlmStrategyRunner", () => {
       );
     });
 
+    it("should correct the run's stored contextWindow to the actual (possibly capped) value from the response", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-ollama" }));
+      mockSupportedModelService.getContextWindow.mockResolvedValueOnce(131072);
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce({
+        ok: true,
+        data: {
+          response: "test reasoning",
+          groups: [
+            ["APPLE", "BANANA", "CHERRY", "DATE"],
+            ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+          ],
+          model: "mistral-nemo",
+          latencyMs: 500,
+          contextWindow: 8192,
+        },
+      });
+
+      await runner.runLlmStrategy(100, "llm-ollama", 0, "mistral-nemo");
+
+      // The run was initially created with the model's real 131,072 context
+      // (see loadOrCreateRun's own tests) — the actual, possibly-capped
+      // value reported by the response overwrites that guess once known.
+      expect(mockManager.save).toHaveBeenCalledWith(
+        StrategyRun,
+        expect.objectContaining({ contextWindow: 8192 }),
+      );
+    });
+
     it("should not look up a contextWindow when no model is given", async () => {
       mockOrchestratorService.solveAssist.mockResolvedValueOnce(
         makeAssistResponse([

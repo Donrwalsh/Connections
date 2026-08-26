@@ -104,6 +104,10 @@ export type SolveAssistRequest = z.infer<typeof SolveAssistRequestSchema>;
  */
 export const SolveAssistResponseSchema = AssistResponseSchema.extend({
   latencyMs: z.number(),
+  // The context window actually used for this call — see
+  // solve-assist.ts's SolveAssistResult for why it can differ from the
+  // request's contextWindow.
+  contextWindow: z.number().optional(),
   usage: z
     .object({
       promptTokens: z.number().optional(),

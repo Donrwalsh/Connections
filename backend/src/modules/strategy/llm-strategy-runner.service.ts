@@ -258,6 +258,13 @@ export class LlmStrategyRunner {
         if (run.modelName === null) {
           run.modelName = data.model;
         }
+        // Correct the run's contextWindow to the actual value the call
+        // used — may differ from the pre-call guess (see loadOrCreateRun)
+        // since Ollama's is always capped at the orchestrator's own
+        // MODEL_CONTEXT_WINDOW (see OrchestratorService.solveAssist).
+        if (data.contextWindow !== undefined) {
+          run.contextWindow = data.contextWindow;
+        }
 
         // Append the assistant response to conversation history.
         messages.push({ role: "assistant", content: data.response });

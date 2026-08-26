@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   defaultProvider,
+  effectiveContextWindow,
   getContextWindow,
   getModel,
   getModelName,
@@ -48,14 +49,32 @@ describe("getModel", () => {
     });
   });
 
-  it("uses an explicit contextWindow over MODEL_CONTEXT_WINDOW when given", () => {
+  it("caps a model's real contextWindow at MODEL_CONTEXT_WINDOW rather than requesting it in full", () => {
+    // A large num_ctx is reserved in full at model-load time regardless of
+    // actual prompt length, so requesting a model's true context window
+    // (e.g. mistral-nemo's 131,072) can OOM-kill Ollama's llama-server on
+    // memory-constrained hardware even though puzzle prompts never come
+    // close to using it. MODEL_CONTEXT_WINDOW caps what's actually
+    // requested; SupportedModel.contextWindow (shown on the leaderboard)
+    // stays the model's real, uncapped spec.
     vi.stubEnv("MODEL_CONTEXT_WINDOW", "2048");
 
     getModel("ollama", undefined, 131072);
 
     const modelFactory = createOllamaMock.mock.results[0].value;
     expect(modelFactory).toHaveBeenCalledWith("llama3.2", {
-      options: { num_ctx: 131072 },
+      options: { num_ctx: 2048 },
+    });
+  });
+
+  it("passes a contextWindow through as-is when it's already below the MODEL_CONTEXT_WINDOW ceiling", () => {
+    vi.stubEnv("MODEL_CONTEXT_WINDOW", "8192");
+
+    getModel("ollama", undefined, 4096);
+
+    const modelFactory = createOllamaMock.mock.results[0].value;
+    expect(modelFactory).toHaveBeenCalledWith("llama3.2", {
+      options: { num_ctx: 4096 },
     });
   });
 
@@ -129,6 +148,36 @@ describe("defaultProvider", () => {
   it("returns ollama when MODEL_PROVIDER is set to ollama", () => {
     vi.stubEnv("MODEL_PROVIDER", "ollama");
     expect(defaultProvider()).toBe("ollama");
+  });
+});
+
+describe("effectiveContextWindow", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("caps a large contextWindow at MODEL_CONTEXT_WINDOW for ollama", () => {
+    vi.stubEnv("MODEL_CONTEXT_WINDOW", "8192");
+    expect(effectiveContextWindow("ollama", 131072)).toBe(8192);
+  });
+
+  it("passes a contextWindow through as-is for ollama when already below the ceiling", () => {
+    vi.stubEnv("MODEL_CONTEXT_WINDOW", "8192");
+    expect(effectiveContextWindow("ollama", 4096)).toBe(4096);
+  });
+
+  it("falls back to the ceiling for ollama when no contextWindow is given", () => {
+    vi.stubEnv("MODEL_CONTEXT_WINDOW", "8192");
+    expect(effectiveContextWindow("ollama")).toBe(8192);
+  });
+
+  it("never caps openai — returns the given contextWindow unchanged", () => {
+    vi.stubEnv("MODEL_CONTEXT_WINDOW", "8192");
+    expect(effectiveContextWindow("openai", 131072)).toBe(131072);
+  });
+
+  it("returns undefined for openai when no contextWindow is given", () => {
+    expect(effectiveContextWindow("openai")).toBeUndefined();
   });
 });
 
