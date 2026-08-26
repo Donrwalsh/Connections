@@ -55,6 +55,9 @@ the current codebase ever writes a non-null value into that column.
   retiring `MODEL_CONTEXT_WINDOW` as the source of truth (it remains only as
   a fallback default for the provider-less AI Assist path, which has no
   specific `SupportedModel` row to look a context window up from).
+- A run's displayed cost always reflects the price actually in effect when
+  that run happened, not today's price — a run from before a price change
+  keeps showing its old cost even after the price is refreshed.
 
 ## Non-goals
 
@@ -100,7 +103,44 @@ detail for the plan, not this spec — it depends on checking each of the ~18
 registered OpenAI models plus `mistral-nemo` against OpenRouter at
 build time).
 
-### 2. Refresh service (backend)
+### 2. Historical cost accuracy
+
+Today, `getLeaderboard` and `getRunHistory`
+([strategy.service.ts:555](../../../backend/src/modules/strategy/strategy.service.ts),
+[:988-1002](../../../backend/src/modules/strategy/strategy.service.ts)) both
+price every run using the model's *current* `ModelPrice` row (highest id) —
+a run from before a price change gets silently re-priced at today's rate
+every time it's queried. This barely mattered when prices only ever changed
+via a rare manual migration; it matters once a daily refresh job is
+routinely changing them.
+
+Since `ModelPrice` is already timestamped (`createdAt`) and append-only,
+both queries switch from "the highest-id row for this model" to "the
+highest-id row for this model whose `createdAt` is ≤ the run's `startedAt`"
+— the price actually in effect when the run began. A run's tokens accrue
+over its full duration (possibly several prompts/attempts), but runs are
+typically seconds to a couple of minutes and prices change at most daily, so
+anchoring the whole run to its `startedAt` is precise enough — pricing each
+individual `SolvePrompt` call at its own exact timestamp was considered and
+rejected as unnecessary complexity for a case this unlikely.
+
+- `getRunHistory`'s correlated `ModelPrice` subquery
+  (`strategy.service.ts:988-994`) gains a `"createdAt" <= run."startedAt"`
+  condition alongside its existing `ORDER BY id DESC LIMIT 1`.
+- `getLeaderboard`'s `rateByModel` (`strategy.service.ts:555`) currently
+  resolves one "current rate" per model up front and reuses it across every
+  run of that model in the aggregation loop — that has to change to a
+  per-run lookup (the same "price as of this run's `startedAt`" query),
+  since different runs of the same model can now legitimately have priced
+  differently.
+- A run whose `startedAt` predates the model's very first `ModelPrice` row
+  has no price that was "in effect" yet — it shows no cost (`null`), same as
+  a model with no price at all today. This matches the rest of the design's
+  "no data beats fake data" principle rather than borrowing a later price
+  for it.
+- `getRecentRuns` is unaffected — it doesn't compute cost today.
+
+### 3. Refresh service (backend)
 
 - `OpenRouterClient` — thin wrapper around `GET
   https://openrouter.ai/api/v1/models` (public, unauthenticated).
@@ -122,7 +162,7 @@ build time).
   service directly (not via the queue — it's one fast API call) and returns
   a summary: counts of updated / skipped / errored rows.
 
-### 3. Per-model context window replaces the flat env var
+### 4. Per-model context window replaces the flat env var
 
 - `OrchestratorService.solveAssist` (backend) gains an optional
   `contextWindow` parameter, sourced from the `SupportedModel` row the
@@ -138,7 +178,7 @@ build time).
   was built — `GuessSequencePanel.tsx`'s `"mistral-nemo (131,072 ctx)"`
   display starts working with no frontend changes needed.
 
-### 4. Frontend
+### 5. Frontend
 
 - `GET /strategy/models` (`findAll()`) starts returning `contextWindow`,
   `paramCount`, and `releaseDate` on every row.
@@ -156,7 +196,7 @@ build time).
   data already present on the row — no extra per-row fetch on the
   leaderboard table.
 
-### 5. Testing
+### 6. Testing
 
 TDD throughout, per this project's normal workflow:
 
@@ -167,6 +207,11 @@ TDD throughout, per this project's normal workflow:
   changed, parsing `paramCount` from a slug and from description prose.
 - New endpoint: auth-guard behavior (mirrors the other `DispatchAuthGuard`
   routes' existing specs) plus the summary-counts response shape.
+- `getRunHistory`/`getLeaderboard`: a run priced correctly against the
+  `ModelPrice` row in effect at its `startedAt`, unaffected by a later price
+  change; a run predating any price for its model shows `null` cost; two
+  runs of the same model priced differently because a price change happened
+  between them.
 - `provider.ts`: passing an explicit `contextWindow` through to `num_ctx`
   vs. falling back to the env default.
 - Frontend: updated `buildDynamicMeta`/`describeLeaderboardRow` description
