@@ -84,13 +84,14 @@ the current codebase ever writes a non-null value into that column.
 
 ### 1. Data model
 
-Add four nullable columns to `SupportedModel`:
+Add five nullable columns to `SupportedModel`:
 
 | Column | Type | Meaning |
 |---|---|---|
 | `openRouterSlug` | text | OpenRouter's model id, e.g. `"openai/gpt-4.1-nano"`. Set manually per model, same place models are already registered. `null` means "not mapped — skip on refresh." |
 | `contextWindow` | int | From OpenRouter's `context_length`. |
 | `paramCount` | bigint | Best-effort: parsed from the OpenRouter slug/name (e.g. `"8b"` → `8_000_000_000`) or its description text (OpenRouter sometimes states it in prose, e.g. "7.3B parameter model"). `null` when it can't be parsed — expected for most OpenAI rows, since OpenAI doesn't publish parameter counts at all. |
+| `providerDescription` | text | OpenRouter's own natural-language description of the model, verbatim (e.g. "For tasks that demand low latency, GPT‑4.1 nano is the fastest..."). Distinct from `StrategyMeta.description` (frontend UI copy — the short "128K context · 12B params" comparison line built in §5); this is the longer prose, refreshed alongside everything else. |
 | `metadataUpdatedAt` | timestamptz | Set on every successful refresh match. `null` until the first successful refresh. |
 | `releaseDate` | timestamptz | From OpenRouter's `created` (Unix timestamp) — this is the model's real release date, not just when OpenRouter listed it (spot-checked against `gpt-4.1-nano`'s known release date). |
 
@@ -195,6 +196,13 @@ rejected as unnecessary complexity for a case this unlikely.
   row server-side, so `describeLeaderboardRow` builds its description from
   data already present on the row — no extra per-row fetch on the
   leaderboard table.
+- `providerDescription` is displayed in exactly one place:
+  [StrategyPuzzlePage.tsx](../../../frontend/src/pages/benchmark/StrategyPuzzlePage.tsx)
+  (the `/leaderboard/:strategyId` model-specific page — e.g.
+  `/leaderboard/mistral-nemo`), as an additional paragraph below the
+  existing `bench-strategy-desc` line, shown only for `kind === "llm"` rows
+  with a non-null value. `PuzzleRunsPage.tsx` (the per-run page) is
+  unaffected — it keeps only the short stats description.
 
 ### 6. Testing
 
