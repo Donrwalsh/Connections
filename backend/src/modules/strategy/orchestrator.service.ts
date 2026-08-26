@@ -18,6 +18,11 @@ export interface SolveAssistSuccess {
   response: string;
   groups: string[][];
   model: string;
+  // The context window actually used for this call — reported back by the
+  // orchestrator, since it can differ from the contextWindow requested (see
+  // this class's solveAssist doc comment and provider.ts's
+  // effectiveContextWindow on the orchestrator side).
+  contextWindow?: number;
   latencyMs: number;
   usage?: SolveUsage;
   requestBody?: unknown;
@@ -66,9 +71,11 @@ export class OrchestratorService {
    * the one place that choice is handed off. Omit either to fall back to the
    * orchestrator's own env-configured default (used for the provider-less
    * /diagnose AI Assist path, which never sends these). `contextWindow` is
-   * this model's real context window (from SupportedModel), overriding the
-   * orchestrator's flat MODEL_CONTEXT_WINDOW default for Ollama's num_ctx —
-   * omitted when the model hasn't been through a metadata refresh yet.
+   * this model's real context window (from SupportedModel) — omitted when
+   * the model hasn't been through a metadata refresh yet. For Ollama, the
+   * orchestrator always caps what it actually requests at its own
+   * MODEL_CONTEXT_WINDOW regardless of this value, and reports the true
+   * effective context window back on `SolveAssistSuccess.contextWindow`.
    */
   async solveAssist(
     messages: ChatMessage[],
@@ -83,6 +90,7 @@ export class OrchestratorService {
         response: raw.response,
         groups: raw.groups,
         model: raw.model,
+        contextWindow: raw.contextWindow,
         latencyMs: raw.latencyMs ?? 0,
         usage: raw.usage,
         requestBody: raw.requestBody,

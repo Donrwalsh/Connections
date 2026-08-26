@@ -52,13 +52,28 @@ export function getModel(
     const ollama = createOllama({
       baseURL: process.env.OLLAMA_BASE_URL ?? "http://localhost:11434",
     });
-    const ceiling = getContextWindow();
     return ollama(modelOverride ?? process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL, {
-      options: { num_ctx: Math.min(contextWindow ?? ceiling, ceiling) },
+      options: { num_ctx: effectiveContextWindow("ollama", contextWindow) },
     });
   }
 
   return openai(modelOverride ?? process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL);
+}
+
+/**
+ * The context window actually used for a call — what a caller should report
+ * back as ground truth, since it can differ from the `contextWindow` it was
+ * given. For ollama this is always capped at MODEL_CONTEXT_WINDOW (see
+ * getModel's doc comment for why); for openai there's no cap concept, so
+ * whatever was passed in comes back unchanged (undefined if nothing was).
+ */
+export function effectiveContextWindow(
+  provider: ModelProvider,
+  contextWindow?: number,
+): number | undefined {
+  if (provider !== "ollama") return contextWindow;
+  const ceiling = getContextWindow();
+  return Math.min(contextWindow ?? ceiling, ceiling);
 }
 
 /**

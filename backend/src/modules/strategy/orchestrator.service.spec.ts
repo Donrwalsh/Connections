@@ -70,6 +70,19 @@ describe("OrchestratorService", () => {
     );
   });
 
+  it("should report the effective contextWindow from the orchestrator's response", async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockResponse({ ok: true, status: 200, body: { ...successBody, contextWindow: 8192 } }),
+    );
+
+    const outcome = await service.solveAssist(messages, "mistral-nemo", "ollama", 131072);
+
+    expect(outcome).toEqual({
+      ok: true,
+      data: expect.objectContaining({ contextWindow: 8192 }),
+    });
+  });
+
   it("should include contextWindow in the request body when given", async () => {
     mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
 

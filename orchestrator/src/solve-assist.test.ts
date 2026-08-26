@@ -85,6 +85,31 @@ describe("solveAssist", () => {
     expect(getModelSpy).toHaveBeenCalledWith("ollama", "mistral-nemo", 131072);
   });
 
+  it("reports the effective (capped) contextWindow in the result, not the requested one", async () => {
+    vi.stubEnv("MODEL_CONTEXT_WINDOW", "8192");
+    generateTextMock.mockResolvedValueOnce({
+      text: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
+      response: { modelId: "mistral-nemo" },
+      request: {},
+    });
+
+    const result = await solveAssist(MESSAGES, "mistral-nemo", "ollama", 131072);
+
+    expect(result.contextWindow).toBe(8192);
+  });
+
+  it("reports contextWindow unchanged for openai (no cap concept)", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
+      response: { modelId: "gpt-4.1-nano" },
+      request: {},
+    });
+
+    const result = await solveAssist(MESSAGES, "gpt-4.1-nano", "openai", 128000);
+
+    expect(result.contextWindow).toBe(128000);
+  });
+
   it("surfaces APICallError detail instead of discarding it", async () => {
     const { APICallError } = await import("ai");
     generateTextMock.mockRejectedValueOnce(

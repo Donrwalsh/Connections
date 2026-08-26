@@ -1,6 +1,12 @@
 import { generateText, type LanguageModelUsage } from "ai";
 import { type ChatMessage } from "./types.js";
-import { defaultProvider, getModel, getModelName, type ModelProvider } from "./provider.js";
+import {
+  defaultProvider,
+  effectiveContextWindow,
+  getModel,
+  getModelName,
+  type ModelProvider,
+} from "./provider.js";
 import { SolveError, classifyModelCallError } from "./solver.js";
 
 export interface ParsedGroupProposal {
@@ -13,6 +19,10 @@ export interface SolveAssistResult {
   groups: string[][];
   proposals: ParsedGroupProposal[];
   model: string;
+  // The context window actually used for this call — may differ from the
+  // contextWindow the caller passed in, since Ollama's is always capped at
+  // MODEL_CONTEXT_WINDOW (see provider.ts's effectiveContextWindow).
+  contextWindow?: number;
   latencyMs: number;
   usage?: {
     promptTokens?: number;
@@ -187,6 +197,7 @@ export async function solveAssist(
     groups,
     proposals,
     model: modelId,
+    contextWindow: effectiveContextWindow(resolvedProvider, contextWindow),
     latencyMs,
     usage,
     requestBody,
