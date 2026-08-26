@@ -65,16 +65,20 @@ export class OrchestratorService {
    * table before a run ever gets this far (see StrategyService), so this is
    * the one place that choice is handed off. Omit either to fall back to the
    * orchestrator's own env-configured default (used for the provider-less
-   * /diagnose AI Assist path, which never sends these).
+   * /diagnose AI Assist path, which never sends these). `contextWindow` is
+   * this model's real context window (from SupportedModel), overriding the
+   * orchestrator's flat MODEL_CONTEXT_WINDOW default for Ollama's num_ctx —
+   * omitted when the model hasn't been through a metadata refresh yet.
    */
   async solveAssist(
     messages: ChatMessage[],
     model?: string,
     provider?: "openai" | "ollama",
+    contextWindow?: number | null,
   ): Promise<SolveAssistOutcome> {
     return this.executeCall<SolveAssistSuccess>(
       "/solve-assist",
-      { messages, model, provider },
+      { messages, model, provider, contextWindow: contextWindow ?? undefined },
       (raw) => ({
         response: raw.response,
         groups: raw.groups,

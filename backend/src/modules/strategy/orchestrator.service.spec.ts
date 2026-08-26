@@ -70,6 +70,24 @@ describe("OrchestratorService", () => {
     );
   });
 
+  it("should include contextWindow in the request body when given", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
+
+    await service.solveAssist(messages, "mistral-nemo", "ollama", 131072);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://orchestrator.test/solve-assist",
+      expect.objectContaining({
+        body: JSON.stringify({
+          messages,
+          model: "mistral-nemo",
+          provider: "ollama",
+          contextWindow: 131072,
+        }),
+      }),
+    );
+  });
+
   it("should include the model and provider in the request body when given", async () => {
     mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
 
