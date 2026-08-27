@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { RunHistoryTable } from "../../components/benchmark/RunHistoryTable";
 import { StatusPill } from "../../components/benchmark/StatusPill";
 import { fetchLeaderboard, fetchRunHistory } from "../../data/benchmark/api";
-import { formatCostUsd, formatDuration } from "../../data/benchmark/metrics";
+import { formatCostUsd, formatDuration, formatSuccessRate } from "../../data/benchmark/metrics";
 import { useStrategyMeta } from "../../data/benchmark/useStrategyMeta";
 import type {
   LeaderboardRow,
@@ -160,9 +160,7 @@ export function StrategyPuzzlePage() {
               <span className="bench-summary__item">
                 Success rate
                 <span className="bench-mono">
-                  {leaderboardRow.successRate === null
-                    ? "—"
-                    : `${Math.round(leaderboardRow.successRate)}%`}
+                  {leaderboardRow.successRate === null ? "—" : formatSuccessRate(leaderboardRow.successRate)}
                 </span>
               </span>
               <span className="bench-summary__item">

@@ -150,6 +150,15 @@ interface LeaderboardAccumulator {
   // model rate — unlike guesses/duration this covers every run regardless
   // of outcome, since a failed or errored LLM run still spent tokens.
   costsUsd: number[];
+  // Issue-tagged SolvePrompt count for every run with a model, regardless
+  // of status or whether cost was priceable — unlike costsUsd, issue
+  // count is always knowable (0 when clean), so this array's length always
+  // equals the number of runs with a model, not a subset of them. Runs that
+  // errored before their first LLM call have no SolvePrompt rows and so
+  // contribute a hard 0, pulling an error-prone model's average downward —
+  // a deliberate spec choice, noted here so a future reader doesn't
+  // rediscover it as a bug.
+  issueCounts: number[];
 }
 
 @Injectable()
@@ -498,11 +507,16 @@ export class StrategyService {
         .select("prompt.strategyRunId", "strategyRunId")
         .addSelect("SUM(prompt.promptTokens)", "promptTokens")
         .addSelect("SUM(prompt.completionTokens)", "completionTokens")
+        .addSelect(
+          `COUNT(*) FILTER (WHERE array_length(prompt."issueTags", 1) > 0)`,
+          "issueCount",
+        )
         .groupBy("prompt.strategyRunId")
         .getRawMany<{
           strategyRunId: number;
           promptTokens: string | null;
           completionTokens: string | null;
+          issueCount: string | null;
         }>(),
       this.supportedModelService.findPriceHistory(),
       this.supportedModelService.findAll(),
@@ -516,11 +530,13 @@ export class StrategyService {
     }
 
     const tokensByRun = new Map<number, { promptTokens: number; completionTokens: number }>();
+    const issueCountByRun = new Map<number, number>();
     for (const row of tokenRows) {
       tokensByRun.set(Number(row.strategyRunId), {
         promptTokens: Number(row.promptTokens ?? 0),
         completionTokens: Number(row.completionTokens ?? 0),
       });
+      issueCountByRun.set(Number(row.strategyRunId), Number(row.issueCount ?? 0));
     }
 
     const metadataByModel = new Map<string, SupportedModelWithRate>();
@@ -555,6 +571,7 @@ export class StrategyService {
           guessCounts: [],
           durationsMs: [],
           costsUsd: [],
+          issueCounts: [],
         };
         aggregates.set(key, acc);
       }
@@ -589,7 +606,9 @@ export class StrategyService {
 
       // Cost counts for every run regardless of outcome — a failed or
       // errored LLM run still spent tokens — so this sits outside the
-      // status branches above.
+      // status branches above. Issue count is pushed the same way, but
+      // unconditionally (not gated on a resolvable rate) since it's always
+      // knowable, not just when cost happens to be.
       if (run.modelName) {
         const tokens = tokensByRun.get(run.id);
         const history = priceHistoryByModel.get(leaderboardKey(run.strategyName, run.modelName));
@@ -597,6 +616,7 @@ export class StrategyService {
         if (tokens && rate) {
           acc.costsUsd.push(computeTokenCostUsd(tokens.promptTokens, tokens.completionTokens, rate));
         }
+        acc.issueCounts.push(issueCountByRun.get(run.id) ?? 0);
       }
     }
 
@@ -645,6 +665,10 @@ export class StrategyService {
             : acc.durationsMs.reduce((a, b) => a + b, 0) / acc.durationsMs.length,
         avgCostUsd: totalCostUsd === null ? null : totalCostUsd / acc.costsUsd.length,
         totalCostUsd,
+        avgIssues:
+          acc.issueCounts.length === 0
+            ? null
+            : acc.issueCounts.reduce((a, b) => a + b, 0) / acc.issueCounts.length,
         contextWindow: metadata?.contextWindow ?? null,
         paramCount: metadata?.paramCount ?? null,
         providerDescription: metadata?.providerDescription ?? null,

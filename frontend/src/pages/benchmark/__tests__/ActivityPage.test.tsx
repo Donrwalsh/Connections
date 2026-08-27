@@ -55,6 +55,7 @@ function makeRow(overrides: Partial<LeaderboardRow> = {}): LeaderboardRow {
     avgDurationMs: 12,
     avgCostUsd: null,
     totalCostUsd: null,
+    avgIssues: null,
     contextWindow: null,
     paramCount: null,
     providerDescription: null,

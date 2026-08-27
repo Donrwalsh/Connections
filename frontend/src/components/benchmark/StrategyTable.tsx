@@ -1,8 +1,8 @@
 import { useNavigate } from "react-router-dom";
 import {
-  formatCostUsd,
   formatDuration,
   formatGuessCount,
+  formatSuccessRate,
   getMetricDefinition,
   metricValue,
   sortStrategiesByMetric,
@@ -76,7 +76,7 @@ export function StrategyTable({ rows, metricKey, variant, freeTierModels }: Stra
               <th scope="col">Range</th>
             </>
           ) : (
-            <th scope="col">Avg cost</th>
+            <th scope="col">Avg issues</th>
           )}
           <th scope="col">Progress</th>
         </tr>
@@ -91,7 +91,7 @@ export function StrategyTable({ rows, metricKey, variant, freeTierModels }: Stra
             { label: "Failed", count: progress.failed, tone: "failed" },
           ];
           const speed = metricValue(row, "speed");
-          const successRateDisplay = row.successRate === null ? "—" : `${Math.round(row.successRate)}%`;
+          const successRateDisplay = row.successRate === null ? "—" : formatSuccessRate(row.successRate);
           // Unitless here — the "solves/hr" caption below the value supplies
           // the unit, so it isn't baked into this number too.
           const speedDisplay = speed === null ? "—" : Math.round(speed).toLocaleString();
@@ -151,7 +151,7 @@ export function StrategyTable({ rows, metricKey, variant, freeTierModels }: Stra
                 </>
               ) : (
                 <td className="bench-mono">
-                  {row.avgCostUsd === null ? "—" : formatCostUsd(row.avgCostUsd)}
+                  {row.avgIssues === null ? "—" : row.avgIssues.toFixed(1)}
                 </td>
               )}
               <td>
