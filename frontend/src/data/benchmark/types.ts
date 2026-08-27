@@ -98,6 +98,11 @@ export interface LeaderboardRow {
    * tokens. */
   avgCostUsd: number | null;
   totalCostUsd: number | null;
+  /** Mean count of issue-tagged solve steps per run (see
+   * SolvePromptRecord.issueTags) across every run this model has
+   * attempted, regardless of outcome. null for deterministic/shuffle rows
+   * (no SolvePrompt rows at all), same as avgCostUsd. */
+  avgIssues: number | null;
   /** Current model metadata (not run-time-historical, unlike cost) — see
    * SupportedModel on the backend. null until the model has been through a
    * metadata refresh, or for deterministic/shuffle rows. */

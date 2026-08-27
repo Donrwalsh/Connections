@@ -39,6 +39,7 @@ function makeLeaderboardRow(overrides: Partial<LeaderboardRow> = {}): Leaderboar
     avgDurationMs: 12,
     avgCostUsd: null,
     totalCostUsd: null,
+    avgIssues: null,
     contextWindow: null,
     paramCount: null,
     providerDescription: null,
