@@ -15,9 +15,9 @@ export const strategyQueue = new Queue("strategy-runs", {
 /**
  * Per-provider queues for the LLM strategies. Splitting them off the shared
  * strategy-runs queue lets each provider's worker process runs at its own
- * configured concurrency, so llm-openai and llm-ollama runs never block each
- * other — and the deterministic strategies are never delayed behind an LLM
- * call (which can take minutes).
+ * configured concurrency, so llm-openai, llm-ollama, and llm-google runs
+ * never block each other — and the deterministic strategies are never
+ * delayed behind an LLM call (which can take minutes).
  */
 export const llmOpenAIQueue = new Queue("llm-openai-runs", {
   connection: redisConnection,

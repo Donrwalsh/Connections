@@ -127,6 +127,55 @@ describe("classifyModelCallError", () => {
     expect(result.code).toBe("model_error");
   });
 
+  it("falls back to model_error (not throw) when the responseBody is the JSON literal \"null\"", () => {
+    // JSON.parse("null") yields the JS value null, not an object — a naive
+    // `parsed.error` access throws TypeError; parseGoogleRateLimit must
+    // guard `parsed` itself, not just `parsed.error`.
+    const err = makeAPICallError({ statusCode: 429, responseBody: "null" });
+
+    expect(() => classifyModelCallError(err, "google", { model: "gemini-3.6-flash" })).not.toThrow();
+
+    const result = classifyModelCallError(err, "google", { model: "gemini-3.6-flash" });
+    expect(result.code).toBe("model_error");
+  });
+
+  it("falls back to model_error (not throw) when a details entry's @type is not a string", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseBody: JSON.stringify({
+        error: { code: 429, message: "rate limited", details: [{ "@type": 42 }] },
+      }),
+    });
+
+    expect(() => classifyModelCallError(err, "google", { model: "gemini-3.6-flash" })).not.toThrow();
+
+    const result = classifyModelCallError(err, "google", { model: "gemini-3.6-flash" });
+    expect(result.code).toBe("model_error");
+  });
+
+  it("falls back to model_error (not throw) when a violation's quotaId/quotaMetric is not a string", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseBody: JSON.stringify({
+        error: {
+          code: 429,
+          message: "rate limited",
+          details: [
+            {
+              "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+              violations: [{ quotaId: 12345, quotaMetric: 67890 }],
+            },
+          ],
+        },
+      }),
+    });
+
+    expect(() => classifyModelCallError(err, "google", { model: "gemini-3.6-flash" })).not.toThrow();
+
+    const result = classifyModelCallError(err, "google", { model: "gemini-3.6-flash" });
+    expect(result.code).toBe("model_error");
+  });
+
   it("never classifies a non-google provider's 429 as rate_limited", () => {
     const err = makeAPICallError({ statusCode: 429, responseBody: GOOGLE_RPM_BODY });
 

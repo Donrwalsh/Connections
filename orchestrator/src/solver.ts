@@ -86,21 +86,29 @@ function parseGoogleRateLimit(responseBody: unknown): number | undefined | null 
     return null;
   }
 
-  const details = parsed.error?.details;
+  const details = parsed?.error?.details;
   if (!Array.isArray(details)) return null;
 
   const quotaFailure = details.find(
     (d): d is GoogleQuotaFailureDetail =>
-      typeof d === "object" && d !== null && (d as GoogleQuotaFailureDetail)["@type"]?.endsWith("QuotaFailure") === true,
+      typeof d === "object" &&
+      d !== null &&
+      typeof (d as GoogleQuotaFailureDetail)["@type"] === "string" &&
+      (d as GoogleQuotaFailureDetail)["@type"].endsWith("QuotaFailure"),
   );
   const isPerMinute = quotaFailure?.violations?.some(
-    (v) => v.quotaId?.includes("PerMinute") || v.quotaMetric?.includes("PerMinute"),
+    (v) =>
+      (typeof v.quotaId === "string" && v.quotaId.includes("PerMinute")) ||
+      (typeof v.quotaMetric === "string" && v.quotaMetric.includes("PerMinute")),
   );
   if (!isPerMinute) return null;
 
   const retryInfo = details.find(
     (d): d is GoogleRetryInfoDetail =>
-      typeof d === "object" && d !== null && (d as GoogleRetryInfoDetail)["@type"]?.endsWith("RetryInfo") === true,
+      typeof d === "object" &&
+      d !== null &&
+      typeof (d as GoogleRetryInfoDetail)["@type"] === "string" &&
+      (d as GoogleRetryInfoDetail)["@type"].endsWith("RetryInfo"),
   );
   const seconds = retryInfo?.retryDelay ? parseFloat(retryInfo.retryDelay) : NaN;
   return Number.isFinite(seconds) ? seconds : undefined;

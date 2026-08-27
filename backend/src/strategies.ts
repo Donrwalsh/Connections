@@ -52,9 +52,10 @@ export const DEFAULT_LLM_NUM_RESPONSES = 1;
 export const MAX_LLM_NUM_RESPONSES = 10;
 
 // How many LLM strategy runs of each provider the worker may process at once.
-// Each provider has its own BullMQ queue (llm-openai-runs / llm-ollama-runs),
-// so the two providers never block each other; within a provider the worker
-// starts at most this many jobs concurrently (default 1 = fully serialized).
+// Each provider has its own BullMQ queue (llm-openai-runs / llm-ollama-runs /
+// llm-google-runs), so the three providers never block each other; within a
+// provider the worker starts at most this many jobs concurrently (default 1
+// = fully serialized).
 export const DEFAULT_LLM_OPENAI_CONCURRENCY = 1;
 export const DEFAULT_LLM_OLLAMA_CONCURRENCY = 1;
 export const DEFAULT_LLM_GOOGLE_CONCURRENCY = 1;
