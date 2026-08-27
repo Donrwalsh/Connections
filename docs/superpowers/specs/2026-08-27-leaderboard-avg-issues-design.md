@@ -1,4 +1,4 @@
-# Replacing "Avg cost" with "Avg issues" on the primary leaderboard — design
+# Leaderboard display changes: "Avg issues" and success-rate precision — design
 
 ## Problem
 
@@ -16,6 +16,16 @@ this table than raw dollar cost — cost is still tracked and shown elsewhere
 (the free-tier budget widget, the per-model detail page), just not as the
 headline number on the model-comparison table.
 
+Separately: both the leaderboard table and the per-model detail page
+(`StrategyPuzzlePage.tsx`) show `successRate` rounded to a whole percent
+(`Math.round(value)%`,
+[StrategyTable.tsx:94](../../../frontend/src/components/benchmark/StrategyTable.tsx#L94)
+and
+[StrategyPuzzlePage.tsx:165](../../../frontend/src/pages/benchmark/StrategyPuzzlePage.tsx#L165)).
+A model that solves only occasionally — say 1 win in 300 attempts, 0.33% —
+rounds to "0%", indistinguishable from a model that has never once solved
+anything. More precision surfaces that distinction.
+
 ## Goals
 
 - `StrategyTable.tsx`'s LLM-variant column changes from "Avg cost" to "Avg
@@ -26,6 +36,10 @@ headline number on the model-comparison table.
   `FreeTierBudgetWidget.tsx`, `sumSpendUsd` in `metrics.ts`) are unaffected
   — this only changes what one table column shows, not the cost-tracking
   feature itself.
+- `successRate` renders at up to 3 significant figures instead of a rounded
+  whole percent, in both `StrategyTable.tsx` and `StrategyPuzzlePage.tsx`,
+  so an occasionally-successful model's record is never indistinguishable
+  from a never-successful one.
 
 ## Non-goals
 
@@ -41,6 +55,11 @@ headline number on the model-comparison table.
   (no LLM cost concept applies), and won't show issues either (no
   `SolvePrompt` rows exist for those strategies, so the concept doesn't
   apply there either).
+- `MetricDefinition.format` (`metrics.ts:31`, the `successRate` entry in
+  `LEADERBOARD_METRICS`) is confirmed dead code — nothing in the app calls
+  `metric.format(...)` anywhere (`MetricSelector.tsx` only reads `.label`/
+  `.description`). Left untouched; not this change's job to clean up
+  unrelated dead code.
 
 ## Design
 
@@ -199,7 +218,39 @@ plain `.toFixed(1)` is simpler and sufficient here since an issue count
 average never needs the integer special-case (it's essentially always
 fractional across more than one run).
 
-### 5. Testing
+### 5. Success-rate precision: a shared formatter
+
+Add `formatSuccessRate` to
+[metrics.ts](../../../frontend/src/data/benchmark/metrics.ts), alongside
+the other formatters there (`formatCostUsd`, `formatGuessCount`,
+`formatDuration`):
+
+```typescript
+/** Success rate to 3 significant figures rather than a rounded whole
+ * percent — an occasionally-successful model (e.g. 1 win in 300 attempts,
+ * 0.33%) would otherwise round to "0%", indistinguishable from a model
+ * that has never solved anything. Number(...toPrecision(3)) rather than a
+ * fixed decimal count so round numbers stay clean ("100%", "5%") instead
+ * of padding to "100.00%"/"5.00%". */
+export function formatSuccessRate(value: number): string {
+  return `${Number(value.toPrecision(3))}%`;
+}
+```
+
+`Number(x.toPrecision(3))` round-trips through `Number` specifically to
+drop trailing zeros that `toPrecision` itself always includes
+(`"0.400"`/`"33.3"`/`"100"`) — converting back to a number and letting
+template-string coercion re-stringify it produces `"0.4"`/`"33.3"`/`"100"`.
+
+Both call sites swap their inline `Math.round(value)}%` for this shared
+formatter, keeping their existing null guards:
+
+- [StrategyTable.tsx:94](../../../frontend/src/components/benchmark/StrategyTable.tsx#L94):
+  `` const successRateDisplay = row.successRate === null ? "—" : formatSuccessRate(row.successRate); ``
+- [StrategyPuzzlePage.tsx:163-165](../../../frontend/src/pages/benchmark/StrategyPuzzlePage.tsx#L163-L165):
+  same swap, same null guard.
+
+### 6. Testing
 
 - `strategy.service.spec.ts`'s existing `getLeaderboard` cost tests
   (e.g. [:1342](../../../backend/src/modules/strategy/strategy.service.spec.ts#L1342),
@@ -222,3 +273,13 @@ fractional across more than one run).
 - `StrategyTable`/`LeaderboardPage` frontend tests: update row fixtures to
   include `avgIssues`, and change any assertion querying for the "Avg
   cost" header/cell text to "Avg issues".
+- New unit tests for `formatSuccessRate` in `metrics.ts`'s test file:
+  `0.333` → `"0.333%"` (3 sig figs, no trailing-zero padding),
+  `100` → `"100%"`, `5` → `"5%"` (round numbers stay clean, no
+  `"5.00%"`), `45.678` → `"45.7%"` (rounds, doesn't truncate).
+- `StrategyTable`/`StrategyPuzzlePage` existing tests that assert a
+  rendered success-rate string (e.g. `"100%"`) need their fixture values
+  checked against the new formatting — a fixture using a round number like
+  `100` or `50` renders identically either way, so most won't need
+  changes; only a fixture whose value isn't a round number would newly
+  render with decimals.
