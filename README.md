@@ -121,6 +121,7 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `LLM_OPENAI_CONCURRENCY` | `1` | Maximum `llm-openai` runs the worker processes at once (own queue, so it never blocks Ollama, Google, or the deterministic strategies) |
 | `LLM_OLLAMA_CONCURRENCY` | `1` | Maximum `llm-ollama` runs the worker processes at once (own queue, so it never blocks OpenAI, Google, or the deterministic strategies) |
 | `LLM_GOOGLE_CONCURRENCY` | `1` | Maximum `llm-google` runs the worker processes at once (own queue, so it never blocks OpenAI, Ollama, or the deterministic strategies) |
+| `LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS` | `60` | Fallback wait before retrying a Google per-minute rate-limit hit, used only when Google's own `RetryInfo` doesn't specify one. A per-minute hit (RPM or TPM) is never a run failure — it waits and retries indefinitely; only a daily-quota hit counts toward `LLM_MAX_MODEL_ERRORS` |
 | `PORT` | `3001` | Orchestrator listen port |
 | `POSTGRES_USER` | `postgres` | Postgres user (compose-level; the backend reads it as `DB_USER`) |
 | `POSTGRES_PASSWORD` | `postgres` | Postgres password (compose-level; the backend reads it as `DB_PASSWORD`) |
