@@ -16,7 +16,7 @@
 - The hold is scoped to the **single model** that hit its RPD. Other `llm-google` models keep processing.
 - Reset zone is **fixed** to `America/Los_Angeles` (DST-aware). Not configurable. **No new environment variables** are introduced.
 - `StrategyRunStatus.RATE_LIMITED_DAILY` (enum string value `"rateLimitedDaily"`) is **not** a terminal status — it must stay out of `TERMINAL_STATUSES` so `loadOrCreateRun` resumes it.
-- New migration timestamp: `1776000000000` (the next free slot after `1775000000000`).
+- New migration timestamp: `1777000000000` (the next free slot after `1776000000000-add-gemini-flash-models.ts`).
 - The per-minute `rate_limited` path is **unchanged**. This feature only adds the per-day sibling.
 - TDD throughout: write the failing test first, watch it fail, implement minimally, watch it pass, commit.
 - Match surrounding code style: explicit `@Inject(Token)` for every class-to-class constructor injection in the backend (bare typed params resolve to `undefined` under the worker's `tsx`/`esbuild` runtime).
@@ -307,7 +307,7 @@ git commit -m "feat: carry the rate_limited_daily code through the orchestrator 
 **Files:**
 - Create: `backend/src/modules/strategy/entities/google-rate-limit-hold.entity.ts`
 - Modify: `backend/src/modules/strategy/entities/strategy-run.entity.ts:17-33` (add enum member; leave `TERMINAL_STATUSES` alone)
-- Create: `backend/src/migrations/1776000000000-add-google-rate-limit-hold.ts`
+- Create: `backend/src/migrations/1777000000000-add-google-rate-limit-hold.ts`
 - Modify: `backend/src/app.module.ts:23,47-58` (import + register entity)
 - Modify: `backend/src/data-source.ts` (import + register entity)
 
@@ -377,7 +377,7 @@ export class GoogleRateLimitHold {
 
 - [ ] **Step 3: Create the migration**
 
-`backend/src/migrations/1776000000000-add-google-rate-limit-hold.ts`:
+`backend/src/migrations/1777000000000-add-google-rate-limit-hold.ts`:
 
 ```ts
 import { MigrationInterface, QueryRunner } from "typeorm";
@@ -389,8 +389,8 @@ import { MigrationInterface, QueryRunner } from "typeorm";
  * such a hold. See
  * docs/superpowers/specs/2026-08-27-llm-google-rpd-hold-design.md.
  */
-export class AddGoogleRateLimitHold1776000000000 implements MigrationInterface {
-  name = "AddGoogleRateLimitHold1776000000000";
+export class AddGoogleRateLimitHold1777000000000 implements MigrationInterface {
+  name = "AddGoogleRateLimitHold1777000000000";
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
@@ -442,30 +442,26 @@ import { GoogleRateLimitHold } from "./modules/strategy/entities/google-rate-lim
 
 and add `GoogleRateLimitHold` to its `entities: [...]` array (after `SolvePrompt`).
 
-- [ ] **Step 5: Run the migration up against the local dev Postgres**
+- [ ] **Step 5: Migration run/revert — DEFERRED**
 
-Ensure the dev database is up (`docker compose -p connections-dev up -d db` if it is not), then:
+This session runs parallel to other work against the shared `connections-dev`
+Postgres, so **do not run `npm run migration:run` / `migration:revert` here.**
+Write the migration file and move on. The up/down/up round-trip is verified
+later, serially, in Final Verification once this branch has the DB to itself.
 
-Run: `cd backend && npm run migration:run`
-Expected: `AddGoogleRateLimitHold1776000000000` runs with no error; output lists the `CREATE TABLE` and `ALTER TYPE` queries.
+Sanity check the SQL by eye instead: the `CREATE TABLE` names match the
+entity, the `ALTER TYPE ... ADD VALUE 'rateLimitedDaily'` matches the enum
+member, and `down()` drops the table.
 
-- [ ] **Step 6: Run the migration down, then up again**
-
-Run: `cd backend && npm run migration:revert`
-Expected: `GoogleRateLimitHold` table dropped, no error.
-
-Run: `cd backend && npm run migration:run`
-Expected: re-applies cleanly.
-
-- [ ] **Step 7: Typecheck**
+- [ ] **Step 6: Typecheck**
 
 Run: `cd backend && npx tsc --noEmit`
 Expected: no errors.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add backend/src/modules/strategy/entities/google-rate-limit-hold.entity.ts backend/src/modules/strategy/entities/strategy-run.entity.ts backend/src/migrations/1776000000000-add-google-rate-limit-hold.ts backend/src/app.module.ts backend/src/data-source.ts
+git add backend/src/modules/strategy/entities/google-rate-limit-hold.entity.ts backend/src/modules/strategy/entities/strategy-run.entity.ts backend/src/migrations/1777000000000-add-google-rate-limit-hold.ts backend/src/app.module.ts backend/src/data-source.ts
 git commit -m "feat: add GoogleRateLimitHold entity and rateLimitedDaily run status"
 ```
 
@@ -1527,5 +1523,5 @@ git commit -m "feat: show the rateLimitedDaily run status as a daily-quota pause
 - [ ] **Backend:** `cd backend && npm test` — all green.
 - [ ] **Backend typecheck:** `cd backend && npx tsc --noEmit` — clean.
 - [ ] **Frontend:** `cd frontend && npm run test:run && npm run build` — all green.
-- [ ] **Migration round-trip:** `cd backend && npm run migration:run && npm run migration:revert && npm run migration:run` — clean each way.
-- [ ] **Manual smoke (optional, needs a real Google key at/near its RPD):** dispatch an `llm-google` run for a model whose daily quota is spent; confirm the run lands at `rateLimitedDaily`, a `GoogleRateLimitHold` row appears with `resetAt` at the next Pacific midnight, subsequent `llm-google` dispatches for that model park immediately with no orchestrator call in the logs, and other Google models keep running.
+- [ ] **Migration round-trip — RUN SEPARATELY, after this branch has the dev DB to itself** (this plan was executed alongside parallel work against the shared `connections-dev` Postgres, so it was skipped during task execution): `cd backend && npm run migration:run && npm run migration:revert && npm run migration:run` — clean each way.
+- [ ] **Manual smoke — RUN SEPARATELY (needs the live stack + a real Google key at/near its RPD):** dispatch an `llm-google` run for a model whose daily quota is spent; confirm the run lands at `rateLimitedDaily`, a `GoogleRateLimitHold` row appears with `resetAt` at the next Pacific midnight, subsequent `llm-google` dispatches for that model park immediately with no orchestrator call in the logs, and other Google models keep running.
