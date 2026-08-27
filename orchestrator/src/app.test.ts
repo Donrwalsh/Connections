@@ -28,10 +28,18 @@ vi.mock("./solve-assist.js", () => ({
   }),
 }));
 
+vi.mock("./judge-category.js", () => ({
+  judgeCategory: vi.fn(async () => {
+    throw new Error("model call failed");
+  }),
+}));
+
 import { runAssistStep } from "./assist.js";
 import { solveAssist } from "./solve-assist.js";
+import { judgeCategory } from "./judge-category.js";
 const runAssistStepMock = vi.mocked(runAssistStep);
 const solveAssistMock = vi.mocked(solveAssist);
+const judgeCategoryMock = vi.mocked(judgeCategory);
 
 function diagnoseRequest(body: unknown) {
   return app.request("/diagnose", {
@@ -55,6 +63,17 @@ function solveAssistRequest(body: unknown) {
   });
 }
 
+function judgeCategoryRequest(
+  body: unknown,
+  headers: Record<string, string> = { "x-internal-api-key": KEY },
+) {
+  return app.request("/judge-category", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
+}
+
 describe("orchestrator app", () => {
   beforeEach(() => {
     process.env.INTERNAL_API_KEY = KEY;
@@ -62,6 +81,8 @@ describe("orchestrator app", () => {
     runAssistStepMock.mockRejectedValue(new Error("model call failed"));
     solveAssistMock.mockReset();
     solveAssistMock.mockRejectedValue(new Error("model call failed"));
+    judgeCategoryMock.mockReset();
+    judgeCategoryMock.mockRejectedValue(new Error("model call failed"));
   });
 
   afterEach(() => {
@@ -266,6 +287,51 @@ describe("orchestrator app", () => {
         undefined,
         expect.any(AbortSignal),
       );
+    });
+  });
+
+  describe("POST /judge-category", () => {
+    it("returns the verdict and rationale from judgeCategory", async () => {
+      judgeCategoryMock.mockResolvedValueOnce({
+        verdict: "correct",
+        rationale: "Same connection.",
+        model: "gpt-4.1-nano",
+        latencyMs: 5,
+      });
+
+      const res = await judgeCategoryRequest({
+        proposedCategory: "A",
+        actualCategory: "B",
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        verdict: "correct",
+        rationale: "Same connection.",
+      });
+      expect(judgeCategoryMock).toHaveBeenCalledWith(
+        "A",
+        "B",
+        undefined,
+        undefined,
+        expect.any(AbortSignal),
+      );
+    });
+
+    it("rejects a request with no internal key", async () => {
+      const res = await judgeCategoryRequest(
+        { proposedCategory: "A", actualCategory: "B" },
+        {},
+      );
+      expect(res.status).toBe(401);
+      expect(judgeCategoryMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects an empty request body", async () => {
+      const res = await judgeCategoryRequest({});
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: "Invalid request body" });
+      expect(judgeCategoryMock).not.toHaveBeenCalled();
     });
   });
 });

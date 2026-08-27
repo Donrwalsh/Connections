@@ -2,12 +2,15 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
   AssistRequestSchema,
+  JudgeCategoryRequestSchema,
   SolveAssistRequestSchema,
+  type JudgeCategoryResponse,
   type SolveAssistResponse,
 } from "./types.js";
 import { SolveError } from "./solver.js";
 import { runAssistStep } from "./assist.js";
 import { solveAssist } from "./solve-assist.js";
+import { judgeCategory } from "./judge-category.js";
 
 export const app = new Hono();
 
@@ -128,6 +131,47 @@ app.post(
       }
       const message = err instanceof Error ? err.message : "Unknown error";
       return c.json({ error: "Solve-assist failed", details: message }, 502);
+    }
+  },
+);
+
+app.post(
+  "/judge-category",
+  bodyLimit({
+    maxSize: SOLVE_BODY_LIMIT,
+    onError: (c) => c.json({ error: "Request body too large" }, 413),
+  }),
+  async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const parsed = JudgeCategoryRequestSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return c.json(
+        { error: "Invalid request body", details: parsed.error.flatten() },
+        400,
+      );
+    }
+
+    try {
+      const result = await judgeCategory(
+        parsed.data.proposedCategory,
+        parsed.data.actualCategory,
+        parsed.data.model,
+        parsed.data.provider,
+        c.req.raw.signal,
+      );
+      const response: JudgeCategoryResponse = result;
+      return c.json(response, 200);
+    } catch (err) {
+      console.error("Judge-category failed:", err);
+      if (err instanceof SolveError) {
+        return c.json(
+          { error: err.message, code: err.code, details: err.details },
+          ERROR_STATUS[err.code],
+        );
+      }
+      const message = err instanceof Error ? err.message : "Unknown error";
+      return c.json({ error: "Judge-category failed", details: message }, 502);
     }
   },
 );
