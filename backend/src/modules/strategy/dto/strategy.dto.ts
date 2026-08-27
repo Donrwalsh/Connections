@@ -151,6 +151,12 @@ export interface LeaderboardRowDto {
   // spent tokens.
   avgCostUsd: number | null;
   totalCostUsd: number | null;
+  // Mean count of issue-tagged SolvePrompt rows per run (see
+  // SolvePromptDto.issueTags) across every run this model has attempted,
+  // regardless of outcome — a failed or errored run can still carry
+  // issue-tagged prompts. null for deterministic/shuffle rows (no
+  // SolvePrompt rows at all), same as avgCostUsd.
+  avgIssues: number | null;
   // Current (not run-time-historical, unlike cost) model metadata — see
   // SupportedModel. null until the model has been through a metadata
   // refresh, or for deterministic/shuffle rows.

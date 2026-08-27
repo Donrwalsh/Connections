@@ -1344,9 +1344,9 @@ describe("StrategyService", () => {
         addSelect: jest.fn().mockReturnThis(),
         groupBy: jest.fn().mockReturnThis(),
         getRawMany: jest.fn().mockResolvedValue([
-          { strategyRunId: 2, promptTokens: "1000000", completionTokens: "500000" },
+          { strategyRunId: 2, promptTokens: "1000000", completionTokens: "500000", issueCount: "3" },
           { strategyRunId: 3, promptTokens: "1000000", completionTokens: "500000" },
-          { strategyRunId: 4, promptTokens: "1000000", completionTokens: "0" },
+          { strategyRunId: 4, promptTokens: "1000000", completionTokens: "0", issueCount: "2" },
         ]),
       });
       mockSupportedModelService.findPriceHistory.mockResolvedValueOnce([
@@ -1364,15 +1364,23 @@ describe("StrategyService", () => {
       const alphabetical = result.deterministic.find((row) => row.id === "alphabetical")!;
       expect(alphabetical.avgCostUsd).toBeNull();
       expect(alphabetical.totalCostUsd).toBeNull();
+      expect(alphabetical.avgIssues).toBeNull();
 
       // 2 runs at $0.30 each ((1 * 0.1) + (0.5 * 0.4)) = $0.60 total, $0.30 avg.
       const gptNano = result.llm.find((row) => row.id === "gpt-4.1-nano")!;
       expect(gptNano.totalCostUsd).toBeCloseTo(0.6);
       expect(gptNano.avgCostUsd).toBeCloseTo(0.3);
+      // issueCount 3 on run 2, no issueCount field (defaults to 0 via the
+      // ?? fallback) on run 3 -> (3 + 0) / 2 = 1.5.
+      expect(gptNano.avgIssues).toBeCloseTo(1.5);
 
       const gptMini = result.llm.find((row) => row.id === "gpt-4o-mini")!;
       expect(gptMini.avgCostUsd).toBeNull();
       expect(gptMini.totalCostUsd).toBeNull();
+      // gpt-4o-mini has no priceable rate (avgCostUsd/totalCostUsd stay
+      // null above), but its run's issueCount of 2 still counts -> issue
+      // counting is never gated on cost being resolvable.
+      expect(gptMini.avgIssues).toBe(2);
     });
 
     it("should price each run at the rate in effect when that run started, not the current rate", async () => {
