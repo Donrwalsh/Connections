@@ -1,7 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { loadEnv, orchestratorTimeoutMs } from "../../config/env";
 
-export type SolveErrorCode = "duplicate_group" | "invalid_group" | "model_error" | "rate_limited";
+export type SolveErrorCode = "duplicate_group" | "invalid_group" | "model_error" | "rate_limited" | "rate_limited_daily";
 
 export interface SolveUsage {
   promptTokens: number;
@@ -203,7 +203,8 @@ export class OrchestratorService {
       code === "duplicate_group" ||
       code === "invalid_group" ||
       code === "model_error" ||
-      code === "rate_limited"
+      code === "rate_limited" ||
+      code === "rate_limited_daily"
     );
   }
 
