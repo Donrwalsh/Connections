@@ -1,6 +1,6 @@
 import { Queue } from "bullmq";
 import { redisConnection } from "./redis.config";
-import { LLM_OPENAI, LLM_OLLAMA } from "../../strategies";
+import { LLM_OPENAI, LLM_OLLAMA, LLM_GOOGLE } from "../../strategies";
 
 export const strategyQueue = new Queue("strategy-runs", {
   connection: redisConnection,
@@ -39,8 +39,18 @@ export const llmOllamaQueue = new Queue("llm-ollama-runs", {
   },
 });
 
+export const llmGoogleQueue = new Queue("llm-google-runs", {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 1000 },
+    removeOnComplete: { count: 1000 },
+    removeOnFail: { count: 5000 },
+  },
+});
+
 /**
- * Routes a strategy run to the queue that processes it: the two LLM
+ * Routes a strategy run to the queue that processes it: the three LLM
  * strategies get their per-provider queues, everything else stays on the
  * shared strategy-runs queue. The only place the strategy->queue mapping
  * lives, so enqueue call sites stay provider-agnostic.
@@ -49,10 +59,12 @@ export function queueForStrategy(
   defaultQueue: Queue,
   openAIQueue: Queue,
   ollamaQueue: Queue,
+  googleQueue: Queue,
   strategyName: string,
 ): Queue {
   if (strategyName === LLM_OPENAI) return openAIQueue;
   if (strategyName === LLM_OLLAMA) return ollamaQueue;
+  if (strategyName === LLM_GOOGLE) return googleQueue;
   return defaultQueue;
 }
 

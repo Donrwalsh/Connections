@@ -2,7 +2,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { DataSource } from "typeorm";
 import { getRepositoryToken } from "@nestjs/typeorm";
-import { STRATEGY_QUEUE, LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE } from "../queue/queue.module";
+import { STRATEGY_QUEUE, LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE, LLM_GOOGLE_QUEUE } from "../queue/queue.module";
 import { StrategyService } from "./strategy.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
@@ -19,6 +19,7 @@ describe("StrategyService", () => {
   let mockQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockOpenAIQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockOllamaQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
+  let mockGoogleQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockStrategyRunRepo: {
     findOne: jest.Mock;
     find: jest.Mock;
@@ -104,6 +105,11 @@ describe("StrategyService", () => {
       addBulk: jest.fn().mockResolvedValue(undefined),
       getJobs: jest.fn().mockResolvedValue([]),
     };
+    mockGoogleQueue = {
+      add: jest.fn().mockResolvedValue(undefined),
+      addBulk: jest.fn().mockResolvedValue(undefined),
+      getJobs: jest.fn().mockResolvedValue([]),
+    };
     mockStrategyRunRepo = {
       findOne: jest.fn(),
       find: jest.fn(),
@@ -166,6 +172,7 @@ describe("StrategyService", () => {
         { provide: STRATEGY_QUEUE, useValue: mockQueue },
         { provide: LLM_OPENAI_QUEUE, useValue: mockOpenAIQueue },
         { provide: LLM_OLLAMA_QUEUE, useValue: mockOllamaQueue },
+        { provide: LLM_GOOGLE_QUEUE, useValue: mockGoogleQueue },
         { provide: getRepositoryToken(StrategyRun), useValue: mockStrategyRunRepo },
         { provide: getRepositoryToken(Puzzle), useValue: mockPuzzleRepo },
         { provide: getRepositoryToken(Guess), useValue: mockGuessRepo },
@@ -257,6 +264,29 @@ describe("StrategyService", () => {
       );
       expect(mockQueue.add).not.toHaveBeenCalled();
       expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("should route llm-google runs to the Google queue after validating the model", async () => {
+      await service.triggerRun(100, "llm-google", "2024-01-02", 0, "gemini-3.6-flash");
+
+      expect(mockSupportedModelService.assertSupported).toHaveBeenCalledWith(
+        "llm-google",
+        "gemini-3.6-flash",
+      );
+      expect(mockGoogleQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
+        {
+          puzzleId: 100,
+          strategyName: "llm-google",
+          date: "2024-01-02",
+          trialNumber: 0,
+          model: "gemini-3.6-flash",
+        },
+        { jobId: "run-100-llm-google-0" },
+      );
+      expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
+      expect(mockOllamaQueue.add).not.toHaveBeenCalled();
     });
 
     it("should not enqueue anything when the model is rejected", async () => {
@@ -847,6 +877,35 @@ describe("StrategyService", () => {
           model: "mistral",
         },
         { jobId: "run-100-llm-ollama-1" },
+      );
+    });
+
+    it("should queue exactly one new llm-google trial on the Google queue after validating the model", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([]);
+
+      await service.triggerStrategyRuns(100, "llm-google", "2024-01-02", "gemini-3.6-flash");
+
+      expect(mockSupportedModelService.assertSupported).toHaveBeenCalledWith(
+        "llm-google",
+        "gemini-3.6-flash",
+      );
+      expect(mockStrategyRunRepo.find).toHaveBeenCalledWith({
+        where: { puzzleId: 100, strategyName: "llm-google" },
+        select: { trialNumber: true, modelName: true },
+      });
+      expect(mockGoogleQueue.add).toHaveBeenCalledTimes(1);
+      expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
+      expect(mockOllamaQueue.add).not.toHaveBeenCalled();
+      expect(mockGoogleQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
+        {
+          puzzleId: 100,
+          strategyName: "llm-google",
+          date: "2024-01-02",
+          trialNumber: 1,
+          model: "gemini-3.6-flash",
+        },
+        { jobId: "run-100-llm-google-1" },
       );
     });
 
