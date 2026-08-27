@@ -113,12 +113,54 @@ describe("classifyModelCallError", () => {
     expect(result.code).toBe("model_error");
   });
 
+  it("falls back to model_error (not throw) when the details array contains a null entry", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseBody: JSON.stringify({
+        error: { code: 429, message: "rate limited", details: [null, "not-an-object", 42] },
+      }),
+    });
+
+    expect(() => classifyModelCallError(err, "google", { model: "gemini-3.6-flash" })).not.toThrow();
+
+    const result = classifyModelCallError(err, "google", { model: "gemini-3.6-flash" });
+    expect(result.code).toBe("model_error");
+  });
+
   it("never classifies a non-google provider's 429 as rate_limited", () => {
     const err = makeAPICallError({ statusCode: 429, responseBody: GOOGLE_RPM_BODY });
 
     const result = classifyModelCallError(err, "openai", { model: "gpt-4.1-nano" });
 
     expect(result.code).toBe("model_error");
+  });
+
+  it("classifies a per-minute violation with no RetryInfo sibling as rate_limited with retryAfterSeconds undefined", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseBody: JSON.stringify({
+        error: {
+          code: 429,
+          message: "rate limited",
+          details: [
+            {
+              "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+              violations: [
+                {
+                  quotaMetric: "generativelanguage.googleapis.com/generate_content_free_tier_requests",
+                  quotaId: "GenerateRequestsPerMinutePerProjectPerModel-FreeTier",
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    });
+
+    const result = classifyModelCallError(err, "google", { model: "gemini-3.6-flash" });
+
+    expect(result.code).toBe("rate_limited");
+    expect(result.details.retryAfterSeconds).toBeUndefined();
   });
 
   it("still classifies a non-429 google error as model_error", () => {

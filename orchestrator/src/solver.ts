@@ -90,7 +90,8 @@ function parseGoogleRateLimit(responseBody: unknown): number | undefined | null 
   if (!Array.isArray(details)) return null;
 
   const quotaFailure = details.find(
-    (d): d is GoogleQuotaFailureDetail => d["@type"]?.endsWith("QuotaFailure") ?? false,
+    (d): d is GoogleQuotaFailureDetail =>
+      typeof d === "object" && d !== null && (d as GoogleQuotaFailureDetail)["@type"]?.endsWith("QuotaFailure") === true,
   );
   const isPerMinute = quotaFailure?.violations?.some(
     (v) => v.quotaId?.includes("PerMinute") || v.quotaMetric?.includes("PerMinute"),
@@ -98,7 +99,8 @@ function parseGoogleRateLimit(responseBody: unknown): number | undefined | null 
   if (!isPerMinute) return null;
 
   const retryInfo = details.find(
-    (d): d is GoogleRetryInfoDetail => d["@type"]?.endsWith("RetryInfo") ?? false,
+    (d): d is GoogleRetryInfoDetail =>
+      typeof d === "object" && d !== null && (d as GoogleRetryInfoDetail)["@type"]?.endsWith("RetryInfo") === true,
   );
   const seconds = retryInfo?.retryDelay ? parseFloat(retryInfo.retryDelay) : NaN;
   return Number.isFinite(seconds) ? seconds : undefined;
