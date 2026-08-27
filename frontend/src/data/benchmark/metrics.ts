@@ -128,6 +128,16 @@ export function formatCostUsd(usd: number): string {
   return usd > 0 && usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
 
+/** Success rate to 3 significant figures rather than a rounded whole
+ * percent — an occasionally-successful model (e.g. 1 win in 300 attempts,
+ * 0.33%) would otherwise round to "0%", indistinguishable from a model
+ * that has never solved anything. Number(...toPrecision(3)) rather than a
+ * fixed decimal count so round numbers stay clean ("100%", "5%") instead
+ * of padding to "100.00%"/"5.00%". */
+export function formatSuccessRate(value: number): string {
+  return `${Number(value.toPrecision(3))}%`;
+}
+
 /** Total USD cost (row.totalCostUsd, which is already all-time — not
  * today-scoped like the token budget) across every LLM row whose model
  * belongs to `models`. Null while either input hasn't loaded yet, so a

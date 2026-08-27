@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import {
   formatDuration,
   formatGuessCount,
+  formatSuccessRate,
   getMetricDefinition,
   metricValue,
   sortStrategiesByMetric,
@@ -90,7 +91,7 @@ export function StrategyTable({ rows, metricKey, variant, freeTierModels }: Stra
             { label: "Failed", count: progress.failed, tone: "failed" },
           ];
           const speed = metricValue(row, "speed");
-          const successRateDisplay = row.successRate === null ? "—" : `${Math.round(row.successRate)}%`;
+          const successRateDisplay = row.successRate === null ? "—" : formatSuccessRate(row.successRate);
           // Unitless here — the "solves/hr" caption below the value supplies
           // the unit, so it isn't baked into this number too.
           const speedDisplay = speed === null ? "—" : Math.round(speed).toLocaleString();
