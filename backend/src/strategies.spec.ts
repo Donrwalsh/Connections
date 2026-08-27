@@ -11,6 +11,7 @@ import {
   DEFAULT_LLM_OPENAI_CONCURRENCY,
   DEFAULT_LLM_OLLAMA_CONCURRENCY,
   DEFAULT_LLM_GOOGLE_CONCURRENCY,
+  DEFAULT_LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS,
   DEFAULT_SHUFFLE_TRIALS,
   isLlmStrategy,
   LLM_OPENAI,
@@ -26,6 +27,7 @@ import {
   llmOllamaConcurrency,
   llmOpenAIConcurrency,
   llmGoogleConcurrency,
+  llmGoogleRateLimitFallbackSeconds,
   llmTemperature,
   llmMaxTrialsPerModel,
   shuffleTrialCount,
@@ -131,6 +133,25 @@ describe("strategies", () => {
 
     it("should read a valid positive integer", () => {
       expect(llmGoogleConcurrency({ LLM_GOOGLE_CONCURRENCY: "4" })).toBe(4);
+    });
+  });
+
+  describe("llmGoogleRateLimitFallbackSeconds", () => {
+    it("should default when the env var is missing", () => {
+      expect(llmGoogleRateLimitFallbackSeconds({})).toBe(DEFAULT_LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS);
+    });
+
+    it("should default when the env var is invalid", () => {
+      expect(llmGoogleRateLimitFallbackSeconds({ LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS: "abc" })).toBe(
+        DEFAULT_LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS,
+      );
+      expect(llmGoogleRateLimitFallbackSeconds({ LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS: "0" })).toBe(
+        DEFAULT_LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS,
+      );
+    });
+
+    it("should read a valid positive integer", () => {
+      expect(llmGoogleRateLimitFallbackSeconds({ LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS: "90" })).toBe(90);
     });
   });
 

@@ -1,6 +1,6 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { Queue } from "bullmq";
-import { STRATEGY_QUEUE, LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE } from "../queue/queue.module";
+import { STRATEGY_QUEUE, LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE, LLM_GOOGLE_QUEUE } from "../queue/queue.module";
 import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/strategy-run.entity";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
@@ -167,6 +167,7 @@ export class StrategyService {
     @Inject(STRATEGY_QUEUE) private queue: Queue,
     @Inject(LLM_OPENAI_QUEUE) private readonly llmOpenAIQueue: Queue,
     @Inject(LLM_OLLAMA_QUEUE) private readonly llmOllamaQueue: Queue,
+    @Inject(LLM_GOOGLE_QUEUE) private readonly llmGoogleQueue: Queue,
     @InjectRepository(StrategyRun)
     private readonly strategyRunRepo: Repository<StrategyRun>,
     @InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>,
@@ -179,12 +180,18 @@ export class StrategyService {
   ) {}
 
   /**
-   * The queue a strategy's runs are dispatched to: llm-openai and llm-ollama
-   * get their own per-provider queues, everything else the shared
-   * strategy-runs queue.
+   * The queue a strategy's runs are dispatched to: llm-openai, llm-ollama,
+   * and llm-google each get their own per-provider queue, everything else
+   * the shared strategy-runs queue.
    */
   private queueFor(strategyName: string): Queue {
-    return queueForStrategy(this.queue, this.llmOpenAIQueue, this.llmOllamaQueue, strategyName);
+    return queueForStrategy(
+      this.queue,
+      this.llmOpenAIQueue,
+      this.llmOllamaQueue,
+      this.llmGoogleQueue,
+      strategyName,
+    );
   }
 
   async triggerRun(
@@ -660,7 +667,7 @@ export class StrategyService {
   }
 
   /**
-   * Tallies waiting/delayed BullMQ jobs across the strategy-runs and both
+   * Tallies waiting/delayed BullMQ jobs across the strategy-runs and all three
    * per-provider LLM queues, grouped by (strategyName, model) — the counts
    * getLeaderboard merges in as `progress.queued`. Deliberately excludes
    * 'active' jobs: by the time BullMQ marks a job active, the worker has
@@ -670,7 +677,7 @@ export class StrategyService {
    */
   private async queuedCountsByKey(): Promise<Map<string, number>> {
     const counts = new Map<string, number>();
-    const queues = [this.queue, this.llmOpenAIQueue, this.llmOllamaQueue];
+    const queues = [this.queue, this.llmOpenAIQueue, this.llmOllamaQueue, this.llmGoogleQueue];
 
     for (const queue of queues) {
       for (let start = 0; ; start += QUEUE_PAGE_SIZE) {

@@ -10,6 +10,7 @@ import {
   llmMaxFailedGuesses,
   llmMaxMalformedResponses,
   llmMaxModelErrors,
+  llmGoogleRateLimitFallbackSeconds,
   llmTemperature,
 } from "../../strategies";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
@@ -43,6 +44,11 @@ interface LlmRunLoopState {
   failedGuessCount: number;
   malformedCount: number;
   consecutiveModelErrors: number;
+  // Set by classifyFailedCall for a "rate_limited" hit — the run loop's
+  // post-flush wait step checks this before the model-error backoff, and
+  // resets it to null after waiting. Never counts toward any failure
+  // threshold; a rate_limited hit is never treated as a failure at all.
+  rateLimitWaitMs: number | null;
   // Groups confirmed correct — used to build RETRY prompts.
   lockedInGroups: string[][];
   // The last failed guess — used to build RETRY prompts.
@@ -199,6 +205,7 @@ export class LlmStrategyRunner {
       ).length,
       malformedCount: 0,
       consecutiveModelErrors: 0,
+      rateLimitWaitMs: null,
       lockedInGroups: [],
       lastFailedGuess: null,
       priorGuesses,
@@ -346,14 +353,27 @@ export class LlmStrategyRunner {
           }),
         );
 
-        this.classifyFailedCall(outcome.error.code, run, state, maxModelErrors, maxDuplicates, maxMalformed);
+        this.classifyFailedCall(
+          outcome.error.code,
+          run,
+          state,
+          maxModelErrors,
+          maxDuplicates,
+          maxMalformed,
+          outcome.error.retryAfterSeconds,
+        );
       }
 
       // Flush every iteration.
       await this.store.flushBatch(run, pendingGuesses, pendingProposals, pendingPrompts);
 
-      // After a transient model failure, pause before re-prompting.
-      if (run.status === StrategyRunStatus.RUNNING && state.consecutiveModelErrors > 0) {
+      // A rate-limited hit waits exactly as long as Google says to, taking
+      // priority over the model-error backoff below — the two never apply
+      // to the same failed call (classifyFailedCall sets at most one).
+      if (run.status === StrategyRunStatus.RUNNING && state.rateLimitWaitMs !== null) {
+        await this.delay(state.rateLimitWaitMs);
+        state.rateLimitWaitMs = null;
+      } else if (run.status === StrategyRunStatus.RUNNING && state.consecutiveModelErrors > 0) {
         await this.delay(this.modelErrorBackoff(state.consecutiveModelErrors));
       }
 
@@ -577,10 +597,13 @@ export class LlmStrategyRunner {
   }
 
   /**
-   * Classifies a failed orchestrator call (no assistant reply at all) into
-   * the same three outcomes the code this was extracted from handled: bump
+   * Classifies a failed orchestrator call (no assistant reply at all).
+   * "rate_limited" (Google per-minute hit only) is never a failure — it
+   * touches no counter and never changes run.status, only sets
+   * state.rateLimitWaitMs so the run loop waits the server-specified
+   * duration and retries the identical request. Every other code bumps
    * that failure kind's own counter, ending the run once its limit is hit
-   * — or otherwise leave `run.status` as RUNNING so the loop retries next
+   * — or otherwise leaves run.status as RUNNING so the loop retries next
    * iteration.
    */
   private classifyFailedCall(
@@ -590,8 +613,11 @@ export class LlmStrategyRunner {
     maxModelErrors: number,
     maxDuplicates: number,
     maxMalformed: number,
+    retryAfterSeconds?: number,
   ): void {
-    if (code === "model_error") {
+    if (code === "rate_limited") {
+      state.rateLimitWaitMs = (retryAfterSeconds ?? llmGoogleRateLimitFallbackSeconds()) * 1000;
+    } else if (code === "model_error") {
       state.consecutiveModelErrors++;
       if (state.consecutiveModelErrors >= maxModelErrors) {
         run.status = StrategyRunStatus.ERROR;

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { loadEnv, orchestratorTimeoutMs } from "../../config/env";
 
-export type SolveErrorCode = "duplicate_group" | "invalid_group" | "model_error";
+export type SolveErrorCode = "duplicate_group" | "invalid_group" | "model_error" | "rate_limited";
 
 export interface SolveUsage {
   promptTokens: number;
@@ -41,6 +41,8 @@ export interface SolveAssistFailure {
   statusCode?: number;
   errorName?: string;
   isRetryable?: boolean;
+  // Seconds to wait before retrying — set only when code is "rate_limited".
+  retryAfterSeconds?: number;
 }
 
 export type SolveAssistOutcome =
@@ -162,6 +164,7 @@ export class OrchestratorService {
     | "statusCode"
     | "errorName"
     | "isRetryable"
+    | "retryAfterSeconds"
   > {
     if (!details) return {};
     return {
@@ -172,6 +175,7 @@ export class OrchestratorService {
       statusCode: details.statusCode as number | undefined,
       errorName: details.errorName as string | undefined,
       isRetryable: details.isRetryable as boolean | undefined,
+      retryAfterSeconds: details.retryAfterSeconds as number | undefined,
     };
   }
 
@@ -195,7 +199,12 @@ export class OrchestratorService {
   }
 
   private isKnownErrorCode(code: string | undefined): code is SolveErrorCode {
-    return code === "duplicate_group" || code === "invalid_group" || code === "model_error";
+    return (
+      code === "duplicate_group" ||
+      code === "invalid_group" ||
+      code === "model_error" ||
+      code === "rate_limited"
+    );
   }
 
   private describeError(err: unknown): string {

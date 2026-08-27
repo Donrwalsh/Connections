@@ -972,6 +972,119 @@ describe("LlmStrategyRunner", () => {
       }
     });
 
+    it("should wait the server-specified retryAfterSeconds and retry, without counting a rate_limited hit as a failure", async () => {
+      const delaySpy = jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+
+      mockOrchestratorService.solveAssist
+        .mockResolvedValueOnce({
+          ok: false,
+          error: { error: "rate limited", code: "rate_limited", retryAfterSeconds: 3.86 },
+        })
+        .mockResolvedValueOnce(
+          makeAssistResponse([
+            ["APPLE", "BANANA", "CHERRY", "DATE"],
+            ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+          ]),
+        );
+
+      const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      expect(delaySpy).toHaveBeenCalledWith(3860);
+      expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
+    });
+
+    it("should never terminate the run for repeated rate_limited hits, however many occur", async () => {
+      jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+
+      // Comfortably past DEFAULT_LLM_MAX_MODEL_ERRORS (5) — proves rate_limited
+      // never feeds that counter, regardless of count.
+      const RATE_LIMIT_HITS = 8;
+      for (let i = 0; i < RATE_LIMIT_HITS; i++) {
+        mockOrchestratorService.solveAssist.mockResolvedValueOnce({
+          ok: false,
+          error: { error: "rate limited", code: "rate_limited", retryAfterSeconds: 1 },
+        });
+      }
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([
+          ["APPLE", "BANANA", "CHERRY", "DATE"],
+          ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        ]),
+      );
+
+      const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(RATE_LIMIT_HITS + 1);
+      expect(result.status).not.toBe(StrategyRunStatus.ERROR);
+    });
+
+    it("should fall back to llmGoogleRateLimitFallbackSeconds when retryAfterSeconds is absent", async () => {
+      process.env.LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS = "45";
+      const delaySpy = jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+
+      try {
+        mockOrchestratorService.solveAssist
+          .mockResolvedValueOnce({
+            ok: false,
+            error: { error: "rate limited", code: "rate_limited" },
+          })
+          .mockResolvedValueOnce(
+            makeAssistResponse([
+              ["APPLE", "BANANA", "CHERRY", "DATE"],
+              ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+            ]),
+          );
+
+        await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+        expect(delaySpy).toHaveBeenCalledWith(45000);
+      } finally {
+        delete process.env.LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS;
+      }
+    });
+
+    it("should not reset or advance consecutiveModelErrors on an interleaved rate_limited hit, still reaching the error threshold on schedule", async () => {
+      const delaySpy = jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+
+      // Default LLM_MAX_MODEL_ERRORS is 5 (DEFAULT_LLM_MAX_MODEL_ERRORS in
+      // strategies.ts) — left unset here to exercise that real default.
+      // The interleaved rate_limited hit (3rd call) must neither reset the
+      // model-error streak back to 0 nor itself count toward the 5, so the
+      // run should still terminate on the 5th model_error (the 6th call
+      // overall).
+      mockOrchestratorService.solveAssist
+        .mockResolvedValueOnce({ ok: false, error: { error: "down", code: "model_error" } })
+        .mockResolvedValueOnce({ ok: false, error: { error: "down", code: "model_error" } })
+        .mockResolvedValueOnce({
+          ok: false,
+          error: { error: "rate limited", code: "rate_limited", retryAfterSeconds: 7 },
+        })
+        .mockResolvedValueOnce({ ok: false, error: { error: "down", code: "model_error" } })
+        .mockResolvedValueOnce({ ok: false, error: { error: "down", code: "model_error" } })
+        .mockResolvedValueOnce({ ok: false, error: { error: "down", code: "model_error" } });
+
+      const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      expect(result).toEqual({ status: StrategyRunStatus.ERROR, guessCount: 0 });
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(6);
+
+      // The rate_limited hit pre-empts that iteration's model-error backoff
+      // wait via the run loop's `else if` — so the delay sequence is the
+      // exponential model-error backoff for streak lengths 1, 2, then the
+      // 7s rate-limit wait, then backoff for streak lengths 3, 4. No delay
+      // is issued for the 5th (terminal) model_error, since the run is no
+      // longer RUNNING by the time the loop checks.
+      expect(delaySpy.mock.calls.map((call) => call[0])).toEqual([1000, 2000, 7000, 4000, 8000]);
+    });
+
     it("should record attemptNumber 1 on every row, even across repeated outer-loop retries of the same failing step", async () => {
       jest
         .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")

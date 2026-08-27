@@ -108,9 +108,10 @@ async function bootstrap() {
 
   /**
    * A worker for one provider's LLM runs. Each provider gets its own queue and
-   * its own concurrency, so llm-openai and llm-ollama runs never block each
-   * other and each provider only overlaps with itself up to the configured
-   * limit (default 1 = fully serialized). Concurrency is read once at boot.
+   * its own concurrency, so llm-openai, llm-ollama, and llm-google runs never
+   * block each other and each provider only overlaps with itself up to the
+   * configured limit (default 1 = fully serialized). Concurrency is read once
+   * at boot.
    */
   const createLlmWorker = (
     queueName: "llm-openai-runs" | "llm-ollama-runs" | "llm-google-runs",

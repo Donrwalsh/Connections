@@ -135,6 +135,31 @@ describe("OrchestratorService", () => {
     );
   });
 
+  it("should extract retryAfterSeconds from a rate_limited failure", async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockResponse({
+        ok: false,
+        status: 429,
+        body: {
+          error: "Google rate limit hit",
+          code: "rate_limited",
+          details: { retryAfterSeconds: 3.86 },
+        },
+      }),
+    );
+
+    const outcome = await service.solveAssist(messages, "gemini-3.6-flash", "google");
+
+    expect(outcome).toEqual({
+      ok: false,
+      error: expect.objectContaining({
+        code: "rate_limited",
+        retryAfterSeconds: 3.86,
+        statusCode: 429,
+      }),
+    });
+  });
+
   it("should default latencyMs to 0 when the orchestrator omits it", async () => {
     mockFetch.mockResolvedValueOnce(
       mockResponse({
