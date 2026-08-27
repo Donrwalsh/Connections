@@ -267,5 +267,23 @@ describe("orchestrator app", () => {
         expect.any(AbortSignal),
       );
     });
+
+    it("returns 429 with retryAfterSeconds for a rate_limited failure", async () => {
+      const { SolveError } = await import("./solver.js");
+      solveAssistMock.mockRejectedValueOnce(
+        new SolveError("rate_limited", "Google rate limit hit", { retryAfterSeconds: 3.86 }),
+      );
+
+      const res = await solveAssistRequest({
+        messages: SOLVE_ASSIST_BODY.messages,
+        model: "gemini-3.6-flash",
+        provider: "google",
+      });
+
+      expect(res.status).toBe(429);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.code).toBe("rate_limited");
+      expect((body.details as Record<string, unknown>).retryAfterSeconds).toBe(3.86);
+    });
   });
 });

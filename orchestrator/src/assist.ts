@@ -37,7 +37,7 @@ export async function runAssistStep(messages: ChatMessage[]): Promise<AssistResu
     text = result.text;
     modelId = result.response.modelId;
   } catch (err) {
-    throw classifyModelCallError(err, { model: getModelName(provider) });
+    throw classifyModelCallError(err, provider, { model: getModelName(provider) });
   }
 
   const groups = parseAnswerGroups(text);
