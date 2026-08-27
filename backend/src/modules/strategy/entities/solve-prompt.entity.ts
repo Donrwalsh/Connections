@@ -17,8 +17,6 @@ export enum SolvePromptType {
 export enum SolvePromptStatus {
   PARSED = "parsed",
   MALFORMED_NO_ANSWER_BLOCK = "malformedNoAnswerBlock",
-  MALFORMED_GROUP_COUNT = "malformedGroupCount",
-  MALFORMED_OTHER = "malformedOther",
   // The OpenAI call itself never produced usable model text — either an
   // earlier attempt this step's backend retry loop discarded, or the step's
   // own terminal failure. rawResponseText stays null for these rows; the
@@ -26,6 +24,24 @@ export enum SolvePromptStatus {
   // orchestrator captured instead.
   CALL_ERROR = "callError",
 }
+
+// Known SolvePrompt.issueTags values. Not a DB enum — issueTags is a plain
+// text[] column specifically so a new tag can be added here without a
+// migration. 'unclassified' is the deliberate exception: it's applied when
+// a response fails in a way none of the other tags explain, so a genuinely
+// new failure variety is still discoverable (query for it, read
+// rawResponseText, decide whether it deserves its own named tag) instead of
+// silently vanishing — see
+// docs/superpowers/specs/2026-08-26-llm-failure-taxonomy-design.md.
+export const SolvePromptIssueTag = {
+  PARENTHETICAL_STRIPPED: "parentheticalStripped",
+  GROUP_COUNT_OFF: "groupCountOff",
+  WORD_NOT_ON_LIST: "wordNotOnList",
+  UNCLASSIFIED: "unclassified",
+} as const;
+
+export type SolvePromptIssueTagValue =
+  (typeof SolvePromptIssueTag)[keyof typeof SolvePromptIssueTag];
 
 // Records every prompt submitted during a multi-guess LLM solve step.
 // Each button press in the AI Assist flow corresponds to one SolvePrompt:
@@ -68,15 +84,17 @@ export class SolvePrompt {
   @Column({ type: "text", nullable: true })
   rawResponseText: string | null;
 
-  // True when at least one group's "Words:" line in this response had a
-  // trailing parenthetical explanation glued onto it (e.g. "LOOK, TOUCH,
-  // SIGHT, SMELL (these are all senses)") that the parser had to strip
-  // before splitting on commas. rawResponseText always keeps the untouched
-  // original text — this just flags that the parser had to work around it,
-  // so a run that got stuck on this can be found later. See
-  // llm-strategy-runner.service.ts's WORDS_PARENTHETICAL_RE.
-  @Column({ type: "boolean", default: false })
-  wordsHadParenthetical: boolean;
+  // Every model-response quality issue detected for this prompt (a group's
+  // "Words:" line needing a trailing parenthetical stripped, a group whose
+  // word count came out wrong, a proposed word that was never part of the
+  // puzzle, or 'unclassified' for a failure shape none of those name yet —
+  // see SolvePromptIssueTag above). rawResponseText always keeps the
+  // untouched original text regardless of what's flagged here. A response
+  // can trip more than one at once, which is why this is a list rather than
+  // a single status value. Detection lives in
+  // llm-strategy-runner.service.ts's parseGroupsSection/evaluateProposals.
+  @Column({ type: "text", array: true, default: () => "'{}'" })
+  issueTags: string[];
 
   // 1-based within promptNumber's step — distinguishes an OpenAI call the
   // backend had to retry (orchestrator.service.ts) from the step's other

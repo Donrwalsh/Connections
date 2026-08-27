@@ -123,11 +123,11 @@ function PromptStep({ prompt }: { prompt: SolvePromptRecord }) {
         {prompt.status !== "parsed" ? (
           <StatusPill label={solvePromptStatusLabel(prompt.status)} tone="failed" />
         ) : null}
-        {prompt.wordsHadParenthetical ? (
-          <span title="This response tucked an explanation into the Words: line — the parser stripped it before guessing.">
-            <StatusPill label="Parenthetical stripped" tone="neutral" />
+        {prompt.issueTags.map((tag) => (
+          <span key={tag} title={issueTagTitle(tag)}>
+            <StatusPill label={issueTagLabel(tag)} tone="neutral" />
           </span>
-        ) : null}
+        ))}
         {telemetry.length > 0 ? (
           <span className="bench-mono bench-step__telemetry">{telemetry.join(" · ")}</span>
         ) : null}
@@ -258,13 +258,39 @@ function solvePromptStatusLabel(status: SolvePromptRecord["status"]): string {
   switch (status) {
     case "malformedNoAnswerBlock":
       return "No answer block";
-    case "malformedGroupCount":
-      return "Bad group count";
-    case "malformedOther":
-      return "Malformed";
     case "callError":
       return "Call failed";
     case "parsed":
       return "Parsed";
+  }
+}
+
+function issueTagLabel(tag: string): string {
+  switch (tag) {
+    case "parentheticalStripped":
+      return "Parenthetical stripped";
+    case "groupCountOff":
+      return "Bad group count";
+    case "wordNotOnList":
+      return "Hallucinated word";
+    case "unclassified":
+      return "Unclassified issue";
+    default:
+      return tag;
+  }
+}
+
+function issueTagTitle(tag: string): string {
+  switch (tag) {
+    case "parentheticalStripped":
+      return "This response tucked an explanation into the Words: line — the parser stripped it before guessing.";
+    case "groupCountOff":
+      return "A group's Words: line didn't split into exactly 4 words.";
+    case "wordNotOnList":
+      return "The model proposed a word that was never part of this puzzle.";
+    case "unclassified":
+      return "A group went missing from the response for a reason not yet covered by a named check.";
+    default:
+      return "Unrecognized issue tag.";
   }
 }

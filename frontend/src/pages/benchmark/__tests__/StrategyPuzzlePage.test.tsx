@@ -18,7 +18,7 @@ function makeRow(overrides: Partial<RunHistoryRow> = {}): RunHistoryRow {
     finishedAt: "2024-01-01T00:00:05Z",
     guessCount: 4,
     tokenCostUsd: null,
-    hadWordsParenthetical: false,
+    issueCount: 0,
     ...overrides,
   };
 }
@@ -216,20 +216,20 @@ describe("StrategyPuzzlePage", () => {
     expect(within(table).queryByRole("columnheader", { name: "Token cost" })).not.toBeInTheDocument();
   });
 
-  it("flags a run whose model needed a parenthetical stripped from its words", async () => {
+  it("flags a run with issue-tagged prompts", async () => {
     stubFetch({
       history: {
-        rows: [makeRow({ hadWordsParenthetical: true })],
+        rows: [makeRow({ issueCount: 2 })],
         meta: { total: 1, page: 1, limit: 100 },
       },
     });
 
     renderStrategy("alphabetical");
 
-    expect(await screen.findByText("Parenthetical stripped")).toBeInTheDocument();
+    expect(await screen.findByText("2 issues")).toBeInTheDocument();
   });
 
-  it("does not flag a run with no parenthetical-stripping quirk", async () => {
+  it("does not render an issue badge for a run with no issues", async () => {
     stubFetch({
       history: { rows: [makeRow()], meta: { total: 1, page: 1, limit: 100 } },
     });
@@ -237,7 +237,7 @@ describe("StrategyPuzzlePage", () => {
     renderStrategy("alphabetical");
 
     await screen.findByRole("table");
-    expect(screen.queryByText("Parenthetical stripped")).not.toBeInTheDocument();
+    expect(screen.queryByText(/issue/)).not.toBeInTheDocument();
   });
 
   it("shows the Token cost column for an LLM strategy, ordered before Status (the far-right column)", async () => {
