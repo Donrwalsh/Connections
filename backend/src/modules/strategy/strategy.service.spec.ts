@@ -1346,7 +1346,7 @@ describe("StrategyService", () => {
         getRawMany: jest.fn().mockResolvedValue([
           { strategyRunId: 2, promptTokens: "1000000", completionTokens: "500000", issueCount: "3" },
           { strategyRunId: 3, promptTokens: "1000000", completionTokens: "500000" },
-          { strategyRunId: 4, promptTokens: "1000000", completionTokens: "0", issueCount: "2" },
+          { strategyRunId: 4, promptTokens: "1000000", completionTokens: "0", issueCount: "0" },
         ]),
       });
       mockSupportedModelService.findPriceHistory.mockResolvedValueOnce([
@@ -1377,10 +1377,12 @@ describe("StrategyService", () => {
       const gptMini = result.llm.find((row) => row.id === "gpt-4o-mini")!;
       expect(gptMini.avgCostUsd).toBeNull();
       expect(gptMini.totalCostUsd).toBeNull();
-      // gpt-4o-mini has no priceable rate (avgCostUsd/totalCostUsd stay
-      // null above), but its run's issueCount of 2 still counts -> issue
-      // counting is never gated on cost being resolvable.
-      expect(gptMini.avgIssues).toBe(2);
+      // gpt-4o-mini has no priceable rate (avgCostUsd/totalCostUsd stay null
+      // above), but its run still gets an issueCounts entry -> issue counting
+      // is never gated on cost being resolvable. Its one run has issueCount
+      // "0", so this also pins the zero-vs-null boundary: empty issueCounts ->
+      // avgIssues null (see alphabetical above), all-zero issueCounts -> 0.
+      expect(gptMini.avgIssues).toBe(0);
     });
 
     it("should price each run at the rate in effect when that run started, not the current rate", async () => {

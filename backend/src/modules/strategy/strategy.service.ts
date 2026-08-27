@@ -153,7 +153,11 @@ interface LeaderboardAccumulator {
   // Issue-tagged SolvePrompt count for every run with a model, regardless
   // of status or whether cost was priceable — unlike costsUsd, issue
   // count is always knowable (0 when clean), so this array's length always
-  // equals the number of runs with a model, not a subset of them.
+  // equals the number of runs with a model, not a subset of them. Runs that
+  // errored before their first LLM call have no SolvePrompt rows and so
+  // contribute a hard 0, pulling an error-prone model's average downward —
+  // a deliberate spec choice, noted here so a future reader doesn't
+  // rediscover it as a bug.
   issueCounts: number[];
 }
 
