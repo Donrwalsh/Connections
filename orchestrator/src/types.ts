@@ -60,6 +60,7 @@ export const SolveErrorCodeSchema = z.enum([
   "invalid_group",
   "model_error",
   "rate_limited",
+  "rate_limited_daily",
 ]);
 export type SolveErrorCode = z.infer<typeof SolveErrorCodeSchema>;
 

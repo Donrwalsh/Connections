@@ -115,6 +115,44 @@ function parseGoogleRateLimit(responseBody: unknown): number | undefined | null 
 }
 
 /**
+ * True when a Google 429 responseBody carries a QuotaFailure whose violation
+ * names a per-day quota ("PerDay" in the quotaId or quotaMetric). Uses the
+ * same defensive parsing as parseGoogleRateLimit — never throws, returns
+ * false for any shape it doesn't recognize (not JSON, no QuotaFailure, a
+ * per-minute violation, etc). The daily reset time is not carried in the
+ * body; the backend computes it as the next America/Los_Angeles midnight.
+ */
+function isGoogleDailyRateLimit(responseBody: unknown): boolean {
+  if (typeof responseBody !== "string") return false;
+
+  let parsed: { error?: { details?: Array<GoogleQuotaFailureDetail> } };
+  try {
+    parsed = JSON.parse(responseBody);
+  } catch {
+    return false;
+  }
+
+  const details = parsed?.error?.details;
+  if (!Array.isArray(details)) return false;
+
+  const quotaFailure = details.find(
+    (d): d is GoogleQuotaFailureDetail =>
+      typeof d === "object" &&
+      d !== null &&
+      typeof (d as GoogleQuotaFailureDetail)["@type"] === "string" &&
+      (d as GoogleQuotaFailureDetail)["@type"].endsWith("QuotaFailure"),
+  );
+
+  return (
+    quotaFailure?.violations?.some(
+      (v) =>
+        (typeof v.quotaId === "string" && v.quotaId.includes("PerDay")) ||
+        (typeof v.quotaMetric === "string" && v.quotaMetric.includes("PerDay")),
+    ) ?? false
+  );
+}
+
+/**
  * Classifies an AI SDK failure from generateObject/generateText into a typed
  * SolveError. Malformed-but-present output (no/undecodable object) is
  * recoverable — callers may re-prompt. Provider/network failures are not,
@@ -167,6 +205,13 @@ export function classifyModelCallError(
         ...apiDetails,
         errorName: err.name,
         retryAfterSeconds,
+      });
+    }
+    if (isGoogleDailyRateLimit(err.responseBody)) {
+      return new SolveError("rate_limited_daily", `Google daily quota exhausted: ${message}`, {
+        ...details,
+        ...apiDetails,
+        errorName: err.name,
       });
     }
   }

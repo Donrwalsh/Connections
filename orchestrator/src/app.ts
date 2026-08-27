@@ -20,6 +20,7 @@ const ERROR_STATUS: Record<SolveError["code"], 409 | 400 | 429 | 502> = {
   invalid_group: 400,
   model_error: 502,
   rate_limited: 429,
+  rate_limited_daily: 429,
 };
 
 // Simple shared-secret check so only the backend container can call this
