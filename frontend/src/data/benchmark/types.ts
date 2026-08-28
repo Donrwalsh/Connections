@@ -13,7 +13,8 @@ export type RunStatus =
   | "failed"
   | "duplicate"
   | "malformedResponse"
-  | "error";
+  | "error"
+  | "rateLimitedDaily";
 
 export type PuzzleRunStatus = "in_progress" | "completed" | "failed";
 

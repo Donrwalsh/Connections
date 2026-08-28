@@ -19,6 +19,7 @@ export const RUN_STATUS_LABEL: Record<RunStatus, string> = {
   duplicate: "Duplicate",
   malformedResponse: "Malformed",
   error: "Error",
+  rateLimitedDaily: "Paused — daily quota",
 };
 
 export function runStatusLabel(status: RunStatus): string {
@@ -37,11 +38,13 @@ export const RUN_HISTORY_STATUSES: RunStatus[] = [
   "duplicate",
   "malformedResponse",
   "error",
+  "rateLimitedDaily",
 ];
 
 export function runStatusTone(status: RunStatus): PillTone {
   if (status === "queued") return "queued";
   if (status === "running") return "active";
+  if (status === "rateLimitedDaily") return "active";
   if (status === "completed") return "completed";
   return "failed";
 }
