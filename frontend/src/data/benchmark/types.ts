@@ -287,6 +287,34 @@ export type LlmProposalStatusValue =
   | "supersededByRetry"
   | "invalidItems";
 
+export type CategoryVerdictValue = "correct" | "partial" | "lucky";
+
+/** One LLM-judge verdict on a used proposal's category — see
+ * CategoryEvaluationDto on the backend. Present only on a submitted
+ * proposal whose guess succeeded and that has been evaluated. `verdict` is
+ * null on a `callError` row. */
+export interface CategoryEvaluationRecord {
+  verdict: CategoryVerdictValue | null;
+  status: "judged" | "callError";
+  proposedCategory: string;
+  actualCategory: string;
+  rationale: string | null;
+  judgeModel: string;
+  judgeProvider: string;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  latencyMs: number | null;
+  statusCode: number | null;
+  errorName: string | null;
+  errorMessage: string | null;
+  requestBody: unknown | null;
+  responseHeaders: Record<string, string> | null;
+  responseBody: unknown | null;
+  rawResponseText: string | null;
+  evaluatedAt: string;
+}
+
 /** One candidate group parsed out of a solve step's response. `guess` is
  * populated only when this proposal was actually submitted (status "used"). */
 export interface LlmProposalRecord {
@@ -295,6 +323,7 @@ export interface LlmProposalRecord {
   category: string;
   status: LlmProposalStatusValue;
   guess: { sequenceNumber: number; result: GuessResultValue; guessedAt: string } | null;
+  categoryEvaluation: CategoryEvaluationRecord | null;
 }
 
 export type SolvePromptTypeValue = "initialSolve" | "retry";
