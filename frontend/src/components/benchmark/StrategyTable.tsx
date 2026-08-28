@@ -76,7 +76,10 @@ export function StrategyTable({ rows, metricKey, variant, freeTierModels }: Stra
               <th scope="col">Range</th>
             </>
           ) : (
-            <th scope="col">Avg issues</th>
+            <>
+              <th scope="col">Avg issues</th>
+              <th scope="col">Category IQ</th>
+            </>
           )}
           <th scope="col">Progress</th>
         </tr>
@@ -150,9 +153,23 @@ export function StrategyTable({ rows, metricKey, variant, freeTierModels }: Stra
                   </td>
                 </>
               ) : (
-                <td className="bench-mono">
-                  {row.avgIssues === null ? "—" : row.avgIssues.toFixed(1)}
-                </td>
+                <>
+                  <td className="bench-mono">
+                    {row.avgIssues === null ? "—" : row.avgIssues.toFixed(1)}
+                  </td>
+                  <td
+                    className="bench-mono"
+                    title={
+                      row.categoryEvaluated === 0
+                        ? "No successful guesses evaluated yet"
+                        : `${row.categoryCorrect} of ${row.categoryEvaluated} correct · ${row.categoryPartial} partial · ${row.categoryLucky} lucky`
+                    }
+                  >
+                    {row.categoryAccuracy === null
+                      ? "—"
+                      : formatSuccessRate(row.categoryAccuracy)}
+                  </td>
+                </>
               )}
               <td>
                 <span className="bench-progress">

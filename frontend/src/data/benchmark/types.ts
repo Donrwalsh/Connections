@@ -103,6 +103,16 @@ export interface LeaderboardRow {
    * attempted, regardless of outcome. null for deterministic/shuffle rows
    * (no SolvePrompt rows at all), same as avgCostUsd. */
   avgIssues: number | null;
+  /** Category-reasoning quality for this model's successful guesses, from
+   * the LLM judge. correct/partial/lucky are raw verdict counts;
+   * categoryEvaluated is their sum. categoryAccuracy is
+   * correct / categoryEvaluated * 100, or null when nothing has been
+   * evaluated (also the case for every deterministic/shuffle row). */
+  categoryCorrect: number;
+  categoryPartial: number;
+  categoryLucky: number;
+  categoryEvaluated: number;
+  categoryAccuracy: number | null;
   /** Current model metadata (not run-time-historical, unlike cost) — see
    * SupportedModel on the backend. null until the model has been through a
    * metadata refresh, or for deterministic/shuffle rows. */

@@ -5,7 +5,7 @@
 
 import type { LeaderboardRow } from "./types";
 
-export type LeaderboardMetricKey = "avgGuesses" | "successRate" | "speed";
+export type LeaderboardMetricKey = "avgGuesses" | "successRate" | "speed" | "categoryAccuracy";
 
 export interface MetricDefinition {
   key: LeaderboardMetricKey;
@@ -37,6 +37,13 @@ export const LEADERBOARD_METRICS: MetricDefinition[] = [
     higherIsBetter: true,
     format: (value) => `${Math.round(value).toLocaleString()}/hr`,
   },
+  {
+    key: "categoryAccuracy",
+    label: "Category IQ",
+    description: "Share of evaluated successful guesses where the model named the real connection",
+    higherIsBetter: true,
+    format: (value) => formatSuccessRate(value),
+  },
 ];
 
 export function getMetricDefinition(key: LeaderboardMetricKey): MetricDefinition {
@@ -50,6 +57,7 @@ export interface MetricSource {
   avgGuessesToSolve: number | null;
   successRate: number | null;
   avgDurationMs: number | null;
+  categoryAccuracy: number | null;
 }
 
 export function metricValue(strategy: MetricSource, key: LeaderboardMetricKey): number | null {
@@ -60,6 +68,8 @@ export function metricValue(strategy: MetricSource, key: LeaderboardMetricKey): 
       return strategy.successRate;
     case "speed":
       return strategy.avgDurationMs === null ? null : 3_600_000 / strategy.avgDurationMs;
+    case "categoryAccuracy":
+      return strategy.categoryAccuracy;
   }
 }
 
