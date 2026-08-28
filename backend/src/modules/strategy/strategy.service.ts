@@ -13,6 +13,7 @@ import { Puzzle } from "../game/entities/puzzle.entity";
 import { combinationToWords, firstCombination, nextCombination } from "./combinatorics";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { LlmProposal } from "./entities/llm-proposal.entity";
+import { CategoryEvaluation } from "./entities/category-evaluation.entity";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { SupportedModel } from "../supported-model/entities/supported-model.entity";
 import { ModelPrice } from "../supported-model/entities/model-price.entity";
@@ -164,6 +165,13 @@ interface LeaderboardAccumulator {
   // a deliberate spec choice, noted here so a future reader doesn't
   // rediscover it as a bug.
   issueCounts: number[];
+  // Raw CategoryEvaluation verdict counts summed across every run of this
+  // (strategy, model) pair — see getLeaderboard. callError rows have a null
+  // verdict and land in none of these three, so they never move
+  // categoryAccuracy.
+  catCorrect: number;
+  catPartial: number;
+  catLucky: number;
 }
 
 @Injectable()
@@ -188,6 +196,8 @@ export class StrategyService {
     @InjectRepository(Guess) private readonly guessRepo: Repository<Guess>,
     @InjectRepository(SolvePrompt) private readonly solvePromptRepo: Repository<SolvePrompt>,
     @InjectRepository(LlmProposal) private readonly llmProposalRepo: Repository<LlmProposal>,
+    @InjectRepository(CategoryEvaluation)
+    private readonly categoryEvaluationRepo: Repository<CategoryEvaluation>,
     @Inject(GameService) private readonly gameService: GameService,
     @Inject(StrategyRunStore) private readonly store: StrategyRunStore,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
@@ -482,6 +492,7 @@ export class StrategyService {
       runs,
       guessCountRows,
       tokenRows,
+      categoryRows,
       priceHistory,
       currentModels,
       queuedCounts,
@@ -523,6 +534,18 @@ export class StrategyService {
           completionTokens: string | null;
           issueCount: string | null;
         }>(),
+      // Per-run verdict tallies from the LLM category judge. Grouped in SQL
+      // the same way the token/issue query above is — a run with no
+      // CategoryEvaluation rows simply has no entry here. verdict is null on
+      // a callError row, so none of the three FILTERed counts include it.
+      this.categoryEvaluationRepo
+        .createQueryBuilder("ce")
+        .select("ce.strategyRunId", "strategyRunId")
+        .addSelect("COUNT(*) FILTER (WHERE ce.verdict = 'correct')", "correct")
+        .addSelect("COUNT(*) FILTER (WHERE ce.verdict = 'partial')", "partial")
+        .addSelect("COUNT(*) FILTER (WHERE ce.verdict = 'lucky')", "lucky")
+        .groupBy("ce.strategyRunId")
+        .getRawMany<{ strategyRunId: number; correct: string; partial: string; lucky: string }>(),
       this.supportedModelService.findPriceHistory(),
       this.supportedModelService.findAll(),
       this.queuedCountsByKey(),
@@ -542,6 +565,15 @@ export class StrategyService {
         completionTokens: Number(row.completionTokens ?? 0),
       });
       issueCountByRun.set(Number(row.strategyRunId), Number(row.issueCount ?? 0));
+    }
+
+    const categoryByRun = new Map<number, { correct: number; partial: number; lucky: number }>();
+    for (const row of categoryRows) {
+      categoryByRun.set(Number(row.strategyRunId), {
+        correct: Number(row.correct ?? 0),
+        partial: Number(row.partial ?? 0),
+        lucky: Number(row.lucky ?? 0),
+      });
     }
 
     const metadataByModel = new Map<string, SupportedModelWithRate>();
@@ -577,11 +609,24 @@ export class StrategyService {
           durationsMs: [],
           costsUsd: [],
           issueCounts: [],
+          catCorrect: 0,
+          catPartial: 0,
+          catLucky: 0,
         };
         aggregates.set(key, acc);
       }
 
       acc.puzzleIds.add(run.puzzleId);
+
+      // An evaluation belongs to its run regardless of that run's final
+      // status, so this accumulates unconditionally (unlike the guess/
+      // duration branches below).
+      const cat = categoryByRun.get(run.id);
+      if (cat) {
+        acc.catCorrect += cat.correct;
+        acc.catPartial += cat.partial;
+        acc.catLucky += cat.lucky;
+      }
 
       if (run.status === StrategyRunStatus.COMPLETED) {
         acc.completed++;
@@ -630,6 +675,7 @@ export class StrategyService {
       // run is still a loss for win-rate purposes, even though it's
       // "finished" for progress-display purposes below.
       const finished = acc.completed + acc.failed;
+      const categoryEvaluated = acc.catCorrect + acc.catPartial + acc.catLucky;
       const sortedGuesses = [...acc.guessCounts].sort((a, b) => a - b);
       const totalCostUsd =
         acc.costsUsd.length === 0 ? null : acc.costsUsd.reduce((a, b) => a + b, 0);
@@ -674,6 +720,12 @@ export class StrategyService {
           acc.issueCounts.length === 0
             ? null
             : acc.issueCounts.reduce((a, b) => a + b, 0) / acc.issueCounts.length,
+        categoryCorrect: acc.catCorrect,
+        categoryPartial: acc.catPartial,
+        categoryLucky: acc.catLucky,
+        categoryEvaluated,
+        categoryAccuracy:
+          categoryEvaluated === 0 ? null : (acc.catCorrect / categoryEvaluated) * 100,
         contextWindow: metadata?.contextWindow ?? null,
         paramCount: metadata?.paramCount ?? null,
         providerDescription: metadata?.providerDescription ?? null,

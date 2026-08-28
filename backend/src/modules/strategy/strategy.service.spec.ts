@@ -15,6 +15,7 @@ import { Puzzle } from "../game/entities/puzzle.entity";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { LlmProposal } from "./entities/llm-proposal.entity";
+import { CategoryEvaluation } from "./entities/category-evaluation.entity";
 import { GameService } from "../game/game.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import { ModelPrice } from "../supported-model/entities/model-price.entity";
@@ -46,6 +47,9 @@ describe("StrategyService", () => {
   };
   let mockLlmProposalRepo: {
     find: jest.Mock;
+  };
+  let mockCategoryEvaluationRepo: {
+    createQueryBuilder: jest.Mock;
   };
   let mockGameService: {
     resolveDateToPuzzleId: jest.Mock;
@@ -153,6 +157,17 @@ describe("StrategyService", () => {
     mockLlmProposalRepo = {
       find: jest.fn().mockResolvedValue([]),
     };
+    mockCategoryEvaluationRepo = {
+      // Default: no verdict rows, so every existing getLeaderboard test gets
+      // zeroed cat* counts and categoryAccuracy: null for free. Same shape as
+      // mockSolvePromptRepo's default. Tests that care override this.
+      createQueryBuilder: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      }),
+    };
     mockSupportedModelService = {
       assertSupported: jest.fn().mockResolvedValue(undefined),
       getDefaultModel: jest.fn(),
@@ -183,6 +198,10 @@ describe("StrategyService", () => {
         { provide: getRepositoryToken(Guess), useValue: mockGuessRepo },
         { provide: getRepositoryToken(SolvePrompt), useValue: mockSolvePromptRepo },
         { provide: getRepositoryToken(LlmProposal), useValue: mockLlmProposalRepo },
+        {
+          provide: getRepositoryToken(CategoryEvaluation),
+          useValue: mockCategoryEvaluationRepo,
+        },
         { provide: GameService, useValue: mockGameService },
         { provide: SupportedModelService, useValue: mockSupportedModelService },
       ],
@@ -1589,6 +1608,41 @@ describe("StrategyService", () => {
 
       expect(result.llm.find((row) => row.id === "gpt-4.1-nano")?.progress.queued).toBe(1);
       expect(result.llm.find((row) => row.id === "mistral")?.progress.queued).toBe(2);
+    });
+
+    it("reports per-model category accuracy from CategoryEvaluation verdict counts", async () => {
+      mockGuessCounts([]);
+      mockStrategyRunRepo.find.mockResolvedValue([
+        { id: 1, strategyName: "llm-openai", modelName: "gpt-4.1-nano", status: "completed", puzzleId: 1, startedAt: new Date(), finishedAt: new Date() },
+        { id: 2, strategyName: "llm-openai", modelName: "gpt-4.1-nano", status: "failed", puzzleId: 2, startedAt: new Date(), finishedAt: new Date() },
+      ]);
+      mockCategoryEvaluationRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          { strategyRunId: 1, correct: "3", partial: "1", lucky: "0" },
+          { strategyRunId: 2, correct: "1", partial: "0", lucky: "2" },
+        ]),
+      });
+
+      const board = await service.getLeaderboard();
+      const row = board.llm.find((r) => r.modelName === "gpt-4.1-nano")!;
+      expect(row.categoryCorrect).toBe(4);
+      expect(row.categoryPartial).toBe(1);
+      expect(row.categoryLucky).toBe(2);
+      expect(row.categoryEvaluated).toBe(7);
+      expect(row.categoryAccuracy).toBeCloseTo((4 / 7) * 100);
+    });
+
+    it("gives categoryAccuracy null for a model with no evaluations and for deterministic rows", async () => {
+      mockGuessCounts([]);
+      mockStrategyRunRepo.find.mockResolvedValue([
+        { id: 1, strategyName: "alphabetical", modelName: null, status: "completed", puzzleId: 1, startedAt: new Date(), finishedAt: new Date() },
+      ]);
+      const board = await service.getLeaderboard();
+      expect(board.deterministic[0].categoryAccuracy).toBeNull();
+      expect(board.deterministic[0].categoryEvaluated).toBe(0);
     });
   });
 
