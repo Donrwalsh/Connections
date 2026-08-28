@@ -169,3 +169,63 @@ describe("CategoryEvaluatorService.evaluateProposal", () => {
     expect(catEvalRepo.save).not.toHaveBeenCalled();
   });
 });
+
+describe("CategoryEvaluatorService.enqueuePending", () => {
+  let service: CategoryEvaluatorService;
+  let openaiAdd: jest.Mock;
+  let qb: Record<string, jest.Mock>;
+
+  beforeEach(async () => {
+    // See the evaluateProposal block: CategoryEvaluatorService field
+    // initializers call loadEnv(), which requires INTERNAL_API_KEY, and the
+    // unit-test Jest config has no setupFiles.
+    process.env.INTERNAL_API_KEY = "test-key";
+
+    openaiAdd = jest.fn().mockResolvedValue(undefined);
+    qb = {
+      innerJoin: jest.fn().mockReturnThis(),
+      leftJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([{ id: 90 }, { id: 88 }, { id: 80 }]),
+    };
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        CategoryEvaluatorService,
+        { provide: getRepositoryToken(CategoryEvaluation), useValue: { findOne: jest.fn(), save: jest.fn() } },
+        { provide: getRepositoryToken(LlmProposal), useValue: { findOne: jest.fn(), createQueryBuilder: jest.fn().mockReturnValue(qb) } },
+        { provide: getRepositoryToken(Puzzle), useValue: { findOne: jest.fn() } },
+        { provide: OrchestratorService, useValue: { judgeCategory: jest.fn() } },
+        { provide: LLM_OPENAI_QUEUE, useValue: { add: openaiAdd } },
+        { provide: LLM_OLLAMA_QUEUE, useValue: { add: jest.fn() } },
+        { provide: LLM_GOOGLE_QUEUE, useValue: { add: jest.fn() } },
+      ],
+    }).compile();
+    service = module.get(CategoryEvaluatorService);
+  });
+
+  afterEach(() => {
+    delete process.env.INTERNAL_API_KEY;
+    jest.restoreAllMocks();
+  });
+
+  it("adds one evaluate-category job per un-evaluated proposal to the judge provider's queue", async () => {
+    const res = await service.enqueuePending({ limit: 10 });
+    expect(res).toEqual({ enqueued: 3, llmProposalIds: [90, 88, 80] });
+    expect(openaiAdd).toHaveBeenCalledTimes(3);
+    expect(openaiAdd).toHaveBeenCalledWith(
+      "evaluate-category",
+      { llmProposalId: 90 },
+      { jobId: "cat-eval-90" },
+    );
+    expect(qb.limit).toHaveBeenCalledWith(10);
+  });
+
+  it("clamps limit to 1..500", async () => {
+    await service.enqueuePending({ limit: 99999 });
+    expect(qb.limit).toHaveBeenCalledWith(500);
+  });
+});

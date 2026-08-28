@@ -12,6 +12,9 @@ import {
 import { LlmProposal, LlmProposalStatus } from "./entities/llm-proposal.entity";
 import { GuessResult } from "./entities/guess.entity";
 import { OrchestratorService } from "./orchestrator.service";
+import { Queue } from "bullmq";
+import { LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE, LLM_GOOGLE_QUEUE } from "../queue/queue.module";
+import { queueForJudgeProvider, categoryEvalJobId } from "../queue/strategy.queue";
 
 // Bump only when buildJudgePrompt (orchestrator) changes materially, so a
 // later re-judge pass can find rows produced by an older prompt. Nothing
@@ -59,7 +62,51 @@ export class CategoryEvaluatorService {
     private readonly puzzleRepo: Repository<Puzzle>,
     @Inject(OrchestratorService)
     private readonly orchestrator: OrchestratorService,
+    @Inject(LLM_OPENAI_QUEUE) private readonly llmOpenAIQueue: Queue,
+    @Inject(LLM_OLLAMA_QUEUE) private readonly llmOllamaQueue: Queue,
+    @Inject(LLM_GOOGLE_QUEUE) private readonly llmGoogleQueue: Queue,
   ) {}
+
+  private readonly DEFAULT_LIMIT = 50;
+  private readonly MAX_LIMIT = 500;
+
+  /**
+   * Enqueue one `evaluate-category` job per not-yet-evaluated successful
+   * used proposal, newest LlmProposal.id first, up to `limit`. Jobs land on
+   * the judge provider's LLM queue (deterministic jobId so a re-enqueue of a
+   * still-pending job collapses). Returns what was queued.
+   */
+  async enqueuePending(opts: { limit?: number } = {}): Promise<{
+    enqueued: number;
+    llmProposalIds: number[];
+  }> {
+    const limit = Math.min(this.MAX_LIMIT, Math.max(1, Math.floor(opts.limit ?? this.DEFAULT_LIMIT)));
+
+    const rows = await this.llmProposalRepo
+      .createQueryBuilder("proposal")
+      .innerJoin("proposal.guess", "guess", "guess.result = :success", { success: GuessResult.SUCCESS })
+      .leftJoin(CategoryEvaluation, "ce", 'ce."llmProposalId" = proposal.id')
+      .where("proposal.status = :used", { used: LlmProposalStatus.USED })
+      .andWhere("ce.id IS NULL")
+      .orderBy("proposal.id", "DESC")
+      .limit(limit)
+      .select("proposal.id", "id")
+      .getRawMany<{ id: number }>();
+
+    const queue = queueForJudgeProvider(
+      this.judgeProvider,
+      this.llmOpenAIQueue,
+      this.llmOllamaQueue,
+      this.llmGoogleQueue,
+    );
+
+    const llmProposalIds = rows.map((r) => Number(r.id));
+    for (const id of llmProposalIds) {
+      await queue.add("evaluate-category", { llmProposalId: id }, { jobId: categoryEvalJobId(id) });
+    }
+
+    return { enqueued: llmProposalIds.length, llmProposalIds };
+  }
 
   /**
    * Judge one proposal's category. Idempotent: a no-op if a row already
