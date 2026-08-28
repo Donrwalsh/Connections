@@ -17,6 +17,8 @@ export interface AppEnv {
   PUZZLE_POPULATION_TZ: string;
   DB_MIGRATIONS_RUN: boolean;
   DISPATCH_PASSWORD: string;
+  JUDGE_MODEL: string;
+  JUDGE_PROVIDER: string;
 }
 
 function required(name: string, value: string | undefined): string {
@@ -94,5 +96,7 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
     // which git revision the local process happens to be on.
     DB_MIGRATIONS_RUN: env.DB_MIGRATIONS_RUN !== "false",
     DISPATCH_PASSWORD: dispatchPassword,
+    JUDGE_MODEL: env.JUDGE_MODEL ?? "gpt-4.1-nano",
+    JUDGE_PROVIDER: env.JUDGE_PROVIDER ?? "openai",
   };
 }
