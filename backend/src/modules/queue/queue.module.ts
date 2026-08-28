@@ -3,6 +3,7 @@ import { strategyQueue, llmOpenAIQueue, llmOllamaQueue, llmGoogleQueue } from ".
 import { puzzleQueue } from "./puzzle.queue";
 import { freeTierDispatchQueue } from "./free-tier-dispatch.queue";
 import { modelMetadataQueue } from "./model-metadata.queue";
+import { googleRpdResumeQueue } from "./google-rpd-resume.queue";
 
 export const STRATEGY_QUEUE = "STRATEGY_QUEUE";
 export const LLM_OPENAI_QUEUE = "LLM_OPENAI_QUEUE";
@@ -11,6 +12,7 @@ export const LLM_GOOGLE_QUEUE = "LLM_GOOGLE_QUEUE";
 export const PUZZLE_QUEUE = "PUZZLE_QUEUE";
 export const FREE_TIER_DISPATCH_QUEUE = "FREE_TIER_DISPATCH_QUEUE";
 export const MODEL_METADATA_QUEUE = "MODEL_METADATA_QUEUE";
+export const GOOGLE_RPD_RESUME_QUEUE = "GOOGLE_RPD_RESUME_QUEUE";
 
 @Module({
   providers: [
@@ -21,6 +23,7 @@ export const MODEL_METADATA_QUEUE = "MODEL_METADATA_QUEUE";
     { provide: PUZZLE_QUEUE, useValue: puzzleQueue },
     { provide: FREE_TIER_DISPATCH_QUEUE, useValue: freeTierDispatchQueue },
     { provide: MODEL_METADATA_QUEUE, useValue: modelMetadataQueue },
+    { provide: GOOGLE_RPD_RESUME_QUEUE, useValue: googleRpdResumeQueue },
   ],
   exports: [
     STRATEGY_QUEUE,
@@ -30,6 +33,7 @@ export const MODEL_METADATA_QUEUE = "MODEL_METADATA_QUEUE";
     PUZZLE_QUEUE,
     FREE_TIER_DISPATCH_QUEUE,
     MODEL_METADATA_QUEUE,
+    GOOGLE_RPD_RESUME_QUEUE,
   ],
 })
 export class QueueModule {}

@@ -15,6 +15,7 @@ import { OrchestratorService } from "./orchestrator.service";
 import { FreeTierUsageService } from "./free-tier-usage.service";
 import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
 import { GoogleRpdResumeService } from "./google-rpd-resume.service";
+import { GoogleRpdResumeBootstrap } from "./google-rpd-resume.bootstrap";
 import { GameModule } from "../game/game.module";
 import { SupportedModelModule } from "../supported-model/supported-model.module";
 
@@ -41,6 +42,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     FreeTierUsageService,
     GoogleRateLimitHoldService,
     GoogleRpdResumeService,
+    GoogleRpdResumeBootstrap,
   ],
   exports: [
     StrategyService,
