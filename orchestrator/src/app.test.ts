@@ -301,6 +301,9 @@ describe("orchestrator app", () => {
       expect(res.status).toBe(429);
       const body = (await res.json()) as Record<string, unknown>;
       expect(body.code).toBe("rate_limited_daily");
+      // The absence of a retry hint is the whole behavioural distinction
+      // from a plain rate_limited hit.
+      expect((body.details as Record<string, unknown>)?.retryAfterSeconds).toBeUndefined();
     });
   });
 });

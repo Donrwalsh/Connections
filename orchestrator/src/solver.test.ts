@@ -205,6 +205,32 @@ describe("classifyModelCallError", () => {
     expect(result.code).toBe("model_error");
   });
 
+  it("falls back to model_error (not throw) when the violations array contains a null entry", () => {
+    // A non-object violation entry — `typeof v.quotaId` would throw TypeError
+    // on `null`, contradicting the "never throws" contract of both
+    // parseGoogleRateLimit and isGoogleDailyRateLimit.
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseBody: JSON.stringify({
+        error: {
+          code: 429,
+          message: "rate limited",
+          details: [
+            {
+              "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+              violations: [null, "not-an-object", 7],
+            },
+          ],
+        },
+      }),
+    });
+
+    expect(() => classifyModelCallError(err, "google", { model: "gemini-3.6-flash" })).not.toThrow();
+
+    const result = classifyModelCallError(err, "google", { model: "gemini-3.6-flash" });
+    expect(result.code).toBe("model_error");
+  });
+
   it("never classifies a non-google provider's 429 as rate_limited", () => {
     const err = makeAPICallError({ statusCode: 429, responseBody: GOOGLE_RPM_BODY });
 

@@ -98,8 +98,10 @@ function parseGoogleRateLimit(responseBody: unknown): number | undefined | null 
   );
   const isPerMinute = quotaFailure?.violations?.some(
     (v) =>
-      (typeof v.quotaId === "string" && v.quotaId.includes("PerMinute")) ||
-      (typeof v.quotaMetric === "string" && v.quotaMetric.includes("PerMinute")),
+      v != null &&
+      typeof v === "object" &&
+      ((typeof v.quotaId === "string" && v.quotaId.includes("PerMinute")) ||
+        (typeof v.quotaMetric === "string" && v.quotaMetric.includes("PerMinute"))),
   );
   if (!isPerMinute) return null;
 
@@ -146,8 +148,10 @@ function isGoogleDailyRateLimit(responseBody: unknown): boolean {
   return (
     quotaFailure?.violations?.some(
       (v) =>
-        (typeof v.quotaId === "string" && v.quotaId.includes("PerDay")) ||
-        (typeof v.quotaMetric === "string" && v.quotaMetric.includes("PerDay")),
+        v != null &&
+        typeof v === "object" &&
+        ((typeof v.quotaId === "string" && v.quotaId.includes("PerDay")) ||
+          (typeof v.quotaMetric === "string" && v.quotaMetric.includes("PerDay"))),
     ) ?? false
   );
 }
