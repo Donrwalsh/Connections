@@ -25,6 +25,7 @@ import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/st
 import { OrchestratorService, type ChatMessage, type SolveErrorCode } from "./orchestrator.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
+import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
 import { firstCombination } from "./combinatorics";
 import { GROUP_SIZE, parseGroupsSection } from "./parse-groups-section";
 
@@ -162,6 +163,7 @@ export class LlmStrategyRunner {
     private readonly solvePromptRepo: Repository<SolvePrompt>,
     @Inject(OrchestratorService) private readonly orchestratorService: OrchestratorService,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
+    @Inject(GoogleRateLimitHoldService) private readonly rpdHold: GoogleRateLimitHoldService,
   ) {}
 
   async runLlmStrategy(puzzleId: number, strategyName: string, trialNumber = 0, model?: string) {
@@ -184,6 +186,23 @@ export class LlmStrategyRunner {
     );
 
     if (TERMINAL_STATUSES.has(run.status)) {
+      return {
+        status: run.status,
+        guessCount: await this.store.countGuesses(run.id),
+      };
+    }
+
+    // Top-gate: an llm-google run whose model is currently out of daily
+    // quota parks immediately — one indexed read instead of a doomed Google
+    // call. The google-rpd-resume sweep re-dispatches it after the reset.
+    if (
+      strategyName === LLM_GOOGLE &&
+      model &&
+      (await this.rpdHold.isHeld(strategyName, model))
+    ) {
+      run.status = StrategyRunStatus.RATE_LIMITED_DAILY;
+      run.finishedAt = new Date();
+      await this.store.saveRun(run);
       return {
         status: run.status,
         guessCount: await this.store.countGuesses(run.id),
@@ -362,6 +381,14 @@ export class LlmStrategyRunner {
           maxMalformed,
           outcome.error.retryAfterSeconds,
         );
+
+        if (
+          outcome.error.code === "rate_limited_daily" &&
+          strategyName === LLM_GOOGLE &&
+          model
+        ) {
+          await this.rpdHold.hold(strategyName, model);
+        }
       }
 
       // Flush every iteration.
@@ -615,7 +642,14 @@ export class LlmStrategyRunner {
     maxMalformed: number,
     retryAfterSeconds?: number,
   ): void {
-    if (code === "rate_limited") {
+    if (code === "rate_limited_daily") {
+      // A per-day quota hit. Park the run — no counter touched, so it never
+      // rolls into ERROR — and let the run loop's status check break out.
+      // The hold row itself is written by the caller (it has `model` and can
+      // await), see runLlmStrategy's failed-call block.
+      run.status = StrategyRunStatus.RATE_LIMITED_DAILY;
+      run.finishedAt = new Date();
+    } else if (code === "rate_limited") {
       state.rateLimitWaitMs = (retryAfterSeconds ?? llmGoogleRateLimitFallbackSeconds()) * 1000;
     } else if (code === "model_error") {
       state.consecutiveModelErrors++;

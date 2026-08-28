@@ -10,6 +10,7 @@ import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { LlmProposalStatus } from "./entities/llm-proposal.entity";
 import { OrchestratorService, type SolveAssistOutcome, type ChatMessage } from "./orchestrator.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
+import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
 
 describe("LlmStrategyRunner", () => {
   let runner: LlmStrategyRunner;
@@ -28,6 +29,7 @@ describe("LlmStrategyRunner", () => {
     solveAssist: jest.Mock<Promise<SolveAssistOutcome>, unknown[]>;
   };
   let mockSupportedModelService: { getContextWindow: jest.Mock };
+  let mockRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
   let mockManager: { insert: jest.Mock; save: jest.Mock };
   let mockDataSource: { transaction: jest.Mock };
 
@@ -85,6 +87,10 @@ describe("LlmStrategyRunner", () => {
     mockSupportedModelService = {
       getContextWindow: jest.fn().mockResolvedValue(null),
     };
+    mockRpdHold = {
+      isHeld: jest.fn().mockResolvedValue(false),
+      hold: jest.fn().mockResolvedValue(undefined),
+    };
     mockManager = {
       insert: jest.fn().mockImplementation((entity: string, data?: unknown[]) => {
         if (entity === "SolvePrompt")
@@ -110,6 +116,7 @@ describe("LlmStrategyRunner", () => {
         { provide: getRepositoryToken(SolvePrompt), useValue: mockSolvePromptRepo },
         { provide: OrchestratorService, useValue: mockOrchestratorService },
         { provide: SupportedModelService, useValue: mockSupportedModelService },
+        { provide: GoogleRateLimitHoldService, useValue: mockRpdHold },
       ],
     }).compile();
 
@@ -1182,6 +1189,55 @@ describe("LlmStrategyRunner", () => {
       } finally {
         delete process.env.LLM_MAX_MODEL_ERRORS;
       }
+    });
+
+    it("parks a held google run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {
+      mockRpdHold.isHeld.mockResolvedValue(true);
+      mockStrategyRunRepo.findOne.mockResolvedValue(
+        makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" }),
+      );
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+
+      const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      expect(mockOrchestratorService.solveAssist).not.toHaveBeenCalled();
+      expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+      expect(mockRpdHold.hold).not.toHaveBeenCalled();
+    });
+
+    it("records a hold and parks the run on a rate_limited_daily failure, touching no failure counter", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValue(
+        makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" }),
+      );
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist.mockResolvedValue({
+        ok: false,
+        error: { error: "Google daily quota exhausted", code: "rate_limited_daily" },
+      });
+
+      const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+      expect(mockRpdHold.hold).toHaveBeenCalledWith("llm-google", "gemini-3.6-flash");
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
+    });
+
+    it("never ends a run in ERROR on a rate_limited_daily hit", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValue(
+        makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" }),
+      );
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist.mockResolvedValue({
+        ok: false,
+        error: { error: "quota", code: "rate_limited_daily" },
+      });
+
+      const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      expect(result.status).not.toBe(StrategyRunStatus.ERROR);
     });
   });
 });
