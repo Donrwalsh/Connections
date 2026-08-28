@@ -89,6 +89,17 @@ describe("App (e2e)", () => {
               model: "e2e-fake-model",
             }),
           );
+        } else if (req.url === "/judge-category" && req.method === "POST") {
+          // Fake judge response: consider it correct if proposed and actual are non-empty.
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              verdict: "correct",
+              rationale: "The proposed category is identical to the actual category.",
+              model: "e2e-fake-judge-model",
+              latencyMs: 100,
+            }),
+          );
         } else {
           res.writeHead(404);
           res.end();

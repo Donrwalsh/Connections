@@ -87,6 +87,17 @@ or drop under space pressure.
   smaller muted line below
 - Top row gets the accent border treatment
 
+**Category IQ metric**
+
+The Category IQ column measures the share of successfully-solved groups where the
+LLM's proposed category correctly named the actual puzzle connection (as opposed to
+a partial or lucky match). It's populated on-demand via `POST /dispatch/evaluate-categories`
+(password-gated), which enqueues one LLM-as-judge job per un-evaluated successful
+proposal onto the judge provider's queue; the same evaluation can be triggered from
+the CLI via `npm run eval:categories`. Per-verdict details with the full
+judge-call diagnostics (request/response bodies, token usage, latency) appear in
+the guess-chain view of a strategy run.
+
 **Metric selector** — pill/tab group on desktop (Avg guesses / Success rate /
 Speed, etc.); collapses to a single dropdown control on mobile rather than
 wrapping pills
