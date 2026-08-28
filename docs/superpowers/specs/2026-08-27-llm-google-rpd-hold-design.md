@@ -292,8 +292,11 @@ TDD throughout, per the repo's normal workflow.
 
 ### Migration
 
-`1776000000000-add-google-rate-limit-hold.ts` — creates the
+`1777000000000-add-google-rate-limit-hold.ts` — creates the
 `GoogleRateLimitHold` table (with the unique constraint) and adds
-`rateLimitedDaily` to `strategy_run_status_enum`. Verified up and down
-against a real database, per the repo convention that migrations are not
-unit-tested.
+`rateLimitedDaily` to `strategy_run_status_enum` (via `ADD VALUE IF NOT
+EXISTS`, so a `run → revert → run` round-trip is idempotent even though
+`down()` deliberately leaves the enum label in place). The up/down/up
+round-trip against a real database is deferred to a serial verification
+pass once the branch has the dev DB to itself, per the repo convention
+that migrations are not unit-tested.

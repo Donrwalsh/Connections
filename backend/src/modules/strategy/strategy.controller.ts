@@ -193,7 +193,8 @@ export class StrategyController {
     required: false,
     description:
       "Narrows to one run status: 'running' | 'completed' | 'failed' | 'duplicate' |" +
-      " 'malformedResponse' | 'error'. Omitted or unrecognized values return every status.",
+      " 'malformedResponse' | 'error' | 'rateLimitedDaily'. Omitted or unrecognized" +
+      " values return every status.",
     example: "completed",
   })
   async getRunHistory(
