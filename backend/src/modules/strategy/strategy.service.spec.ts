@@ -2,7 +2,12 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { DataSource } from "typeorm";
 import { getRepositoryToken } from "@nestjs/typeorm";
-import { STRATEGY_QUEUE, LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE } from "../queue/queue.module";
+import {
+  STRATEGY_QUEUE,
+  LLM_OPENAI_QUEUE,
+  LLM_OLLAMA_QUEUE,
+  LLM_GOOGLE_QUEUE,
+} from "../queue/queue.module";
 import { StrategyService } from "./strategy.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
@@ -19,6 +24,7 @@ describe("StrategyService", () => {
   let mockQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockOpenAIQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockOllamaQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
+  let mockGoogleQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockStrategyRunRepo: {
     findOne: jest.Mock;
     find: jest.Mock;
@@ -104,6 +110,11 @@ describe("StrategyService", () => {
       addBulk: jest.fn().mockResolvedValue(undefined),
       getJobs: jest.fn().mockResolvedValue([]),
     };
+    mockGoogleQueue = {
+      add: jest.fn().mockResolvedValue(undefined),
+      addBulk: jest.fn().mockResolvedValue(undefined),
+      getJobs: jest.fn().mockResolvedValue([]),
+    };
     mockStrategyRunRepo = {
       findOne: jest.fn(),
       find: jest.fn(),
@@ -166,6 +177,7 @@ describe("StrategyService", () => {
         { provide: STRATEGY_QUEUE, useValue: mockQueue },
         { provide: LLM_OPENAI_QUEUE, useValue: mockOpenAIQueue },
         { provide: LLM_OLLAMA_QUEUE, useValue: mockOllamaQueue },
+        { provide: LLM_GOOGLE_QUEUE, useValue: mockGoogleQueue },
         { provide: getRepositoryToken(StrategyRun), useValue: mockStrategyRunRepo },
         { provide: getRepositoryToken(Puzzle), useValue: mockPuzzleRepo },
         { provide: getRepositoryToken(Guess), useValue: mockGuessRepo },
