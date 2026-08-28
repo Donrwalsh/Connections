@@ -28,13 +28,15 @@ export interface LlmJobDeps {
  * solve run). Exported so the routing is unit-testable without BullMQ.
  */
 export async function handleLlmJob(
-  job: Job<RunStrategyJobData | { llmProposalId: number }>,
+  job: Job<RunStrategyJobData | { llmProposalId: number; force?: boolean }>,
   deps: LlmJobDeps,
 ): Promise<unknown> {
   if (job.name === "evaluate-category") {
-    const { llmProposalId } = job.data as { llmProposalId: number };
+    const { llmProposalId, force } = job.data as { llmProposalId: number; force?: boolean };
     deps.logger.log(`starting job ${job.id}: evaluate-category proposal=${llmProposalId}`);
-    const result = await deps.categoryEvaluatorService.evaluateProposal(llmProposalId);
+    const result = await deps.categoryEvaluatorService.evaluateProposal(llmProposalId, {
+      force: Boolean(force),
+    });
     deps.logger.log(
       `finished job ${job.id}: evaluate-category proposal=${llmProposalId} outcome=${result.outcome}`,
     );

@@ -76,18 +76,27 @@ export class CategoryEvaluatorService {
    * the judge provider's LLM queue (deterministic jobId so a re-enqueue of a
    * still-pending job collapses). Returns what was queued.
    */
-  async enqueuePending(opts: { limit?: number } = {}): Promise<{
+  async enqueuePending(opts: { limit?: number; force?: boolean } = {}): Promise<{
     enqueued: number;
     llmProposalIds: number[];
   }> {
     const limit = Math.min(this.MAX_LIMIT, Math.max(1, Math.floor(opts.limit ?? this.DEFAULT_LIMIT)));
+    const force = Boolean(opts.force);
 
-    const rows = await this.llmProposalRepo
+    const qb = this.llmProposalRepo
       .createQueryBuilder("proposal")
       .innerJoin("proposal.guess", "guess", "guess.result = :success", { success: GuessResult.SUCCESS })
       .leftJoin(CategoryEvaluation, "ce", 'ce."llmProposalId" = proposal.id')
-      .where("proposal.status = :used", { used: LlmProposalStatus.USED })
-      .andWhere("ce.id IS NULL")
+      .where("proposal.status = :used", { used: LlmProposalStatus.USED });
+
+    // Without --force, only enqueue proposals that have no CategoryEvaluation
+    // row yet. With --force, re-select every used+SUCCESS proposal so the
+    // worker can overwrite an existing evaluation.
+    if (!force) {
+      qb.andWhere("ce.id IS NULL");
+    }
+
+    const rows = await qb
       .orderBy("proposal.id", "DESC")
       .limit(limit)
       .select("proposal.id", "id")
@@ -102,7 +111,11 @@ export class CategoryEvaluatorService {
 
     const llmProposalIds = rows.map((r) => Number(r.id));
     for (const id of llmProposalIds) {
-      await queue.add("evaluate-category", { llmProposalId: id }, { jobId: categoryEvalJobId(id) });
+      await queue.add(
+        "evaluate-category",
+        force ? { llmProposalId: id, force: true } : { llmProposalId: id },
+        { jobId: categoryEvalJobId(id) },
+      );
     }
 
     return { enqueued: llmProposalIds.length, llmProposalIds };

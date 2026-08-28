@@ -15,9 +15,25 @@ describe("handleLlmJob", () => {
       logger,
     });
 
-    expect(evaluator.evaluateProposal).toHaveBeenCalledWith(77);
+    expect(evaluator.evaluateProposal).toHaveBeenCalledWith(77, { force: false });
     expect(runner.runLlmStrategy).not.toHaveBeenCalled();
     expect(result).toEqual({ outcome: "judged" });
+  });
+
+  it("passes force through to the evaluator when the job data sets it", async () => {
+    const runner = { runLlmStrategy: jest.fn() };
+    const evaluator = { evaluateProposal: jest.fn().mockResolvedValue({ outcome: "judged" }) };
+    const job = { id: "j1f", name: "evaluate-category", data: { llmProposalId: 77, force: true } };
+
+    await handleLlmJob(job as never, {
+      llmStrategyRunner: runner as never,
+      categoryEvaluatorService: evaluator as never,
+      expectedStrategy: "llm-openai",
+      logger,
+    });
+
+    expect(evaluator.evaluateProposal).toHaveBeenCalledWith(77, { force: true });
+    expect(runner.runLlmStrategy).not.toHaveBeenCalled();
   });
 
   it("routes a run-strategy job to the strategy runner", async () => {

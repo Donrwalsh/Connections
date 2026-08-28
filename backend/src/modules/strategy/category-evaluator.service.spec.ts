@@ -228,4 +228,14 @@ describe("CategoryEvaluatorService.enqueuePending", () => {
     await service.enqueuePending({ limit: 99999 });
     expect(qb.limit).toHaveBeenCalledWith(500);
   });
+
+  it("with force: skips the ce.id IS NULL filter and puts force: true in the job data", async () => {
+    await service.enqueuePending({ force: true });
+    expect(qb.andWhere).not.toHaveBeenCalledWith(expect.stringContaining("ce.id IS NULL"));
+    expect(openaiAdd).toHaveBeenCalledWith(
+      "evaluate-category",
+      { llmProposalId: 90, force: true },
+      { jobId: "cat-eval-90" },
+    );
+  });
 });

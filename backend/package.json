@@ -19,7 +19,8 @@
     "migration:run": "npm run typeorm -- migration:run -d src/data-source.ts",
     "migration:revert": "npm run typeorm -- migration:revert -d src/data-source.ts",
     "backfill:image-dates": "node dist/scripts/backfill-image-puzzle-dates.js",
-    "backfill:issue-tags": "node dist/scripts/backfill-issue-tags.js"
+    "backfill:issue-tags": "node dist/scripts/backfill-issue-tags.js",
+    "eval:categories": "tsx src/scripts/evaluate-categories.ts"
   },
   "dependencies": {
     "@bull-board/api": "^8.4.0",
