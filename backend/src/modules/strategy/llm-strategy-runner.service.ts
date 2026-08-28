@@ -193,7 +193,7 @@ export class LlmStrategyRunner {
     }
 
     // Top-gate: an llm-google run whose model is currently out of daily
-    // quota parks immediately — one indexed read instead of a doomed Google
+    // quota parks immediately — cheap DB work instead of a doomed Google
     // call. The google-rpd-resume sweep re-dispatches it after the reset.
     if (
       strategyName === LLM_GOOGLE &&
@@ -207,6 +207,17 @@ export class LlmStrategyRunner {
         status: run.status,
         guessCount: await this.store.countGuesses(run.id),
       };
+    }
+
+    // Past the gate with a parked status means the hold has lifted and this
+    // run is resuming — either the sweep flipped it and re-dispatched, or a
+    // stale job is being retried after expiry. Normalize back to RUNNING
+    // before the loop, which otherwise breaks after a single iteration on
+    // its `status !== RUNNING` check; and clear the finishedAt the park set,
+    // which run-history's duration sort would otherwise measure against.
+    if (run.status === StrategyRunStatus.RATE_LIMITED_DAILY) {
+      run.status = StrategyRunStatus.RUNNING;
+      run.finishedAt = null;
     }
 
     // Rebuild state from flushed guesses so a worker restart mid-run resumes

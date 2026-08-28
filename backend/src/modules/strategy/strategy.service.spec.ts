@@ -1241,6 +1241,54 @@ describe("StrategyService", () => {
       expect(row.avgDurationMs).toBe(45_000);
     });
 
+    it("should bucket a run parked by an RPD hold as active, never as a failure", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([
+        {
+          id: 1,
+          strategyName: "llm-google",
+          modelName: "gemini-3.6-flash",
+          status: StrategyRunStatus.COMPLETED,
+          puzzleId: 1,
+          startedAt: new Date("2024-01-01T00:00:00Z"),
+          finishedAt: new Date("2024-01-01T00:00:30Z"),
+        },
+        // Parked waiting for the daily quota to reset — not an outcome at
+        // all. It must not lower successRate, must show as in-progress, and
+        // (having made no call) must not dilute avgIssues with a hard 0.
+        {
+          id: 2,
+          strategyName: "llm-google",
+          modelName: "gemini-3.6-flash",
+          status: StrategyRunStatus.RATE_LIMITED_DAILY,
+          puzzleId: 2,
+          startedAt: new Date("2024-01-02T00:00:00Z"),
+          finishedAt: new Date("2024-01-02T00:00:01Z"),
+        },
+      ]);
+      mockGuessCounts([{ strategyRunId: 1, count: "4" }]);
+      mockPuzzleRepo.count.mockResolvedValueOnce(10);
+      mockSolvePromptRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest
+          .fn()
+          .mockResolvedValue([
+            { strategyRunId: 1, promptTokens: "0", completionTokens: "0", issueCount: "2" },
+          ]),
+      });
+
+      const result = await service.getLeaderboard();
+
+      const row = result.llm.find((r) => r.id === "gemini-3.6-flash")!;
+      expect(row.progress).toEqual({ completed: 1, active: 1, failed: 0, queued: 0 });
+      // 1 completed out of 1 real outcome — the parked run is not a loss.
+      expect(row.successRate).toBe(100);
+      // Only the completed run's 2 issues count; a 0 from the parked run
+      // would have halved this to 1.
+      expect(row.avgIssues).toBe(2);
+    });
+
     it("should aggregate rows into deterministic vs llm, keyed by strategy/model", async () => {
       mockStrategyRunRepo.find.mockResolvedValueOnce([
         {

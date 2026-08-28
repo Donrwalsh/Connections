@@ -19,6 +19,24 @@ export class GoogleRpdResumeBootstrap implements OnApplicationBootstrap {
       return;
     }
 
+    // Run once immediately on startup to catch up on anything the 00:01
+    // sweep missed — the worker being down at 00:01, or a hold whose resetAt
+    // was still future then. Without this, a missed sweep leaves its parked
+    // runs waiting a full further day. Fixed per-day jobId so a backend and
+    // worker booting together resolve to the same job (see
+    // PuzzleQueueBootstrap's startup-catch-up).
+    await this.queue.add(
+      "resume-google-rpd",
+      {},
+      {
+        jobId: `google-rpd-resume-startup-catch-up-${new Date().toISOString().slice(0, 10)}`,
+        removeOnComplete: true,
+        removeOnFail: 50,
+        attempts: 5,
+        backoff: { type: "exponential", delay: 30000 },
+      },
+    );
+
     await this.queue.upsertJobScheduler(
       "google-rpd-resume",
       { pattern: "1 0 * * *", tz: "America/Los_Angeles" },

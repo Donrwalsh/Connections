@@ -4,6 +4,7 @@ import { MoreThan, LessThanOrEqual } from "typeorm";
 import {
   GoogleRateLimitHoldService,
   nextPacificMidnight,
+  pacificDateStamp,
 } from "./google-rate-limit-hold.service";
 import { GoogleRateLimitHold } from "./entities/google-rate-limit-hold.entity";
 
@@ -30,6 +31,42 @@ describe("nextPacificMidnight", () => {
     // 2026-01-16 00:30 PST
     const now = new Date("2026-01-16T08:30:00Z");
     expect(nextPacificMidnight(now).toISOString()).toBe("2026-01-17T08:00:00.000Z");
+  });
+
+  it("lands on the spring-forward day's PDT midnight (the following day is UTC-7)", () => {
+    // 2026-03-08 01:00 PST — the day the clocks jump forward at 02:00.
+    const now = new Date("2026-03-08T09:00:00Z");
+    expect(nextPacificMidnight(now).toISOString()).toBe("2026-03-09T07:00:00.000Z");
+  });
+
+  it("lands on the fall-back day's PST midnight (the following day is UTC-8)", () => {
+    // 2026-11-01 01:00 PDT — the day the clocks fall back at 02:00.
+    const now = new Date("2026-11-01T08:00:00Z");
+    expect(nextPacificMidnight(now).toISOString()).toBe("2026-11-02T08:00:00.000Z");
+  });
+
+  it("returns the *next* midnight when now is exactly a Pacific midnight instant", () => {
+    // 2026-01-16 00:00:00.000 PST exactly.
+    const now = new Date("2026-01-16T08:00:00.000Z");
+    expect(nextPacificMidnight(now).toISOString()).toBe("2026-01-17T08:00:00.000Z");
+  });
+});
+
+describe("pacificDateStamp", () => {
+  it("returns the Pacific calendar date as YYYY-MM-DD", () => {
+    // 2026-01-15 12:00 PST
+    expect(pacificDateStamp(new Date("2026-01-15T20:00:00Z"))).toBe("2026-01-15");
+  });
+
+  it("uses the Pacific day, not the UTC day, either side of midnight", () => {
+    // 2026-01-16 00:30 UTC is still 2026-01-15 16:30 PST.
+    expect(pacificDateStamp(new Date("2026-01-16T00:30:00Z"))).toBe("2026-01-15");
+    // 2026-01-16 08:30 UTC is 2026-01-16 00:30 PST.
+    expect(pacificDateStamp(new Date("2026-01-16T08:30:00Z"))).toBe("2026-01-16");
+  });
+
+  it("zero-pads single-digit months and days", () => {
+    expect(pacificDateStamp(new Date("2026-03-09T20:00:00Z"))).toBe("2026-03-09");
   });
 });
 
@@ -92,6 +129,20 @@ describe("GoogleRateLimitHoldService", () => {
     expect(repo.find).toHaveBeenCalledWith({
       where: { strategyName: "llm-google", resetAt: MoreThan(expect.any(Date)) },
     });
+  });
+
+  it("nextResetAt returns the soonest still-future resetAt, or null when nothing is held", async () => {
+    const soon = new Date(Date.now() + 60_000);
+    const later = new Date(Date.now() + 600_000);
+    repo.find.mockResolvedValueOnce([{ resetAt: later }, { resetAt: soon }]);
+
+    expect(await service.nextResetAt("llm-google")).toEqual(soon);
+    expect(repo.find).toHaveBeenCalledWith({
+      where: { strategyName: "llm-google", resetAt: MoreThan(expect.any(Date)) },
+    });
+
+    repo.find.mockResolvedValueOnce([]);
+    expect(await service.nextResetAt("llm-google")).toBeNull();
   });
 
   it("clearExpired deletes rows whose resetAt has passed and returns their models", async () => {

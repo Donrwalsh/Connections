@@ -1237,7 +1237,96 @@ describe("LlmStrategyRunner", () => {
 
       const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
 
-      expect(result.status).not.toBe(StrategyRunStatus.ERROR);
+      // Parked, not errored — and parked on the very first hit, so no
+      // counter had a chance to roll toward ERROR in the first place.
+      expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
+    });
+
+    it("parks mid-solve keeping the progress already made, then resumes from the flushed guesses", async () => {
+      // --- Part 1: park after real progress ---------------------------
+      const parking = makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" });
+      mockStrategyRunRepo.findOne.mockResolvedValue(parking);
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist
+        // A wrong group: one failed guess, run stays RUNNING.
+        .mockResolvedValueOnce(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "EGGPLANT"]]))
+        // A correct group: one solved group, availableWords halves.
+        .mockResolvedValueOnce(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]))
+        // Then the daily quota runs out.
+        .mockResolvedValueOnce({
+          ok: false,
+          error: { error: "Google daily quota exhausted", code: "rate_limited_daily" },
+        });
+
+      const parked = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      expect(parked.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+      // The two guesses already made are kept, not thrown away.
+      expect(parked.guessCount).toBe(2);
+      expect(mockRpdHold.hold).toHaveBeenCalledTimes(1);
+      expect(mockRpdHold.hold).toHaveBeenCalledWith("llm-google", "gemini-3.6-flash");
+      // The solved group is gone from the persisted run — that reduced word
+      // set is what the resume below has to pick up from.
+      expect(parking.availableWords).toEqual(["EGGPLANT", "FIG", "GRAPE", "HONEY"]);
+      const parkedAt = parking.finishedAt;
+      expect(parkedAt).toBeInstanceOf(Date);
+
+      // --- Part 2: resume from those flushed guesses ------------------
+      jest.clearAllMocks();
+      // The run is re-dispatched still carrying the parked status (the sweep
+      // flips it too, but the runner must not depend on that having landed).
+      const resuming = makeRun({
+        strategyName: "llm-google",
+        modelName: "gemini-3.6-flash",
+        status: StrategyRunStatus.RATE_LIMITED_DAILY,
+        availableWords: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        finishedAt: parkedAt,
+      });
+      mockStrategyRunRepo.findOne.mockResolvedValue(resuming);
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockRpdHold.isHeld.mockResolvedValue(false);
+      mockGuessRepo.find.mockResolvedValue([
+        { words: ["APPLE", "BANANA", "CHERRY", "EGGPLANT"], result: GuessResult.FAILURE },
+        { words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: GuessResult.SUCCESS },
+      ]);
+      mockOrchestratorService.solveAssist
+        // Unusable output — non-terminal, so the loop must go round again.
+        // Without the parked-status normalization it would break here.
+        .mockResolvedValueOnce(makeAssistResponse([]))
+        .mockResolvedValueOnce(makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]));
+
+      const resumed = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(2);
+      expect(resumed.status).toBe(StrategyRunStatus.COMPLETED);
+      // Two flushed guesses plus the solving one.
+      expect(resumed.guessCount).toBe(3);
+      // finishedAt is the completion, not the stale park timestamp that
+      // run-history's duration sort would otherwise measure against.
+      expect(resuming.finishedAt!.getTime()).toBeGreaterThan(parkedAt!.getTime());
+    });
+
+    it("does not re-park a resumed run whose hold has since expired", async () => {
+      const resuming = makeRun({
+        strategyName: "llm-google",
+        modelName: "gemini-3.6-flash",
+        status: StrategyRunStatus.RATE_LIMITED_DAILY,
+        finishedAt: new Date("2024-01-01T00:00:00Z"),
+      });
+      mockStrategyRunRepo.findOne.mockResolvedValue(resuming);
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockRpdHold.isHeld.mockResolvedValue(false);
+      mockOrchestratorService.solveAssist
+        .mockResolvedValueOnce(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]))
+        .mockResolvedValueOnce(makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]));
+
+      const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      expect(result.status).toBe(StrategyRunStatus.COMPLETED);
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(2);
     });
   });
 });
