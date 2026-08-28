@@ -14,6 +14,7 @@ import { StrategyRunStore } from "./strategy-run-store.service";
 import { OrchestratorService } from "./orchestrator.service";
 import { FreeTierUsageService } from "./free-tier-usage.service";
 import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
+import { GoogleRpdResumeService } from "./google-rpd-resume.service";
 import { GameModule } from "../game/game.module";
 import { SupportedModelModule } from "../supported-model/supported-model.module";
 
@@ -39,7 +40,14 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     OrchestratorService,
     FreeTierUsageService,
     GoogleRateLimitHoldService,
+    GoogleRpdResumeService,
   ],
-  exports: [StrategyService, LlmStrategyRunner, FreeTierUsageService, GoogleRateLimitHoldService],
+  exports: [
+    StrategyService,
+    LlmStrategyRunner,
+    FreeTierUsageService,
+    GoogleRateLimitHoldService,
+    GoogleRpdResumeService,
+  ],
 })
 export class StrategyModule {}
