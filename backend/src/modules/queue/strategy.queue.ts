@@ -50,7 +50,7 @@ export const llmGoogleQueue = new Queue("llm-google-runs", {
 });
 
 /**
- * Routes a strategy run to the queue that processes it: the two LLM
+ * Routes a strategy run to the queue that processes it: the three LLM
  * strategies get their per-provider queues, everything else stays on the
  * shared strategy-runs queue. The only place the strategy->queue mapping
  * lives, so enqueue call sites stay provider-agnostic.

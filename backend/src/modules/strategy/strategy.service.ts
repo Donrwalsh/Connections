@@ -205,9 +205,9 @@ export class StrategyService {
   ) {}
 
   /**
-   * The queue a strategy's runs are dispatched to: llm-openai and llm-ollama
-   * get their own per-provider queues, everything else the shared
-   * strategy-runs queue.
+   * The queue a strategy's runs are dispatched to: all three LLM strategies
+   * (llm-openai, llm-ollama, llm-google) get their own per-provider queues,
+   * everything else the shared strategy-runs queue.
    */
   private queueFor(strategyName: string): Queue {
     return queueForStrategy(
@@ -749,8 +749,8 @@ export class StrategyService {
   }
 
   /**
-   * Tallies waiting/delayed BullMQ jobs across the strategy-runs and both
-   * per-provider LLM queues, grouped by (strategyName, model) — the counts
+   * Tallies waiting/delayed BullMQ jobs across the strategy-runs and all
+   * three per-provider LLM queues, grouped by (strategyName, model) — the counts
    * getLeaderboard merges in as `progress.queued`. Deliberately excludes
    * 'active' jobs: by the time BullMQ marks a job active, the worker has
    * already inserted its StrategyRun row, so that job is already counted via

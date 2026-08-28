@@ -103,6 +103,8 @@ export async function judgeCategory(
       responseId: result.response?.id,
       responseHeaders: result.response?.headers,
       responseBody: result.response?.body,
+      // The parsed verdict re-serialized, not raw model text — the field
+      // name is mirrored from SolvePrompt, where it genuinely is raw output.
       rawResponseText: JSON.stringify(result.object),
     };
   } catch (err) {

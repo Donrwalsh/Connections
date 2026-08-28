@@ -90,7 +90,7 @@ describe("App (e2e)", () => {
             }),
           );
         } else if (req.url === "/judge-category" && req.method === "POST") {
-          // Fake judge response: consider it correct if proposed and actual are non-empty.
+          // Fake judge: always returns a fixed "correct" verdict.
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({

@@ -212,6 +212,19 @@ describe("StrategyPuzzlePage", () => {
     expect(within(item as HTMLElement).queryByText(/correct ·/)).not.toBeInTheDocument();
   });
 
+  it("omits the Category IQ item entirely for a deterministic strategy", async () => {
+    stubFetch({
+      leaderboard: { deterministic: [makeLeaderboardRow()], llm: [] },
+      history: { rows: [makeRow()], meta: { total: 1, page: 1, limit: 100 } },
+    });
+
+    renderStrategy("alphabetical");
+
+    await screen.findByText("100%");
+    expect(screen.queryByText("Category IQ")).not.toBeInTheDocument();
+    expect(screen.queryByText("not yet evaluated")).not.toBeInTheDocument();
+  });
+
   it("shows real Avg cost/Total cost values next to Success rate for an LLM row", async () => {
     stubFetch({
       leaderboard: {

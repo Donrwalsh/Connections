@@ -51,7 +51,7 @@ export interface EvaluateProposalResult {
 export class CategoryEvaluatorService {
   private readonly logger = new Logger(CategoryEvaluatorService.name);
   private readonly judgeModel = loadEnv().JUDGE_MODEL;
-  private readonly judgeProvider = loadEnv().JUDGE_PROVIDER as "openai" | "ollama" | "google";
+  private readonly judgeProvider = loadEnv().JUDGE_PROVIDER;
 
   constructor(
     @InjectRepository(CategoryEvaluation)
@@ -80,7 +80,10 @@ export class CategoryEvaluatorService {
     enqueued: number;
     llmProposalIds: number[];
   }> {
-    const limit = Math.min(this.MAX_LIMIT, Math.max(1, Math.floor(opts.limit ?? this.DEFAULT_LIMIT)));
+    const raw = Number(opts.limit);
+    const limit = Number.isFinite(raw)
+      ? Math.min(this.MAX_LIMIT, Math.max(1, Math.floor(raw)))
+      : this.DEFAULT_LIMIT;
     const force = Boolean(opts.force);
 
     const qb = this.llmProposalRepo
@@ -111,10 +114,17 @@ export class CategoryEvaluatorService {
 
     const llmProposalIds = rows.map((r) => Number(r.id));
     for (const id of llmProposalIds) {
+      // A deterministic jobId collapses a re-enqueue of a still-pending job
+      // (the intended non-force behavior). But BullMQ silently drops an add
+      // whose jobId hash still exists from a *completed* job (LLM queues keep
+      // removeOnComplete: { count: 1000 }), so a --force re-judge right after
+      // a batch finished would enqueue nothing. Force opts out with a
+      // unique jobId so the re-judge always runs.
+      const jobId = force ? `${categoryEvalJobId(id)}-${Date.now()}` : categoryEvalJobId(id);
       await queue.add(
         "evaluate-category",
         force ? { llmProposalId: id, force: true } : { llmProposalId: id },
-        { jobId: categoryEvalJobId(id) },
+        { jobId },
       );
     }
 
@@ -206,6 +216,9 @@ export class CategoryEvaluatorService {
         errorName: null,
         errorMessage: null,
         isRetryable: null,
+        // Mirrors JUDGE_TEMPERATURE in orchestrator/src/judge-category.ts —
+        // the orchestrator doesn't return the value it used, so keep this in
+        // sync by hand if that constant ever changes.
         temperature: 0,
       });
       return { outcome: "judged" };

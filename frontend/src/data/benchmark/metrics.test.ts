@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatSuccessRate } from "./metrics";
-import { sortStrategiesByMetric, metricValue, getMetricDefinition } from "./metrics";
+import {
+  formatSuccessRate,
+  getMetricDefinition,
+  metricValue,
+  sortStrategiesByMetric,
+} from "./metrics";
 
 const row = (id: string, categoryAccuracy: number | null) =>
   ({ id, avgGuessesToSolve: null, successRate: null, avgDurationMs: null, categoryAccuracy }) as never;

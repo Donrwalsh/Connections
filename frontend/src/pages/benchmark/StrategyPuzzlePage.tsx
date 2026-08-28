@@ -203,20 +203,22 @@ export function StrategyPuzzlePage() {
                   {leaderboardRow.totalPuzzles.toLocaleString()}
                 </span>
               </span>
-              <span className="bench-summary__item">
-                Category IQ
-                <span className="bench-mono">
-                  {leaderboardRow.categoryEvaluated === 0
-                    ? "not yet evaluated"
-                    : formatSuccessRate(leaderboardRow.categoryAccuracy ?? 0)}
-                </span>
-                {leaderboardRow.categoryEvaluated > 0 ? (
-                  <span className="bench-muted bench-mono">
-                    {leaderboardRow.categoryCorrect} correct · {leaderboardRow.categoryPartial} partial ·{" "}
-                    {leaderboardRow.categoryLucky} lucky (of {leaderboardRow.categoryEvaluated})
+              {meta.kind === "llm" ? (
+                <span className="bench-summary__item">
+                  Category IQ
+                  <span className="bench-mono">
+                    {leaderboardRow.categoryEvaluated === 0
+                      ? "not yet evaluated"
+                      : formatSuccessRate(leaderboardRow.categoryAccuracy ?? 0)}
                   </span>
-                ) : null}
-              </span>
+                  {leaderboardRow.categoryEvaluated > 0 ? (
+                    <span className="bench-muted bench-mono">
+                      {leaderboardRow.categoryCorrect} correct · {leaderboardRow.categoryPartial} partial ·{" "}
+                      {leaderboardRow.categoryLucky} lucky (of {leaderboardRow.categoryEvaluated})
+                    </span>
+                  ) : null}
+                </span>
+              ) : null}
             </div>
             <div className="bench-badges">
               {leaderboardRow.progress.queued > 0 ? (

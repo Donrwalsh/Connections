@@ -24,7 +24,8 @@ const logger = new Logger("EvaluateCategories");
 function parseArgs(argv: string[]): { limit?: number; force: boolean } {
   const force = argv.includes("--force");
   const i = argv.indexOf("--limit");
-  const limit = i >= 0 && argv[i + 1] ? Number(argv[i + 1]) : undefined;
+  const n = i >= 0 && argv[i + 1] ? Number(argv[i + 1]) : NaN;
+  const limit = Number.isFinite(n) ? n : undefined;
   return { limit, force };
 }
 

@@ -229,12 +229,26 @@ describe("CategoryEvaluatorService.enqueuePending", () => {
     expect(qb.limit).toHaveBeenCalledWith(500);
   });
 
+  it("falls back to the default limit (50) for a non-numeric limit rather than passing NaN", async () => {
+    await service.enqueuePending({ limit: NaN });
+    expect(qb.limit).toHaveBeenCalledWith(50);
+    await service.enqueuePending({ limit: Number("abc") });
+    expect(qb.limit).toHaveBeenLastCalledWith(50);
+  });
+
   it("with force: skips the ce.id IS NULL filter and puts force: true in the job data", async () => {
     await service.enqueuePending({ force: true });
     expect(qb.andWhere).not.toHaveBeenCalledWith(expect.stringContaining("ce.id IS NULL"));
     expect(openaiAdd).toHaveBeenCalledWith(
       "evaluate-category",
       { llmProposalId: 90, force: true },
+      { jobId: expect.stringMatching(/^cat-eval-90-\d+$/) },
+    );
+    // The force path must NOT reuse the deterministic jobId, or BullMQ's
+    // completed-job dedupe silently drops the re-judge.
+    expect(openaiAdd).not.toHaveBeenCalledWith(
+      "evaluate-category",
+      expect.anything(),
       { jobId: "cat-eval-90" },
     );
   });

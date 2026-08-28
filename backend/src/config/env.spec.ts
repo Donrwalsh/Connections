@@ -46,5 +46,14 @@ describe("loadEnv", () => {
       expect(loadEnv(env).JUDGE_MODEL).toBe("gpt-5-nano");
       expect(loadEnv(env).JUDGE_PROVIDER).toBe("google");
     });
+
+    it("should accept each supported provider", () => {
+      expect(loadEnv({ ...baseEnv, JUDGE_PROVIDER: "google" }).JUDGE_PROVIDER).toBe("google");
+      expect(loadEnv({ ...baseEnv, JUDGE_PROVIDER: "ollama" }).JUDGE_PROVIDER).toBe("ollama");
+    });
+
+    it("should throw for an unrecognized JUDGE_PROVIDER", () => {
+      expect(() => loadEnv({ ...baseEnv, JUDGE_PROVIDER: "bogus" })).toThrow(/JUDGE_PROVIDER/);
+    });
   });
 });

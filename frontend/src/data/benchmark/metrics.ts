@@ -50,7 +50,7 @@ export function getMetricDefinition(key: LeaderboardMetricKey): MetricDefinition
   return LEADERBOARD_METRICS.find((metric) => metric.key === key) ?? LEADERBOARD_METRICS[0]!;
 }
 
-/** Any row shape with the three metric-source fields the leaderboard sorts
+/** Any row shape with the four metric-source fields the leaderboard sorts
  * by (see the live LeaderboardRow in types.ts) — the metric helpers below
  * don't need to know the concrete row type, just that it has these. */
 export interface MetricSource {

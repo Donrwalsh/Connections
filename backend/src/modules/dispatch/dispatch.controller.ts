@@ -345,8 +345,9 @@ export class DispatchController {
     example: 50,
   })
   @ApiBody({ type: DispatchAuthDto })
-  async evaluateCategories(@Query("limit") limitRaw?: string) {
-    const limit = limitRaw === undefined ? undefined : Number(limitRaw);
+  async evaluateCategories(
+    @Query("limit", new ParseIntPipe({ optional: true })) limit?: number,
+  ) {
     const result = await this.categoryEvaluatorService.enqueuePending({ limit });
     return {
       message: `Enqueued ${result.enqueued} category-evaluation job(s)`,
