@@ -4,6 +4,12 @@ import { Worker, Job } from "bullmq";
 import { AppModule } from "./app.module";
 import { StrategyService } from "./modules/strategy/strategy.service";
 import { LlmStrategyRunner } from "./modules/strategy/llm-strategy-runner.service";
+import { CategoryEvaluatorService } from "./modules/strategy/category-evaluator.service";
+import {
+  handleLlmJob,
+  type LlmJobDeps,
+  type RunStrategyJobData,
+} from "./modules/strategy/llm-job-handler";
 import { FreeTierDispatchService } from "./modules/free-tier-dispatch/free-tier-dispatch.service";
 import type { FreeTierId } from "./modules/strategy/free-tier-usage.service";
 import { redisConnection } from "./modules/queue/redis.config";
@@ -25,17 +31,6 @@ interface FreeTierDispatchTickJobData {
   tier: FreeTierId;
 }
 
-interface RunStrategyJobData {
-  puzzleId: number;
-  strategyName: string;
-  date: string;
-  trialNumber: number;
-  // The dispatcher already validated this against the SupportedModel table
-  // before enqueueing (StrategyService/PuzzleIngestionService) — null/absent
-  // for non-LLM strategies, which don't have a model at all.
-  model?: string | null;
-}
-
 async function bootstrap() {
   const logger = new Logger("Worker");
   const role = workerRole();
@@ -44,6 +39,7 @@ async function bootstrap() {
   const appContext = await NestFactory.createApplicationContext(AppModule);
   const strategyService = appContext.get(StrategyService);
   const llmStrategyRunner = appContext.get(LlmStrategyRunner);
+  const categoryEvaluatorService = appContext.get(CategoryEvaluatorService);
   const puzzleIngestionService = appContext.get(PuzzleIngestionService);
   const freeTierDispatchService = appContext.get(FreeTierDispatchService);
   const modelMetadataRefreshService = appContext.get(ModelMetadataRefreshService);
@@ -117,33 +113,17 @@ async function bootstrap() {
     expectedStrategy: string,
     concurrency: number,
   ) => {
+    const llmJobDeps: LlmJobDeps = {
+      llmStrategyRunner,
+      categoryEvaluatorService,
+      expectedStrategy,
+      logger,
+    };
+
     const llmWorker = new Worker(
       queueName,
-      async (job: Job<RunStrategyJobData>) => {
-        const { puzzleId, strategyName, date, trialNumber, model } = job.data;
-
-        if (strategyName !== expectedStrategy) {
-          throw new Error(
-            `Strategy '${strategyName}' dispatched to '${queueName}' queue for puzzle ${puzzleId}; expected '${expectedStrategy}'`,
-          );
-        }
-
-        logger.log(
-          `starting job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName} trial=${trialNumber}`,
-        );
-
-        const result = await llmStrategyRunner.runLlmStrategy(
-          puzzleId,
-          strategyName,
-          trialNumber,
-          model ?? undefined,
-        );
-
-        logger.log(
-          `finished job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName} trial=${trialNumber} status=${result.status}`,
-        );
-        return result;
-      },
+      (job: Job<RunStrategyJobData | { llmProposalId: number }>) =>
+        handleLlmJob(job, llmJobDeps),
       {
         connection: redisConnection,
         concurrency,
