@@ -155,8 +155,8 @@ describe("reconstructSolvePrompts", () => {
       formatConversation([{ role: "user", content: initialPrompt }]),
     );
     expect(result[0]!.proposals).toEqual([
-      { id: 1, words: ["A", "B", "C", "D"], category: "Cat1", status: LlmProposalStatus.USED, guess: { sequenceNumber: 1, result: GuessResult.FAILURE, guessedAt: guess1.guessedAt } },
-      { id: 2, words: ["E", "F", "G", "H"], category: "Cat2", status: LlmProposalStatus.NOT_SELECTED, guess: null },
+      { id: 1, words: ["A", "B", "C", "D"], category: "Cat1", status: LlmProposalStatus.USED, guess: { sequenceNumber: 1, result: GuessResult.FAILURE, guessedAt: guess1.guessedAt }, categoryEvaluation: null },
+      { id: 2, words: ["E", "F", "G", "H"], category: "Cat2", status: LlmProposalStatus.NOT_SELECTED, guess: null, categoryEvaluation: null },
     ]);
 
     // Step 2: the full transcript so far — step 1's prompt and response —

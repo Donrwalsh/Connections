@@ -22,6 +22,7 @@ import {
   StrategyRunDetailDto,
   StrategyRunListItemDto,
   GuessDetailDto,
+  CategoryEvaluationDto,
   LeaderboardDto,
   LeaderboardRowDto,
   RunHistoryDto,
@@ -882,7 +883,7 @@ export class StrategyService {
    * promptNumber.
    */
   private async buildSolvePromptDtos(run: StrategyRun) {
-    const [solvePrompts, proposals, allGuesses, puzzle] = await Promise.all([
+    const [solvePrompts, proposals, allGuesses, puzzle, catEvals] = await Promise.all([
       this.solvePromptRepo.find({
         where: { strategyRunId: run.id },
         order: { promptNumber: "ASC", attemptNumber: "ASC" },
@@ -896,6 +897,7 @@ export class StrategyService {
         where: { id: run.puzzleId },
         relations: { answerGroups: { members: true } },
       }),
+      this.categoryEvaluationRepo.find({ where: { strategyRunId: run.id } }),
     ]);
 
     if (solvePrompts.length === 0 || !puzzle) {
@@ -905,7 +907,45 @@ export class StrategyService {
     const guessesById = new Map(allGuesses.map((guess) => [guess.id, guess]));
     const originalWords = computeInitialWordOrder(puzzle, run.strategyName);
 
-    return reconstructSolvePrompts(originalWords, solvePrompts, proposals, guessesById);
+    const dtos = reconstructSolvePrompts(originalWords, solvePrompts, proposals, guessesById);
+
+    // Attach each run CategoryEvaluation to its proposal by llmProposalId —
+    // reconstructSolvePrompts leaves categoryEvaluation: null on every
+    // proposal, so proposals with no eval row simply keep that null.
+    const evalByProposalId = new Map(catEvals.map((e) => [e.llmProposalId, e]));
+    for (const prompt of dtos) {
+      for (const proposal of prompt.proposals) {
+        const e = evalByProposalId.get(proposal.id);
+        proposal.categoryEvaluation = e ? this.toCategoryEvaluationDto(e) : null;
+      }
+    }
+
+    return dtos;
+  }
+
+  // Copies a CategoryEvaluation row 1:1 onto the guess-chain DTO shape.
+  private toCategoryEvaluationDto(e: CategoryEvaluation): CategoryEvaluationDto {
+    return {
+      verdict: e.verdict ?? null,
+      status: e.status,
+      proposedCategory: e.proposedCategory,
+      actualCategory: e.actualCategory,
+      rationale: e.rationale ?? null,
+      judgeModel: e.judgeModel,
+      judgeProvider: e.judgeProvider,
+      promptTokens: e.promptTokens ?? null,
+      completionTokens: e.completionTokens ?? null,
+      totalTokens: e.totalTokens ?? null,
+      latencyMs: e.latencyMs ?? null,
+      statusCode: e.statusCode ?? null,
+      errorName: e.errorName ?? null,
+      errorMessage: e.errorMessage ?? null,
+      requestBody: e.requestBody ?? null,
+      responseHeaders: e.responseHeaders ?? null,
+      responseBody: e.responseBody ?? null,
+      rawResponseText: e.rawResponseText ?? null,
+      evaluatedAt: e.evaluatedAt,
+    };
   }
 
   /**

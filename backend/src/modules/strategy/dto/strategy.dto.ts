@@ -22,6 +22,33 @@ export interface LlmProposalGuessRefDto {
   guessedAt: Date;
 }
 
+// One LLM-judge verdict on a used proposal's category (see
+// 2026-08-27-llm-category-accuracy-evaluation-design.md). Present only on a
+// proposal that was submitted, whose guess succeeded, and that has been
+// evaluated — null everywhere else. `verdict` is null on a `callError`
+// row; the error/raw fields carry the judge-call diagnostics for auditing.
+export interface CategoryEvaluationDto {
+  verdict: "correct" | "partial" | "lucky" | null;
+  status: "judged" | "callError";
+  proposedCategory: string;
+  actualCategory: string;
+  rationale: string | null;
+  judgeModel: string;
+  judgeProvider: string;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  latencyMs: number | null;
+  statusCode: number | null;
+  errorName: string | null;
+  errorMessage: string | null;
+  requestBody: unknown | null;
+  responseHeaders: Record<string, string> | null;
+  responseBody: unknown | null;
+  rawResponseText: string | null;
+  evaluatedAt: Date;
+}
+
 // One candidate group parsed out of a solve step's response. `status` says
 // whether it was submitted as a guess ('used') or left on the table; the
 // frontend uses that to give unused suggestions less visual weight.
@@ -31,6 +58,9 @@ export interface LlmProposalDto {
   category: string;
   status: LlmProposalStatus;
   guess: LlmProposalGuessRefDto | null;
+  // The LLM-judge verdict on this proposal's category, when it has been
+  // evaluated (used + successful guess + judged); null otherwise.
+  categoryEvaluation: CategoryEvaluationDto | null;
 }
 
 // One step of an LLM run's solve loop: the reconstructed prompt sent, the raw

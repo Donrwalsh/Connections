@@ -49,6 +49,7 @@ describe("StrategyService", () => {
     find: jest.Mock;
   };
   let mockCategoryEvaluationRepo: {
+    find: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
   let mockGameService: {
@@ -158,6 +159,10 @@ describe("StrategyService", () => {
       find: jest.fn().mockResolvedValue([]),
     };
     mockCategoryEvaluationRepo = {
+      // Default: no evaluation rows for buildSolvePromptDtos' per-run fetch,
+      // so existing run-detail/solvePrompts tests get categoryEvaluation:
+      // null on every proposal for free. Tests that care override this.
+      find: jest.fn().mockResolvedValue([]),
       // Default: no verdict rows, so every existing getLeaderboard test gets
       // zeroed cat* counts and categoryAccuracy: null for free. Same shape as
       // mockSolvePromptRepo's default. Tests that care override this.
@@ -522,10 +527,138 @@ describe("StrategyService", () => {
             result: GuessResult.SUCCESS,
             guessedAt: new Date("2024-01-02T00:00:00Z"),
           },
+          categoryEvaluation: null,
         },
       ]);
       expect(typeof result.solvePrompts[0]!.reconstructedPrompt).toBe("string");
       expect(result.solvePrompts[0]!.reconstructedPrompt).toContain("APPLE");
+    });
+
+    it("should attach the categoryEvaluation DTO to a used proposal that has one, and null to proposals without", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ id: 7, strategyName: "llm-openai", availableWords: [] }),
+      );
+      mockGuessRepo.count.mockResolvedValueOnce(1);
+      mockGuessRepo.find
+        .mockResolvedValueOnce([
+          {
+            sequenceNumber: 1,
+            words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+            result: GuessResult.SUCCESS,
+            guessedAt: new Date("2024-01-02T00:00:00Z"),
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            id: 1,
+            sequenceNumber: 1,
+            words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+            result: GuessResult.SUCCESS,
+            guessedAt: new Date("2024-01-02T00:00:00Z"),
+          },
+          {
+            id: 2,
+            sequenceNumber: 2,
+            words: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+            result: GuessResult.SUCCESS,
+            guessedAt: new Date("2024-01-02T00:01:00Z"),
+          },
+        ]);
+      mockPuzzleRepo.findOne.mockResolvedValueOnce(solvePuzzle);
+      mockSolvePromptRepo.find.mockResolvedValueOnce([
+        {
+          id: 501,
+          strategyRunId: 7,
+          promptNumber: 1,
+          promptType: "initialSolve",
+          status: "parsed",
+          rawResponseText: "raw",
+          promptTokens: 10,
+          completionTokens: 20,
+          totalTokens: 30,
+          latencyMs: 500,
+          temperature: 0.2,
+          createdAt: new Date("2024-01-02T00:00:00Z"),
+        },
+      ]);
+      mockLlmProposalRepo.find.mockResolvedValueOnce([
+        {
+          id: 55,
+          strategyRunId: 7,
+          guessId: 1,
+          solvePromptId: 501,
+          words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+          category: "Fruit",
+          status: "used",
+          createdAt: new Date("2024-01-02T00:00:00Z"),
+        },
+        {
+          id: 56,
+          strategyRunId: 7,
+          guessId: 2,
+          solvePromptId: 501,
+          words: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+          category: "Veg",
+          status: "used",
+          createdAt: new Date("2024-01-02T00:00:00Z"),
+        },
+      ]);
+      const evaluatedAt = new Date("2024-01-03T00:00:00Z");
+      mockCategoryEvaluationRepo.find.mockResolvedValueOnce([
+        {
+          llmProposalId: 55,
+          verdict: "correct",
+          status: "judged",
+          proposedCategory: "X",
+          actualCategory: "Y",
+          rationale: "r",
+          judgeModel: "gpt-4.1-nano",
+          judgeProvider: "openai",
+          promptTokens: 10,
+          completionTokens: 2,
+          totalTokens: 12,
+          latencyMs: 5,
+          statusCode: null,
+          errorName: null,
+          errorMessage: null,
+          requestBody: null,
+          responseHeaders: null,
+          responseBody: null,
+          rawResponseText: "{}",
+          evaluatedAt,
+        },
+      ]);
+
+      const result = await service.getRunDetailByRunId(7);
+
+      const proposals = result.solvePrompts[0]!.proposals;
+      expect(proposals[0]!.id).toBe(55);
+      expect(proposals[0]!.categoryEvaluation).toEqual({
+        verdict: "correct",
+        status: "judged",
+        proposedCategory: "X",
+        actualCategory: "Y",
+        rationale: "r",
+        judgeModel: "gpt-4.1-nano",
+        judgeProvider: "openai",
+        promptTokens: 10,
+        completionTokens: 2,
+        totalTokens: 12,
+        latencyMs: 5,
+        statusCode: null,
+        errorName: null,
+        errorMessage: null,
+        requestBody: null,
+        responseHeaders: null,
+        responseBody: null,
+        rawResponseText: "{}",
+        evaluatedAt,
+      });
+      expect(proposals[1]!.id).toBe(56);
+      expect(proposals[1]!.categoryEvaluation).toBeNull();
+      expect(mockCategoryEvaluationRepo.find).toHaveBeenCalledWith({
+        where: { strategyRunId: 7 },
+      });
     });
 
     it("should fetch every SolvePrompt row for the run, including CALL_ERROR ones, with a deterministic attemptNumber tiebreak", async () => {
