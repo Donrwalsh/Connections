@@ -151,6 +151,13 @@ export interface RunHistoryRow {
   /** Count of this run's solve steps with at least one issue tag (see
    * SolvePromptRecord.issueTags). Always 0 for non-LLM strategies. */
   issueCount: number;
+  /** This run's category-judge verdict tallies — one per successful used
+   * proposal that has been judged (see CategoryEvaluationRecord). `callError`
+   * rows count toward none. All 0 for non-LLM strategies and for LLM runs
+   * not yet evaluated. */
+  categoryCorrect: number;
+  categoryPartial: number;
+  categoryLucky: number;
 }
 
 export interface RunHistoryMeta {
