@@ -15,7 +15,11 @@ import { Puzzle } from "../game/entities/puzzle.entity";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { LlmProposal } from "./entities/llm-proposal.entity";
-import { CategoryEvaluation } from "./entities/category-evaluation.entity";
+import {
+  CategoryEvaluation,
+  CategoryEvalStatus,
+  CategoryEvalVerdict,
+} from "./entities/category-evaluation.entity";
 import { GameService } from "../game/game.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import { ModelPrice } from "../supported-model/entities/model-price.entity";
@@ -2084,19 +2088,22 @@ describe("StrategyService", () => {
     });
   });
 
-  describe("getRecentRuns", () => {
-    function mockRecentRunsQuery(rawRows: unknown[]) {
-      const qb = {
+  describe("getRecentActivity", () => {
+    function mockActivityQueries(runRows: unknown[], judgmentRows: unknown[]) {
+      const makeQb = (rows: unknown[]) => ({
         innerJoin: jest.fn().mockReturnThis(),
         select: jest.fn().mockReturnThis(),
         addSelect: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
         limit: jest.fn().mockReturnThis(),
-        getRawMany: jest.fn().mockResolvedValue(rawRows),
-      };
-      mockStrategyRunRepo.createQueryBuilder.mockReturnValue(qb);
-      return qb;
+        getRawMany: jest.fn().mockResolvedValue(rows),
+      });
+      const runQb = makeQb(runRows);
+      const judgmentQb = makeQb(judgmentRows);
+      mockStrategyRunRepo.createQueryBuilder.mockReturnValue(runQb);
+      mockCategoryEvaluationRepo.createQueryBuilder.mockReturnValue(judgmentQb);
+      return { runQb, judgmentQb };
     }
 
     function rawRun(overrides: Record<string, unknown> = {}) {
@@ -2108,50 +2115,67 @@ describe("StrategyService", () => {
         modelName: null,
         trialNumber: 0,
         status: StrategyRunStatus.COMPLETED,
-        startedAt: new Date("2024-01-01T00:00:00Z"),
-        finishedAt: new Date("2024-01-01T00:00:05Z"),
+        occurredAt: new Date("2024-01-01T00:00:00Z"),
         ...overrides,
       };
     }
 
-    it("should query without a strategyName filter, newest first with a stable tiebreaker, capped at 100", async () => {
-      const qb = mockRecentRunsQuery([rawRun()]);
+    function rawJudgment(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 1,
+        puzzleId: 10,
+        puzzleDate: "2024-01-01",
+        strategyName: "llm-openai",
+        modelName: "gpt-4.1-nano",
+        verdict: CategoryEvalVerdict.CORRECT,
+        status: CategoryEvalStatus.JUDGED,
+        proposedCategory: "types of citrus",
+        actualCategory: "citrus fruits",
+        occurredAt: new Date("2024-01-01T00:00:00Z"),
+        ...overrides,
+      };
+    }
 
-      await service.getRecentRuns();
+    it("queries runs newest first with a stable tiebreaker, capped at the activity limit", async () => {
+      const { runQb } = mockActivityQueries([rawRun()], []);
+
+      await service.getRecentActivity();
 
       expect(mockStrategyRunRepo.createQueryBuilder).toHaveBeenCalledWith("run");
-      expect(qb.orderBy).toHaveBeenCalledWith("run.startedAt", "DESC");
-      expect(qb.addOrderBy).toHaveBeenCalledWith("run.id", "DESC");
-      expect(qb.limit).toHaveBeenCalledWith(100);
+      expect(runQb.orderBy).toHaveBeenCalledWith("run.startedAt", "DESC");
+      expect(runQb.addOrderBy).toHaveBeenCalledWith("run.id", "DESC");
+      expect(runQb.limit).toHaveBeenCalledWith(100);
     });
 
-    it("should map raw rows across strategies, including LLM modelName", async () => {
-      mockRecentRunsQuery([
-        rawRun({ id: 1, strategyName: "alphabetical", modelName: null }),
-        rawRun({
-          id: 2,
-          strategyName: "llm-openai",
-          modelName: "gpt-4.1-nano",
-          status: StrategyRunStatus.FAILED,
-          finishedAt: null,
-        }),
-      ]);
+    it("queries category evaluations newest first with a stable tiebreaker, capped at the activity limit", async () => {
+      const { judgmentQb } = mockActivityQueries([], [rawJudgment()]);
 
-      const result = await service.getRecentRuns();
+      await service.getRecentActivity();
+
+      expect(mockCategoryEvaluationRepo.createQueryBuilder).toHaveBeenCalledWith("eval");
+      expect(judgmentQb.orderBy).toHaveBeenCalledWith("eval.evaluatedAt", "DESC");
+      expect(judgmentQb.addOrderBy).toHaveBeenCalledWith("eval.id", "DESC");
+      expect(judgmentQb.limit).toHaveBeenCalledWith(100);
+    });
+
+    it("maps StrategyRun rows to run events", async () => {
+      mockActivityQueries(
+        [
+          rawRun({
+            id: 2,
+            strategyName: "llm-openai",
+            modelName: "gpt-4.1-nano",
+            status: StrategyRunStatus.FAILED,
+          }),
+        ],
+        [],
+      );
+
+      const result = await service.getRecentActivity();
 
       expect(result).toEqual([
         {
-          id: 1,
-          puzzleId: 10,
-          puzzleDate: "2024-01-01",
-          strategyName: "alphabetical",
-          modelName: null,
-          trialNumber: 0,
-          status: StrategyRunStatus.COMPLETED,
-          startedAt: new Date("2024-01-01T00:00:00Z"),
-          finishedAt: new Date("2024-01-01T00:00:05Z"),
-        },
-        {
+          kind: "run",
           id: 2,
           puzzleId: 10,
           puzzleDate: "2024-01-01",
@@ -2159,10 +2183,85 @@ describe("StrategyService", () => {
           modelName: "gpt-4.1-nano",
           trialNumber: 0,
           status: StrategyRunStatus.FAILED,
-          startedAt: new Date("2024-01-01T00:00:00Z"),
-          finishedAt: null,
+          occurredAt: new Date("2024-01-01T00:00:00Z"),
         },
       ]);
+    });
+
+    it("maps CategoryEvaluation rows to judgment events", async () => {
+      mockActivityQueries([], [rawJudgment({ id: 7 })]);
+
+      const result = await service.getRecentActivity();
+
+      expect(result).toEqual([
+        {
+          kind: "judgment",
+          id: 7,
+          puzzleId: 10,
+          puzzleDate: "2024-01-01",
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          status: CategoryEvalStatus.JUDGED,
+          verdict: CategoryEvalVerdict.CORRECT,
+          proposedCategory: "types of citrus",
+          actualCategory: "citrus fruits",
+          occurredAt: new Date("2024-01-01T00:00:00Z"),
+        },
+      ]);
+    });
+
+    it("carries a null verdict for a failed judge call", async () => {
+      mockActivityQueries(
+        [],
+        [rawJudgment({ status: CategoryEvalStatus.CALL_ERROR, verdict: null })],
+      );
+
+      const [event] = await service.getRecentActivity();
+
+      expect(event).toMatchObject({
+        kind: "judgment",
+        status: CategoryEvalStatus.CALL_ERROR,
+        verdict: null,
+      });
+    });
+
+    it("merges runs and judgments into one feed ordered by event time, newest first", async () => {
+      mockActivityQueries(
+        [
+          rawRun({ id: 1, occurredAt: new Date("2024-01-01T00:00:03Z") }),
+          rawRun({ id: 2, occurredAt: new Date("2024-01-01T00:00:01Z") }),
+        ],
+        [
+          rawJudgment({ id: 1, occurredAt: new Date("2024-01-01T00:00:04Z") }),
+          rawJudgment({ id: 2, occurredAt: new Date("2024-01-01T00:00:02Z") }),
+        ],
+      );
+
+      const result = await service.getRecentActivity();
+
+      expect(result.map((event) => [event.kind, event.id])).toEqual([
+        ["judgment", 1],
+        ["run", 1],
+        ["judgment", 2],
+        ["run", 2],
+      ]);
+    });
+
+    it("applies the activity limit to the merged feed, not to each source alone", async () => {
+      const runRows = Array.from({ length: 100 }, (_, i) =>
+        rawRun({ id: i + 1, occurredAt: new Date(2024, 0, 1, 0, 0, i) }),
+      );
+      const judgmentRows = Array.from({ length: 100 }, (_, i) =>
+        rawJudgment({ id: i + 1, occurredAt: new Date(2024, 0, 2, 0, 0, i) }),
+      );
+      mockActivityQueries(runRows, judgmentRows);
+
+      const result = await service.getRecentActivity();
+
+      expect(result).toHaveLength(100);
+      // Every judgment here is newer than every run, so the window is all
+      // judgments — proof the cap is applied after the merge, not before.
+      expect(result.every((event) => event.kind === "judgment")).toBe(true);
     });
   });
 

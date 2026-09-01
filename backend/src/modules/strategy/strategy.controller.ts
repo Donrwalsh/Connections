@@ -52,11 +52,12 @@ export class StrategyController {
   }
 
   // Same reasoning as "models"/"leaderboard" above. Backs the Activity
-  // page's live feed — the most recent runs across every strategy/model,
-  // not scoped to one strategyName like the routes below.
-  @Get("runs/recent")
-  async getRecentRuns() {
-    return this.strategyService.getRecentRuns();
+  // page's live feed — the most recent events across every strategy/model
+  // (runs starting and category-judge verdicts landing), interleaved
+  // newest-first, not scoped to one strategyName like the routes below.
+  @Get("activity/recent")
+  async getRecentActivity() {
+    return this.strategyService.getRecentActivity();
   }
 
   @Get(":strategyName/puzzle/:date")

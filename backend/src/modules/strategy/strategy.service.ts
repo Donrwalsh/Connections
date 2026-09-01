@@ -28,7 +28,7 @@ import {
   RunHistoryDto,
   RunHistoryRowDto,
   RunHistorySortBy,
-  RecentRunDto,
+  RecentActivityEventDto,
 } from "./dto/strategy.dto";
 import {
   SHUFFLE_SMART,
@@ -57,9 +57,11 @@ const QUEUE_PAGE_SIZE = 1000;
 const DEFAULT_RUN_HISTORY_LIMIT = 100;
 const MAX_RUN_HISTORY_LIMIT = 500;
 
-// Fixed-size rolling window for getRecentRuns — a live feed, not a paginated
-// list, so there's no caller-adjustable limit/page like getRunHistory.
-const RECENT_RUNS_LIMIT = 100;
+// Fixed-size rolling window for getRecentActivity — a live feed, not a
+// paginated list, so there's no caller-adjustable limit/page like
+// getRunHistory. Applied to each source's query and again to the merged
+// feed, so the window is the newest N events regardless of kind.
+const RECENT_ACTIVITY_LIMIT = 100;
 
 // Raw ORDER BY expressions for getRunHistory, keyed by the sort the caller
 // asked for. "puzzleDate" and "guessCount" order by their raw-query SELECT
@@ -1235,47 +1237,81 @@ export class StrategyService {
   }
 
   /**
-   * The most recent StrategyRun rows across *every* strategy/model, newest
-   * first — backs the Activity page's live feed (polled, so this is
-   * deliberately cheap: no guessCount/tokenCostUsd correlated subqueries or
+   * The Activity page's live feed: one reverse-chronological stream across
+   * *every* strategy/model that interleaves two kinds of event — a
+   * StrategyRun starting (event time = startedAt) and a CategoryEvaluation
+   * verdict landing (event time = evaluatedAt). Polled, so it's deliberately
+   * cheap: no guessCount/tokenCostUsd correlated subqueries or
    * SupportedModel/ModelPrice joins like getRunHistory has, just the columns
-   * the feed actually renders). Fixed at RECENT_RUNS_LIMIT rather than
-   * paginated — a rolling window, not a list a caller pages through.
+   * a feed row renders. Fixed at RECENT_ACTIVITY_LIMIT rather than paginated
+   * — a rolling window, not a list a caller pages through. Each source is
+   * capped at the limit, then the merged feed is capped again, so the
+   * result is always the newest N events whatever the kind mix.
    */
-  async getRecentRuns(): Promise<RecentRunDto[]> {
-    const rawRows = await this.strategyRunRepo
-      .createQueryBuilder("run")
-      .innerJoin(Puzzle, "puzzle", 'puzzle.id = run."puzzleId"')
-      .select("run.id", "id")
-      .addSelect("run.puzzleId", "puzzleId")
-      // Cast to text — see the identical cast in getRunHistory: getRawMany()
-      // bypasses Puzzle.date's entity-level string transformer.
-      .addSelect("puzzle.date::text", "puzzleDate")
-      .addSelect("run.strategyName", "strategyName")
-      .addSelect("run.modelName", "modelName")
-      .addSelect("run.trialNumber", "trialNumber")
-      .addSelect("run.status", "status")
-      .addSelect("run.startedAt", "startedAt")
-      .addSelect("run.finishedAt", "finishedAt")
-      .orderBy("run.startedAt", "DESC")
-      // Stable tiebreaker: without one, ties on startedAt (plausible under
-      // concurrent dispatch) could reorder rows between polls even though
-      // the underlying set hasn't changed.
-      .addOrderBy("run.id", "DESC")
-      .limit(RECENT_RUNS_LIMIT)
-      .getRawMany<{
-        id: number;
-        puzzleId: number;
-        puzzleDate: string;
-        strategyName: string;
-        modelName: string | null;
-        trialNumber: number;
-        status: StrategyRunStatus;
-        startedAt: Date | string;
-        finishedAt: Date | string | null;
-      }>();
+  async getRecentActivity(): Promise<RecentActivityEventDto[]> {
+    const [rawRuns, rawJudgments] = await Promise.all([
+      this.strategyRunRepo
+        .createQueryBuilder("run")
+        .innerJoin(Puzzle, "puzzle", 'puzzle.id = run."puzzleId"')
+        .select("run.id", "id")
+        .addSelect("run.puzzleId", "puzzleId")
+        // Cast to text — see the identical cast in getRunHistory: getRawMany()
+        // bypasses Puzzle.date's entity-level string transformer.
+        .addSelect("puzzle.date::text", "puzzleDate")
+        .addSelect("run.strategyName", "strategyName")
+        .addSelect("run.modelName", "modelName")
+        .addSelect("run.trialNumber", "trialNumber")
+        .addSelect("run.status", "status")
+        .addSelect("run.startedAt", "occurredAt")
+        .orderBy("run.startedAt", "DESC")
+        // Stable tiebreaker: without one, ties on the event time (plausible
+        // under concurrent dispatch) could reorder rows between polls even
+        // though the underlying set hasn't changed.
+        .addOrderBy("run.id", "DESC")
+        .limit(RECENT_ACTIVITY_LIMIT)
+        .getRawMany<{
+          id: number;
+          puzzleId: number;
+          puzzleDate: string;
+          strategyName: string;
+          modelName: string | null;
+          trialNumber: number;
+          status: StrategyRunStatus;
+          occurredAt: Date | string;
+        }>(),
+      this.categoryEvaluationRepo
+        .createQueryBuilder("eval")
+        .innerJoin(StrategyRun, "run", 'run.id = eval."strategyRunId"')
+        .innerJoin(Puzzle, "puzzle", 'puzzle.id = run."puzzleId"')
+        .select("eval.id", "id")
+        .addSelect("run.puzzleId", "puzzleId")
+        .addSelect("puzzle.date::text", "puzzleDate")
+        .addSelect("run.strategyName", "strategyName")
+        .addSelect("run.modelName", "modelName")
+        .addSelect("eval.status", "status")
+        .addSelect("eval.verdict", "verdict")
+        .addSelect("eval.proposedCategory", "proposedCategory")
+        .addSelect("eval.actualCategory", "actualCategory")
+        .addSelect("eval.evaluatedAt", "occurredAt")
+        .orderBy("eval.evaluatedAt", "DESC")
+        .addOrderBy("eval.id", "DESC")
+        .limit(RECENT_ACTIVITY_LIMIT)
+        .getRawMany<{
+          id: number;
+          puzzleId: number;
+          puzzleDate: string;
+          strategyName: string;
+          modelName: string | null;
+          status: "judged" | "callError";
+          verdict: "correct" | "partial" | "lucky" | null;
+          proposedCategory: string;
+          actualCategory: string;
+          occurredAt: Date | string;
+        }>(),
+    ]);
 
-    return rawRows.map((row) => ({
+    const runEvents: RecentActivityEventDto[] = rawRuns.map((row) => ({
+      kind: "run",
       id: row.id,
       puzzleId: row.puzzleId,
       puzzleDate: row.puzzleDate,
@@ -1283,9 +1319,33 @@ export class StrategyService {
       modelName: row.modelName,
       trialNumber: row.trialNumber,
       status: row.status,
-      startedAt: new Date(row.startedAt),
-      finishedAt: row.finishedAt ? new Date(row.finishedAt) : null,
+      occurredAt: new Date(row.occurredAt),
     }));
+
+    const judgmentEvents: RecentActivityEventDto[] = rawJudgments.map((row) => ({
+      kind: "judgment",
+      id: row.id,
+      puzzleId: row.puzzleId,
+      puzzleDate: row.puzzleDate,
+      strategyName: row.strategyName,
+      modelName: row.modelName,
+      status: row.status,
+      verdict: row.verdict,
+      proposedCategory: row.proposedCategory,
+      actualCategory: row.actualCategory,
+      occurredAt: new Date(row.occurredAt),
+    }));
+
+    return [...runEvents, ...judgmentEvents]
+      .sort((a, b) => {
+        const byTime = b.occurredAt.getTime() - a.occurredAt.getTime();
+        if (byTime !== 0) return byTime;
+        // Deterministic order for same-instant events: runs before judgments,
+        // then higher id first — so polls don't reshuffle a static feed.
+        if (a.kind !== b.kind) return a.kind === "run" ? -1 : 1;
+        return b.id - a.id;
+      })
+      .slice(0, RECENT_ACTIVITY_LIMIT);
   }
 
   private mapRunDetail(
