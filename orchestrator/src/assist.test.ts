@@ -50,6 +50,14 @@ describe("runAssistStep", () => {
     expect(result.model).toBe("test-model");
   });
 
+  it("disables the AI SDK's own retry layer (maxRetries: 0)", async () => {
+    await runAssistStep(MESSAGES);
+
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ maxRetries: 0 }),
+    );
+  });
+
   it("classifies a provider failure as a model_error", async () => {
     generateTextMock.mockRejectedValueOnce(new Error("openai is down"));
 

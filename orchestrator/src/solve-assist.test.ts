@@ -73,6 +73,20 @@ describe("solveAssist", () => {
     });
   });
 
+  it("disables the AI SDK's own retry layer (maxRetries: 0)", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
+      response: { modelId: "gpt-4.1-nano" },
+      request: {},
+    });
+
+    await solveAssist(MESSAGES);
+
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ maxRetries: 0 }),
+    );
+  });
+
   it("passes contextWindow through to getModel", async () => {
     generateTextMock.mockResolvedValueOnce({
       text: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
