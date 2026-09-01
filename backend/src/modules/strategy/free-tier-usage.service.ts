@@ -2,6 +2,7 @@ import { Inject, Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
+import { CategoryEvaluation } from "./entities/category-evaluation.entity";
 import { startOfTodayUtc } from "../../strategies";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 
@@ -33,6 +34,8 @@ export class FreeTierUsageService {
   constructor(
     @InjectRepository(SolvePrompt)
     private readonly solvePromptRepo: Repository<SolvePrompt>,
+    @InjectRepository(CategoryEvaluation)
+    private readonly categoryEvaluationRepo: Repository<CategoryEvaluation>,
     @Inject(SupportedModelService)
     private readonly supportedModelService: SupportedModelService,
   ) {}
@@ -46,17 +49,27 @@ export class FreeTierUsageService {
   }
 
   /**
-   * Tokens spent today (UTC) across every run of `tier`'s models, summed
-   * from SolvePrompt.totalTokens — the same per-call token figure
-   * StrategyService's cost calculations use. "Today" resets at UTC midnight
-   * rather than server-local time, since that's when the provider's own
-   * usage window resets. getFlagshipUsage/getMiniUsage are thin wrappers
-   * over this; FreeTierDispatchService calls it directly since it needs to
-   * look usage up by whichever tier it's currently ticking.
+   * Tokens spent today (UTC) against `tier`'s daily allowance, from two
+   * sources that both bill the same provider budget:
+   *
+   *  - SolvePrompt.totalTokens for every solve step of a run on one of the
+   *    tier's models (the per-call figure StrategyService's cost math uses);
+   *  - CategoryEvaluation.totalTokens for every category-judge call whose
+   *    judgeModel is one of the tier's models — the LLM-as-judge runs on
+   *    JUDGE_MODEL (a mini/nano model by default), so its spend lands in
+   *    whichever tier that model belongs to. judgeModel is stored per row at
+   *    call time, so re-pointing JUDGE_MODEL never moves past spend.
+   *
+   * "Today" resets at UTC midnight rather than server-local time, since
+   * that's when the provider's own usage window resets.
+   * getFlagshipUsage/getMiniUsage are thin wrappers over this;
+   * FreeTierDispatchService calls it directly since it needs to look usage
+   * up by whichever tier it's currently ticking.
    */
   async getUsage(tier: FreeTierId): Promise<FreeTierUsageDto> {
     const { label, dailyLimitTokens } = FREE_TIER_LIMITS[tier];
     const models = await this.supportedModelService.findModelNamesByFreeTier(tier);
+    const since = startOfTodayUtc();
 
     // A tier with zero models configured (reachable via an ordinary Adminer
     // edit, or a typo in the freeTier column value) must skip the query
@@ -73,15 +86,23 @@ export class FreeTierUsageService {
       };
     }
 
-    const raw = await this.solvePromptRepo
-      .createQueryBuilder("prompt")
-      .innerJoin("prompt.strategyRun", "run")
-      .where("run.modelName IN (:...models)", { models })
-      .andWhere("prompt.createdAt >= :startOfTodayUtc", { startOfTodayUtc: startOfTodayUtc() })
-      .select("COALESCE(SUM(prompt.totalTokens), 0)", "totalTokens")
-      .getRawOne<{ totalTokens: string }>();
+    const [promptRaw, judgeRaw] = await Promise.all([
+      this.solvePromptRepo
+        .createQueryBuilder("prompt")
+        .innerJoin("prompt.strategyRun", "run")
+        .where("run.modelName IN (:...models)", { models })
+        .andWhere("prompt.createdAt >= :startOfTodayUtc", { startOfTodayUtc: since })
+        .select("COALESCE(SUM(prompt.totalTokens), 0)", "totalTokens")
+        .getRawOne<{ totalTokens: string }>(),
+      this.categoryEvaluationRepo
+        .createQueryBuilder("evaluation")
+        .where("evaluation.judgeModel IN (:...models)", { models })
+        .andWhere("evaluation.evaluatedAt >= :startOfTodayUtc", { startOfTodayUtc: since })
+        .select("COALESCE(SUM(evaluation.totalTokens), 0)", "totalTokens")
+        .getRawOne<{ totalTokens: string }>(),
+    ]);
 
-    const usedTokens = Number(raw?.totalTokens ?? 0);
+    const usedTokens = Number(promptRaw?.totalTokens ?? 0) + Number(judgeRaw?.totalTokens ?? 0);
 
     return {
       tier,
