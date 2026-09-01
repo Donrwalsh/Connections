@@ -1,7 +1,7 @@
 // Shared display helpers for run statuses. Kept out of the component files so
 // the components stay presentational and the helpers stay unit-testable.
 
-import type { GuessResultValue, PuzzleRunStatus, RunStatus } from "./types";
+import type { CategoryVerdictValue, GuessResultValue, PuzzleRunStatus, RunStatus } from "./types";
 
 export type PillTone = "queued" | "active" | "completed" | "failed" | "neutral" | "flagship" | "mini";
 
@@ -88,4 +88,27 @@ export function guessResultLabel(result: GuessResultValue): string {
 
 export function guessResultTone(result: GuessResultValue): PillTone {
   return result === "success" ? "completed" : "failed";
+}
+
+/** Display label/tone for an LLM category-judge verdict — used by the
+ * guess-chain visualizer's per-proposal pill and the Activity feed's
+ * judgment rows. A null verdict is a `callError` row (the judge call itself
+ * failed). */
+export function categoryVerdictLabel(verdict: CategoryVerdictValue | null): string {
+  switch (verdict) {
+    case "correct":
+      return "Category: correct";
+    case "partial":
+      return "Category: partial";
+    case "lucky":
+      return "Category: lucky";
+    default:
+      return "Category: judge failed";
+  }
+}
+
+export function categoryVerdictTone(verdict: CategoryVerdictValue | null): PillTone {
+  if (verdict === "correct") return "completed";
+  if (verdict === "partial") return "neutral";
+  return "failed";
 }

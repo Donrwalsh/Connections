@@ -164,22 +164,36 @@ export interface RunHistory {
   meta: RunHistoryMeta;
 }
 
-/** One row of GET /strategy/runs/recent: the most recent StrategyRun rows
- * across *every* strategy/model (unlike RunHistoryRow, which is scoped to
- * one strategy) — backs the Activity page's live feed. Deliberately slimmer
- * than RunHistoryRow (no guessCount/tokenCostUsd/issueCount)
- * since this is polled repeatedly. */
-export interface RecentRun {
+/** Events from GET /strategy/activity/recent: the Activity page's live feed,
+ * one reverse-chronological stream across *every* strategy/model that mixes
+ * a StrategyRun starting with a CategoryEvaluation (category-judge) verdict
+ * landing. `occurredAt` is the run's startedAt or the judgment's
+ * evaluatedAt. Deliberately slim (no guessCount/tokenCostUsd/rationale/
+ * diagnostics) since it is polled repeatedly — the run page carries detail. */
+interface RecentActivityEventBase {
   id: number;
   puzzleId: number;
   puzzleDate: string;
   strategyName: string;
   modelName: string | null;
+  occurredAt: string;
+}
+
+export interface RecentActivityRunEvent extends RecentActivityEventBase {
+  kind: "run";
   trialNumber: number;
   status: RunStatus;
-  startedAt: string;
-  finishedAt: string | null;
 }
+
+export interface RecentActivityJudgmentEvent extends RecentActivityEventBase {
+  kind: "judgment";
+  status: "judged" | "callError";
+  verdict: CategoryVerdictValue | null;
+  proposedCategory: string;
+  actualCategory: string;
+}
+
+export type RecentActivityEvent = RecentActivityRunEvent | RecentActivityJudgmentEvent;
 
 /** One row from GET /strategy/models — the real allowlist of models a
  * strategy may dispatch runs against. Used to recognize a model the static

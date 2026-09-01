@@ -7,7 +7,9 @@ import type {
   FreeTierUsage,
   Leaderboard,
   LeaderboardRow,
-  RecentRun,
+  RecentActivityEvent,
+  RecentActivityJudgmentEvent,
+  RecentActivityRunEvent,
 } from "../../../data/benchmark/types";
 import { ActivityPage } from "../ActivityPage";
 
@@ -70,8 +72,9 @@ function makeRow(overrides: Partial<LeaderboardRow> = {}): LeaderboardRow {
 
 const emptyLeaderboard: Leaderboard = { deterministic: [], llm: [] };
 
-function makeRun(overrides: Partial<RecentRun> = {}): RecentRun {
+function makeRunEvent(overrides: Partial<RecentActivityRunEvent> = {}): RecentActivityRunEvent {
   return {
+    kind: "run",
     id: 1,
     puzzleId: 10,
     puzzleDate: "2024-01-01",
@@ -79,18 +82,36 @@ function makeRun(overrides: Partial<RecentRun> = {}): RecentRun {
     modelName: null,
     trialNumber: 0,
     status: "completed",
-    startedAt: "2024-01-01T00:00:00Z",
-    finishedAt: "2024-01-01T00:00:05Z",
+    occurredAt: "2024-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeJudgmentEvent(
+  overrides: Partial<RecentActivityJudgmentEvent> = {},
+): RecentActivityJudgmentEvent {
+  return {
+    kind: "judgment",
+    id: 1,
+    puzzleId: 10,
+    puzzleDate: "2024-01-01",
+    strategyName: "llm-openai",
+    modelName: "gpt-4.1-nano",
+    status: "judged",
+    verdict: "correct",
+    proposedCategory: "types of citrus",
+    actualCategory: "citrus fruits",
+    occurredAt: "2024-01-01T00:00:00Z",
     ...overrides,
   };
 }
 
 function stubFetch({
   leaderboard = emptyLeaderboard,
-  recentRuns = [],
+  recentActivity = [],
 }: {
   leaderboard?: Leaderboard;
-  recentRuns?: RecentRun[];
+  recentActivity?: RecentActivityEvent[];
 } = {}) {
   vi.stubGlobal(
     "fetch",
@@ -102,8 +123,8 @@ function stubFetch({
       if (href.includes("/strategy/free-tier-usage/mini")) {
         return Promise.resolve({ ok: true, json: async () => miniUsage });
       }
-      if (href.includes("/strategy/runs/recent")) {
-        return Promise.resolve({ ok: true, json: async () => recentRuns });
+      if (href.includes("/strategy/activity/recent")) {
+        return Promise.resolve({ ok: true, json: async () => recentActivity });
       }
       return Promise.resolve({ ok: true, json: async () => leaderboard });
     }),
@@ -206,53 +227,63 @@ describe("ActivityPage", () => {
     expect(screen.queryByRole("heading", { name: "Enable Auto-Dispatch" })).not.toBeInTheDocument();
   });
 
-  it("renders the recent-runs table with model, puzzle, and status per row", async () => {
+  it("renders the recent-activity table, one row per event, run and judgment kinds interleaved", async () => {
     stubFetch({
-      recentRuns: [
-        makeRun({
+      recentActivity: [
+        makeRunEvent({
           id: 1,
           strategyName: "llm-openai",
           modelName: "gpt-4.1-nano-2025-04-14",
           puzzleDate: "2024-01-01",
           status: "completed",
-          startedAt: "2024-01-01T08:15:00Z",
+          occurredAt: "2024-01-01T08:15:00Z",
         }),
-        makeRun({
-          id: 2,
-          strategyName: "shuffle-foolish",
-          modelName: null,
+        makeJudgmentEvent({
+          id: 1,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano-2025-04-14",
           puzzleDate: "2024-01-02",
-          status: "running",
-          startedAt: "2024-01-02T20:45:00Z",
+          verdict: "partial",
+          occurredAt: "2024-01-02T20:45:00Z",
         }),
       ],
     });
     renderActivity();
 
-    const table = await screen.findByRole("table", { name: /recent runs/i });
+    const table = await screen.findByRole("table", { name: /recent activity/i });
     const headers = within(table)
       .getAllByRole("columnheader")
       .map((header) => header.textContent);
-    expect(headers).toEqual(["Model", "Puzzle", "Started", "Status"]);
+    expect(headers).toEqual(["Activity", "Model", "Puzzle", "When", "Detail"]);
 
     const rows = within(table).getAllByRole("link");
+    expect(rows[0]!.textContent).toContain("Run");
     expect(rows[0]!.textContent).toContain("gpt-4.1-nano-2025-04-14");
     expect(rows[0]!.textContent).toContain("Jan 1, 2024");
     expect(rows[0]!.textContent).toContain("8:15 AM");
     expect(rows[0]!.textContent).toContain("Completed");
-    // Deterministic/shuffle rows have no modelName — falls back to the
-    // humanized strategy name.
-    expect(rows[1]!.textContent).toContain("Shuffle-Foolish");
+
+    expect(rows[1]!.textContent).toContain("Category judge");
     expect(rows[1]!.textContent).toContain("Jan 2, 2024");
     expect(rows[1]!.textContent).toContain("8:45 PM");
-    expect(rows[1]!.textContent).toContain("Running");
+    expect(rows[1]!.textContent).toContain("Category: partial");
   });
 
-  it("navigates to the run's puzzle page on click, keyed by model for LLM rows and strategy otherwise", async () => {
+  it("shows a distinct pill for a failed judge call", async () => {
+    stubFetch({
+      recentActivity: [makeJudgmentEvent({ id: 5, status: "callError", verdict: null })],
+    });
+    renderActivity();
+
+    const table = await screen.findByRole("table", { name: /recent activity/i });
+    expect(within(table).getByText("Category: judge failed")).toBeInTheDocument();
+  });
+
+  it("navigates to the puzzle-run page on click for both event kinds, keyed by model for LLM rows", async () => {
     const user = userEvent.setup();
     stubFetch({
-      recentRuns: [
-        makeRun({
+      recentActivity: [
+        makeJudgmentEvent({
           id: 1,
           puzzleId: 42,
           strategyName: "llm-openai",
@@ -262,27 +293,27 @@ describe("ActivityPage", () => {
     });
     renderActivity();
 
-    const table = await screen.findByRole("table", { name: /recent runs/i });
+    const table = await screen.findByRole("table", { name: /recent activity/i });
     await user.click(within(table).getAllByRole("link")[0]!);
 
     expect(await screen.findByText("run-page")).toBeInTheDocument();
   });
 
-  it("shows an empty state when there are no recent runs", async () => {
-    stubFetch({ recentRuns: [] });
+  it("shows an empty state when there is no recent activity", async () => {
+    stubFetch({ recentActivity: [] });
     renderActivity();
 
-    expect(await screen.findByText("No runs yet.")).toBeInTheDocument();
+    expect(await screen.findByText("No activity yet.")).toBeInTheDocument();
   });
 
-  it("polls the recent-runs endpoint on an interval", async () => {
+  it("polls the recent-activity endpoint on an interval", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const fetchMock = vi.fn((url: unknown) => {
       const href = String(url);
       if (href.includes("/strategy/free-tier-usage/")) {
         return Promise.resolve({ ok: true, json: async () => flagshipUsage });
       }
-      if (href.includes("/strategy/runs/recent")) {
+      if (href.includes("/strategy/activity/recent")) {
         return Promise.resolve({ ok: true, json: async () => [] });
       }
       return Promise.resolve({ ok: true, json: async () => emptyLeaderboard });
@@ -291,16 +322,16 @@ describe("ActivityPage", () => {
 
     renderActivity();
     await vi.waitFor(() =>
-      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("runs/recent"))).toHaveLength(
-        1,
-      ),
+      expect(
+        fetchMock.mock.calls.filter(([url]) => String(url).includes("activity/recent")),
+      ).toHaveLength(1),
     );
 
     await vi.advanceTimersByTimeAsync(10_000);
     await vi.waitFor(() =>
-      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("runs/recent"))).toHaveLength(
-        2,
-      ),
+      expect(
+        fetchMock.mock.calls.filter(([url]) => String(url).includes("activity/recent")),
+      ).toHaveLength(2),
     );
 
     vi.useRealTimers();

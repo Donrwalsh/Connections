@@ -2,16 +2,16 @@ import { useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { FreeTierBudgetWidget } from "../../components/benchmark/FreeTierBudgetWidget";
 import { FreeTierDispatchModal } from "../../components/benchmark/FreeTierDispatchModal";
-import { RecentRunsTable } from "../../components/benchmark/RecentRunsTable";
+import { RecentActivityTable } from "../../components/benchmark/RecentActivityTable";
 import type { FreeTierModelSets } from "../../components/benchmark/StrategyTable";
-import { fetchFreeTierUsage, fetchLeaderboard, fetchRecentRuns } from "../../data/benchmark/api";
+import { fetchFreeTierUsage, fetchLeaderboard, fetchRecentActivity } from "../../data/benchmark/api";
 import { sumSpendUsd } from "../../data/benchmark/metrics";
 
-// How often the recent-runs table refetches. Frequent enough to feel "live"
-// while a dispatch cycle is running without hammering the endpoint — same
-// order of magnitude as FreeTierBudgetWidget's dispatch-status poll (30s),
-// just faster since new rows here are the whole point of the table.
-const RECENT_RUNS_POLL_MS = 10_000;
+// How often the recent-activity table refetches. Frequent enough to feel
+// "live" while a dispatch cycle is running without hammering the endpoint —
+// same order of magnitude as FreeTierBudgetWidget's dispatch-status poll
+// (30s), just faster since new rows here are the whole point of the table.
+const RECENT_ACTIVITY_POLL_MS = 10_000;
 
 /** Operational overview: daily free-token usage for both provider tiers,
  * plus a live feed of the most recent runs across every strategy/model —
@@ -49,13 +49,13 @@ export function ActivityPage() {
   const miniSpentUsd = sumSpendUsd(llmRows, freeTierModels.mini);
 
   const {
-    data: recentRuns,
-    isLoading: isLoadingRuns,
-    error: recentRunsError,
+    data: recentActivity,
+    isLoading: isLoadingActivity,
+    error: recentActivityError,
   } = useQuery({
-    queryKey: ["recent-runs"],
-    queryFn: ({ signal }) => fetchRecentRuns(signal),
-    refetchInterval: RECENT_RUNS_POLL_MS,
+    queryKey: ["recent-activity"],
+    queryFn: ({ signal }) => fetchRecentActivity(signal),
+    refetchInterval: RECENT_ACTIVITY_POLL_MS,
   });
 
   return (
@@ -90,14 +90,18 @@ export function ActivityPage() {
         />
       ) : null}
 
-      <section className="bench-page__section" aria-label="Recent runs">
+      <section className="bench-page__section" aria-label="Recent activity">
         <div className="bench-page__section-head">
-          <h2 className="bench-page__section-title">Recent Runs</h2>
+          <h2 className="bench-page__section-title">Recent Activity</h2>
         </div>
 
-        {isLoadingRuns ? <p className="bench-muted">Loading runs…</p> : null}
-        {recentRunsError ? <p className="bench-error">Couldn&apos;t load recent runs.</p> : null}
-        {!isLoadingRuns && !recentRunsError ? <RecentRunsTable runs={recentRuns ?? []} /> : null}
+        {isLoadingActivity ? <p className="bench-muted">Loading activity…</p> : null}
+        {recentActivityError ? (
+          <p className="bench-error">Couldn&apos;t load recent activity.</p>
+        ) : null}
+        {!isLoadingActivity && !recentActivityError ? (
+          <RecentActivityTable events={recentActivity ?? []} />
+        ) : null}
       </section>
     </div>
   );
