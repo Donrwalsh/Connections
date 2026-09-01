@@ -108,7 +108,7 @@ export async function judgeCategory(
       rawResponseText: JSON.stringify(result.object),
     };
   } catch (err) {
-    throw classifyModelCallError(err, {
+    throw classifyModelCallError(err, resolvedProvider, {
       model: getModelName(resolvedProvider, model),
       latencyMs: Date.now() - startTime,
     });
