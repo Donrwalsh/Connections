@@ -499,6 +499,19 @@ describe("App (e2e)", () => {
     }
   });
 
+  it("GET /dispatch/evaluate-categories/coverage reports eligible/judged/pending totals", async () => {
+    const res = await request(app.getHttpServer()).get("/dispatch/evaluate-categories/coverage");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      eligible: expect.any(Number),
+      judged: expect.any(Number),
+      pending: expect.any(Number),
+    });
+    expect(res.body.pending).toBe(res.body.eligible - res.body.judged);
+    expect(res.body.judged).toBeLessThanOrEqual(res.body.eligible);
+  });
+
   describe("free-tier dispatch", () => {
     beforeEach(async () => {
       // This suite's tests assume genuinely fresh 'mini'/'flagship' rows —

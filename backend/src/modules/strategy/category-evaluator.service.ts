@@ -47,6 +47,17 @@ export interface EvaluateProposalResult {
   reason?: string;
 }
 
+/** How much of the judge-eligible backlog has been evaluated — `eligible`
+ * is every used proposal whose guess succeeded, `judged` is how many of
+ * those already have a CategoryEvaluation row (a callError row counts:
+ * enqueuePending won't re-pick it without force), `pending` is the
+ * difference and equals what the next dispatch would enqueue. */
+export interface CategoryEvaluationCoverage {
+  eligible: number;
+  judged: number;
+  pending: number;
+}
+
 @Injectable()
 export class CategoryEvaluatorService {
   private readonly logger = new Logger(CategoryEvaluatorService.name);
@@ -129,6 +140,30 @@ export class CategoryEvaluatorService {
     }
 
     return { enqueued: llmProposalIds.length, llmProposalIds };
+  }
+
+  /**
+   * Judge-coverage totals for the Activity page's "how much is left to
+   * dispatch" widget. `eligible` / `judged` come from the same used +
+   * successful-guess join as enqueuePending, with a LEFT JOIN onto
+   * CategoryEvaluation; `pending` (eligible − judged) is exactly what an
+   * un-forced dispatch would enqueue next.
+   */
+  async getCoverage(): Promise<CategoryEvaluationCoverage> {
+    const row = await this.llmProposalRepo
+      .createQueryBuilder("proposal")
+      .innerJoin("proposal.guess", "guess", "guess.result = :success", {
+        success: GuessResult.SUCCESS,
+      })
+      .leftJoin(CategoryEvaluation, "ce", 'ce."llmProposalId" = proposal.id')
+      .where("proposal.status = :used", { used: LlmProposalStatus.USED })
+      .select("COUNT(*)::int", "eligible")
+      .addSelect("COUNT(ce.id)::int", "judged")
+      .getRawOne<{ eligible: number | string; judged: number | string }>();
+
+    const eligible = Number(row?.eligible ?? 0);
+    const judged = Number(row?.judged ?? 0);
+    return { eligible, judged, pending: eligible - judged };
   }
 
   /**

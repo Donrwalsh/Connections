@@ -253,3 +253,73 @@ describe("CategoryEvaluatorService.enqueuePending", () => {
     );
   });
 });
+
+describe("CategoryEvaluatorService.getCoverage", () => {
+  let service: CategoryEvaluatorService;
+  let qb: Record<string, jest.Mock>;
+
+  beforeEach(async () => {
+    process.env.INTERNAL_API_KEY = "test-key";
+    qb = {
+      innerJoin: jest.fn().mockReturnThis(),
+      leftJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      getRawOne: jest.fn().mockResolvedValue({ eligible: 50, judged: 42 }),
+    };
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        CategoryEvaluatorService,
+        {
+          provide: getRepositoryToken(CategoryEvaluation),
+          useValue: { findOne: jest.fn(), save: jest.fn() },
+        },
+        {
+          provide: getRepositoryToken(LlmProposal),
+          useValue: { findOne: jest.fn(), createQueryBuilder: jest.fn().mockReturnValue(qb) },
+        },
+        { provide: getRepositoryToken(Puzzle), useValue: { findOne: jest.fn() } },
+        { provide: OrchestratorService, useValue: { judgeCategory: jest.fn() } },
+        { provide: LLM_OPENAI_QUEUE, useValue: { add: jest.fn() } },
+        { provide: LLM_OLLAMA_QUEUE, useValue: { add: jest.fn() } },
+        { provide: LLM_GOOGLE_QUEUE, useValue: { add: jest.fn() } },
+      ],
+    }).compile();
+    service = module.get(CategoryEvaluatorService);
+  });
+
+  afterEach(() => {
+    delete process.env.INTERNAL_API_KEY;
+    jest.restoreAllMocks();
+  });
+
+  it("counts judge-eligible proposals (used + successful) against how many have an evaluation row", async () => {
+    const result = await service.getCoverage();
+
+    expect(result).toEqual({ eligible: 50, judged: 42, pending: 8 });
+    expect(qb.where).toHaveBeenCalledWith("proposal.status = :used", {
+      used: LlmProposalStatus.USED,
+    });
+    expect(qb.innerJoin).toHaveBeenCalledWith("proposal.guess", "guess", "guess.result = :success", {
+      success: GuessResult.SUCCESS,
+    });
+    expect(qb.leftJoin).toHaveBeenCalledWith(
+      CategoryEvaluation,
+      "ce",
+      'ce."llmProposalId" = proposal.id',
+    );
+  });
+
+  it("coerces string counts from the raw driver and derives pending", async () => {
+    qb.getRawOne.mockResolvedValue({ eligible: "12", judged: "12" });
+
+    expect(await service.getCoverage()).toEqual({ eligible: 12, judged: 12, pending: 0 });
+  });
+
+  it("treats a missing row as all-zero", async () => {
+    qb.getRawOne.mockResolvedValue(undefined);
+
+    expect(await service.getCoverage()).toEqual({ eligible: 0, judged: 0, pending: 0 });
+  });
+});

@@ -354,4 +354,13 @@ export class DispatchController {
       ...result,
     };
   }
+
+  // Read-only judge-coverage totals for the Activity page's "Category
+  // judging" widget: how many successful LLM guesses are judge-eligible,
+  // how many have been judged, and how many still need a dispatch. Not
+  // password-gated — it enqueues nothing.
+  @Get("evaluate-categories/coverage")
+  async categoryEvaluationCoverage() {
+    return this.categoryEvaluatorService.getCoverage();
+  }
 }
