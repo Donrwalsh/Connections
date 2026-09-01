@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { loadEnv } from "../../config/env";
@@ -10,6 +10,7 @@ import {
   CategoryEvalVerdict,
 } from "./entities/category-evaluation.entity";
 import { LlmProposal, LlmProposalStatus } from "./entities/llm-proposal.entity";
+import { StrategyRun } from "./entities/strategy-run.entity";
 import { GuessResult } from "./entities/guess.entity";
 import { OrchestratorService } from "./orchestrator.service";
 import { Queue } from "bullmq";
@@ -71,6 +72,8 @@ export class CategoryEvaluatorService {
     private readonly llmProposalRepo: Repository<LlmProposal>,
     @InjectRepository(Puzzle)
     private readonly puzzleRepo: Repository<Puzzle>,
+    @InjectRepository(StrategyRun)
+    private readonly strategyRunRepo: Repository<StrategyRun>,
     @Inject(OrchestratorService)
     private readonly orchestrator: OrchestratorService,
     @Inject(LLM_OPENAI_QUEUE) private readonly llmOpenAIQueue: Queue,
@@ -164,6 +167,24 @@ export class CategoryEvaluatorService {
     const eligible = Number(row?.eligible ?? 0);
     const judged = Number(row?.judged ?? 0);
     return { eligible, judged, pending: eligible - judged };
+  }
+
+  /**
+   * Remove every CategoryEvaluation row for one strategy run — for
+   * re-judging a run from scratch (a later dispatch then re-picks its
+   * now-unevaluated successful proposals). 404s on an unknown run id, the
+   * same as StrategyRunStore.deleteRun; unlike that, it does not care
+   * whether the run is still RUNNING, since evaluations are written well
+   * after a run finishes.
+   */
+  async deleteRunEvaluations(runId: number): Promise<{ deleted: number }> {
+    const run = await this.strategyRunRepo.findOne({ where: { id: runId } });
+    if (!run) {
+      throw new NotFoundException(`No strategy run with id: ${runId}`);
+    }
+
+    const { affected } = await this.categoryEvalRepo.delete({ strategyRunId: runId });
+    return { deleted: affected ?? 0 };
   }
 
   /**

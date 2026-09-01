@@ -3,6 +3,7 @@ import { getRepositoryToken } from "@nestjs/typeorm";
 import { CategoryEvaluatorService, matchAnswerGroup } from "./category-evaluator.service";
 import { CategoryEvaluation, CategoryEvalStatus, CategoryEvalVerdict } from "./entities/category-evaluation.entity";
 import { LlmProposal, LlmProposalStatus } from "./entities/llm-proposal.entity";
+import { StrategyRun } from "./entities/strategy-run.entity";
 import { Guess, GuessResult } from "./entities/guess.entity";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { OrchestratorService } from "./orchestrator.service";
@@ -75,6 +76,7 @@ describe("CategoryEvaluatorService.evaluateProposal", () => {
         { provide: getRepositoryToken(CategoryEvaluation), useValue: catEvalRepo },
         { provide: getRepositoryToken(LlmProposal), useValue: llmProposalRepo },
         { provide: getRepositoryToken(Puzzle), useValue: puzzleRepo },
+        { provide: getRepositoryToken(StrategyRun), useValue: { findOne: jest.fn(), delete: jest.fn() } },
         { provide: OrchestratorService, useValue: orchestrator },
         { provide: LLM_OPENAI_QUEUE, useValue: noopQueue },
         { provide: LLM_OLLAMA_QUEUE, useValue: noopQueue },
@@ -198,6 +200,10 @@ describe("CategoryEvaluatorService.enqueuePending", () => {
         { provide: getRepositoryToken(CategoryEvaluation), useValue: { findOne: jest.fn(), save: jest.fn() } },
         { provide: getRepositoryToken(LlmProposal), useValue: { findOne: jest.fn(), createQueryBuilder: jest.fn().mockReturnValue(qb) } },
         { provide: getRepositoryToken(Puzzle), useValue: { findOne: jest.fn() } },
+        {
+          provide: getRepositoryToken(StrategyRun),
+          useValue: { findOne: jest.fn(), delete: jest.fn() },
+        },
         { provide: OrchestratorService, useValue: { judgeCategory: jest.fn() } },
         { provide: LLM_OPENAI_QUEUE, useValue: { add: openaiAdd } },
         { provide: LLM_OLLAMA_QUEUE, useValue: { add: jest.fn() } },
@@ -280,6 +286,10 @@ describe("CategoryEvaluatorService.getCoverage", () => {
           useValue: { findOne: jest.fn(), createQueryBuilder: jest.fn().mockReturnValue(qb) },
         },
         { provide: getRepositoryToken(Puzzle), useValue: { findOne: jest.fn() } },
+        {
+          provide: getRepositoryToken(StrategyRun),
+          useValue: { findOne: jest.fn(), delete: jest.fn() },
+        },
         { provide: OrchestratorService, useValue: { judgeCategory: jest.fn() } },
         { provide: LLM_OPENAI_QUEUE, useValue: { add: jest.fn() } },
         { provide: LLM_OLLAMA_QUEUE, useValue: { add: jest.fn() } },
@@ -321,5 +331,62 @@ describe("CategoryEvaluatorService.getCoverage", () => {
     qb.getRawOne.mockResolvedValue(undefined);
 
     expect(await service.getCoverage()).toEqual({ eligible: 0, judged: 0, pending: 0 });
+  });
+});
+
+describe("CategoryEvaluatorService.deleteRunEvaluations", () => {
+  let service: CategoryEvaluatorService;
+  let catEvalRepo: { delete: jest.Mock };
+  let strategyRunRepo: { findOne: jest.Mock };
+
+  beforeEach(async () => {
+    process.env.INTERNAL_API_KEY = "test-key";
+    catEvalRepo = { delete: jest.fn().mockResolvedValue({ affected: 3 }) };
+    strategyRunRepo = { findOne: jest.fn().mockResolvedValue({ id: 42 }) };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        CategoryEvaluatorService,
+        {
+          provide: getRepositoryToken(CategoryEvaluation),
+          useValue: { findOne: jest.fn(), save: jest.fn(), ...catEvalRepo },
+        },
+        { provide: getRepositoryToken(LlmProposal), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(Puzzle), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(StrategyRun), useValue: strategyRunRepo },
+        { provide: OrchestratorService, useValue: { judgeCategory: jest.fn() } },
+        { provide: LLM_OPENAI_QUEUE, useValue: { add: jest.fn() } },
+        { provide: LLM_OLLAMA_QUEUE, useValue: { add: jest.fn() } },
+        { provide: LLM_GOOGLE_QUEUE, useValue: { add: jest.fn() } },
+      ],
+    }).compile();
+    service = module.get(CategoryEvaluatorService);
+  });
+
+  afterEach(() => {
+    delete process.env.INTERNAL_API_KEY;
+    jest.restoreAllMocks();
+  });
+
+  it("deletes every CategoryEvaluation row for the run and reports the count", async () => {
+    const result = await service.deleteRunEvaluations(42);
+
+    expect(result).toEqual({ deleted: 3 });
+    expect(catEvalRepo.delete).toHaveBeenCalledWith({ strategyRunId: 42 });
+  });
+
+  it("reports zero when the run has no evaluations", async () => {
+    catEvalRepo.delete.mockResolvedValue({ affected: 0 });
+
+    expect(await service.deleteRunEvaluations(42)).toEqual({ deleted: 0 });
+  });
+
+  it("throws NotFoundException for an unknown run and deletes nothing", async () => {
+    strategyRunRepo.findOne.mockResolvedValue(null);
+
+    await expect(service.deleteRunEvaluations(999)).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(catEvalRepo.delete).not.toHaveBeenCalled();
   });
 });
