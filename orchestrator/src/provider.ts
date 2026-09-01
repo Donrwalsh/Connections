@@ -6,6 +6,8 @@ import type { LanguageModel } from "ai";
 export const DEFAULT_OPENAI_MODEL = "gpt-4.1-nano";
 export const DEFAULT_OLLAMA_MODEL = "llama3.2";
 export const DEFAULT_GOOGLE_MODEL = "gemini-3.6-flash";
+export const DEFAULT_JUDGE_MODEL = "gpt-4.1-nano";
+export const DEFAULT_JUDGE_PROVIDER: ModelProvider = "openai";
 export const DEFAULT_CONTEXT_WINDOW = 8192;
 
 export type ModelProvider = "openai" | "ollama" | "google";

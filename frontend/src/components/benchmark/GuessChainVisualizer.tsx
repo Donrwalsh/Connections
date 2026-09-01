@@ -231,6 +231,73 @@ function ProposalRow({ proposal }: { proposal: LlmProposalRecord }) {
       ) : (
         <span className="bench-proposal__unused-label">Not submitted</span>
       )}
+      {proposal.categoryEvaluation ? (
+        <>
+          <StatusPill
+            label={categoryVerdictLabel(proposal.categoryEvaluation.verdict)}
+            tone={categoryVerdictTone(proposal.categoryEvaluation.verdict)}
+          />
+          <details className="bench-step__detail">
+            <summary>Category judge</summary>
+            <div className="bench-proposal__judge">
+              <p><strong>Proposed:</strong> {proposal.categoryEvaluation.proposedCategory}</p>
+              <p><strong>Actual:</strong> {proposal.categoryEvaluation.actualCategory}</p>
+              {proposal.categoryEvaluation.rationale ? (
+                <p>{proposal.categoryEvaluation.rationale}</p>
+              ) : null}
+              <p className="bench-mono bench-muted">
+                {[
+                  `${proposal.categoryEvaluation.judgeProvider}/${proposal.categoryEvaluation.judgeModel}`,
+                  proposal.categoryEvaluation.totalTokens !== null
+                    ? `${proposal.categoryEvaluation.totalTokens} tok`
+                    : null,
+                  proposal.categoryEvaluation.latencyMs !== null
+                    ? formatDuration(proposal.categoryEvaluation.latencyMs)
+                    : null,
+                  proposal.categoryEvaluation.statusCode !== null
+                    ? `HTTP ${proposal.categoryEvaluation.statusCode}`
+                    : null,
+                ].filter(Boolean).join(" · ")}
+              </p>
+              {proposal.categoryEvaluation.errorMessage ? (
+                <p className="bench-error">
+                  {proposal.categoryEvaluation.errorName}: {proposal.categoryEvaluation.errorMessage}
+                </p>
+              ) : null}
+              {proposal.categoryEvaluation.requestBody !== null ? (
+                <details className="bench-step__detail">
+                  <summary>Judge request</summary>
+                  <pre className="bench-step__pre">
+                    {JSON.stringify(proposal.categoryEvaluation.requestBody, null, 2)}
+                  </pre>
+                </details>
+              ) : null}
+              {proposal.categoryEvaluation.responseHeaders !== null ? (
+                <details className="bench-step__detail">
+                  <summary>Judge response headers</summary>
+                  <pre className="bench-step__pre">
+                    {JSON.stringify(proposal.categoryEvaluation.responseHeaders, null, 2)}
+                  </pre>
+                </details>
+              ) : null}
+              {proposal.categoryEvaluation.responseBody !== null ? (
+                <details className="bench-step__detail">
+                  <summary>Judge response body</summary>
+                  <pre className="bench-step__pre">
+                    {JSON.stringify(proposal.categoryEvaluation.responseBody, null, 2)}
+                  </pre>
+                </details>
+              ) : null}
+              {proposal.categoryEvaluation.rawResponseText ? (
+                <details className="bench-step__detail">
+                  <summary>Judge raw output</summary>
+                  <pre className="bench-step__pre">{proposal.categoryEvaluation.rawResponseText}</pre>
+                </details>
+              ) : null}
+            </div>
+          </details>
+        </>
+      ) : null}
     </li>
   );
 }
@@ -263,6 +330,25 @@ function solvePromptStatusLabel(status: SolvePromptRecord["status"]): string {
     case "parsed":
       return "Parsed";
   }
+}
+
+function categoryVerdictLabel(verdict: string | null): string {
+  switch (verdict) {
+    case "correct":
+      return "Category: correct";
+    case "partial":
+      return "Category: partial";
+    case "lucky":
+      return "Category: lucky";
+    default:
+      return "Category: judge failed";
+  }
+}
+
+function categoryVerdictTone(verdict: string | null): "completed" | "neutral" | "failed" {
+  if (verdict === "correct") return "completed";
+  if (verdict === "partial") return "neutral";
+  return "failed";
 }
 
 function issueTagLabel(tag: string): string {

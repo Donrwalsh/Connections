@@ -34,4 +34,26 @@ describe("loadEnv", () => {
       ).toBe("secret");
     });
   });
+
+  describe("JUDGE_MODEL / JUDGE_PROVIDER", () => {
+    it("should default to gpt-4.1-nano / openai when unset", () => {
+      expect(loadEnv(baseEnv).JUDGE_MODEL).toBe("gpt-4.1-nano");
+      expect(loadEnv(baseEnv).JUDGE_PROVIDER).toBe("openai");
+    });
+
+    it("should pass through configured values", () => {
+      const env = { ...baseEnv, JUDGE_MODEL: "gpt-5-nano", JUDGE_PROVIDER: "google" };
+      expect(loadEnv(env).JUDGE_MODEL).toBe("gpt-5-nano");
+      expect(loadEnv(env).JUDGE_PROVIDER).toBe("google");
+    });
+
+    it("should accept each supported provider", () => {
+      expect(loadEnv({ ...baseEnv, JUDGE_PROVIDER: "google" }).JUDGE_PROVIDER).toBe("google");
+      expect(loadEnv({ ...baseEnv, JUDGE_PROVIDER: "ollama" }).JUDGE_PROVIDER).toBe("ollama");
+    });
+
+    it("should throw for an unrecognized JUDGE_PROVIDER", () => {
+      expect(() => loadEnv({ ...baseEnv, JUDGE_PROVIDER: "bogus" })).toThrow(/JUDGE_PROVIDER/);
+    });
+  });
 });

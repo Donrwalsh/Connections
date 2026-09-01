@@ -89,6 +89,17 @@ describe("App (e2e)", () => {
               model: "e2e-fake-model",
             }),
           );
+        } else if (req.url === "/judge-category" && req.method === "POST") {
+          // Fake judge: always returns a fixed "correct" verdict.
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              verdict: "correct",
+              rationale: "The proposed category is identical to the actual category.",
+              model: "e2e-fake-judge-model",
+              latencyMs: 100,
+            }),
+          );
         } else {
           res.writeHead(404);
           res.end();
@@ -466,6 +477,25 @@ describe("App (e2e)", () => {
 
     expect(res.status).toBe(400);
     expect(res.body.message).toContain("puzzle date(s) exist");
+  });
+
+  it("POST /dispatch/evaluate-categories enqueues judge jobs for un-evaluated successful proposals", async () => {
+    const res = await request(app.getHttpServer()).post("/dispatch/evaluate-categories?limit=2");
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({
+      message: expect.stringContaining("category-evaluation job(s)"),
+      enqueued: expect.any(Number),
+      llmProposalIds: expect.any(Array),
+    });
+    expect(res.body.enqueued).toBe(res.body.llmProposalIds.length);
+    expect(res.body.enqueued).toBeLessThanOrEqual(2);
+
+    // Drop whatever judge jobs this queued so they don't linger in the
+    // shared test Redis (the e2e suite runs no worker to drain them).
+    for (const id of res.body.llmProposalIds as number[]) {
+      await llmOpenAIQueue.remove(`cat-eval-${id}`);
+    }
   });
 
   describe("free-tier dispatch", () => {

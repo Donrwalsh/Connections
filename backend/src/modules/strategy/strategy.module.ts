@@ -5,6 +5,7 @@ import { QueueModule } from "../queue/queue.module";
 import { Guess } from "./entities/guess.entity";
 import { LlmProposal } from "./entities/llm-proposal.entity";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
+import { CategoryEvaluation } from "./entities/category-evaluation.entity";
 import { StrategyRun } from "./entities/strategy-run.entity";
 import { GoogleRateLimitHold } from "./entities/google-rate-limit-hold.entity";
 import { StrategyController } from "./strategy.controller";
@@ -12,6 +13,7 @@ import { StrategyService } from "./strategy.service";
 import { LlmStrategyRunner } from "./llm-strategy-runner.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { OrchestratorService } from "./orchestrator.service";
+import { CategoryEvaluatorService } from "./category-evaluator.service";
 import { FreeTierUsageService } from "./free-tier-usage.service";
 import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
 import { GoogleRpdResumeService } from "./google-rpd-resume.service";
@@ -27,6 +29,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
       Guess,
       LlmProposal,
       SolvePrompt,
+      CategoryEvaluation,
       GoogleRateLimitHold,
     ]),
     QueueModule,
@@ -39,6 +42,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     StrategyRunStore,
     LlmStrategyRunner,
     OrchestratorService,
+    CategoryEvaluatorService,
     FreeTierUsageService,
     GoogleRateLimitHoldService,
     GoogleRpdResumeService,
@@ -47,6 +51,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
   exports: [
     StrategyService,
     LlmStrategyRunner,
+    CategoryEvaluatorService,
     FreeTierUsageService,
     GoogleRateLimitHoldService,
     GoogleRpdResumeService,

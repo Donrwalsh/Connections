@@ -15,6 +15,7 @@ import { StrategyService } from "../strategy/strategy.service";
 import { GameService } from "../game/game.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import { ModelMetadataRefreshService } from "../supported-model/model-metadata-refresh.service";
+import { CategoryEvaluatorService } from "../strategy/category-evaluator.service";
 import {
   FreeTierDispatchService,
   FreeTierDispatchStatusDto,
@@ -48,6 +49,8 @@ export class DispatchController {
     @Inject(FreeTierDispatchService) private readonly freeTierDispatchService: FreeTierDispatchService,
     @Inject(ModelMetadataRefreshService)
     private readonly modelMetadataRefreshService: ModelMetadataRefreshService,
+    @Inject(CategoryEvaluatorService)
+    private readonly categoryEvaluatorService: CategoryEvaluatorService,
   ) {}
 
   @Post("strategy/:strategyName/:date")
@@ -325,5 +328,30 @@ export class DispatchController {
   async refreshModelMetadata() {
     const result = await this.modelMetadataRefreshService.refreshAll();
     return { message: "Model metadata refresh complete", ...result };
+  }
+
+  // Enqueues LLM-judge evaluation jobs for the most recent successful LLM
+  // guesses that don't have a CategoryEvaluation yet — one job per
+  // proposal, onto the judge provider's LLM queue (see
+  // CategoryEvaluatorService). Password-gated like the other paid-call
+  // dispatch routes.
+  @Post("evaluate-categories")
+  @UseGuards(DispatchAuthGuard)
+  @ApiQuery({
+    name: "limit",
+    type: Number,
+    required: false,
+    description: "How many un-evaluated proposals to enqueue (default 50, max 500).",
+    example: 50,
+  })
+  @ApiBody({ type: DispatchAuthDto })
+  async evaluateCategories(
+    @Query("limit", new ParseIntPipe({ optional: true })) limit?: number,
+  ) {
+    const result = await this.categoryEvaluatorService.enqueuePending({ limit });
+    return {
+      message: `Enqueued ${result.enqueued} category-evaluation job(s)`,
+      ...result,
+    };
   }
 }

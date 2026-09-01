@@ -645,6 +645,15 @@
   color: #b04a3f;
 }
 
+/* Category-judge diagnostics for a used proposal — same restrained inset as
+ * .bench-call-error, just a little padding and a left border, no new tokens. */
+.bench-proposal__judge {
+  margin: 0.4rem 0 0;
+  padding: 0.4rem 0.6rem;
+  border-left: 2px solid var(--border);
+  font-size: 0.85rem;
+}
+
 /* Plain guess list — non-LLM strategies (no prompt/proposal chain to show). */
 .bench-guess-list {
   display: flex;

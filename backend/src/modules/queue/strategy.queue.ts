@@ -69,6 +69,27 @@ export function queueForStrategy(
 }
 
 /**
+ * The LLM queue a judge job rides — the judge provider's own queue, so
+ * category-evaluation jobs share that provider's worker concurrency and
+ * rate budget with its solve runs (see the design doc).
+ */
+export function queueForJudgeProvider(
+  provider: "openai" | "ollama" | "google",
+  openAIQueue: Queue,
+  ollamaQueue: Queue,
+  googleQueue: Queue,
+): Queue {
+  if (provider === "ollama") return ollamaQueue;
+  if (provider === "google") return googleQueue;
+  return openAIQueue;
+}
+
+/** Deterministic job id so a re-enqueue of a still-pending evaluation collapses. */
+export function categoryEvalJobId(llmProposalId: number): string {
+  return `cat-eval-${llmProposalId}`;
+}
+
+/**
  * Deterministic job id for a strategy run so that duplicate enqueues of the
  * same (puzzle, strategy, trial) collapse to a single BullMQ job.
  */

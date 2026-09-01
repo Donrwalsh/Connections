@@ -124,6 +124,9 @@ export function reconstructSolvePrompts(
                 guessedAt: guess.guessedAt,
               }
             : null,
+          // Default; buildSolvePromptDtos overwrites this by walking the
+          // returned dtos once it has the run's CategoryEvaluation rows.
+          categoryEvaluation: null,
         };
       });
 

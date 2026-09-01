@@ -8,7 +8,12 @@ import { createHash, createHmac, timingSafeEqual } from "crypto";
 import { urlencoded, type RequestHandler } from "express";
 import { loadEnv } from "./config/env";
 import { puzzleQueue } from "./modules/queue/puzzle.queue";
-import { strategyQueue, llmOpenAIQueue, llmOllamaQueue, llmGoogleQueue } from "./modules/queue/strategy.queue";
+import {
+  strategyQueue,
+  llmOpenAIQueue,
+  llmOllamaQueue,
+  llmGoogleQueue,
+} from "./modules/queue/strategy.queue";
 
 const BULL_LOGIN_PATH = "/bull/login";
 const BULL_BOARD_PATH = "/bull/queues";

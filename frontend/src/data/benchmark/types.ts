@@ -104,6 +104,16 @@ export interface LeaderboardRow {
    * attempted, regardless of outcome. null for deterministic/shuffle rows
    * (no SolvePrompt rows at all), same as avgCostUsd. */
   avgIssues: number | null;
+  /** Category-reasoning quality for this model's successful guesses, from
+   * the LLM judge. correct/partial/lucky are raw verdict counts;
+   * categoryEvaluated is their sum. categoryAccuracy is
+   * correct / categoryEvaluated * 100, or null when nothing has been
+   * evaluated (also the case for every deterministic/shuffle row). */
+  categoryCorrect: number;
+  categoryPartial: number;
+  categoryLucky: number;
+  categoryEvaluated: number;
+  categoryAccuracy: number | null;
   /** Current model metadata (not run-time-historical, unlike cost) — see
    * SupportedModel on the backend. null until the model has been through a
    * metadata refresh, or for deterministic/shuffle rows. */
@@ -278,6 +288,34 @@ export type LlmProposalStatusValue =
   | "supersededByRetry"
   | "invalidItems";
 
+export type CategoryVerdictValue = "correct" | "partial" | "lucky";
+
+/** One LLM-judge verdict on a used proposal's category — see
+ * CategoryEvaluationDto on the backend. Present only on a submitted
+ * proposal whose guess succeeded and that has been evaluated. `verdict` is
+ * null on a `callError` row. */
+export interface CategoryEvaluationRecord {
+  verdict: CategoryVerdictValue | null;
+  status: "judged" | "callError";
+  proposedCategory: string;
+  actualCategory: string;
+  rationale: string | null;
+  judgeModel: string;
+  judgeProvider: string;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  latencyMs: number | null;
+  statusCode: number | null;
+  errorName: string | null;
+  errorMessage: string | null;
+  requestBody: unknown | null;
+  responseHeaders: Record<string, string> | null;
+  responseBody: unknown | null;
+  rawResponseText: string | null;
+  evaluatedAt: string;
+}
+
 /** One candidate group parsed out of a solve step's response. `guess` is
  * populated only when this proposal was actually submitted (status "used"). */
 export interface LlmProposalRecord {
@@ -286,6 +324,7 @@ export interface LlmProposalRecord {
   category: string;
   status: LlmProposalStatusValue;
   guess: { sequenceNumber: number; result: GuessResultValue; guessedAt: string } | null;
+  categoryEvaluation: CategoryEvaluationRecord | null;
 }
 
 export type SolvePromptTypeValue = "initialSolve" | "retry";

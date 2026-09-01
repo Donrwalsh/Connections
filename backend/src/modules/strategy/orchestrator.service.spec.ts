@@ -369,4 +369,51 @@ describe("OrchestratorService", () => {
       },
     });
   });
+
+  describe("judgeCategory", () => {
+    it("POSTs categories to /judge-category and maps the success body", async () => {
+      const fetchMock = jest.spyOn(global, "fetch").mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            verdict: "lucky",
+            rationale: "Right words, wrong reason.",
+            model: "gpt-4.1-nano",
+            latencyMs: 42,
+            usage: { promptTokens: 100, completionTokens: 12, totalTokens: 112 },
+            requestBody: { a: 1 },
+            responseId: "r1",
+            responseHeaders: { h: "v" },
+            responseBody: { ok: true },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+
+      const outcome = await service.judgeCategory("Fruits", "___ COBBLER", "gpt-4.1-nano", "openai");
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/judge-category"),
+        expect.objectContaining({ method: "POST" }),
+      );
+      const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+      expect(body).toEqual({
+        proposedCategory: "Fruits",
+        actualCategory: "___ COBBLER",
+        model: "gpt-4.1-nano",
+        provider: "openai",
+      });
+      expect(outcome).toEqual({
+        ok: true,
+        data: expect.objectContaining({ verdict: "lucky", rationale: "Right words, wrong reason." }),
+      });
+    });
+
+    it("returns { ok: false } with the failure detail on a non-2xx response", async () => {
+      jest.spyOn(global, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ error: "boom", code: "model_error" }), { status: 502 }),
+      );
+      const outcome = await service.judgeCategory("A", "B", "gpt-4.1-nano", "openai");
+      expect(outcome.ok).toBe(false);
+    });
+  });
 });

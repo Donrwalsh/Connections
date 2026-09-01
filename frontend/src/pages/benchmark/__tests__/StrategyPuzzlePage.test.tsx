@@ -40,6 +40,11 @@ function makeLeaderboardRow(overrides: Partial<LeaderboardRow> = {}): Leaderboar
     avgCostUsd: null,
     totalCostUsd: null,
     avgIssues: null,
+    categoryCorrect: 0,
+    categoryPartial: 0,
+    categoryLucky: 0,
+    categoryEvaluated: 0,
+    categoryAccuracy: null,
     contextWindow: null,
     paramCount: null,
     providerDescription: null,
@@ -144,6 +149,80 @@ describe("StrategyPuzzlePage", () => {
     const guessesItem = screen.getByText("Avg guesses").closest(".bench-summary__item");
     expect(guessesItem?.textContent).toBe("Avg guesses1,325.4");
     expect(screen.getByText("Queued 1,500")).toBeInTheDocument();
+  });
+
+  it("shows the Category IQ breakdown for an LLM row with evaluated categories", async () => {
+    stubFetch({
+      leaderboard: {
+        deterministic: [],
+        llm: [
+          makeLeaderboardRow({
+            id: "gpt-4.1-nano-2025-04-14",
+            strategyName: "llm-openai",
+            modelName: "gpt-4.1-nano-2025-04-14",
+            kind: "llm",
+            categoryCorrect: 6,
+            categoryPartial: 2,
+            categoryLucky: 2,
+            categoryEvaluated: 10,
+            categoryAccuracy: 60,
+          }),
+        ],
+      },
+      history: {
+        rows: [makeRow({ strategyName: "llm-openai", modelName: "gpt-4.1-nano-2025-04-14" })],
+        meta: { total: 1, page: 1, limit: 100 },
+      },
+    });
+
+    renderStrategy("gpt-4.1-nano-2025-04-14");
+
+    expect(await screen.findByText("Category IQ")).toBeInTheDocument();
+    const item = screen.getByText("Category IQ").closest(".bench-summary__item");
+    expect(within(item as HTMLElement).getByText("60%")).toBeInTheDocument();
+    expect(within(item as HTMLElement).getByText(/6 correct · 2 partial · 2 lucky/)).toBeInTheDocument();
+  });
+
+  it("shows 'not yet evaluated' for Category IQ when nothing has been judged", async () => {
+    stubFetch({
+      leaderboard: {
+        deterministic: [],
+        llm: [
+          makeLeaderboardRow({
+            id: "gpt-4.1-nano-2025-04-14",
+            strategyName: "llm-openai",
+            modelName: "gpt-4.1-nano-2025-04-14",
+            kind: "llm",
+            categoryEvaluated: 0,
+            categoryAccuracy: null,
+          }),
+        ],
+      },
+      history: {
+        rows: [makeRow({ strategyName: "llm-openai", modelName: "gpt-4.1-nano-2025-04-14" })],
+        meta: { total: 1, page: 1, limit: 100 },
+      },
+    });
+
+    renderStrategy("gpt-4.1-nano-2025-04-14");
+
+    expect(await screen.findByText("Category IQ")).toBeInTheDocument();
+    const item = screen.getByText("Category IQ").closest(".bench-summary__item");
+    expect(within(item as HTMLElement).getByText("not yet evaluated")).toBeInTheDocument();
+    expect(within(item as HTMLElement).queryByText(/correct ·/)).not.toBeInTheDocument();
+  });
+
+  it("omits the Category IQ item entirely for a deterministic strategy", async () => {
+    stubFetch({
+      leaderboard: { deterministic: [makeLeaderboardRow()], llm: [] },
+      history: { rows: [makeRow()], meta: { total: 1, page: 1, limit: 100 } },
+    });
+
+    renderStrategy("alphabetical");
+
+    await screen.findByText("100%");
+    expect(screen.queryByText("Category IQ")).not.toBeInTheDocument();
+    expect(screen.queryByText("not yet evaluated")).not.toBeInTheDocument();
   });
 
   it("shows real Avg cost/Total cost values next to Success rate for an LLM row", async () => {

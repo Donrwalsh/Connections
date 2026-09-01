@@ -1,6 +1,11 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { Queue } from "bullmq";
-import { STRATEGY_QUEUE, LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE, LLM_GOOGLE_QUEUE } from "../queue/queue.module";
+import {
+  STRATEGY_QUEUE,
+  LLM_OPENAI_QUEUE,
+  LLM_OLLAMA_QUEUE,
+  LLM_GOOGLE_QUEUE,
+} from "../queue/queue.module";
 import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/strategy-run.entity";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
@@ -8,6 +13,7 @@ import { Puzzle } from "../game/entities/puzzle.entity";
 import { combinationToWords, firstCombination, nextCombination } from "./combinatorics";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { LlmProposal } from "./entities/llm-proposal.entity";
+import { CategoryEvaluation } from "./entities/category-evaluation.entity";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { SupportedModel } from "../supported-model/entities/supported-model.entity";
 import { ModelPrice } from "../supported-model/entities/model-price.entity";
@@ -16,6 +22,7 @@ import {
   StrategyRunDetailDto,
   StrategyRunListItemDto,
   GuessDetailDto,
+  CategoryEvaluationDto,
   LeaderboardDto,
   LeaderboardRowDto,
   RunHistoryDto,
@@ -163,6 +170,13 @@ interface LeaderboardAccumulator {
   // a deliberate spec choice, noted here so a future reader doesn't
   // rediscover it as a bug.
   issueCounts: number[];
+  // Raw CategoryEvaluation verdict counts summed across every run of this
+  // (strategy, model) pair — see getLeaderboard. callError rows have a null
+  // verdict and land in none of these three, so they never move
+  // categoryAccuracy.
+  catCorrect: number;
+  catPartial: number;
+  catLucky: number;
 }
 
 @Injectable()
@@ -187,15 +201,17 @@ export class StrategyService {
     @InjectRepository(Guess) private readonly guessRepo: Repository<Guess>,
     @InjectRepository(SolvePrompt) private readonly solvePromptRepo: Repository<SolvePrompt>,
     @InjectRepository(LlmProposal) private readonly llmProposalRepo: Repository<LlmProposal>,
+    @InjectRepository(CategoryEvaluation)
+    private readonly categoryEvaluationRepo: Repository<CategoryEvaluation>,
     @Inject(GameService) private readonly gameService: GameService,
     @Inject(StrategyRunStore) private readonly store: StrategyRunStore,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
   ) {}
 
   /**
-   * The queue a strategy's runs are dispatched to: llm-openai, llm-ollama,
-   * and llm-google each get their own per-provider queue, everything else
-   * the shared strategy-runs queue.
+   * The queue a strategy's runs are dispatched to: all three LLM strategies
+   * (llm-openai, llm-ollama, llm-google) get their own per-provider queues,
+   * everything else the shared strategy-runs queue.
    */
   private queueFor(strategyName: string): Queue {
     return queueForStrategy(
@@ -481,6 +497,7 @@ export class StrategyService {
       runs,
       guessCountRows,
       tokenRows,
+      categoryRows,
       priceHistory,
       currentModels,
       queuedCounts,
@@ -522,6 +539,18 @@ export class StrategyService {
           completionTokens: string | null;
           issueCount: string | null;
         }>(),
+      // Per-run verdict tallies from the LLM category judge. Grouped in SQL
+      // the same way the token/issue query above is — a run with no
+      // CategoryEvaluation rows simply has no entry here. verdict is null on
+      // a callError row, so none of the three FILTERed counts include it.
+      this.categoryEvaluationRepo
+        .createQueryBuilder("ce")
+        .select("ce.strategyRunId", "strategyRunId")
+        .addSelect("COUNT(*) FILTER (WHERE ce.verdict = 'correct')", "correct")
+        .addSelect("COUNT(*) FILTER (WHERE ce.verdict = 'partial')", "partial")
+        .addSelect("COUNT(*) FILTER (WHERE ce.verdict = 'lucky')", "lucky")
+        .groupBy("ce.strategyRunId")
+        .getRawMany<{ strategyRunId: number; correct: string; partial: string; lucky: string }>(),
       this.supportedModelService.findPriceHistory(),
       this.supportedModelService.findAll(),
       this.queuedCountsByKey(),
@@ -541,6 +570,15 @@ export class StrategyService {
         completionTokens: Number(row.completionTokens ?? 0),
       });
       issueCountByRun.set(Number(row.strategyRunId), Number(row.issueCount ?? 0));
+    }
+
+    const categoryByRun = new Map<number, { correct: number; partial: number; lucky: number }>();
+    for (const row of categoryRows) {
+      categoryByRun.set(Number(row.strategyRunId), {
+        correct: Number(row.correct ?? 0),
+        partial: Number(row.partial ?? 0),
+        lucky: Number(row.lucky ?? 0),
+      });
     }
 
     const metadataByModel = new Map<string, SupportedModelWithRate>();
@@ -576,11 +614,24 @@ export class StrategyService {
           durationsMs: [],
           costsUsd: [],
           issueCounts: [],
+          catCorrect: 0,
+          catPartial: 0,
+          catLucky: 0,
         };
         aggregates.set(key, acc);
       }
 
       acc.puzzleIds.add(run.puzzleId);
+
+      // An evaluation belongs to its run regardless of that run's final
+      // status, so this accumulates unconditionally (unlike the guess/
+      // duration branches below).
+      const cat = categoryByRun.get(run.id);
+      if (cat) {
+        acc.catCorrect += cat.correct;
+        acc.catPartial += cat.partial;
+        acc.catLucky += cat.lucky;
+      }
 
       if (run.status === StrategyRunStatus.COMPLETED) {
         acc.completed++;
@@ -645,6 +696,7 @@ export class StrategyService {
       // run is still a loss for win-rate purposes, even though it's
       // "finished" for progress-display purposes below.
       const finished = acc.completed + acc.failed;
+      const categoryEvaluated = acc.catCorrect + acc.catPartial + acc.catLucky;
       const sortedGuesses = [...acc.guessCounts].sort((a, b) => a - b);
       const totalCostUsd =
         acc.costsUsd.length === 0 ? null : acc.costsUsd.reduce((a, b) => a + b, 0);
@@ -689,6 +741,12 @@ export class StrategyService {
           acc.issueCounts.length === 0
             ? null
             : acc.issueCounts.reduce((a, b) => a + b, 0) / acc.issueCounts.length,
+        categoryCorrect: acc.catCorrect,
+        categoryPartial: acc.catPartial,
+        categoryLucky: acc.catLucky,
+        categoryEvaluated,
+        categoryAccuracy:
+          categoryEvaluated === 0 ? null : (acc.catCorrect / categoryEvaluated) * 100,
         contextWindow: metadata?.contextWindow ?? null,
         paramCount: metadata?.paramCount ?? null,
         providerDescription: metadata?.providerDescription ?? null,
@@ -711,8 +769,8 @@ export class StrategyService {
   }
 
   /**
-   * Tallies waiting/delayed BullMQ jobs across the strategy-runs and all three
-   * per-provider LLM queues, grouped by (strategyName, model) — the counts
+   * Tallies waiting/delayed BullMQ jobs across the strategy-runs and all
+   * three per-provider LLM queues, grouped by (strategyName, model) — the counts
    * getLeaderboard merges in as `progress.queued`. Deliberately excludes
    * 'active' jobs: by the time BullMQ marks a job active, the worker has
    * already inserted its StrategyRun row, so that job is already counted via
@@ -845,7 +903,7 @@ export class StrategyService {
    * promptNumber.
    */
   private async buildSolvePromptDtos(run: StrategyRun) {
-    const [solvePrompts, proposals, allGuesses, puzzle] = await Promise.all([
+    const [solvePrompts, proposals, allGuesses, puzzle, catEvals] = await Promise.all([
       this.solvePromptRepo.find({
         where: { strategyRunId: run.id },
         order: { promptNumber: "ASC", attemptNumber: "ASC" },
@@ -859,6 +917,7 @@ export class StrategyService {
         where: { id: run.puzzleId },
         relations: { answerGroups: { members: true } },
       }),
+      this.categoryEvaluationRepo.find({ where: { strategyRunId: run.id } }),
     ]);
 
     if (solvePrompts.length === 0 || !puzzle) {
@@ -868,7 +927,45 @@ export class StrategyService {
     const guessesById = new Map(allGuesses.map((guess) => [guess.id, guess]));
     const originalWords = computeInitialWordOrder(puzzle, run.strategyName);
 
-    return reconstructSolvePrompts(originalWords, solvePrompts, proposals, guessesById);
+    const dtos = reconstructSolvePrompts(originalWords, solvePrompts, proposals, guessesById);
+
+    // Attach each run CategoryEvaluation to its proposal by llmProposalId —
+    // reconstructSolvePrompts leaves categoryEvaluation: null on every
+    // proposal, so proposals with no eval row simply keep that null.
+    const evalByProposalId = new Map(catEvals.map((e) => [e.llmProposalId, e]));
+    for (const prompt of dtos) {
+      for (const proposal of prompt.proposals) {
+        const e = evalByProposalId.get(proposal.id);
+        proposal.categoryEvaluation = e ? this.toCategoryEvaluationDto(e) : null;
+      }
+    }
+
+    return dtos;
+  }
+
+  // Copies a CategoryEvaluation row 1:1 onto the guess-chain DTO shape.
+  private toCategoryEvaluationDto(e: CategoryEvaluation): CategoryEvaluationDto {
+    return {
+      verdict: e.verdict ?? null,
+      status: e.status,
+      proposedCategory: e.proposedCategory,
+      actualCategory: e.actualCategory,
+      rationale: e.rationale ?? null,
+      judgeModel: e.judgeModel,
+      judgeProvider: e.judgeProvider,
+      promptTokens: e.promptTokens ?? null,
+      completionTokens: e.completionTokens ?? null,
+      totalTokens: e.totalTokens ?? null,
+      latencyMs: e.latencyMs ?? null,
+      statusCode: e.statusCode ?? null,
+      errorName: e.errorName ?? null,
+      errorMessage: e.errorMessage ?? null,
+      requestBody: e.requestBody ?? null,
+      responseHeaders: e.responseHeaders ?? null,
+      responseBody: e.responseBody ?? null,
+      rawResponseText: e.rawResponseText ?? null,
+      evaluatedAt: e.evaluatedAt,
+    };
   }
 
   /**

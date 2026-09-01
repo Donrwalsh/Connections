@@ -6,6 +6,7 @@ import { Puzzle } from "./modules/game/entities/puzzle.entity";
 import { Guess } from "./modules/strategy/entities/guess.entity";
 import { LlmProposal } from "./modules/strategy/entities/llm-proposal.entity";
 import { SolvePrompt } from "./modules/strategy/entities/solve-prompt.entity";
+import { CategoryEvaluation } from "./modules/strategy/entities/category-evaluation.entity";
 import { GoogleRateLimitHold } from "./modules/strategy/entities/google-rate-limit-hold.entity";
 import { StrategyRun } from "./modules/strategy/entities/strategy-run.entity";
 import { SupportedModel } from "./modules/supported-model/entities/supported-model.entity";
@@ -32,6 +33,7 @@ export const AppDataSource = new DataSource({
     Guess,
     LlmProposal,
     SolvePrompt,
+    CategoryEvaluation,
     GoogleRateLimitHold,
     SupportedModel,
     ModelPrice,

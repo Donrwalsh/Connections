@@ -119,3 +119,44 @@ export const SolveAssistResponseSchema = AssistResponseSchema.extend({
     .optional(),
 });
 export type SolveAssistResponse = z.infer<typeof SolveAssistResponseSchema>;
+
+/**
+ * Request body for POST /judge-category. Categories only — the four words
+ * are deliberately not sent; the judge is comparing whether one label
+ * names the same connection as another, and both already describe the same
+ * items by construction. `model`/`provider` override JUDGE_MODEL/
+ * JUDGE_PROVIDER, same override semantics as /solve-assist.
+ */
+export const JudgeCategoryRequestSchema = z.object({
+  proposedCategory: z.string().min(1),
+  actualCategory: z.string().min(1),
+  model: z.string().min(1).optional(),
+  provider: z.enum(["openai", "ollama", "google"]).optional(),
+});
+export type JudgeCategoryRequest = z.infer<typeof JudgeCategoryRequestSchema>;
+
+/**
+ * Response body for POST /judge-category. The 3-way verdict plus a
+ * one-sentence rationale, plus the same per-call telemetry / raw call
+ * detail /solve-assist returns, which the backend persists onto its
+ * CategoryEvaluation row.
+ */
+export const JudgeCategoryResponseSchema = z.object({
+  verdict: z.enum(["correct", "partial", "lucky"]),
+  rationale: z.string(),
+  model: z.string(),
+  latencyMs: z.number(),
+  usage: z
+    .object({
+      promptTokens: z.number().optional(),
+      completionTokens: z.number().optional(),
+      totalTokens: z.number().optional(),
+    })
+    .optional(),
+  requestBody: z.unknown().optional(),
+  responseId: z.string().optional(),
+  responseHeaders: z.record(z.string()).optional(),
+  responseBody: z.unknown().optional(),
+  rawResponseText: z.string().optional(),
+});
+export type JudgeCategoryResponse = z.infer<typeof JudgeCategoryResponseSchema>;

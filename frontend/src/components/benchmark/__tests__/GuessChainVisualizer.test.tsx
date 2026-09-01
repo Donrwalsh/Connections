@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GuessChainVisualizer } from "../GuessChainVisualizer";
@@ -55,6 +55,7 @@ const llmDetail: StrategyRunDetail = {
           category: "Fruit",
           status: "used",
           guess: { sequenceNumber: 1, result: "success", guessedAt: "2025-01-01T00:00:01Z" },
+          categoryEvaluation: null,
         },
         {
           id: 2,
@@ -62,6 +63,7 @@ const llmDetail: StrategyRunDetail = {
           category: "Uncertain",
           status: "not_selected",
           guess: null,
+          categoryEvaluation: null,
         },
       ],
     },
@@ -240,6 +242,117 @@ describe("GuessChainVisualizer", () => {
     expect(await screen.findByText("Request timed out")).toBeInTheDocument();
     expect(screen.queryByText("Raw request sent to OpenAI")).not.toBeInTheDocument();
     expect(screen.queryByText("Raw response from OpenAI")).not.toBeInTheDocument();
+  });
+
+  it("renders a category-judge verdict pill and collapsible diagnostics for a used, evaluated proposal", async () => {
+    const user = userEvent.setup();
+    const base = llmDetail.solvePrompts[0]!;
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [
+        {
+          ...base,
+          proposals: [
+            {
+              ...base.proposals[0]!,
+              categoryEvaluation: {
+                verdict: "lucky",
+                status: "judged",
+                proposedCategory: "Fruits",
+                actualCategory: "___ COBBLER",
+                rationale: "Right words, wrong reason.",
+                judgeModel: "gpt-4.1-nano",
+                judgeProvider: "openai",
+                promptTokens: 90,
+                completionTokens: 8,
+                totalTokens: 98,
+                latencyMs: 30,
+                statusCode: null,
+                errorName: null,
+                errorMessage: null,
+                requestBody: null,
+                responseHeaders: null,
+                responseBody: null,
+                rawResponseText: '{"verdict":"lucky"}',
+                evaluatedAt: "2026-08-27T00:00:00.000Z",
+              },
+            },
+            { ...base.proposals[1]! },
+          ],
+        },
+      ],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Category: lucky")).toBeInTheDocument();
+
+    const usedItem = screen.getByText("Fruit").closest("li")!;
+    expect(within(usedItem).getByText("Category: lucky")).toBeInTheDocument();
+
+    await user.click(within(usedItem).getByText("Category judge"));
+    expect(within(usedItem).getByText("Fruits")).toBeInTheDocument();
+    expect(within(usedItem).getByText("___ COBBLER")).toBeInTheDocument();
+    expect(within(usedItem).getByText("Right words, wrong reason.")).toBeInTheDocument();
+
+    const unusedItem = screen.getByText("Uncertain").closest("li")!;
+    expect(within(unusedItem).queryByText(/Category:/)).not.toBeInTheDocument();
+    expect(within(unusedItem).queryByText("Category judge")).not.toBeInTheDocument();
+  });
+
+  it("renders the judge-failed pill and error line for a used proposal whose category judge call errored", async () => {
+    const user = userEvent.setup();
+    const base = llmDetail.solvePrompts[0]!;
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [
+        {
+          ...base,
+          proposals: [
+            {
+              ...base.proposals[0]!,
+              categoryEvaluation: {
+                verdict: null,
+                status: "callError",
+                proposedCategory: "Fruits",
+                actualCategory: "___ COBBLER",
+                rationale: null,
+                judgeModel: "gpt-4.1-nano",
+                judgeProvider: "openai",
+                promptTokens: null,
+                completionTokens: null,
+                totalTokens: null,
+                latencyMs: null,
+                statusCode: 502,
+                errorName: "APICallError",
+                errorMessage: "upstream 502",
+                requestBody: null,
+                responseHeaders: null,
+                responseBody: null,
+                rawResponseText: null,
+                evaluatedAt: "2026-08-27T00:00:00.000Z",
+              },
+            },
+            { ...base.proposals[1]! },
+          ],
+        },
+      ],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    const usedItem = (await screen.findByText("Fruit")).closest("li")!;
+    expect(within(usedItem).getByText(/judge failed/i)).toBeInTheDocument();
+
+    const summary = within(usedItem).getByText("Category judge");
+    expect(summary).toBeInTheDocument();
+    await user.click(summary);
+
+    expect(within(usedItem).getByText("APICallError: upstream 502")).toBeInTheDocument();
+    expect(within(usedItem).queryByText("Judge request")).not.toBeInTheDocument();
+    expect(within(usedItem).queryByText("Judge response headers")).not.toBeInTheDocument();
+    expect(within(usedItem).queryByText("Judge response body")).not.toBeInTheDocument();
+    expect(within(usedItem).queryByText("Judge raw output")).not.toBeInTheDocument();
   });
 
   it("falls back to a plain guess list for strategies with no solve-prompt chain", async () => {

@@ -17,6 +17,8 @@ export interface AppEnv {
   PUZZLE_POPULATION_TZ: string;
   DB_MIGRATIONS_RUN: boolean;
   DISPATCH_PASSWORD: string;
+  JUDGE_MODEL: string;
+  JUDGE_PROVIDER: "openai" | "ollama" | "google";
 }
 
 function required(name: string, value: string | undefined): string {
@@ -61,6 +63,16 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
 
   const dispatchPassword = env.DISPATCH_PASSWORD ?? "";
 
+  // A bad JUDGE_PROVIDER would otherwise fall through queueForJudgeProvider's
+  // default to the OpenAI queue and produce a callError row per proposal
+  // instead of failing at boot.
+  const judgeProvider = env.JUDGE_PROVIDER ?? "openai";
+  if (!["openai", "ollama", "google"].includes(judgeProvider)) {
+    throw new Error(
+      `JUDGE_PROVIDER must be one of openai|ollama|google, got '${judgeProvider}'.`,
+    );
+  }
+
   // Only enforced by DispatchAuthGuard when NODE_ENV=production (see that
   // guard for why dev/test dispatches stay password-free) — but fail fast at
   // boot rather than let a production deploy come up silently unprotected.
@@ -94,5 +106,7 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
     // which git revision the local process happens to be on.
     DB_MIGRATIONS_RUN: env.DB_MIGRATIONS_RUN !== "false",
     DISPATCH_PASSWORD: dispatchPassword,
+    JUDGE_MODEL: env.JUDGE_MODEL ?? "gpt-4.1-nano",
+    JUDGE_PROVIDER: judgeProvider as "openai" | "ollama" | "google",
   };
 }

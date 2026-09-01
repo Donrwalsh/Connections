@@ -49,6 +49,23 @@ export type SolveAssistOutcome =
   | { ok: true; data: SolveAssistSuccess }
   | { ok: false; error: SolveAssistFailure };
 
+export interface JudgeCategorySuccess {
+  verdict: "correct" | "partial" | "lucky";
+  rationale: string;
+  model: string;
+  latencyMs: number;
+  usage?: SolveUsage;
+  requestBody?: unknown;
+  responseId?: string;
+  responseHeaders?: Record<string, string>;
+  responseBody?: unknown;
+  rawResponseText?: string;
+}
+
+export type JudgeCategoryOutcome =
+  | { ok: true; data: JudgeCategorySuccess }
+  | { ok: false; error: SolveAssistFailure };
+
 const TIMEOUT_MS = orchestratorTimeoutMs();
 
 /**
@@ -99,6 +116,37 @@ export class OrchestratorService {
         responseId: raw.responseId,
         responseHeaders: raw.responseHeaders,
         responseBody: raw.responseBody,
+      }),
+    );
+  }
+
+  /**
+   * Calls the orchestrator's POST /judge-category — an LLM-as-judge verdict
+   * on whether `proposedCategory` names the same connection as
+   * `actualCategory`. `model`/`provider` default to JUDGE_MODEL/
+   * JUDGE_PROVIDER on the orchestrator side when omitted; the backend always
+   * passes both (from loadEnv()). Same failure shape as solveAssist.
+   */
+  async judgeCategory(
+    proposedCategory: string,
+    actualCategory: string,
+    model?: string,
+    provider?: "openai" | "ollama" | "google",
+  ): Promise<JudgeCategoryOutcome> {
+    return this.executeCall<JudgeCategorySuccess>(
+      "/judge-category",
+      { proposedCategory, actualCategory, model, provider },
+      (raw) => ({
+        verdict: raw.verdict,
+        rationale: raw.rationale,
+        model: raw.model,
+        latencyMs: raw.latencyMs ?? 0,
+        usage: raw.usage,
+        requestBody: raw.requestBody,
+        responseId: raw.responseId,
+        responseHeaders: raw.responseHeaders,
+        responseBody: raw.responseBody,
+        rawResponseText: raw.rawResponseText,
       }),
     );
   }
