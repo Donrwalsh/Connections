@@ -1270,8 +1270,15 @@ describe("LlmStrategyRunner", () => {
       // The solved group is gone from the persisted run — that reduced word
       // set is what the resume below has to pick up from.
       expect(parking.availableWords).toEqual(["EGGPLANT", "FIG", "GRAPE", "HONEY"]);
-      const parkedAt = parking.finishedAt;
-      expect(parkedAt).toBeInstanceOf(Date);
+      expect(parking.finishedAt).toBeInstanceOf(Date);
+      // Backdate the park timestamp by a second. Part 1 and Part 2 both stamp
+      // finishedAt from `new Date()` and, on a fast machine, land in the same
+      // millisecond — which makes the strict `toBeGreaterThan` at the end of
+      // this test flake. Pushing the park time into the past keeps that check
+      // meaningful (a runner that never refreshes finishedAt still fails it)
+      // without depending on wall-clock progress between the two runs.
+      const parkedAt = new Date(parking.finishedAt!.getTime() - 1000);
+      parking.finishedAt = parkedAt;
 
       // --- Part 2: resume from those flushed guesses ------------------
       jest.clearAllMocks();
