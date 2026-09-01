@@ -59,6 +59,8 @@ export const SolveErrorCodeSchema = z.enum([
   "duplicate_group",
   "invalid_group",
   "model_error",
+  "rate_limited",
+  "rate_limited_daily",
 ]);
 export type SolveErrorCode = z.infer<typeof SolveErrorCodeSchema>;
 

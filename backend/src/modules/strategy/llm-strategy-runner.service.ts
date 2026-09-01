@@ -10,6 +10,7 @@ import {
   llmMaxFailedGuesses,
   llmMaxMalformedResponses,
   llmMaxModelErrors,
+  llmGoogleRateLimitFallbackSeconds,
   llmTemperature,
 } from "../../strategies";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
@@ -24,6 +25,7 @@ import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/st
 import { OrchestratorService, type ChatMessage, type SolveErrorCode } from "./orchestrator.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
+import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
 import { firstCombination } from "./combinatorics";
 import { GROUP_SIZE, parseGroupsSection } from "./parse-groups-section";
 
@@ -43,6 +45,11 @@ interface LlmRunLoopState {
   failedGuessCount: number;
   malformedCount: number;
   consecutiveModelErrors: number;
+  // Set by classifyFailedCall for a "rate_limited" hit — the run loop's
+  // post-flush wait step checks this before the model-error backoff, and
+  // resets it to null after waiting. Never counts toward any failure
+  // threshold; a rate_limited hit is never treated as a failure at all.
+  rateLimitWaitMs: number | null;
   // Groups confirmed correct — used to build RETRY prompts.
   lockedInGroups: string[][];
   // The last failed guess — used to build RETRY prompts.
@@ -156,6 +163,7 @@ export class LlmStrategyRunner {
     private readonly solvePromptRepo: Repository<SolvePrompt>,
     @Inject(OrchestratorService) private readonly orchestratorService: OrchestratorService,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
+    @Inject(GoogleRateLimitHoldService) private readonly rpdHold: GoogleRateLimitHoldService,
   ) {}
 
   async runLlmStrategy(puzzleId: number, strategyName: string, trialNumber = 0, model?: string) {
@@ -184,6 +192,34 @@ export class LlmStrategyRunner {
       };
     }
 
+    // Top-gate: an llm-google run whose model is currently out of daily
+    // quota parks immediately — cheap DB work instead of a doomed Google
+    // call. The google-rpd-resume sweep re-dispatches it after the reset.
+    if (
+      strategyName === LLM_GOOGLE &&
+      model &&
+      (await this.rpdHold.isHeld(strategyName, model))
+    ) {
+      run.status = StrategyRunStatus.RATE_LIMITED_DAILY;
+      run.finishedAt = new Date();
+      await this.store.saveRun(run);
+      return {
+        status: run.status,
+        guessCount: await this.store.countGuesses(run.id),
+      };
+    }
+
+    // Past the gate with a parked status means the hold has lifted and this
+    // run is resuming — either the sweep flipped it and re-dispatched, or a
+    // stale job is being retried after expiry. Normalize back to RUNNING
+    // before the loop, which otherwise breaks after a single iteration on
+    // its `status !== RUNNING` check; and clear the finishedAt the park set,
+    // which run-history's duration sort would otherwise measure against.
+    if (run.status === StrategyRunStatus.RATE_LIMITED_DAILY) {
+      run.status = StrategyRunStatus.RUNNING;
+      run.finishedAt = null;
+    }
+
     // Rebuild state from flushed guesses so a worker restart mid-run resumes
     // with the same conversation context.
     const priorGuesses = (await this.loadLlmGuessesForRun(run.id)).map((guess) => ({
@@ -199,6 +235,7 @@ export class LlmStrategyRunner {
       ).length,
       malformedCount: 0,
       consecutiveModelErrors: 0,
+      rateLimitWaitMs: null,
       lockedInGroups: [],
       lastFailedGuess: null,
       priorGuesses,
@@ -346,14 +383,35 @@ export class LlmStrategyRunner {
           }),
         );
 
-        this.classifyFailedCall(outcome.error.code, run, state, maxModelErrors, maxDuplicates, maxMalformed);
+        this.classifyFailedCall(
+          outcome.error.code,
+          run,
+          state,
+          maxModelErrors,
+          maxDuplicates,
+          maxMalformed,
+          outcome.error.retryAfterSeconds,
+        );
+
+        if (
+          outcome.error.code === "rate_limited_daily" &&
+          strategyName === LLM_GOOGLE &&
+          model
+        ) {
+          await this.rpdHold.hold(strategyName, model);
+        }
       }
 
       // Flush every iteration.
       await this.store.flushBatch(run, pendingGuesses, pendingProposals, pendingPrompts);
 
-      // After a transient model failure, pause before re-prompting.
-      if (run.status === StrategyRunStatus.RUNNING && state.consecutiveModelErrors > 0) {
+      // A rate-limited hit waits exactly as long as Google says to, taking
+      // priority over the model-error backoff below — the two never apply
+      // to the same failed call (classifyFailedCall sets at most one).
+      if (run.status === StrategyRunStatus.RUNNING && state.rateLimitWaitMs !== null) {
+        await this.delay(state.rateLimitWaitMs);
+        state.rateLimitWaitMs = null;
+      } else if (run.status === StrategyRunStatus.RUNNING && state.consecutiveModelErrors > 0) {
         await this.delay(this.modelErrorBackoff(state.consecutiveModelErrors));
       }
 
@@ -577,10 +635,13 @@ export class LlmStrategyRunner {
   }
 
   /**
-   * Classifies a failed orchestrator call (no assistant reply at all) into
-   * the same three outcomes the code this was extracted from handled: bump
+   * Classifies a failed orchestrator call (no assistant reply at all).
+   * "rate_limited" (Google per-minute hit only) is never a failure — it
+   * touches no counter and never changes run.status, only sets
+   * state.rateLimitWaitMs so the run loop waits the server-specified
+   * duration and retries the identical request. Every other code bumps
    * that failure kind's own counter, ending the run once its limit is hit
-   * — or otherwise leave `run.status` as RUNNING so the loop retries next
+   * — or otherwise leaves run.status as RUNNING so the loop retries next
    * iteration.
    */
   private classifyFailedCall(
@@ -590,8 +651,18 @@ export class LlmStrategyRunner {
     maxModelErrors: number,
     maxDuplicates: number,
     maxMalformed: number,
+    retryAfterSeconds?: number,
   ): void {
-    if (code === "model_error") {
+    if (code === "rate_limited_daily") {
+      // A per-day quota hit. Park the run — no counter touched, so it never
+      // rolls into ERROR — and let the run loop's status check break out.
+      // The hold row itself is written by the caller (it has `model` and can
+      // await), see runLlmStrategy's failed-call block.
+      run.status = StrategyRunStatus.RATE_LIMITED_DAILY;
+      run.finishedAt = new Date();
+    } else if (code === "rate_limited") {
+      state.rateLimitWaitMs = (retryAfterSeconds ?? llmGoogleRateLimitFallbackSeconds()) * 1000;
+    } else if (code === "model_error") {
       state.consecutiveModelErrors++;
       if (state.consecutiveModelErrors >= maxModelErrors) {
         run.status = StrategyRunStatus.ERROR;

@@ -18,10 +18,12 @@ export const app = new Hono();
 // a garbage/oversized request can't tie up memory while we parse it.
 export const SOLVE_BODY_LIMIT = 64 * 1024;
 
-const ERROR_STATUS: Record<SolveError["code"], 409 | 400 | 502> = {
+const ERROR_STATUS: Record<SolveError["code"], 409 | 400 | 429 | 502> = {
   duplicate_group: 409,
   invalid_group: 400,
   model_error: 502,
+  rate_limited: 429,
+  rate_limited_daily: 429,
 };
 
 // Simple shared-secret check so only the backend container can call this

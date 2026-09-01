@@ -10,6 +10,7 @@ import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { LlmProposalStatus } from "./entities/llm-proposal.entity";
 import { OrchestratorService, type SolveAssistOutcome, type ChatMessage } from "./orchestrator.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
+import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
 
 describe("LlmStrategyRunner", () => {
   let runner: LlmStrategyRunner;
@@ -28,6 +29,7 @@ describe("LlmStrategyRunner", () => {
     solveAssist: jest.Mock<Promise<SolveAssistOutcome>, unknown[]>;
   };
   let mockSupportedModelService: { getContextWindow: jest.Mock };
+  let mockRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
   let mockManager: { insert: jest.Mock; save: jest.Mock };
   let mockDataSource: { transaction: jest.Mock };
 
@@ -85,6 +87,10 @@ describe("LlmStrategyRunner", () => {
     mockSupportedModelService = {
       getContextWindow: jest.fn().mockResolvedValue(null),
     };
+    mockRpdHold = {
+      isHeld: jest.fn().mockResolvedValue(false),
+      hold: jest.fn().mockResolvedValue(undefined),
+    };
     mockManager = {
       insert: jest.fn().mockImplementation((entity: string, data?: unknown[]) => {
         if (entity === "SolvePrompt")
@@ -110,6 +116,7 @@ describe("LlmStrategyRunner", () => {
         { provide: getRepositoryToken(SolvePrompt), useValue: mockSolvePromptRepo },
         { provide: OrchestratorService, useValue: mockOrchestratorService },
         { provide: SupportedModelService, useValue: mockSupportedModelService },
+        { provide: GoogleRateLimitHoldService, useValue: mockRpdHold },
       ],
     }).compile();
 
@@ -972,6 +979,119 @@ describe("LlmStrategyRunner", () => {
       }
     });
 
+    it("should wait the server-specified retryAfterSeconds and retry, without counting a rate_limited hit as a failure", async () => {
+      const delaySpy = jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+
+      mockOrchestratorService.solveAssist
+        .mockResolvedValueOnce({
+          ok: false,
+          error: { error: "rate limited", code: "rate_limited", retryAfterSeconds: 3.86 },
+        })
+        .mockResolvedValueOnce(
+          makeAssistResponse([
+            ["APPLE", "BANANA", "CHERRY", "DATE"],
+            ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+          ]),
+        );
+
+      const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      expect(delaySpy).toHaveBeenCalledWith(3860);
+      expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
+    });
+
+    it("should never terminate the run for repeated rate_limited hits, however many occur", async () => {
+      jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+
+      // Comfortably past DEFAULT_LLM_MAX_MODEL_ERRORS (5) — proves rate_limited
+      // never feeds that counter, regardless of count.
+      const RATE_LIMIT_HITS = 8;
+      for (let i = 0; i < RATE_LIMIT_HITS; i++) {
+        mockOrchestratorService.solveAssist.mockResolvedValueOnce({
+          ok: false,
+          error: { error: "rate limited", code: "rate_limited", retryAfterSeconds: 1 },
+        });
+      }
+      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+        makeAssistResponse([
+          ["APPLE", "BANANA", "CHERRY", "DATE"],
+          ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        ]),
+      );
+
+      const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(RATE_LIMIT_HITS + 1);
+      expect(result.status).not.toBe(StrategyRunStatus.ERROR);
+    });
+
+    it("should fall back to llmGoogleRateLimitFallbackSeconds when retryAfterSeconds is absent", async () => {
+      process.env.LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS = "45";
+      const delaySpy = jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+
+      try {
+        mockOrchestratorService.solveAssist
+          .mockResolvedValueOnce({
+            ok: false,
+            error: { error: "rate limited", code: "rate_limited" },
+          })
+          .mockResolvedValueOnce(
+            makeAssistResponse([
+              ["APPLE", "BANANA", "CHERRY", "DATE"],
+              ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+            ]),
+          );
+
+        await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+        expect(delaySpy).toHaveBeenCalledWith(45000);
+      } finally {
+        delete process.env.LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS;
+      }
+    });
+
+    it("should not reset or advance consecutiveModelErrors on an interleaved rate_limited hit, still reaching the error threshold on schedule", async () => {
+      const delaySpy = jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+
+      // Default LLM_MAX_MODEL_ERRORS is 5 (DEFAULT_LLM_MAX_MODEL_ERRORS in
+      // strategies.ts) — left unset here to exercise that real default.
+      // The interleaved rate_limited hit (3rd call) must neither reset the
+      // model-error streak back to 0 nor itself count toward the 5, so the
+      // run should still terminate on the 5th model_error (the 6th call
+      // overall).
+      mockOrchestratorService.solveAssist
+        .mockResolvedValueOnce({ ok: false, error: { error: "down", code: "model_error" } })
+        .mockResolvedValueOnce({ ok: false, error: { error: "down", code: "model_error" } })
+        .mockResolvedValueOnce({
+          ok: false,
+          error: { error: "rate limited", code: "rate_limited", retryAfterSeconds: 7 },
+        })
+        .mockResolvedValueOnce({ ok: false, error: { error: "down", code: "model_error" } })
+        .mockResolvedValueOnce({ ok: false, error: { error: "down", code: "model_error" } })
+        .mockResolvedValueOnce({ ok: false, error: { error: "down", code: "model_error" } });
+
+      const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      expect(result).toEqual({ status: StrategyRunStatus.ERROR, guessCount: 0 });
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(6);
+
+      // The rate_limited hit pre-empts that iteration's model-error backoff
+      // wait via the run loop's `else if` — so the delay sequence is the
+      // exponential model-error backoff for streak lengths 1, 2, then the
+      // 7s rate-limit wait, then backoff for streak lengths 3, 4. No delay
+      // is issued for the 5th (terminal) model_error, since the run is no
+      // longer RUNNING by the time the loop checks.
+      expect(delaySpy.mock.calls.map((call) => call[0])).toEqual([1000, 2000, 7000, 4000, 8000]);
+    });
+
     it("should record attemptNumber 1 on every row, even across repeated outer-loop retries of the same failing step", async () => {
       jest
         .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
@@ -1069,6 +1189,151 @@ describe("LlmStrategyRunner", () => {
       } finally {
         delete process.env.LLM_MAX_MODEL_ERRORS;
       }
+    });
+
+    it("parks a held google run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {
+      mockRpdHold.isHeld.mockResolvedValue(true);
+      mockStrategyRunRepo.findOne.mockResolvedValue(
+        makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" }),
+      );
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+
+      const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      expect(mockOrchestratorService.solveAssist).not.toHaveBeenCalled();
+      expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+      expect(mockRpdHold.hold).not.toHaveBeenCalled();
+    });
+
+    it("records a hold and parks the run on a rate_limited_daily failure, touching no failure counter", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValue(
+        makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" }),
+      );
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist.mockResolvedValue({
+        ok: false,
+        error: { error: "Google daily quota exhausted", code: "rate_limited_daily" },
+      });
+
+      const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+      expect(mockRpdHold.hold).toHaveBeenCalledWith("llm-google", "gemini-3.6-flash");
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
+    });
+
+    it("never ends a run in ERROR on a rate_limited_daily hit", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValue(
+        makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" }),
+      );
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist.mockResolvedValue({
+        ok: false,
+        error: { error: "quota", code: "rate_limited_daily" },
+      });
+
+      const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      // Parked, not errored — and parked on the very first hit, so no
+      // counter had a chance to roll toward ERROR in the first place.
+      expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
+    });
+
+    it("parks mid-solve keeping the progress already made, then resumes from the flushed guesses", async () => {
+      // --- Part 1: park after real progress ---------------------------
+      const parking = makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" });
+      mockStrategyRunRepo.findOne.mockResolvedValue(parking);
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist
+        // A wrong group: one failed guess, run stays RUNNING.
+        .mockResolvedValueOnce(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "EGGPLANT"]]))
+        // A correct group: one solved group, availableWords halves.
+        .mockResolvedValueOnce(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]))
+        // Then the daily quota runs out.
+        .mockResolvedValueOnce({
+          ok: false,
+          error: { error: "Google daily quota exhausted", code: "rate_limited_daily" },
+        });
+
+      const parked = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      expect(parked.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+      // The two guesses already made are kept, not thrown away.
+      expect(parked.guessCount).toBe(2);
+      expect(mockRpdHold.hold).toHaveBeenCalledTimes(1);
+      expect(mockRpdHold.hold).toHaveBeenCalledWith("llm-google", "gemini-3.6-flash");
+      // The solved group is gone from the persisted run — that reduced word
+      // set is what the resume below has to pick up from.
+      expect(parking.availableWords).toEqual(["EGGPLANT", "FIG", "GRAPE", "HONEY"]);
+      expect(parking.finishedAt).toBeInstanceOf(Date);
+      // Backdate the park timestamp by a second. Part 1 and Part 2 both stamp
+      // finishedAt from `new Date()` and, on a fast machine, land in the same
+      // millisecond — which makes the strict `toBeGreaterThan` at the end of
+      // this test flake. Pushing the park time into the past keeps that check
+      // meaningful (a runner that never refreshes finishedAt still fails it)
+      // without depending on wall-clock progress between the two runs.
+      const parkedAt = new Date(parking.finishedAt!.getTime() - 1000);
+      parking.finishedAt = parkedAt;
+
+      // --- Part 2: resume from those flushed guesses ------------------
+      jest.clearAllMocks();
+      // The run is re-dispatched still carrying the parked status (the sweep
+      // flips it too, but the runner must not depend on that having landed).
+      const resuming = makeRun({
+        strategyName: "llm-google",
+        modelName: "gemini-3.6-flash",
+        status: StrategyRunStatus.RATE_LIMITED_DAILY,
+        availableWords: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        finishedAt: parkedAt,
+      });
+      mockStrategyRunRepo.findOne.mockResolvedValue(resuming);
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockRpdHold.isHeld.mockResolvedValue(false);
+      mockGuessRepo.find.mockResolvedValue([
+        { words: ["APPLE", "BANANA", "CHERRY", "EGGPLANT"], result: GuessResult.FAILURE },
+        { words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: GuessResult.SUCCESS },
+      ]);
+      mockOrchestratorService.solveAssist
+        // Unusable output — non-terminal, so the loop must go round again.
+        // Without the parked-status normalization it would break here.
+        .mockResolvedValueOnce(makeAssistResponse([]))
+        .mockResolvedValueOnce(makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]));
+
+      const resumed = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(2);
+      expect(resumed.status).toBe(StrategyRunStatus.COMPLETED);
+      // Two flushed guesses plus the solving one.
+      expect(resumed.guessCount).toBe(3);
+      // finishedAt is the completion, not the stale park timestamp that
+      // run-history's duration sort would otherwise measure against.
+      expect(resuming.finishedAt!.getTime()).toBeGreaterThan(parkedAt!.getTime());
+    });
+
+    it("does not re-park a resumed run whose hold has since expired", async () => {
+      const resuming = makeRun({
+        strategyName: "llm-google",
+        modelName: "gemini-3.6-flash",
+        status: StrategyRunStatus.RATE_LIMITED_DAILY,
+        finishedAt: new Date("2024-01-01T00:00:00Z"),
+      });
+      mockStrategyRunRepo.findOne.mockResolvedValue(resuming);
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockRpdHold.isHeld.mockResolvedValue(false);
+      mockOrchestratorService.solveAssist
+        .mockResolvedValueOnce(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]))
+        .mockResolvedValueOnce(makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]));
+
+      const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
+
+      expect(result.status).toBe(StrategyRunStatus.COMPLETED);
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(2);
     });
   });
 });

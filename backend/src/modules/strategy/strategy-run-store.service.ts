@@ -114,6 +114,13 @@ export class StrategyRunStore {
     });
   }
 
+  /** Persist a single run row. Used for status-only transitions (e.g.
+   * parking a run at RATE_LIMITED_DAILY) that don't need the batched
+   * guess/proposal/prompt flush of flushBatch. */
+  async saveRun(run: StrategyRun): Promise<StrategyRun> {
+    return this.strategyRunRepo.save(run);
+  }
+
   /**
    * The highest promptNumber already recorded for this run, or 0 if none
    * exist yet. Used to resume numbering after a worker restart. A MAX
