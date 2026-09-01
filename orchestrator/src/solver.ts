@@ -2,6 +2,7 @@ import {
   APICallError,
   JSONParseError,
   NoObjectGeneratedError,
+  RetryError,
   TypeValidationError,
 } from "ai";
 import { type SolveErrorCode } from "./types.js";
@@ -174,6 +175,16 @@ export function classifyModelCallError(
   provider: ModelProvider,
   details: SolveErrorDetails,
 ): SolveError {
+  // generateText/generateObject retry any retryable failure (every 429 is
+  // retryable) up to maxRetries, then throw a RetryError wrapping the last
+  // underlying error instead of that error itself. Classify against the
+  // wrapped error, or a Google rate-limit hit is never recognised: it lands
+  // on model_error, serialises as HTTP 502, and the runner retries it as a
+  // generic model error rather than parking the run until quota resets.
+  if (RetryError.isInstance(err) && err.lastError !== undefined) {
+    return classifyModelCallError(err.lastError, provider, details);
+  }
+
   const message = err instanceof Error ? err.message : "Unknown model error";
 
   if (

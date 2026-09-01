@@ -142,6 +142,11 @@ export async function solveAssist(
       // rejection path's APICallError.responseBody isn't gated the same
       // way, which is why only failures were landing in SolvePrompt).
       include: { requestBody: true, responseBody: true },
+      // The strategy runner's own step loop is the only retry layer; the AI
+      // SDK's default of 2 silently adds a second one that also delays and
+      // re-bills a doomed call (e.g. a Google daily-quota 429) before it
+      // ever reaches classifyModelCallError.
+      maxRetries: 0,
       // Forwards the incoming HTTP request's own abort signal (see app.ts),
       // so a client that gives up (e.g. the backend's ORCHESTRATOR_TIMEOUT_MS)
       // actually cancels this call instead of leaving it running server-side

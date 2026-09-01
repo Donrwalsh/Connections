@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { APICallError } from "ai";
+import { APICallError, RetryError } from "ai";
 import { classifyModelCallError, SolveError } from "./solver.js";
 
 // The real 429 body captured from a live burst against Google AI Studio's
@@ -269,6 +269,52 @@ describe("classifyModelCallError", () => {
 
   it("still classifies a non-429 google error as model_error", () => {
     const err = makeAPICallError({ statusCode: 500, responseBody: "internal error" });
+
+    const result = classifyModelCallError(err, "google", { model: "gemini-3.6-flash" });
+
+    expect(result.code).toBe("model_error");
+  });
+
+  // The AI SDK's generateText/generateObject retry a retryable failure
+  // (every 429 is retryable) up to maxRetries, then throw a RetryError that
+  // wraps the underlying APICallError rather than the APICallError itself.
+  // classifyModelCallError must look through that wrapper or a Google
+  // rate-limit hit can never be recognised — it lands on model_error, which
+  // the orchestrator serialises as HTTP 502 and the runner retries as a
+  // generic model error instead of parking the run.
+  it("unwraps a RetryError around a Google per-minute APICallError as rate_limited", () => {
+    const inner = makeAPICallError({ statusCode: 429, responseBody: GOOGLE_RPM_BODY });
+    const err = new RetryError({
+      message: "Failed after 3 attempts",
+      reason: "maxRetriesExceeded",
+      errors: [inner, inner, inner],
+    });
+
+    const result = classifyModelCallError(err, "google", { model: "gemini-3.6-flash" });
+
+    expect(result.code).toBe("rate_limited");
+    expect(result.details.retryAfterSeconds).toBeCloseTo(3.857116819);
+  });
+
+  it("unwraps a RetryError around a Google per-day APICallError as rate_limited_daily", () => {
+    const inner = makeAPICallError({ statusCode: 429, responseBody: GOOGLE_RPD_BODY });
+    const err = new RetryError({
+      message: "Failed after 3 attempts",
+      reason: "maxRetriesExceeded",
+      errors: [inner, inner, inner],
+    });
+
+    const result = classifyModelCallError(err, "google", { model: "gemini-3.6-flash" });
+
+    expect(result.code).toBe("rate_limited_daily");
+  });
+
+  it("classifies a RetryError wrapping a non-APICallError as model_error without throwing", () => {
+    const err = new RetryError({
+      message: "Failed after 3 attempts",
+      reason: "maxRetriesExceeded",
+      errors: [new Error("socket hang up")],
+    });
 
     const result = classifyModelCallError(err, "google", { model: "gemini-3.6-flash" });
 

@@ -33,6 +33,11 @@ export async function runAssistStep(messages: ChatMessage[]): Promise<AssistResu
       model: getModel(provider),
       messages,
       temperature: ASSIST_TEMPERATURE,
+      // The strategy runner's own step loop is the only retry layer; the AI
+      // SDK's default of 2 silently adds a second one that also delays and
+      // re-bills a doomed call (e.g. a Google daily-quota 429) before it
+      // ever reaches classifyModelCallError.
+      maxRetries: 0,
     });
     text = result.text;
     modelId = result.response.modelId;

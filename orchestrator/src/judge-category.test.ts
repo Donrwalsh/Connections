@@ -54,4 +54,18 @@ describe("judgeCategory", () => {
       name: "SolveError",
     });
   });
+
+  it("disables the AI SDK's own retry layer (maxRetries: 0)", async () => {
+    generateObjectMock.mockResolvedValue({
+      object: { verdict: "correct", rationale: "Match." },
+      request: {},
+      response: {},
+    });
+
+    await judgeCategory("Fruits", "___ COBBLER", "gpt-4.1-nano", "openai");
+
+    expect(generateObjectMock).toHaveBeenCalledWith(
+      expect.objectContaining({ maxRetries: 0 }),
+    );
+  });
 });
