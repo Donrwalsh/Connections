@@ -109,9 +109,11 @@ function makeJudgmentEvent(
 function stubFetch({
   leaderboard = emptyLeaderboard,
   recentActivity = [],
+  coverage = { eligible: 0, judged: 0, pending: 0 },
 }: {
   leaderboard?: Leaderboard;
   recentActivity?: RecentActivityEvent[];
+  coverage?: { eligible: number; judged: number; pending: number };
 } = {}) {
   vi.stubGlobal(
     "fetch",
@@ -125,6 +127,9 @@ function stubFetch({
       }
       if (href.includes("/strategy/activity/recent")) {
         return Promise.resolve({ ok: true, json: async () => recentActivity });
+      }
+      if (href.includes("/dispatch/evaluate-categories/coverage")) {
+        return Promise.resolve({ ok: true, json: async () => coverage });
       }
       return Promise.resolve({ ok: true, json: async () => leaderboard });
     }),
@@ -211,6 +216,14 @@ describe("ActivityPage", () => {
     renderActivity();
 
     expect(await screen.findByRole("heading", { name: "Activity" })).toBeInTheDocument();
+  });
+
+  it("shows the category-judging coverage widget in the budget row", async () => {
+    stubFetch({ coverage: { eligible: 30, judged: 18, pending: 12 } });
+    renderActivity();
+
+    expect(await screen.findByText("18 / 30 judged")).toBeInTheDocument();
+    expect(screen.getByText("12 to judge")).toBeInTheDocument();
   });
 
   it("opens and closes the Enable Auto-Dispatch modal", async () => {
@@ -315,6 +328,12 @@ describe("ActivityPage", () => {
       }
       if (href.includes("/strategy/activity/recent")) {
         return Promise.resolve({ ok: true, json: async () => [] });
+      }
+      if (href.includes("/dispatch/evaluate-categories/coverage")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ eligible: 0, judged: 0, pending: 0 }),
+        });
       }
       return Promise.resolve({ ok: true, json: async () => emptyLeaderboard });
     });

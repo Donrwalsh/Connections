@@ -243,6 +243,17 @@ export interface FreeTierUsage {
   models: string[];
 }
 
+/** GET /dispatch/evaluate-categories/coverage — how much of the LLM
+ * category-judge backlog is done. `eligible` is every successful used
+ * proposal; `judged` is how many already have a verdict row; `pending`
+ * (eligible − judged) is what the next `evaluate-categories` dispatch
+ * would enqueue. Backs the Activity page's Category judging widget. */
+export interface CategoryEvaluationCoverage {
+  eligible: number;
+  judged: number;
+  pending: number;
+}
+
 /** GET /dispatch/free-tier/:tier — whether a continuous free-tier dispatch
  * cycle (see the backend's FreeTierDispatchService) is currently running
  * for `tier`, and at what threshold. Both tiers are dispatchable; a tier

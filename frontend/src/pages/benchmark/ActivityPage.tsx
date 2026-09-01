@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
+import { CategoryJudgingWidget } from "../../components/benchmark/CategoryJudgingWidget";
 import { FreeTierBudgetWidget } from "../../components/benchmark/FreeTierBudgetWidget";
 import { FreeTierDispatchModal } from "../../components/benchmark/FreeTierDispatchModal";
 import { RecentActivityTable } from "../../components/benchmark/RecentActivityTable";
@@ -81,6 +82,7 @@ export function ActivityPage() {
           refreshSignal={dispatchRefreshSignal}
         />
         <FreeTierBudgetWidget tier="mini" spentUsd={miniSpentUsd} refreshSignal={dispatchRefreshSignal} />
+        <CategoryJudgingWidget />
       </div>
 
       {isDispatchModalOpen ? (

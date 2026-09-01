@@ -4,6 +4,7 @@
 // which parts of the benchmark UI are still mock-driven.
 
 import type {
+  CategoryEvaluationCoverage,
   DeleteRunResult,
   FreeTierDispatchBothStartResult,
   FreeTierDispatchBothStopResult,
@@ -141,6 +142,15 @@ export function fetchFreeTierDispatchStatus(
   signal?: AbortSignal,
 ): Promise<FreeTierDispatchStatus> {
   return fetchJson(`/dispatch/free-tier/${tier}`, signal);
+}
+
+/** How much of the category-judge backlog is done — see
+ * CategoryEvaluationCoverage. Backs the Activity page's Category judging
+ * widget; `pending` is what the next evaluate-categories dispatch enqueues. */
+export function fetchCategoryEvaluationCoverage(
+  signal?: AbortSignal,
+): Promise<CategoryEvaluationCoverage> {
+  return fetchJson("/dispatch/evaluate-categories/coverage", signal);
 }
 
 /** Starts a continuous free-tier dispatch cycle for one tier at
