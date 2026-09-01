@@ -151,6 +151,13 @@ export interface RunHistoryRow {
   /** Count of this run's solve steps with at least one issue tag (see
    * SolvePromptRecord.issueTags). Always 0 for non-LLM strategies. */
   issueCount: number;
+  /** This run's category-judge verdict tallies — one per successful used
+   * proposal that has been judged (see CategoryEvaluationRecord). `callError`
+   * rows count toward none. All 0 for non-LLM strategies and for LLM runs
+   * not yet evaluated. */
+  categoryCorrect: number;
+  categoryPartial: number;
+  categoryLucky: number;
 }
 
 export interface RunHistoryMeta {
@@ -164,22 +171,36 @@ export interface RunHistory {
   meta: RunHistoryMeta;
 }
 
-/** One row of GET /strategy/runs/recent: the most recent StrategyRun rows
- * across *every* strategy/model (unlike RunHistoryRow, which is scoped to
- * one strategy) — backs the Activity page's live feed. Deliberately slimmer
- * than RunHistoryRow (no guessCount/tokenCostUsd/issueCount)
- * since this is polled repeatedly. */
-export interface RecentRun {
+/** Events from GET /strategy/activity/recent: the Activity page's live feed,
+ * one reverse-chronological stream across *every* strategy/model that mixes
+ * a StrategyRun starting with a CategoryEvaluation (category-judge) verdict
+ * landing. `occurredAt` is the run's startedAt or the judgment's
+ * evaluatedAt. Deliberately slim (no guessCount/tokenCostUsd/rationale/
+ * diagnostics) since it is polled repeatedly — the run page carries detail. */
+interface RecentActivityEventBase {
   id: number;
   puzzleId: number;
   puzzleDate: string;
   strategyName: string;
   modelName: string | null;
+  occurredAt: string;
+}
+
+export interface RecentActivityRunEvent extends RecentActivityEventBase {
+  kind: "run";
   trialNumber: number;
   status: RunStatus;
-  startedAt: string;
-  finishedAt: string | null;
 }
+
+export interface RecentActivityJudgmentEvent extends RecentActivityEventBase {
+  kind: "judgment";
+  status: "judged" | "callError";
+  verdict: CategoryVerdictValue | null;
+  proposedCategory: string;
+  actualCategory: string;
+}
+
+export type RecentActivityEvent = RecentActivityRunEvent | RecentActivityJudgmentEvent;
 
 /** One row from GET /strategy/models — the real allowlist of models a
  * strategy may dispatch runs against. Used to recognize a model the static
@@ -220,6 +241,17 @@ export interface FreeTierUsage {
   dailyLimitTokens: number;
   remainingTokens: number;
   models: string[];
+}
+
+/** GET /category-evaluation/coverage — how much of the LLM
+ * category-judge backlog is done. `eligible` is every successful used
+ * proposal; `judged` is how many already have a verdict row; `pending`
+ * (eligible − judged) is what the next `evaluate-categories` dispatch
+ * would enqueue. Backs the Activity page's Category judging widget. */
+export interface CategoryEvaluationCoverage {
+  eligible: number;
+  judged: number;
+  pending: number;
 }
 
 /** GET /dispatch/free-tier/:tier — whether a continuous free-tier dispatch

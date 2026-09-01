@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { loadEnv } from "../../config/env";
@@ -10,6 +10,7 @@ import {
   CategoryEvalVerdict,
 } from "./entities/category-evaluation.entity";
 import { LlmProposal, LlmProposalStatus } from "./entities/llm-proposal.entity";
+import { StrategyRun } from "./entities/strategy-run.entity";
 import { GuessResult } from "./entities/guess.entity";
 import { OrchestratorService } from "./orchestrator.service";
 import { Queue } from "bullmq";
@@ -47,6 +48,17 @@ export interface EvaluateProposalResult {
   reason?: string;
 }
 
+/** How much of the judge-eligible backlog has been evaluated — `eligible`
+ * is every used proposal whose guess succeeded, `judged` is how many of
+ * those already have a CategoryEvaluation row (a callError row counts:
+ * enqueuePending won't re-pick it without force), `pending` is the
+ * difference and equals what the next dispatch would enqueue. */
+export interface CategoryEvaluationCoverage {
+  eligible: number;
+  judged: number;
+  pending: number;
+}
+
 @Injectable()
 export class CategoryEvaluatorService {
   private readonly logger = new Logger(CategoryEvaluatorService.name);
@@ -60,6 +72,8 @@ export class CategoryEvaluatorService {
     private readonly llmProposalRepo: Repository<LlmProposal>,
     @InjectRepository(Puzzle)
     private readonly puzzleRepo: Repository<Puzzle>,
+    @InjectRepository(StrategyRun)
+    private readonly strategyRunRepo: Repository<StrategyRun>,
     @Inject(OrchestratorService)
     private readonly orchestrator: OrchestratorService,
     @Inject(LLM_OPENAI_QUEUE) private readonly llmOpenAIQueue: Queue,
@@ -129,6 +143,48 @@ export class CategoryEvaluatorService {
     }
 
     return { enqueued: llmProposalIds.length, llmProposalIds };
+  }
+
+  /**
+   * Judge-coverage totals for the Activity page's "how much is left to
+   * dispatch" widget. `eligible` / `judged` come from the same used +
+   * successful-guess join as enqueuePending, with a LEFT JOIN onto
+   * CategoryEvaluation; `pending` (eligible − judged) is exactly what an
+   * un-forced dispatch would enqueue next.
+   */
+  async getCoverage(): Promise<CategoryEvaluationCoverage> {
+    const row = await this.llmProposalRepo
+      .createQueryBuilder("proposal")
+      .innerJoin("proposal.guess", "guess", "guess.result = :success", {
+        success: GuessResult.SUCCESS,
+      })
+      .leftJoin(CategoryEvaluation, "ce", 'ce."llmProposalId" = proposal.id')
+      .where("proposal.status = :used", { used: LlmProposalStatus.USED })
+      .select("COUNT(*)::int", "eligible")
+      .addSelect("COUNT(ce.id)::int", "judged")
+      .getRawOne<{ eligible: number | string; judged: number | string }>();
+
+    const eligible = Number(row?.eligible ?? 0);
+    const judged = Number(row?.judged ?? 0);
+    return { eligible, judged, pending: eligible - judged };
+  }
+
+  /**
+   * Remove every CategoryEvaluation row for one strategy run — for
+   * re-judging a run from scratch (a later dispatch then re-picks its
+   * now-unevaluated successful proposals). 404s on an unknown run id, the
+   * same as StrategyRunStore.deleteRun; unlike that, it does not care
+   * whether the run is still RUNNING, since evaluations are written well
+   * after a run finishes.
+   */
+  async deleteRunEvaluations(runId: number): Promise<{ deleted: number }> {
+    const run = await this.strategyRunRepo.findOne({ where: { id: runId } });
+    if (!run) {
+      throw new NotFoundException(`No strategy run with id: ${runId}`);
+    }
+
+    const { affected } = await this.categoryEvalRepo.delete({ strategyRunId: runId });
+    return { deleted: affected ?? 0 };
   }
 
   /**

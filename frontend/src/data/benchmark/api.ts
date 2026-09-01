@@ -4,6 +4,7 @@
 // which parts of the benchmark UI are still mock-driven.
 
 import type {
+  CategoryEvaluationCoverage,
   DeleteRunResult,
   FreeTierDispatchBothStartResult,
   FreeTierDispatchBothStopResult,
@@ -11,7 +12,7 @@ import type {
   FreeTierId,
   FreeTierUsage,
   Leaderboard,
-  RecentRun,
+  RecentActivityEvent,
   RunHistory,
   RunHistorySortBy,
   RunHistorySortDir,
@@ -110,11 +111,12 @@ export function fetchRunHistory(
   return fetchJson(`/strategy/${strategyName}/runs${query ? `?${query}` : ""}`, signal);
 }
 
-/** The most recent runs across every strategy/model, newest first — backs
- * the Activity page's live feed. Fixed at 100 rows server-side, no
- * pagination (a rolling window, not a list to page through). */
-export function fetchRecentRuns(signal?: AbortSignal): Promise<RecentRun[]> {
-  return fetchJson("/strategy/runs/recent", signal);
+/** The most recent activity across every strategy/model, newest first —
+ * runs starting and category-judge verdicts landing, interleaved. Backs the
+ * Activity page's live feed. Fixed at 100 events server-side, no pagination
+ * (a rolling window, not a list to page through). */
+export function fetchRecentActivity(signal?: AbortSignal): Promise<RecentActivityEvent[]> {
+  return fetchJson("/strategy/activity/recent", signal);
 }
 
 /** The real model allowlist (every configured model, any strategy). Used to
@@ -140,6 +142,15 @@ export function fetchFreeTierDispatchStatus(
   signal?: AbortSignal,
 ): Promise<FreeTierDispatchStatus> {
   return fetchJson(`/dispatch/free-tier/${tier}`, signal);
+}
+
+/** How much of the category-judge backlog is done — see
+ * CategoryEvaluationCoverage. Backs the Activity page's Category judging
+ * widget; `pending` is what the next evaluate-categories dispatch enqueues. */
+export function fetchCategoryEvaluationCoverage(
+  signal?: AbortSignal,
+): Promise<CategoryEvaluationCoverage> {
+  return fetchJson("/category-evaluation/coverage", signal);
 }
 
 /** Starts a continuous free-tier dispatch cycle for one tier at

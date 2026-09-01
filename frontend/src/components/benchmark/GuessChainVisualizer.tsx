@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 import { fetchRunDetail } from "../../data/benchmark/api";
 import { formatDuration } from "../../data/benchmark/metrics";
-import { guessResultLabel, guessResultTone } from "../../data/benchmark/runStatus";
+import {
+  categoryVerdictLabel,
+  categoryVerdictTone,
+  guessResultLabel,
+  guessResultTone,
+} from "../../data/benchmark/runStatus";
 import type {
   DeleteRunResult,
   GuessRecord,
@@ -330,25 +335,6 @@ function solvePromptStatusLabel(status: SolvePromptRecord["status"]): string {
     case "parsed":
       return "Parsed";
   }
-}
-
-function categoryVerdictLabel(verdict: string | null): string {
-  switch (verdict) {
-    case "correct":
-      return "Category: correct";
-    case "partial":
-      return "Category: partial";
-    case "lucky":
-      return "Category: lucky";
-    default:
-      return "Category: judge failed";
-  }
-}
-
-function categoryVerdictTone(verdict: string | null): "completed" | "neutral" | "failed" {
-  if (verdict === "correct") return "completed";
-  if (verdict === "partial") return "neutral";
-  return "failed";
 }
 
 function issueTagLabel(tag: string): string {

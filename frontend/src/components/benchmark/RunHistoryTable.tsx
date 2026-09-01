@@ -16,6 +16,7 @@ import type {
 } from "../../data/benchmark/types";
 import { RunStatusFilter } from "./RunStatusFilter";
 import { StatusPill } from "./StatusPill";
+import { VerdictSquares } from "./VerdictSquares";
 
 export interface RunHistoryTableProps {
   /** The route's :strategyId — a model name for LLM rows, the strategy name
@@ -136,6 +137,11 @@ export function RunHistoryTable({
                       />
                     </span>
                   ) : null}
+                  <VerdictSquares
+                    correct={row.categoryCorrect}
+                    partial={row.categoryPartial}
+                    lucky={row.categoryLucky}
+                  />
                 </span>
               </td>
             </tr>

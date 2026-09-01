@@ -292,6 +292,41 @@
   gap: 0.35rem;
 }
 
+/* Per-run category-judge verdict tally in the run-history table — one small
+ * square per verdict kind, count inside (see VerdictSquares). Kept
+ * deliberately tiny so it rides alongside the status/issue pills without
+ * widening the row. */
+.bench-verdicts {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.bench-verdict {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.2rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.bench-verdict--correct {
+  background: #2f9e6f;
+}
+
+.bench-verdict--partial {
+  background: #c98a2b;
+}
+
+.bench-verdict--lucky {
+  background: #8a8f98;
+}
+
 .bench-muted {
   color: var(--text);
 }

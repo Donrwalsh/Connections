@@ -19,6 +19,9 @@ function makeRow(overrides: Partial<RunHistoryRow> = {}): RunHistoryRow {
     guessCount: 4,
     tokenCostUsd: null,
     issueCount: 0,
+    categoryCorrect: 0,
+    categoryPartial: 0,
+    categoryLucky: 0,
     ...overrides,
   };
 }
@@ -318,6 +321,45 @@ describe("StrategyPuzzlePage", () => {
 
     await screen.findByRole("table");
     expect(screen.queryByText(/issue/)).not.toBeInTheDocument();
+  });
+
+  it("shows a verdict square per non-zero category-judge count on a judged run", async () => {
+    stubFetch({
+      history: {
+        rows: [
+          makeRow({
+            strategyName: "llm-openai",
+            modelName: "gpt-4.1-nano-2025-04-14",
+            categoryCorrect: 3,
+            categoryPartial: 1,
+            categoryLucky: 0,
+          }),
+        ],
+        meta: { total: 1, page: 1, limit: 100 },
+      },
+    });
+
+    renderStrategy("gpt-4.1-nano-2025-04-14");
+
+    expect(await screen.findByTitle("3 correct — judge matched the real connection")).toHaveTextContent(
+      "3",
+    );
+    expect(
+      screen.getByTitle("1 partial — judge only partly matched the connection"),
+    ).toHaveTextContent("1");
+    // lucky count is 0 — no square for it.
+    expect(screen.queryByTitle(/lucky/)).not.toBeInTheDocument();
+  });
+
+  it("renders no verdict squares for a run with no category evaluations", async () => {
+    stubFetch({
+      history: { rows: [makeRow()], meta: { total: 1, page: 1, limit: 100 } },
+    });
+
+    renderStrategy("alphabetical");
+
+    await screen.findByRole("table");
+    expect(screen.queryByRole("group", { name: "Category-judge verdicts" })).not.toBeInTheDocument();
   });
 
   it("shows the Token cost column for an LLM strategy, ordered before Status (the far-right column)", async () => {

@@ -325,7 +325,7 @@ describe("App (e2e)", () => {
     expect(rows.every((row) => row.status === "failed")).toBe(true);
   });
 
-  it("GET /strategy/runs/recent returns the most recent runs across every strategy, newest first", async () => {
+  it("GET /strategy/activity/recent returns the most recent events across every strategy, newest first", async () => {
     // "reverse-order" again (see the status-filter test above) rather than
     // an LLM strategy/model combo — dispatch elsewhere in this suite counts
     // existing StrategyRun rows per (puzzle, model) against a trial cap, and
@@ -340,14 +340,15 @@ describe("App (e2e)", () => {
       currentCombination: [0, 1, 2, 3],
     });
 
-    const res = await request(app.getHttpServer()).get("/strategy/runs/recent");
+    const res = await request(app.getHttpServer()).get("/strategy/activity/recent");
 
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body.length).toBeLessThanOrEqual(100);
     // Just inserted, so it has the latest startedAt of everything in the
-    // suite so far — the endpoint's own DESC ordering puts it first.
+    // suite so far — the feed's own DESC ordering puts this run event first.
     expect(res.body[0]).toMatchObject({
+      kind: "run",
       id: newestRun.id,
       strategyName: "reverse-order",
       modelName: null,
@@ -479,8 +480,8 @@ describe("App (e2e)", () => {
     expect(res.body.message).toContain("puzzle date(s) exist");
   });
 
-  it("POST /dispatch/evaluate-categories enqueues judge jobs for un-evaluated successful proposals", async () => {
-    const res = await request(app.getHttpServer()).post("/dispatch/evaluate-categories?limit=2");
+  it("POST /category-evaluation/dispatch enqueues judge jobs for un-evaluated successful proposals", async () => {
+    const res = await request(app.getHttpServer()).post("/category-evaluation/dispatch?limit=2");
 
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({
@@ -496,6 +497,47 @@ describe("App (e2e)", () => {
     for (const id of res.body.llmProposalIds as number[]) {
       await llmOpenAIQueue.remove(`cat-eval-${id}`);
     }
+  });
+
+  it("GET /category-evaluation/coverage reports eligible/judged/pending totals", async () => {
+    const res = await request(app.getHttpServer()).get("/category-evaluation/coverage");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      eligible: expect.any(Number),
+      judged: expect.any(Number),
+      pending: expect.any(Number),
+    });
+    expect(res.body.pending).toBe(res.body.eligible - res.body.judged);
+    expect(res.body.judged).toBeLessThanOrEqual(res.body.eligible);
+  });
+
+  it("DELETE /category-evaluation/run/:runId clears a run's verdicts and reports the count", async () => {
+    const puzzle = await dataSource.getRepository(Puzzle).findOneByOrFail({ date: TEST_DATE });
+    const run = await dataSource.getRepository(StrategyRun).save({
+      puzzle,
+      strategyName: "reverse-order",
+      trialNumber: 208,
+      status: StrategyRunStatus.COMPLETED,
+      availableWords: [],
+      currentCombination: [0, 1, 2, 3],
+      finishedAt: new Date(),
+    });
+
+    const res = await request(app.getHttpServer()).delete(`/category-evaluation/run/${run.id}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      message: expect.stringContaining(`for run ${run.id}`),
+      runId: run.id,
+      deleted: 0,
+    });
+  });
+
+  it("DELETE /category-evaluation/run/:runId 404s on an unknown run id", async () => {
+    const res = await request(app.getHttpServer()).delete("/category-evaluation/run/999999999");
+
+    expect(res.status).toBe(404);
   });
 
   describe("free-tier dispatch", () => {

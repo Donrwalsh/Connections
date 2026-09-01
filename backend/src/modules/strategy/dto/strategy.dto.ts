@@ -242,6 +242,14 @@ export interface RunHistoryRowDto {
   // as a whole. Always 0 for non-LLM strategies (no SolvePrompt rows at
   // all).
   issueCount: number;
+  // This run's LLM category-judge verdict counts (see CategoryEvaluation) —
+  // one per successful used proposal that has been judged. `callError` rows
+  // (null verdict) count toward none, same rule as the leaderboard's
+  // categoryAccuracy. All 0 for non-LLM strategies and for LLM runs not yet
+  // evaluated.
+  categoryCorrect: number;
+  categoryPartial: number;
+  categoryLucky: number;
 }
 
 export interface RunHistoryMetaDto {
@@ -255,22 +263,41 @@ export interface RunHistoryDto {
   meta: RunHistoryMetaDto;
 }
 
-// One row of GET /strategy/runs/recent: the most recent StrategyRun rows
-// across *every* strategy/model (unlike RunHistoryRowDto, which is scoped
-// to one strategy) — backs the Activity page's live feed. Deliberately
-// slimmer than RunHistoryRowDto (no guessCount/tokenCostUsd/
-// issueCount) since this is polled repeatedly.
-export interface RecentRunDto {
+// Events for GET /strategy/activity/recent — the Activity page's live feed,
+// one reverse-chronological stream across *every* strategy/model that mixes
+// two kinds of thing: a StrategyRun starting, and a CategoryEvaluation (the
+// LLM category-accuracy judge) landing a verdict. `occurredAt` is the run's
+// startedAt or the judgment's evaluatedAt; the feed sorts on it. Deliberately
+// slim (no guessCount/tokenCostUsd/rationale/diagnostics) since it is polled
+// repeatedly — the run page carries the detail.
+interface RecentActivityEventBaseDto {
   id: number;
   puzzleId: number;
   puzzleDate: string;
   strategyName: string;
   modelName: string | null;
+  occurredAt: Date;
+}
+
+export interface RecentActivityRunEventDto extends RecentActivityEventBaseDto {
+  kind: "run";
   trialNumber: number;
   status: StrategyRunStatus;
-  startedAt: Date;
-  finishedAt: Date | null;
 }
+
+export interface RecentActivityJudgmentEventDto extends RecentActivityEventBaseDto {
+  kind: "judgment";
+  // "judged" with a verdict, or "callError" with a null verdict (the judge
+  // call itself failed) — mirrors CategoryEvalStatus / CategoryEvaluationDto.
+  status: "judged" | "callError";
+  verdict: "correct" | "partial" | "lucky" | null;
+  proposedCategory: string;
+  actualCategory: string;
+}
+
+export type RecentActivityEventDto =
+  | RecentActivityRunEventDto
+  | RecentActivityJudgmentEventDto;
 
 // The full allowlist entry for one model — lets a caller (e.g. the
 // leaderboard's per-model run page) recognize a real model it doesn't
