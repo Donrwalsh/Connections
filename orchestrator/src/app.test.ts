@@ -285,5 +285,25 @@ describe("orchestrator app", () => {
       expect(body.code).toBe("rate_limited");
       expect((body.details as Record<string, unknown>).retryAfterSeconds).toBe(3.86);
     });
+
+    it("returns 429 for a rate_limited_daily failure", async () => {
+      const { SolveError } = await import("./solver.js");
+      solveAssistMock.mockRejectedValueOnce(
+        new SolveError("rate_limited_daily", "Google daily quota exhausted"),
+      );
+
+      const res = await solveAssistRequest({
+        messages: SOLVE_ASSIST_BODY.messages,
+        model: "gemini-3.6-flash",
+        provider: "google",
+      });
+
+      expect(res.status).toBe(429);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.code).toBe("rate_limited_daily");
+      // The absence of a retry hint is the whole behavioural distinction
+      // from a plain rate_limited hit.
+      expect((body.details as Record<string, unknown>)?.retryAfterSeconds).toBeUndefined();
+    });
   });
 });

@@ -126,8 +126,11 @@ interface LeaderboardAccumulator {
   puzzleIds: Set<number>;
   // Real StrategyRunStatus.COMPLETED count — the successRate numerator.
   completed: number;
+  // In-progress runs: RUNNING, plus RATE_LIMITED_DAILY (parked waiting for
+  // Google's daily quota to reset — non-terminal, and deliberately kept out
+  // of `failed` so a held model's parked runs don't read as failures).
   active: number;
-  // Every non-completed, non-running run (FAILED, DUPLICATE,
+  // Every run that is neither completed nor in progress (FAILED, DUPLICATE,
   // MALFORMED_RESPONSE, ERROR) — the successRate denominator is
   // completed + failed, unchanged regardless of the LLM-specific display
   // adjustment below.
@@ -150,10 +153,11 @@ interface LeaderboardAccumulator {
   // model rate — unlike guesses/duration this covers every run regardless
   // of outcome, since a failed or errored LLM run still spent tokens.
   costsUsd: number[];
-  // Issue-tagged SolvePrompt count for every run with a model, regardless
-  // of status or whether cost was priceable — unlike costsUsd, issue
-  // count is always knowable (0 when clean), so this array's length always
-  // equals the number of runs with a model, not a subset of them. Runs that
+  // Issue-tagged SolvePrompt count for every run with a model, whatever its
+  // status (except RATE_LIMITED_DAILY — see the push site) and whether or
+  // not cost was priceable: unlike costsUsd, issue count is always knowable
+  // (0 when clean), so this array's length is the number of runs with a
+  // model that actually reached an outcome or are running. Runs that
   // errored before their first LLM call have no SolvePrompt rows and so
   // contribute a hard 0, pulling an error-prone model's average downward —
   // a deliberate spec choice, noted here so a future reader doesn't
@@ -584,7 +588,16 @@ export class StrategyService {
         if (run.finishedAt) {
           acc.durationsMs.push(run.finishedAt.getTime() - run.startedAt.getTime());
         }
-      } else if (run.status === StrategyRunStatus.RUNNING) {
+      } else if (
+        run.status === StrategyRunStatus.RUNNING ||
+        run.status === StrategyRunStatus.RATE_LIMITED_DAILY
+      ) {
+        // RATE_LIMITED_DAILY is non-terminal: the run is parked waiting for
+        // Google's daily quota to reset and the google-rpd-resume sweep to
+        // re-dispatch it. It is in-progress, not an outcome — counting it as
+        // a failure would let one exhausted model tank its own success rate
+        // (the runner's top gate can mint a parked row per already-queued
+        // job). See the RPD hold design spec's Goals.
         acc.active++;
       } else {
         acc.failed++;
@@ -616,7 +629,14 @@ export class StrategyService {
         if (tokens && rate) {
           acc.costsUsd.push(computeTokenCostUsd(tokens.promptTokens, tokens.completionTokens, rate));
         }
-        acc.issueCounts.push(issueCountByRun.get(run.id) ?? 0);
+        // A run parked by an RPD hold is excluded: it is still in progress,
+        // and one parked by the top gate never made a call at all, so its
+        // hard 0 would dilute the average with a non-observation rather than
+        // a clean run. Every other status keeps contributing (see the
+        // issueCounts note on LeaderboardAccumulator).
+        if (run.status !== StrategyRunStatus.RATE_LIMITED_DAILY) {
+          acc.issueCounts.push(issueCountByRun.get(run.id) ?? 0);
+        }
       }
     }
 

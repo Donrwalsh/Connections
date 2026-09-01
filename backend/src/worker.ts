@@ -9,6 +9,7 @@ import type { FreeTierId } from "./modules/strategy/free-tier-usage.service";
 import { redisConnection } from "./modules/queue/redis.config";
 import { PuzzleIngestionService } from "./modules/game/puzzle-ingestion.service";
 import { ModelMetadataRefreshService } from "./modules/supported-model/model-metadata-refresh.service";
+import { GoogleRpdResumeService } from "./modules/strategy/google-rpd-resume.service";
 import {
   isLlmStrategy,
   LLM_OPENAI,
@@ -47,6 +48,7 @@ async function bootstrap() {
   const puzzleIngestionService = appContext.get(PuzzleIngestionService);
   const freeTierDispatchService = appContext.get(FreeTierDispatchService);
   const modelMetadataRefreshService = appContext.get(ModelMetadataRefreshService);
+  const googleRpdResumeService = appContext.get(GoogleRpdResumeService);
 
   const activeWorkers: Worker[] = [];
   const activeQueueNames: string[] = [];
@@ -259,6 +261,27 @@ async function bootstrap() {
 
     activeWorkers.push(freeTierDispatchWorker);
     activeQueueNames.push("free-tier-dispatch");
+
+    const googleRpdResumeWorker = new Worker(
+      "google-rpd-resume",
+      async (job) => {
+        logger.log(`starting google-rpd resume sweep ${job.id}`);
+        const result = await googleRpdResumeService.runResume();
+        logger.log(`finished google-rpd resume sweep ${job.id}: ${JSON.stringify(result)}`);
+        return result;
+      },
+      {
+        connection: redisConnection,
+        concurrency: 1,
+      },
+    );
+
+    googleRpdResumeWorker.on("failed", (job, err) => {
+      logger.error(`google-rpd resume sweep ${job?.id} failed`, err?.stack || err);
+    });
+
+    activeWorkers.push(googleRpdResumeWorker);
+    activeQueueNames.push("google-rpd-resume");
   }
 
   // Graceful shutdown: let BullMQ finish (or safely abandon, mid-transaction-safe)

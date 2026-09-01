@@ -85,13 +85,42 @@ describe("classifyModelCallError", () => {
     expect(result.details.retryAfterSeconds).toBeCloseTo(3.857116819);
   });
 
-  it("classifies a Google daily (RPD) hit as model_error, not rate_limited", () => {
+  it("classifies a Google daily (RPD) hit as rate_limited_daily with no retryAfterSeconds", () => {
     const err = makeAPICallError({ statusCode: 429, responseBody: GOOGLE_RPD_BODY });
 
     const result = classifyModelCallError(err, "google", { model: "gemini-3.6-flash" });
 
-    expect(result.code).toBe("model_error");
+    expect(result).toBeInstanceOf(SolveError);
+    expect(result.code).toBe("rate_limited_daily");
     expect(result.details.retryAfterSeconds).toBeUndefined();
+  });
+
+  it("does not classify a non-google provider's per-day 429 as rate_limited_daily", () => {
+    const err = makeAPICallError({ statusCode: 429, responseBody: GOOGLE_RPD_BODY });
+
+    const result = classifyModelCallError(err, "openai", { model: "gpt-4.1-nano" });
+
+    expect(result.code).toBe("model_error");
+  });
+
+  it("classifies a Google 429 with neither PerMinute nor PerDay as model_error", () => {
+    const body = JSON.stringify({
+      error: {
+        code: 429,
+        status: "RESOURCE_EXHAUSTED",
+        details: [
+          {
+            "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+            violations: [{ quotaId: "GenerateContentInputTokensPerModel-FreeTier" }],
+          },
+        ],
+      },
+    });
+    const err = makeAPICallError({ statusCode: 429, responseBody: body });
+
+    const result = classifyModelCallError(err, "google", { model: "gemini-3.6-flash" });
+
+    expect(result.code).toBe("model_error");
   });
 
   it("falls back to model_error when the 429 body isn't JSON", () => {
@@ -164,6 +193,32 @@ describe("classifyModelCallError", () => {
             {
               "@type": "type.googleapis.com/google.rpc.QuotaFailure",
               violations: [{ quotaId: 12345, quotaMetric: 67890 }],
+            },
+          ],
+        },
+      }),
+    });
+
+    expect(() => classifyModelCallError(err, "google", { model: "gemini-3.6-flash" })).not.toThrow();
+
+    const result = classifyModelCallError(err, "google", { model: "gemini-3.6-flash" });
+    expect(result.code).toBe("model_error");
+  });
+
+  it("falls back to model_error (not throw) when the violations array contains a null entry", () => {
+    // A non-object violation entry — `typeof v.quotaId` would throw TypeError
+    // on `null`, contradicting the "never throws" contract of both
+    // parseGoogleRateLimit and isGoogleDailyRateLimit.
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseBody: JSON.stringify({
+        error: {
+          code: 429,
+          message: "rate limited",
+          details: [
+            {
+              "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+              violations: [null, "not-an-object", 7],
             },
           ],
         },

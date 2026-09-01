@@ -21,6 +21,10 @@ export enum StrategyRunStatus {
   DUPLICATE = "duplicate",
   MALFORMED_RESPONSE = "malformedResponse",
   ERROR = "error",
+  // A Google model hit its free-tier requests-per-day quota. NOT terminal —
+  // the google-rpd-resume sweep flips it back to RUNNING after the daily
+  // reset and re-dispatches the job, which resumes from flushed guesses.
+  RATE_LIMITED_DAILY = "rateLimitedDaily",
 }
 
 // Statuses that represent a terminal state (run will never resume).
