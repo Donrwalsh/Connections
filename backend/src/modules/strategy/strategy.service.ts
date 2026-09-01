@@ -1161,6 +1161,26 @@ export class StrategyService {
           WHERE sp."strategyRunId" = run.id AND array_length(sp."issueTags", 1) > 0)`,
         "issueCount",
       )
+      // This run's category-judge verdict tallies (see CategoryEvaluation).
+      // Three separate correlated counts rather than one grouped join so a
+      // run with no evaluation rows still returns 0/0/0, not an absent row —
+      // same shape as issueCount above. callError rows have a null verdict
+      // and match none of the three.
+      .addSelect(
+        `(SELECT COUNT(*)::int FROM "CategoryEvaluation" ce
+          WHERE ce."strategyRunId" = run.id AND ce.verdict = 'correct')`,
+        "categoryCorrect",
+      )
+      .addSelect(
+        `(SELECT COUNT(*)::int FROM "CategoryEvaluation" ce
+          WHERE ce."strategyRunId" = run.id AND ce.verdict = 'partial')`,
+        "categoryPartial",
+      )
+      .addSelect(
+        `(SELECT COUNT(*)::int FROM "CategoryEvaluation" ce
+          WHERE ce."strategyRunId" = run.id AND ce.verdict = 'lucky')`,
+        "categoryLucky",
+      )
       // Each row's own model's rate as of that row's own startedAt (the
       // highest-id ModelPrice row for the model with createdAt <=
       // run.startedAt — see that entity's comment) via plain left joins, so
@@ -1215,6 +1235,9 @@ export class StrategyService {
         finishedAt: Date | string | null;
         guessCount: number;
         issueCount: number;
+        categoryCorrect: number;
+        categoryPartial: number;
+        categoryLucky: number;
         tokenCostUsd: string | number | null;
       }>();
 
@@ -1231,6 +1254,9 @@ export class StrategyService {
       guessCount: Number(row.guessCount),
       tokenCostUsd: row.tokenCostUsd === null ? null : Number(row.tokenCostUsd),
       issueCount: Number(row.issueCount),
+      categoryCorrect: Number(row.categoryCorrect),
+      categoryPartial: Number(row.categoryPartial),
+      categoryLucky: Number(row.categoryLucky),
     }));
 
     return { rows, meta: { total, page: safePage, limit: safeLimit } };

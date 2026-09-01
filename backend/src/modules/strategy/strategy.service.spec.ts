@@ -1920,6 +1920,9 @@ describe("StrategyService", () => {
         finishedAt: new Date("2024-01-01T00:00:05Z"),
         guessCount: 4,
         issueCount: 0,
+        categoryCorrect: 0,
+        categoryPartial: 0,
+        categoryLucky: 0,
         tokenCostUsd: null,
         ...overrides,
       };
@@ -1943,6 +1946,18 @@ describe("StrategyService", () => {
       expect(qb.addSelect).toHaveBeenCalledWith(
         expect.stringContaining('array_length(sp."issueTags", 1) > 0'),
         "issueCount",
+      );
+      expect(qb.addSelect).toHaveBeenCalledWith(
+        expect.stringContaining("ce.verdict = 'correct'"),
+        "categoryCorrect",
+      );
+      expect(qb.addSelect).toHaveBeenCalledWith(
+        expect.stringContaining("ce.verdict = 'partial'"),
+        "categoryPartial",
+      );
+      expect(qb.addSelect).toHaveBeenCalledWith(
+        expect.stringContaining("ce.verdict = 'lucky'"),
+        "categoryLucky",
       );
       expect(qb.addSelect).toHaveBeenCalledWith(
         expect.stringContaining('"inputCostPerMillionTokens" IS NULL'),
@@ -1971,6 +1986,9 @@ describe("StrategyService", () => {
           guessCount: 4,
           tokenCostUsd: null,
           issueCount: 0,
+          categoryCorrect: 0,
+          categoryPartial: 0,
+          categoryLucky: 0,
         },
       ]);
     });
@@ -1981,6 +1999,31 @@ describe("StrategyService", () => {
       const result = await service.getRunHistory("alphabetical", {});
 
       expect(result.rows[0].issueCount).toBe(3);
+    });
+
+    it("should surface category-judge verdict counts from the row", async () => {
+      mockRunHistoryQuery(1, [
+        rawRun({ categoryCorrect: 2, categoryPartial: 1, categoryLucky: 0 }),
+      ]);
+
+      const result = await service.getRunHistory("llm-openai", { model: "gpt-4.1-nano" });
+
+      expect(result.rows[0]).toMatchObject({
+        categoryCorrect: 2,
+        categoryPartial: 1,
+        categoryLucky: 0,
+      });
+    });
+
+    it("should coerce string verdict counts from the raw driver to numbers", async () => {
+      mockRunHistoryQuery(1, [
+        rawRun({ categoryCorrect: "3", categoryPartial: "0", categoryLucky: "1" }),
+      ]);
+
+      const result = await service.getRunHistory("llm-openai", { model: "gpt-4.1-nano" });
+
+      expect(result.rows[0].categoryCorrect).toBe(3);
+      expect(result.rows[0].categoryLucky).toBe(1);
     });
 
     it("should filter by model and honor a given sortBy/sortDir/page/limit", async () => {

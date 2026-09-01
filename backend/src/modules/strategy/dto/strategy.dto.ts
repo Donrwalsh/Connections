@@ -242,6 +242,14 @@ export interface RunHistoryRowDto {
   // as a whole. Always 0 for non-LLM strategies (no SolvePrompt rows at
   // all).
   issueCount: number;
+  // This run's LLM category-judge verdict counts (see CategoryEvaluation) —
+  // one per successful used proposal that has been judged. `callError` rows
+  // (null verdict) count toward none, same rule as the leaderboard's
+  // categoryAccuracy. All 0 for non-LLM strategies and for LLM runs not yet
+  // evaluated.
+  categoryCorrect: number;
+  categoryPartial: number;
+  categoryLucky: number;
 }
 
 export interface RunHistoryMetaDto {
