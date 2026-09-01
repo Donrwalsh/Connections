@@ -128,7 +128,7 @@ function stubFetch({
       if (href.includes("/strategy/activity/recent")) {
         return Promise.resolve({ ok: true, json: async () => recentActivity });
       }
-      if (href.includes("/dispatch/evaluate-categories/coverage")) {
+      if (href.includes("/category-evaluation/coverage")) {
         return Promise.resolve({ ok: true, json: async () => coverage });
       }
       return Promise.resolve({ ok: true, json: async () => leaderboard });
@@ -329,7 +329,7 @@ describe("ActivityPage", () => {
       if (href.includes("/strategy/activity/recent")) {
         return Promise.resolve({ ok: true, json: async () => [] });
       }
-      if (href.includes("/dispatch/evaluate-categories/coverage")) {
+      if (href.includes("/category-evaluation/coverage")) {
         return Promise.resolve({
           ok: true,
           json: async () => ({ eligible: 0, judged: 0, pending: 0 }),

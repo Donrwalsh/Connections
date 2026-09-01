@@ -150,7 +150,7 @@ export function fetchFreeTierDispatchStatus(
 export function fetchCategoryEvaluationCoverage(
   signal?: AbortSignal,
 ): Promise<CategoryEvaluationCoverage> {
-  return fetchJson("/dispatch/evaluate-categories/coverage", signal);
+  return fetchJson("/category-evaluation/coverage", signal);
 }
 
 /** Starts a continuous free-tier dispatch cycle for one tier at

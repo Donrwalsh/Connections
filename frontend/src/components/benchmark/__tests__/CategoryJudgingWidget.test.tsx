@@ -7,7 +7,7 @@ function stubCoverage(coverage: CategoryEvaluationCoverage) {
   vi.stubGlobal(
     "fetch",
     vi.fn((url: unknown) => {
-      if (String(url).includes("/dispatch/evaluate-categories/coverage")) {
+      if (String(url).includes("/category-evaluation/coverage")) {
         return Promise.resolve({ ok: true, json: async () => coverage });
       }
       return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });

@@ -243,7 +243,7 @@ export interface FreeTierUsage {
   models: string[];
 }
 
-/** GET /dispatch/evaluate-categories/coverage — how much of the LLM
+/** GET /category-evaluation/coverage — how much of the LLM
  * category-judge backlog is done. `eligible` is every successful used
  * proposal; `judged` is how many already have a verdict row; `pending`
  * (eligible − judged) is what the next `evaluate-categories` dispatch
