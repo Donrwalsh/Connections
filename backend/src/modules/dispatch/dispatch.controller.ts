@@ -293,6 +293,23 @@ export class DispatchController {
     return this.freeTierDispatchService.getStatus(tier as FreeTierId);
   }
 
+  // Bulk version of DELETE run/:runId — permanently deletes every strategy
+  // run currently in the 'error' status, plus all rows tied to each (guesses,
+  // solve prompts, LLM proposals, and category-judge verdicts). For clearing
+  // out a batch of runs that blew up on a since-fixed bug in one shot. The
+  // 'error' filter can't match a still-'running' run, so unlike the
+  // single-run route there's no per-run running check.
+  @Delete("runs/errored")
+  @UseGuards(DispatchAuthGuard)
+  @ApiBody({ type: DispatchAuthDto })
+  async deleteErroredRuns() {
+    const result = await this.strategyService.deleteErroredRuns();
+    return {
+      message: `Deleted ${result.deletedRuns} errored strategy run(s) and all related data`,
+      ...result,
+    };
+  }
+
   // Permanently deletes a strategy run and every row that belongs to it —
   // for scrubbing a run that errored out after the underlying bug is fixed
   // in code, so a rerun doesn't leave the broken attempt cluttering its

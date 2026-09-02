@@ -849,6 +849,14 @@ export class StrategyService {
     return this.store.deleteRun(runId);
   }
 
+  /**
+   * Bulk-deletes every strategy run whose status is 'error', along with all
+   * rows tied to each — see StrategyRunStore.deleteErroredRuns.
+   */
+  async deleteErroredRuns() {
+    return this.store.deleteErroredRuns();
+  }
+
   private async buildRunDetail(
     run: StrategyRun,
     page: number,

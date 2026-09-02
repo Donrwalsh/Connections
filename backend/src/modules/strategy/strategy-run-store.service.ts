@@ -1,10 +1,11 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
-import { DataSource, Repository } from "typeorm";
+import { DataSource, EntityManager, Repository } from "typeorm";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { Guess } from "./entities/guess.entity";
 import { LlmProposal, LlmProposalStatus } from "./entities/llm-proposal.entity";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
+import { CategoryEvaluation } from "./entities/category-evaluation.entity";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { firstCombination } from "./combinatorics";
 import { SHUFFLE_SMART, SHUFFLE_FOOLISH, LLM_OPENAI, LLM_OLLAMA } from "../../strategies";
@@ -236,10 +237,16 @@ export class StrategyRunStore {
    * StrategyRun row goes: deleting StrategyRun first would just null out
    * strategyRunId on its guesses instead of removing them, leaving them
    * behind as orphaned rows still attached to the puzzle's guess history.
+   * CategoryEvaluation (the run's LLM-judge verdicts) is ON DELETE CASCADE
+   * too, but is deleted explicitly here so the teardown is auditable via
+   * the returned deletedCategoryEvaluations count.
    */
-  async deleteRun(
-    runId: number,
-  ): Promise<{ deletedGuesses: number; deletedSolvePrompts: number; deletedLlmProposals: number }> {
+  async deleteRun(runId: number): Promise<{
+    deletedGuesses: number;
+    deletedSolvePrompts: number;
+    deletedLlmProposals: number;
+    deletedCategoryEvaluations: number;
+  }> {
     const run = await this.strategyRunRepo.findOne({ where: { id: runId } });
 
     if (!run) {
@@ -252,17 +259,76 @@ export class StrategyRunStore {
       );
     }
 
+    return this.dataSource.transaction((manager) => this.deleteRunTx(manager, runId));
+  }
+
+  /**
+   * Bulk-deletes every strategy run whose status is 'error', tearing each
+   * one down through the same path as deleteRun. The 'error' filter already
+   * excludes 'running', so no per-run running check is needed. Runs in a
+   * single transaction so a mid-sweep failure rolls the whole thing back.
+   */
+  async deleteErroredRuns(): Promise<{
+    deletedRuns: number;
+    deletedGuesses: number;
+    deletedSolvePrompts: number;
+    deletedLlmProposals: number;
+    deletedCategoryEvaluations: number;
+  }> {
     return this.dataSource.transaction(async (manager) => {
-      const [deletedGuesses, deletedSolvePrompts, deletedLlmProposals] = await Promise.all([
+      const erroredRuns = await manager.find(StrategyRun, {
+        where: { status: StrategyRunStatus.ERROR },
+        select: { id: true },
+      });
+
+      const totals = {
+        deletedRuns: 0,
+        deletedGuesses: 0,
+        deletedSolvePrompts: 0,
+        deletedLlmProposals: 0,
+        deletedCategoryEvaluations: 0,
+      };
+
+      for (const { id } of erroredRuns) {
+        const counts = await this.deleteRunTx(manager, id);
+        totals.deletedRuns += 1;
+        totals.deletedGuesses += counts.deletedGuesses;
+        totals.deletedSolvePrompts += counts.deletedSolvePrompts;
+        totals.deletedLlmProposals += counts.deletedLlmProposals;
+        totals.deletedCategoryEvaluations += counts.deletedCategoryEvaluations;
+      }
+
+      return totals;
+    });
+  }
+
+  /**
+   * The row-teardown shared by deleteRun and deleteErroredRuns. Deletes
+   * CategoryEvaluation and Guess explicitly before the StrategyRun row (see
+   * deleteRun's doc comment for why order matters), and returns each table's
+   * pre-delete row count. Must run inside a transaction.
+   */
+  private async deleteRunTx(
+    manager: EntityManager,
+    runId: number,
+  ): Promise<{
+    deletedGuesses: number;
+    deletedSolvePrompts: number;
+    deletedLlmProposals: number;
+    deletedCategoryEvaluations: number;
+  }> {
+    const [deletedGuesses, deletedSolvePrompts, deletedLlmProposals, deletedCategoryEvaluations] =
+      await Promise.all([
         manager.count(Guess, { where: { strategyRunId: runId } }),
         manager.count(SolvePrompt, { where: { strategyRunId: runId } }),
         manager.count(LlmProposal, { where: { strategyRunId: runId } }),
+        manager.count(CategoryEvaluation, { where: { strategyRunId: runId } }),
       ]);
 
-      await manager.delete(Guess, { strategyRunId: runId });
-      await manager.delete(StrategyRun, { id: runId });
+    await manager.delete(CategoryEvaluation, { strategyRunId: runId });
+    await manager.delete(Guess, { strategyRunId: runId });
+    await manager.delete(StrategyRun, { id: runId });
 
-      return { deletedGuesses, deletedSolvePrompts, deletedLlmProposals };
-    });
+    return { deletedGuesses, deletedSolvePrompts, deletedLlmProposals, deletedCategoryEvaluations };
   }
 }
