@@ -293,6 +293,14 @@ export class DispatchController {
     return this.freeTierDispatchService.getStatus(tier as FreeTierId);
   }
 
+  // How many strategy runs are currently in the 'error' status. Read-only,
+  // un-gated — backs the maintenance panel's "delete errored runs" button
+  // (the figure the DELETE below would remove).
+  @Get("runs/errored")
+  async countErroredRuns() {
+    return this.strategyService.countErroredRuns();
+  }
+
   // Bulk version of DELETE run/:runId — permanently deletes every strategy
   // run currently in the 'error' status, plus all rows tied to each (guesses,
   // solve prompts, LLM proposals, and category-judge verdicts). For clearing

@@ -5,7 +5,11 @@
 
 import type {
   CategoryEvaluationCoverage,
+  DeleteErroredRunsResult,
+  DeleteFailedJudgeCallsResult,
   DeleteRunResult,
+  ErroredRunCount,
+  FailedJudgeCallCount,
   FreeTierDispatchBothStartResult,
   FreeTierDispatchBothStopResult,
   FreeTierDispatchStatus,
@@ -151,6 +155,51 @@ export function fetchCategoryEvaluationCoverage(
   signal?: AbortSignal,
 ): Promise<CategoryEvaluationCoverage> {
   return fetchJson("/category-evaluation/coverage", signal);
+}
+
+/** How many strategy runs are in the 'error' status right now — the figure
+ * the maintenance panel's "delete errored runs" button acts on. Read-only,
+ * un-gated. */
+export function fetchErroredRunCount(signal?: AbortSignal): Promise<ErroredRunCount> {
+  return fetchJson("/dispatch/runs/errored", signal);
+}
+
+/** Permanently deletes every strategy run in the 'error' status, plus all
+ * rows tied to each (guesses, solve prompts, LLM proposals, category-judge
+ * verdicts). Rejects (thrown Error, message from the backend) on a bad
+ * password. `password` is only checked by the backend in production
+ * (DispatchAuthGuard) — harmless to send blank elsewhere. */
+export function deleteErroredRuns(
+  password: string,
+  signal?: AbortSignal,
+): Promise<DeleteErroredRunsResult> {
+  return fetchJson("/dispatch/runs/errored", signal, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+}
+
+/** How many CategoryEvaluation rows are failed judge calls (status
+ * 'callError') — the figure the maintenance panel's "delete failed judge
+ * calls" button acts on. Read-only, un-gated. */
+export function fetchFailedJudgeCallCount(signal?: AbortSignal): Promise<FailedJudgeCallCount> {
+  return fetchJson("/category-evaluation/failed", signal);
+}
+
+/** Permanently deletes every failed judge call (CategoryEvaluation with
+ * status 'callError') across all runs, so the next evaluate-categories
+ * dispatch re-judges those proposals. Rejects (thrown Error, message from
+ * the backend) on a bad password. */
+export function deleteFailedJudgeCalls(
+  password: string,
+  signal?: AbortSignal,
+): Promise<DeleteFailedJudgeCallsResult> {
+  return fetchJson("/category-evaluation/failed", signal, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
 }
 
 /** Starts a continuous free-tier dispatch cycle for one tier at

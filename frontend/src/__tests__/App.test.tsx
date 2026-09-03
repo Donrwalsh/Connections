@@ -220,6 +220,32 @@ describe("App leaderboard routes", () => {
     expect(await screen.findByRole("heading", { name: "Guess chain" })).toBeInTheDocument();
   });
 
+  it("renders the maintenance panel at /maintenance", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        const href = String(url);
+        if (href.includes("/dispatch/runs/errored")) {
+          return Promise.resolve({ ok: true, json: async () => ({ erroredRuns: 2 }) });
+        }
+        if (href.includes("/category-evaluation/failed")) {
+          return Promise.resolve({ ok: true, json: async () => ({ failed: 5 }) });
+        }
+        return Promise.resolve({ ok: true, json: async () => ({}) });
+      }),
+    );
+
+    renderApp(["/maintenance"]);
+
+    expect(
+      await screen.findByRole("heading", { name: "Bulk cleanup" }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /delete errored runs/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /delete failed judge calls/i })).toBeInTheDocument();
+  });
+
   it("renders the free-tier budget widgets at /activity", async () => {
     vi.stubGlobal(
       "fetch",

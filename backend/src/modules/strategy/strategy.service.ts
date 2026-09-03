@@ -857,6 +857,17 @@ export class StrategyService {
     return this.store.deleteErroredRuns();
   }
 
+  /**
+   * How many strategy runs are currently in the 'error' status — the figure
+   * the maintenance panel's "delete errored runs" button acts on.
+   */
+  async countErroredRuns(): Promise<{ erroredRuns: number }> {
+    const erroredRuns = await this.strategyRunRepo.count({
+      where: { status: StrategyRunStatus.ERROR },
+    });
+    return { erroredRuns };
+  }
+
   private async buildRunDetail(
     run: StrategyRun,
     page: number,

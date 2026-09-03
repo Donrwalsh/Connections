@@ -35,6 +35,7 @@ describe("StrategyService", () => {
     find: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
+    count: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
   let mockPuzzleRepo: { findOne: jest.Mock; count: jest.Mock; createQueryBuilder: jest.Mock };
@@ -135,6 +136,7 @@ describe("StrategyService", () => {
       find: jest.fn(),
       create: jest.fn(),
       save: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
       createQueryBuilder: jest.fn(),
     };
     mockPuzzleRepo = {
@@ -759,6 +761,19 @@ describe("StrategyService", () => {
       expect(mockManager.find).toHaveBeenCalledWith(StrategyRun, {
         where: { status: StrategyRunStatus.ERROR },
         select: { id: true },
+      });
+    });
+  });
+
+  describe("countErroredRuns", () => {
+    it("should count only runs in the error status, for the maintenance panel's button", async () => {
+      mockStrategyRunRepo.count.mockResolvedValueOnce(5);
+
+      const result = await service.countErroredRuns();
+
+      expect(result).toEqual({ erroredRuns: 5 });
+      expect(mockStrategyRunRepo.count).toHaveBeenCalledWith({
+        where: { status: StrategyRunStatus.ERROR },
       });
     });
   });
