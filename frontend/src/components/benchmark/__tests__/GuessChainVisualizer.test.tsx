@@ -13,6 +13,7 @@ const baseDetail: Omit<StrategyRunDetail, "solvePrompts" | "guesses"> = {
   contextWindow: 128_000,
   startedAt: "2025-01-01T00:00:00Z",
   finishedAt: "2025-01-01T00:00:05Z",
+  solveDurationMs: null,
   guessCount: 2,
   meta: { total: 2, page: 1, limit: 200 },
 };

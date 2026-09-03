@@ -16,6 +16,7 @@ function makeRow(overrides: Partial<RunHistoryRow> = {}): RunHistoryRow {
     status: "completed",
     startedAt: "2024-01-01T00:00:00Z",
     finishedAt: "2024-01-01T00:00:05Z",
+    solveDurationMs: 5_000,
     guessCount: 4,
     tokenCostUsd: null,
     issueCount: 0,

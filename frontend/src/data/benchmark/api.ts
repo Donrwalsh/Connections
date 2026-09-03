@@ -275,7 +275,11 @@ export function fetchRunDetailByStrategyDate(
  * it in for completed runs) — the real count is informative for
  * failed/duplicate runs too, and null only means "no guesses yet". */
 export function toRunRecord(item: StrategyRunListItem): RunRecord {
-  const durationMs = computeDurationMs(item.startedAt, item.finishedAt);
+  // Prefer the backend's summed model-call time; fall back to the
+  // wall-clock span for deterministic runs, which have no solveDurationMs.
+  // `??` (not `||`) so a real 0ms sum is kept, not treated as absent.
+  const durationMs =
+    item.solveDurationMs ?? computeDurationMs(item.startedAt, item.finishedAt);
 
   return {
     runId: item.id,
