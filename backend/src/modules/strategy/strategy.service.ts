@@ -72,7 +72,8 @@ const RUN_HISTORY_SORT_EXPR: Record<RunHistorySortBy, string> = {
   puzzleDate: '"puzzleDate"',
   startedAt: 'run."startedAt"',
   guessCount: '"guessCount"',
-  duration: '(run."finishedAt" - run."startedAt")',
+  duration:
+    '(SELECT SUM(sp."latencyMs") FROM "SolvePrompt" sp WHERE sp."strategyRunId" = run.id)',
   tokenCost: '"tokenCostUsd"',
 };
 
@@ -530,6 +531,7 @@ export class StrategyService {
         .select("prompt.strategyRunId", "strategyRunId")
         .addSelect("SUM(prompt.promptTokens)", "promptTokens")
         .addSelect("SUM(prompt.completionTokens)", "completionTokens")
+        .addSelect("SUM(prompt.latencyMs)", "latencyMs")
         .addSelect(
           `COUNT(*) FILTER (WHERE array_length(prompt."issueTags", 1) > 0)`,
           "issueCount",
@@ -539,6 +541,7 @@ export class StrategyService {
           strategyRunId: number;
           promptTokens: string | null;
           completionTokens: string | null;
+          latencyMs: string | null;
           issueCount: string | null;
         }>(),
       // Per-run verdict tallies from the LLM category judge. Grouped in SQL
@@ -566,12 +569,21 @@ export class StrategyService {
 
     const tokensByRun = new Map<number, { promptTokens: number; completionTokens: number }>();
     const issueCountByRun = new Map<number, number>();
+    // Summed model-call time per run (SUM of SolvePrompt.latencyMs). Only
+    // populated for LLM runs; used for avgDurationMs below instead of the
+    // finishedAt - startedAt wall-clock span, which is inflated by
+    // rate-limit sleeps and daily parks. A run with no latency recorded
+    // (deterministic, or an all-callError LLM run) simply has no entry.
+    const latencyMsByRun = new Map<number, number>();
     for (const row of tokenRows) {
       tokensByRun.set(Number(row.strategyRunId), {
         promptTokens: Number(row.promptTokens ?? 0),
         completionTokens: Number(row.completionTokens ?? 0),
       });
       issueCountByRun.set(Number(row.strategyRunId), Number(row.issueCount ?? 0));
+      if (row.latencyMs !== null && row.latencyMs !== undefined) {
+        latencyMsByRun.set(Number(row.strategyRunId), Number(row.latencyMs));
+      }
     }
 
     const categoryByRun = new Map<number, { correct: number; partial: number; lucky: number }>();
@@ -638,8 +650,16 @@ export class StrategyService {
       if (run.status === StrategyRunStatus.COMPLETED) {
         acc.completed++;
         acc.guessCounts.push(guessCountByRun.get(run.id) ?? 0);
-        if (run.finishedAt) {
-          acc.durationsMs.push(run.finishedAt.getTime() - run.startedAt.getTime());
+        // LLM runs use summed model-call time (latencyMsByRun); deterministic
+        // strategies have no SolvePrompt rows, so they keep the wall-clock
+        // span, which for them is real compute time.
+        const solveMs = isLlmStrategy(run.strategyName)
+          ? latencyMsByRun.get(run.id)
+          : run.finishedAt
+            ? run.finishedAt.getTime() - run.startedAt.getTime()
+            : undefined;
+        if (solveMs !== undefined) {
+          acc.durationsMs.push(solveMs);
         }
       } else if (
         run.status === StrategyRunStatus.RUNNING ||
@@ -663,8 +683,9 @@ export class StrategyService {
             // real guesses over real time, so it counts toward these
             // averages the same as a solve (see LeaderboardAccumulator).
             acc.guessCounts.push(guessCountByRun.get(run.id) ?? 0);
-            if (run.finishedAt) {
-              acc.durationsMs.push(run.finishedAt.getTime() - run.startedAt.getTime());
+            const solveMs = latencyMsByRun.get(run.id);
+            if (solveMs !== undefined) {
+              acc.durationsMs.push(solveMs);
             }
           }
         }
@@ -1059,6 +1080,25 @@ export class StrategyService {
       countByRun.set(Number(row.strategyRunId), Number(row.count));
     }
 
+    // Summed model-call time per run (SUM of SolvePrompt.latencyMs), the
+    // same grouped-query shape as countByRun above. Only LLM runs have
+    // SolvePrompt rows; a run absent from the map (or with a NULL sum) has
+    // no recorded call latency and maps to solveDurationMs: null.
+    const latencyRows = await this.solvePromptRepo
+      .createQueryBuilder("prompt")
+      .select("prompt.strategyRunId", "strategyRunId")
+      .addSelect("SUM(prompt.latencyMs)", "latencyMs")
+      .where("prompt.strategyRunId IN (:...ids)", { ids: runs.map((run) => run.id) })
+      .groupBy("prompt.strategyRunId")
+      .getRawMany<{ strategyRunId: number; latencyMs: string | null }>();
+
+    const solveDurationByRun = new Map<number, number>();
+    for (const row of latencyRows) {
+      if (row.latencyMs !== null) {
+        solveDurationByRun.set(Number(row.strategyRunId), Number(row.latencyMs));
+      }
+    }
+
     return runs.map((run) => ({
       id: run.id,
       strategyName: run.strategyName,
@@ -1068,6 +1108,7 @@ export class StrategyService {
       contextWindow: run.contextWindow,
       startedAt: run.startedAt,
       finishedAt: run.finishedAt,
+      solveDurationMs: solveDurationByRun.get(run.id) ?? null,
       guessCount: countByRun.get(run.id) ?? 0,
     }));
   }
@@ -1156,6 +1197,16 @@ export class StrategyService {
         '(SELECT COUNT(*)::int FROM "Guess" g WHERE g."strategyRunId" = run.id)',
         "guessCount",
       )
+      // Summed model-call time for this run. Bare SUM (no COALESCE) so a run
+      // with no SolvePrompt rows — or an LLM run whose rows are all
+      // callErrors (null latency) — comes back as NULL and is mapped to
+      // null, the same shape tokenCostUsd uses. This is what the "duration"
+      // sort orders by (see RUN_HISTORY_SORT_EXPR).
+      .addSelect(
+        `(SELECT SUM(sp."latencyMs")::int FROM "SolvePrompt" sp
+          WHERE sp."strategyRunId" = run.id)`,
+        "solveDurationMs",
+      )
       .addSelect(
         `(SELECT COUNT(*)::int FROM "SolvePrompt" sp
           WHERE sp."strategyRunId" = run.id AND array_length(sp."issueTags", 1) > 0)`,
@@ -1234,6 +1285,7 @@ export class StrategyService {
         startedAt: Date | string;
         finishedAt: Date | string | null;
         guessCount: number;
+        solveDurationMs: string | number | null;
         issueCount: number;
         categoryCorrect: number;
         categoryPartial: number;
@@ -1252,6 +1304,7 @@ export class StrategyService {
       startedAt: new Date(row.startedAt),
       finishedAt: row.finishedAt ? new Date(row.finishedAt) : null,
       guessCount: Number(row.guessCount),
+      solveDurationMs: row.solveDurationMs === null ? null : Number(row.solveDurationMs),
       tokenCostUsd: row.tokenCostUsd === null ? null : Number(row.tokenCostUsd),
       issueCount: Number(row.issueCount),
       categoryCorrect: Number(row.categoryCorrect),
