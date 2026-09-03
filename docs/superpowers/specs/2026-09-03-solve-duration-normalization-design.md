@@ -101,26 +101,27 @@ File: `backend/src/modules/strategy/strategy.service.ts`
 - Add a correlated subquery select:
 
   ```
-  (SELECT COALESCE(SUM(sp."latencyMs"), 0)
+  (SELECT SUM(sp."latencyMs")
      FROM "SolvePrompt" sp
     WHERE sp."strategyRunId" = run.id)::int
   ```
 
   aliased `solveDurationMs`, next to the existing `guessCount` /
-  `issueCount` / `tokenCostUsd` subqueries.
+  `issueCount` / `tokenCostUsd` subqueries. Bare `SUM` (no `COALESCE`)
+  so it returns SQL `NULL` for a run with no `SolvePrompt` rows at all —
+  the same shape `tokenCostUsd` already returns and sorts on.
 - `RUN_HISTORY_SORT_EXPR.duration` (line ~75) changes from
   `(run."finishedAt" - run."startedAt")` to the same
-  `SELECT COALESCE(SUM(sp."latencyMs"), 0) ...` subquery, so the
-  "duration" sort orders by summed call time.
+  `SELECT SUM(sp."latencyMs") ...` subquery, so the "duration" sort
+  orders by summed call time (`NULL`s sort last under `DESC`, first
+  under `ASC` — Postgres default, matching `tokenCost`).
 - `RunHistoryRowDto` gains `solveDurationMs: number | null`.
-- Row mapping: `solveDurationMs` is `null` when the run has **zero**
-  `SolvePrompt` rows (deterministic run, or an LLM run that never
-  completed a call); otherwise the summed value (which may be `0` if
-  every row was `CALL_ERROR`). The raw subquery `COALESCE`s to `0` for
-  SQL sort stability; the JS mapper distinguishes "no rows at all" →
-  `null` from "rows summing to 0" → `0`. Simplest reliable signal:
-  select a companion `COUNT(sp.id)` (or reuse an existing count) and map
-  `count === 0 ? null : sum`.
+- Row mapping: `solveDurationMs` is `null` when the subquery returned
+  `NULL` — a run with no `SolvePrompt` rows (deterministic, or an LLM
+  run that never recorded a call), or an LLM run whose only rows are
+  `CALL_ERROR` (all `latencyMs` `NULL`, so `SUM` is `NULL`). Otherwise
+  it is `Number(row.solveDurationMs)`. Same `x === null ? null : Number(x)`
+  pattern the mapper already uses for `tokenCostUsd`.
 - `startedAt` / `finishedAt` stay on the row DTO.
 
 ### 3. Per-puzzle runs list
@@ -129,11 +130,12 @@ File: `backend/src/modules/strategy/strategy.service.ts`
 (`getRunsForPuzzleId`, approx. lines 1040–1081).
 
 - Add a grouped query mirroring the `countByRun` block directly above
-  it: over the page's run ids, `SELECT strategyRunId, SUM(latencyMs),
-  COUNT(id) FROM SolvePrompt WHERE strategyRunId IN (:...ids) GROUP BY
-  strategyRunId`.
-- Build `solveDurationByRun`; map each run's `solveDurationMs` as
-  `null` when it has no `SolvePrompt` rows, else the sum.
+  it: over the page's run ids, `SELECT prompt.strategyRunId,
+  SUM(prompt.latencyMs) FROM "SolvePrompt" prompt WHERE
+  prompt.strategyRunId IN (:...ids) GROUP BY prompt.strategyRunId`.
+- Build `solveDurationByRun: Map<number, number>`; a run absent from the
+  map (no `SolvePrompt` rows) or with a `NULL` sum maps to
+  `solveDurationMs: null`, else the summed number.
 - `StrategyRunListItemDto` gains `solveDurationMs: number | null`.
 
 ### 4. Frontend
@@ -156,28 +158,38 @@ File: `backend/src/modules/strategy/strategy.service.ts`
 
 | Case | Behaviour |
 |------|-----------|
-| LLM run, every call `CALL_ERROR` | Sum is `0`; row shows `0ms`. Excluded from leaderboard average (not COMPLETED / cap-FAILED). |
+| LLM run, every call `CALL_ERROR` | All `latencyMs` `NULL` → `SUM` is `NULL` → `solveDurationMs` is `null`, row shows `"—"`. Excluded from leaderboard average anyway (not COMPLETED / cap-FAILED). |
 | Orchestrator returned `latencyMs: 0` on a real call | Counted as `0`, same as existing telemetry treats it. |
 | Deterministic run (no `SolvePrompt` rows) | `solveDurationMs` is `null`; run-history shows `"—"`; `toRunRecord` falls back to wall-clock. Leaderboard path for deterministic strategies is unchanged. |
 | LLM run still RUNNING with ≥1 completed call | `solveDurationMs` is the partial sum; not yet in any leaderboard average (gating excludes non-terminal). |
-| SQL sort on "duration" with mixed deterministic + LLM rows | Deterministic rows sort as `0` (subquery `COALESCE`). Acceptable — deterministic strategies never set `modelName` and this sort is an LLM-oriented view. |
+| SQL sort on "duration" with mixed deterministic + LLM rows | Deterministic rows have a `NULL` sum and sort last (`DESC`) / first (`ASC`), same as `tokenCost` already does. Acceptable — this sort is an LLM-oriented view. |
 
 ## Testing
 
 Backend (`strategy.service.spec.ts`):
 
-- Leaderboard `avgDurationMs` specs (around lines 532, 613, 1440, 1573,
-  1625) — drive the expected average from `SolvePrompt.latencyMs`
-  fixtures instead of `finishedAt - startedAt` spans. Add a case where
-  wall-clock and summed latency diverge sharply (a fixture with a large
-  `startedAt→finishedAt` gap but small latencies) and assert the summed
-  value wins.
-- Run-history sort spec (around line 2091) — expect
-  `orderBy` to be called with the new `SELECT COALESCE(SUM(...))`
-  subquery expression rather than `(run."finishedAt" - run."startedAt")`.
-- New run-history row spec — `solveDurationMs` is the sum for an LLM run,
-  `null` for a deterministic run.
-- New `getRunsForPuzzleId` spec — `solveDurationMs` populated / `null`.
+- The existing leaderboard `avgDurationMs` assertions (e.g. the
+  "lost LLM run … for progress/averages" test near line 1344 that
+  expects `avgDurationMs` `45_000`) currently derive from
+  `finishedAt - startedAt` and lean on the **default** empty
+  `mockSolvePromptRepo.createQueryBuilder`. Under the new logic an empty
+  SolvePrompt query means no `latencyMsByRun` entry and
+  `avgDurationMs: null`, so each such test must now stub
+  `mockSolvePromptRepo.createQueryBuilder` with `getRawMany` rows
+  carrying a `latencyMs` field per run and assert the average of those.
+- Add a leaderboard case where wall-clock and summed latency diverge
+  sharply (large `startedAt → finishedAt` gap, small `latencyMs` sums)
+  and assert the summed value wins.
+- Run-history sort spec (the "sort by startedAt, duration, or tokenCost"
+  test near line 2047) — change the `duration` expectation from
+  `'(run."finishedAt" - run."startedAt")'` to the new
+  `SELECT SUM(sp."latencyMs")` subquery string.
+- `rawRun()` fixture helper (near line 1911) gains a `solveDurationMs`
+  field; add a run-history row spec asserting `solveDurationMs` is
+  `Number`-cast when set and stays `null` when the raw value is `null`
+  (mirrors the existing `tokenCostUsd` cast test near line 2100).
+- New `getRunsForPuzzleId` spec — `solveDurationMs` populated from the
+  grouped latency query, `null` for a run absent from it.
 
 Frontend:
 
