@@ -4,6 +4,7 @@
 // which parts of the benchmark UI are still mock-driven.
 
 import type {
+  AutomationStatus,
   CategoryEvaluationCoverage,
   DeleteRunResult,
   FreeTierDispatchBothStartResult,
@@ -11,6 +12,7 @@ import type {
   FreeTierDispatchStatus,
   FreeTierId,
   FreeTierUsage,
+  GoogleDispatchStatus,
   Leaderboard,
   RecentActivityEvent,
   RunHistory,
@@ -202,6 +204,20 @@ export function stopBothFreeTierDispatch(
   signal?: AbortSignal,
 ): Promise<FreeTierDispatchBothStopResult> {
   return fetchJson("/dispatch/free-tier/both", signal, { method: "DELETE" });
+}
+
+/** Today's daily-automation run — see AutomationStatus. Backs the
+ * "Auto-run: ... · Next: ..." line on the mini FreeTierBudgetWidget,
+ * CategoryJudgingWidget, and GoogleDispatchWidget. */
+export function fetchAutomationStatus(signal?: AbortSignal): Promise<AutomationStatus> {
+  return fetchJson("/automation/status", signal);
+}
+
+/** Whether the Google free-daily-quota dispatch cycle is currently running —
+ * see GoogleDispatchStatus. Backs GoogleDispatchWidget's active/inactive
+ * indicator, polled the same way fetchFreeTierDispatchStatus is. */
+export function fetchGoogleDispatchStatus(signal?: AbortSignal): Promise<GoogleDispatchStatus> {
+  return fetchJson("/dispatch/google", signal);
 }
 
 const DETAIL_PAGE_SIZE = 200;
