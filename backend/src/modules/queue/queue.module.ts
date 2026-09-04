@@ -5,6 +5,7 @@ import { freeTierDispatchQueue } from "./free-tier-dispatch.queue";
 import { modelMetadataQueue } from "./model-metadata.queue";
 import { googleRpdResumeQueue } from "./google-rpd-resume.queue";
 import { googleFreeDispatchQueue } from "./google-free-dispatch.queue";
+import { dailyAutomationQueue } from "./daily-automation.queue";
 
 export const STRATEGY_QUEUE = "STRATEGY_QUEUE";
 export const LLM_OPENAI_QUEUE = "LLM_OPENAI_QUEUE";
@@ -15,6 +16,7 @@ export const FREE_TIER_DISPATCH_QUEUE = "FREE_TIER_DISPATCH_QUEUE";
 export const MODEL_METADATA_QUEUE = "MODEL_METADATA_QUEUE";
 export const GOOGLE_RPD_RESUME_QUEUE = "GOOGLE_RPD_RESUME_QUEUE";
 export const GOOGLE_FREE_DISPATCH_QUEUE = "GOOGLE_FREE_DISPATCH_QUEUE";
+export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
 
 @Module({
   providers: [
@@ -27,6 +29,7 @@ export const GOOGLE_FREE_DISPATCH_QUEUE = "GOOGLE_FREE_DISPATCH_QUEUE";
     { provide: MODEL_METADATA_QUEUE, useValue: modelMetadataQueue },
     { provide: GOOGLE_RPD_RESUME_QUEUE, useValue: googleRpdResumeQueue },
     { provide: GOOGLE_FREE_DISPATCH_QUEUE, useValue: googleFreeDispatchQueue },
+    { provide: DAILY_AUTOMATION_QUEUE, useValue: dailyAutomationQueue },
   ],
   exports: [
     STRATEGY_QUEUE,
@@ -38,6 +41,7 @@ export const GOOGLE_FREE_DISPATCH_QUEUE = "GOOGLE_FREE_DISPATCH_QUEUE";
     MODEL_METADATA_QUEUE,
     GOOGLE_RPD_RESUME_QUEUE,
     GOOGLE_FREE_DISPATCH_QUEUE,
+    DAILY_AUTOMATION_QUEUE,
   ],
 })
 export class QueueModule {}

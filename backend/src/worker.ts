@@ -17,6 +17,7 @@ import { redisConnection } from "./modules/queue/redis.config";
 import { PuzzleIngestionService } from "./modules/game/puzzle-ingestion.service";
 import { ModelMetadataRefreshService } from "./modules/supported-model/model-metadata-refresh.service";
 import { GoogleRpdResumeService } from "./modules/strategy/google-rpd-resume.service";
+import { DailyAutomationService } from "./modules/automation/daily-automation.service";
 import {
   isLlmStrategy,
   LLM_OPENAI,
@@ -47,6 +48,7 @@ async function bootstrap() {
   const googleFreeDispatchService = appContext.get(GoogleFreeDispatchService);
   const modelMetadataRefreshService = appContext.get(ModelMetadataRefreshService);
   const googleRpdResumeService = appContext.get(GoogleRpdResumeService);
+  const dailyAutomationService = appContext.get(DailyAutomationService);
 
   const activeWorkers: Worker[] = [];
   const activeQueueNames: string[] = [];
@@ -287,6 +289,26 @@ async function bootstrap() {
 
     activeWorkers.push(googleRpdResumeWorker);
     activeQueueNames.push("google-rpd-resume");
+
+    const dailyAutomationWorker = new Worker(
+      "daily-automation",
+      async (job) => {
+        logger.log(`starting daily automation run ${job.id}`);
+        await dailyAutomationService.run();
+        logger.log(`finished daily automation run ${job.id}`);
+      },
+      {
+        connection: redisConnection,
+        concurrency: 1,
+      },
+    );
+
+    dailyAutomationWorker.on("failed", (job, err) => {
+      logger.error(`daily automation run ${job?.id} failed`, err?.stack || err);
+    });
+
+    activeWorkers.push(dailyAutomationWorker);
+    activeQueueNames.push("daily-automation");
   }
 
   // Graceful shutdown: let BullMQ finish (or safely abandon, mid-transaction-safe)
