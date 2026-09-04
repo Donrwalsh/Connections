@@ -3,9 +3,11 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import { CategoryJudgingWidget } from "../../components/benchmark/CategoryJudgingWidget";
 import { FreeTierBudgetWidget } from "../../components/benchmark/FreeTierBudgetWidget";
 import { FreeTierDispatchModal } from "../../components/benchmark/FreeTierDispatchModal";
+import { GoogleDispatchWidget } from "../../components/benchmark/GoogleDispatchWidget";
 import { RecentActivityTable } from "../../components/benchmark/RecentActivityTable";
 import type { FreeTierModelSets } from "../../components/benchmark/StrategyTable";
-import { fetchFreeTierUsage, fetchLeaderboard, fetchRecentActivity } from "../../data/benchmark/api";
+import { fetchAutomationStatus, fetchFreeTierUsage, fetchLeaderboard, fetchRecentActivity } from "../../data/benchmark/api";
+import type { AutomationLegDisplay } from "../../data/benchmark/types";
 import { sumSpendUsd } from "../../data/benchmark/metrics";
 
 // How often the recent-activity table refetches. Frequent enough to feel
@@ -49,6 +51,44 @@ export function ActivityPage() {
   const flagshipSpentUsd = sumSpendUsd(llmRows, freeTierModels.flagship);
   const miniSpentUsd = sumSpendUsd(llmRows, freeTierModels.mini);
 
+  const { data: automationStatus } = useQuery({
+    queryKey: ["automation-status"],
+    queryFn: ({ signal }) => fetchAutomationStatus(signal),
+    refetchInterval: 30_000,
+  });
+
+  const judgeAutomation: AutomationLegDisplay | null = automationStatus
+    ? {
+        message:
+          automationStatus.judge.error !== null
+            ? `failed: ${automationStatus.judge.error}`
+            : automationStatus.judge.enqueued !== null
+              ? `enqueued ${automationStatus.judge.enqueued}`
+              : null,
+        lastRunAt: automationStatus.lastRunAt,
+        nextRunAt: automationStatus.nextRunAt,
+        isError: automationStatus.judge.error !== null,
+      }
+    : null;
+
+  const miniBurnAutomation: AutomationLegDisplay | null = automationStatus
+    ? {
+        message: automationStatus.miniBurn.message,
+        lastRunAt: automationStatus.lastRunAt,
+        nextRunAt: automationStatus.nextRunAt,
+        isError: automationStatus.miniBurn.outcome === "error",
+      }
+    : null;
+
+  const googleBurnAutomation: AutomationLegDisplay | null = automationStatus
+    ? {
+        message: automationStatus.googleBurn.message,
+        lastRunAt: automationStatus.lastRunAt,
+        nextRunAt: automationStatus.nextRunAt,
+        isError: automationStatus.googleBurn.outcome === "error",
+      }
+    : null;
+
   const {
     data: recentActivity,
     isLoading: isLoadingActivity,
@@ -81,8 +121,14 @@ export function ActivityPage() {
           spentUsd={flagshipSpentUsd}
           refreshSignal={dispatchRefreshSignal}
         />
-        <FreeTierBudgetWidget tier="mini" spentUsd={miniSpentUsd} refreshSignal={dispatchRefreshSignal} />
-        <CategoryJudgingWidget />
+        <FreeTierBudgetWidget
+          tier="mini"
+          spentUsd={miniSpentUsd}
+          refreshSignal={dispatchRefreshSignal}
+          automation={miniBurnAutomation}
+        />
+        <CategoryJudgingWidget automation={judgeAutomation} />
+        <GoogleDispatchWidget automation={googleBurnAutomation} />
       </div>
 
       {isDispatchModalOpen ? (
