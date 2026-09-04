@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchCategoryEvaluationCoverage } from "../../data/benchmark/api";
-import type { CategoryEvaluationCoverage } from "../../data/benchmark/types";
+import { formatAutomationLine } from "./automationFormat";
+import type { AutomationLegDisplay, CategoryEvaluationCoverage } from "../../data/benchmark/types";
 
 // Matches the Recent Activity feed's poll cadence — a judge dispatch drains
 // the backlog over a minute or two, and this is the number that tells the
@@ -10,11 +11,16 @@ const COVERAGE_POLL_MS = 10_000;
 
 const TITLE = "Category judging";
 
+export interface CategoryJudgingWidgetProps {
+  /** The daily-automation judge-dispatch leg — see AutomationStatus. */
+  automation?: AutomationLegDisplay | null;
+}
+
 /** Activity-page card: how much of the LLM category-judge backlog is done
  * (see CategoryEvaluationCoverage). Self-fetches and polls so a running
  * `evaluate-categories` dispatch visibly drains it. `pending` is exactly
  * what the next dispatch would enqueue — the figure to size a dispatch by. */
-export function CategoryJudgingWidget() {
+export function CategoryJudgingWidget({ automation }: CategoryJudgingWidgetProps = {}) {
   const [coverage, setCoverage] = useState<CategoryEvaluationCoverage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -92,6 +98,11 @@ export function CategoryJudgingWidget() {
         <div className="bench-free-tier__bar-fill" style={{ width: `${percentJudged}%` }} />
       </div>
       <span className="bench-muted bench-free-tier__remaining">{summary}</span>
+      {automation ? (
+        <p className={automation.isError ? "bench-error" : "bench-muted"}>
+          {formatAutomationLine(automation)}
+        </p>
+      ) : null}
     </div>
   );
 }
