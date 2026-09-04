@@ -5,7 +5,8 @@ import {
   stopFreeTierDispatch,
 } from "../../data/benchmark/api";
 import { formatCostUsd } from "../../data/benchmark/metrics";
-import type { FreeTierDispatchStatus, FreeTierId, FreeTierUsage } from "../../data/benchmark/types";
+import { formatAutomationLine } from "./automationFormat";
+import type { FreeTierDispatchStatus, FreeTierId, FreeTierUsage, AutomationLegDisplay } from "../../data/benchmark/types";
 import { StatusPill } from "./StatusPill";
 
 // Usage at or above this share of a tier's daily budget gets the warning
@@ -48,6 +49,11 @@ export interface FreeTierBudgetWidgetProps {
    * about. Not needed for this widget's own Disable button, which refetches
    * its own status directly after stopping. */
   refreshSignal?: number;
+  /** The daily-automation "burn" leg for this tier (see AutomationStatus) —
+   * only meaningful for the mini instance, which is the only tier the daily
+   * automation chain touches; the flagship instance is simply never given
+   * this prop by the parent. */
+  automation?: AutomationLegDisplay | null;
 }
 
 /** Leaderboard widget: today's spend against one of the two free-token
@@ -57,7 +63,7 @@ export interface FreeTierBudgetWidgetProps {
  * whether a continuous dispatch cycle (FreeTierDispatchService) is
  * currently running for this tier and at what threshold, with a button to
  * disable it. */
-export function FreeTierBudgetWidget({ tier, spentUsd, refreshSignal }: FreeTierBudgetWidgetProps) {
+export function FreeTierBudgetWidget({ tier, spentUsd, refreshSignal, automation }: FreeTierBudgetWidgetProps) {
   const [usage, setUsage] = useState<FreeTierUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dispatchStatus, setDispatchStatus] = useState<FreeTierDispatchStatus | null>(null);
@@ -199,6 +205,11 @@ export function FreeTierBudgetWidget({ tier, spentUsd, refreshSignal }: FreeTier
       <span className="bench-muted bench-free-tier__remaining">
         {usage.remainingTokens.toLocaleString()} tokens remaining today
       </span>
+      {automation ? (
+        <p className={automation.isError ? "bench-error" : "bench-muted"}>
+          {formatAutomationLine(automation)}
+        </p>
+      ) : null}
       {spentUsd !== undefined && spentUsd !== null ? (
         <span
           className="bench-muted bench-free-tier__spent"
