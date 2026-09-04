@@ -8,6 +8,7 @@ import { Puzzle } from "../game/entities/puzzle.entity";
 import { Guess } from "./entities/guess.entity";
 import { SolvePrompt, SolvePromptType } from "./entities/solve-prompt.entity";
 import { LlmProposal, LlmProposalStatus } from "./entities/llm-proposal.entity";
+import { CategoryEvaluation } from "./entities/category-evaluation.entity";
 
 describe("StrategyRunStore", () => {
   let store: StrategyRunStore;
@@ -19,7 +20,13 @@ describe("StrategyRunStore", () => {
   let mockPuzzleRepo: { findOne: jest.Mock };
   let mockGuessRepo: { count: jest.Mock };
   let mockSolvePromptRepo: { createQueryBuilder: jest.Mock };
-  let mockManager: { insert: jest.Mock; save: jest.Mock; count: jest.Mock; delete: jest.Mock };
+  let mockManager: {
+    insert: jest.Mock;
+    save: jest.Mock;
+    count: jest.Mock;
+    delete: jest.Mock;
+    find: jest.Mock;
+  };
   let mockDataSource: { transaction: jest.Mock };
 
   const makeRun = (overrides: Partial<StrategyRun> = {}) => ({
@@ -56,6 +63,7 @@ describe("StrategyRunStore", () => {
       save: jest.fn().mockResolvedValue(undefined),
       count: jest.fn().mockResolvedValue(0),
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
+      find: jest.fn().mockResolvedValue([]),
     };
     mockDataSource = {
       transaction: jest.fn(async (cb: (manager: unknown) => Promise<unknown>) => cb(mockManager)),
@@ -328,24 +336,84 @@ describe("StrategyRunStore", () => {
       expect(mockDataSource.transaction).not.toHaveBeenCalled();
     });
 
-    it("should delete the run's guesses before the run itself, and return each table's deleted count", async () => {
+    it("should delete the run's guesses and judging data before the run itself, and return each table's deleted count", async () => {
       mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ status: StrategyRunStatus.ERROR }));
       mockManager.count
         .mockResolvedValueOnce(3) // Guess
         .mockResolvedValueOnce(5) // SolvePrompt
-        .mockResolvedValueOnce(2); // LlmProposal
+        .mockResolvedValueOnce(2) // LlmProposal
+        .mockResolvedValueOnce(4); // CategoryEvaluation
 
       const result = await store.deleteRun(7);
 
-      expect(result).toEqual({ deletedGuesses: 3, deletedSolvePrompts: 5, deletedLlmProposals: 2 });
+      expect(result).toEqual({
+        deletedGuesses: 3,
+        deletedSolvePrompts: 5,
+        deletedLlmProposals: 2,
+        deletedCategoryEvaluations: 4,
+      });
       expect(mockManager.count).toHaveBeenNthCalledWith(1, Guess, { where: { strategyRunId: 7 } });
       expect(mockManager.count).toHaveBeenNthCalledWith(2, SolvePrompt, { where: { strategyRunId: 7 } });
       expect(mockManager.count).toHaveBeenNthCalledWith(3, LlmProposal, { where: { strategyRunId: 7 } });
-      // Guess.strategyRunId is ON DELETE SET NULL (not CASCADE) — deleting
-      // StrategyRun first would just null it out instead of removing the
-      // row, so the explicit Guess delete must run first.
-      expect(mockManager.delete).toHaveBeenNthCalledWith(1, Guess, { strategyRunId: 7 });
-      expect(mockManager.delete).toHaveBeenNthCalledWith(2, StrategyRun, { id: 7 });
+      expect(mockManager.count).toHaveBeenNthCalledWith(4, CategoryEvaluation, {
+        where: { strategyRunId: 7 },
+      });
+      // CategoryEvaluation and Guess must be deleted before StrategyRun:
+      // Guess.strategyRunId is ON DELETE SET NULL (deleting the run first
+      // would orphan them, not remove them), and CategoryEvaluation is
+      // deleted explicitly — rather than left to its ON DELETE CASCADE — so
+      // the teardown is auditable via the returned count.
+      expect(mockManager.delete).toHaveBeenNthCalledWith(1, CategoryEvaluation, { strategyRunId: 7 });
+      expect(mockManager.delete).toHaveBeenNthCalledWith(2, Guess, { strategyRunId: 7 });
+      expect(mockManager.delete).toHaveBeenNthCalledWith(3, StrategyRun, { id: 7 });
+    });
+  });
+
+  describe("deleteErroredRuns", () => {
+    it("should return zeroed totals when no run has error status", async () => {
+      mockManager.find.mockResolvedValueOnce([]);
+
+      const result = await store.deleteErroredRuns();
+
+      expect(result).toEqual({
+        deletedRuns: 0,
+        deletedGuesses: 0,
+        deletedSolvePrompts: 0,
+        deletedLlmProposals: 0,
+        deletedCategoryEvaluations: 0,
+      });
+      expect(mockManager.find).toHaveBeenCalledWith(StrategyRun, {
+        where: { status: StrategyRunStatus.ERROR },
+        select: { id: true },
+      });
+      expect(mockManager.delete).not.toHaveBeenCalled();
+    });
+
+    it("should tear down every error run and aggregate each table's deleted count", async () => {
+      mockManager.find.mockResolvedValueOnce([{ id: 11 }, { id: 22 }]);
+      mockManager.count
+        // run 11: Guess, SolvePrompt, LlmProposal, CategoryEvaluation
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(2)
+        .mockResolvedValueOnce(3)
+        .mockResolvedValueOnce(4)
+        // run 22
+        .mockResolvedValueOnce(10)
+        .mockResolvedValueOnce(20)
+        .mockResolvedValueOnce(30)
+        .mockResolvedValueOnce(40);
+
+      const result = await store.deleteErroredRuns();
+
+      expect(result).toEqual({
+        deletedRuns: 2,
+        deletedGuesses: 11,
+        deletedSolvePrompts: 22,
+        deletedLlmProposals: 33,
+        deletedCategoryEvaluations: 44,
+      });
+      expect(mockManager.delete).toHaveBeenCalledWith(StrategyRun, { id: 11 });
+      expect(mockManager.delete).toHaveBeenCalledWith(StrategyRun, { id: 22 });
     });
   });
 });

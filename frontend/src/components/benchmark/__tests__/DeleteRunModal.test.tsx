@@ -10,6 +10,7 @@ const deletedResult: DeleteRunResult = {
   deletedGuesses: 3,
   deletedSolvePrompts: 5,
   deletedLlmProposals: 2,
+  deletedCategoryEvaluations: 1,
 };
 
 function stubFetch(handler: (url: string, init: RequestInit | undefined) => unknown) {

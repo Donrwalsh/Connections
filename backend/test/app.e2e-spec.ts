@@ -540,6 +540,47 @@ describe("App (e2e)", () => {
     expect(res.status).toBe(404);
   });
 
+  it("GET /category-evaluation/failed reports how many judge calls have failed", async () => {
+    const res = await request(app.getHttpServer()).get("/category-evaluation/failed");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ failed: expect.any(Number) });
+    expect(res.body.failed).toBeGreaterThanOrEqual(0);
+  });
+
+  it("DELETE /category-evaluation/failed removes failed judge calls and reports the count", async () => {
+    const res = await request(app.getHttpServer()).delete("/category-evaluation/failed");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      message: expect.stringContaining("failed judge call"),
+      deleted: expect.any(Number),
+    });
+    expect(res.body.deleted).toBeGreaterThanOrEqual(0);
+  });
+
+  it("GET /dispatch/runs/errored reports how many runs are in the error status", async () => {
+    const res = await request(app.getHttpServer()).get("/dispatch/runs/errored");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ erroredRuns: expect.any(Number) });
+    expect(res.body.erroredRuns).toBeGreaterThanOrEqual(0);
+  });
+
+  it("DELETE /dispatch/runs/errored removes every errored run and reports per-table counts", async () => {
+    const res = await request(app.getHttpServer()).delete("/dispatch/runs/errored");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      message: expect.stringContaining("errored strategy run"),
+      deletedRuns: expect.any(Number),
+      deletedGuesses: expect.any(Number),
+      deletedSolvePrompts: expect.any(Number),
+      deletedLlmProposals: expect.any(Number),
+      deletedCategoryEvaluations: expect.any(Number),
+    });
+  });
+
   describe("free-tier dispatch", () => {
     beforeEach(async () => {
       // This suite's tests assume genuinely fresh 'mini'/'flagship' rows —

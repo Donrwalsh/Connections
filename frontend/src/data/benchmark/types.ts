@@ -470,4 +470,38 @@ export interface DeleteRunResult {
   deletedGuesses: number;
   deletedSolvePrompts: number;
   deletedLlmProposals: number;
+  deletedCategoryEvaluations: number;
+}
+
+/** GET /dispatch/runs/errored — how many strategy runs are in the 'error'
+ * status right now. The figure the maintenance panel's "delete errored
+ * runs" button acts on. */
+export interface ErroredRunCount {
+  erroredRuns: number;
+}
+
+/** Response from DELETE /dispatch/runs/errored — the same per-table counts
+ * as DeleteRunResult, summed across every errored run that was torn down. */
+export interface DeleteErroredRunsResult {
+  message: string;
+  deletedRuns: number;
+  deletedGuesses: number;
+  deletedSolvePrompts: number;
+  deletedLlmProposals: number;
+  deletedCategoryEvaluations: number;
+}
+
+/** GET /category-evaluation/failed — how many CategoryEvaluation rows are
+ * failed judge calls (status 'callError'). The figure the maintenance
+ * panel's "delete failed judge calls" button acts on. */
+export interface FailedJudgeCallCount {
+  failed: number;
+}
+
+/** Response from DELETE /category-evaluation/failed — how many failed judge
+ * calls were removed. Each one lets the next dispatch re-judge that
+ * proposal. */
+export interface DeleteFailedJudgeCallsResult {
+  message: string;
+  deleted: number;
 }
