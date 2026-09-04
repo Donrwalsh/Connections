@@ -23,6 +23,12 @@ describe("buildJudgePrompt", () => {
     expect(prompt).toContain("partial:");
     expect(prompt).toContain("lucky:");
   });
+
+  it("escapes quotation marks embedded in a category name instead of colliding with the wrapper quotes", () => {
+    const prompt = buildJudgePrompt('WORDS BEFORE "HOUSE"', 'SOUNDS LIKE "CAT"');
+    expect(prompt).toContain(JSON.stringify('WORDS BEFORE "HOUSE"'));
+    expect(prompt).toContain(JSON.stringify('SOUNDS LIKE "CAT"'));
+  });
 });
 
 describe("judgeCategory", () => {
