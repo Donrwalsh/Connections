@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
+  AutomationStatus,
   FreeTierUsage,
   Leaderboard,
   LeaderboardRow,
@@ -106,14 +107,26 @@ function makeJudgmentEvent(
   };
 }
 
+const defaultAutomation: AutomationStatus = {
+  lastRunAt: null,
+  nextRunAt: "2024-06-02T00:15:00.000Z",
+  judge: { enqueued: null, error: null },
+  miniBurn: { outcome: null, message: null },
+  googleBurn: { outcome: null, message: null },
+};
+
 function stubFetch({
   leaderboard = emptyLeaderboard,
   recentActivity = [],
   coverage = { eligible: 0, judged: 0, pending: 0 },
+  automation = defaultAutomation,
+  googleDispatch = { active: false, startedAt: null },
 }: {
   leaderboard?: Leaderboard;
   recentActivity?: RecentActivityEvent[];
   coverage?: { eligible: number; judged: number; pending: number };
+  automation?: AutomationStatus;
+  googleDispatch?: { active: boolean; startedAt: string | null };
 } = {}) {
   vi.stubGlobal(
     "fetch",
@@ -130,6 +143,12 @@ function stubFetch({
       }
       if (href.includes("/category-evaluation/coverage")) {
         return Promise.resolve({ ok: true, json: async () => coverage });
+      }
+      if (href.includes("/automation/status")) {
+        return Promise.resolve({ ok: true, json: async () => automation });
+      }
+      if (href.includes("/dispatch/google")) {
+        return Promise.resolve({ ok: true, json: async () => googleDispatch });
       }
       return Promise.resolve({ ok: true, json: async () => leaderboard });
     }),
@@ -335,6 +354,12 @@ describe("ActivityPage", () => {
           json: async () => ({ eligible: 0, judged: 0, pending: 0 }),
         });
       }
+      if (href.includes("/automation/status")) {
+        return Promise.resolve({ ok: true, json: async () => defaultAutomation });
+      }
+      if (href.includes("/dispatch/google")) {
+        return Promise.resolve({ ok: true, json: async () => ({ active: false, startedAt: null }) });
+      }
       return Promise.resolve({ ok: true, json: async () => emptyLeaderboard });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -354,5 +379,62 @@ describe("ActivityPage", () => {
     );
 
     vi.useRealTimers();
+  });
+
+  it("shows each widget's auto-run line and the Google dispatch widget", async () => {
+    stubFetch({
+      coverage: { eligible: 10, judged: 6, pending: 4 },
+      automation: {
+        lastRunAt: "2024-06-01T00:15:00.000Z",
+        nextRunAt: "2024-06-02T00:15:00.000Z",
+        judge: { enqueued: 4, error: null },
+        miniBurn: { outcome: "started", message: "started at 80%" },
+        googleBurn: { outcome: "started", message: "started" },
+      },
+    });
+    renderActivity();
+
+    expect(screen.getByText("Google daily quota")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Auto-run: enqueued 4 (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Auto-run: started at 80% (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Auto-run: started (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM"),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the judge leg's auto-run line as a failure when it errored", async () => {
+    stubFetch({
+      automation: {
+        ...defaultAutomation,
+        lastRunAt: "2024-06-01T00:15:00.000Z",
+        judge: { enqueued: null, error: "db down" },
+      },
+    });
+    renderActivity();
+
+    const line = await screen.findByText(
+      "Auto-run: failed: db down (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM",
+    );
+    expect(line).toHaveClass("bench-error");
+  });
+
+  it("shows the mini-burn leg's auto-run line as a failure when it errored", async () => {
+    stubFetch({
+      automation: {
+        ...defaultAutomation,
+        lastRunAt: "2024-06-01T00:15:00.000Z",
+        miniBurn: { outcome: "error", message: "threshold exceeded" },
+      },
+    });
+    renderActivity();
+
+    const line = await screen.findByText(
+      "Auto-run: failed: threshold exceeded (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM",
+    );
+    expect(line).toHaveClass("bench-error");
   });
 });

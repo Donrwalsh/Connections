@@ -19,6 +19,7 @@ import {
   FreeTierDispatchService,
   FreeTierDispatchStatusDto,
 } from "../free-tier-dispatch/free-tier-dispatch.service";
+import { GoogleFreeDispatchService } from "../google-free-dispatch/google-free-dispatch.service";
 import { FreeTierId } from "../strategy/free-tier-usage.service";
 import { AUTOMATIC_STRATEGIES, LLM_STRATEGIES, STRATEGY_SET, isLlmStrategy } from "../../strategies";
 import { DispatchAuthGuard } from "./dispatch-auth.guard";
@@ -46,6 +47,7 @@ export class DispatchController {
     @Inject(GameService) private readonly gameService: GameService,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
     @Inject(FreeTierDispatchService) private readonly freeTierDispatchService: FreeTierDispatchService,
+    @Inject(GoogleFreeDispatchService) private readonly googleFreeDispatchService: GoogleFreeDispatchService,
     @Inject(ModelMetadataRefreshService)
     private readonly modelMetadataRefreshService: ModelMetadataRefreshService,
   ) {}
@@ -291,6 +293,24 @@ export class DispatchController {
   @ApiParam({ name: "tier", type: String, example: "mini" })
   async getFreeTierDispatchStatus(@Param("tier") tier: string) {
     return this.freeTierDispatchService.getStatus(tier as FreeTierId);
+  }
+
+  // Read-only Google free-daily-quota dispatch status — see
+  // GoogleFreeDispatchService. No token threshold like the OpenAI tiers:
+  // active/startedAt only. Not password-gated, same as the free-tier status
+  // route above — it enqueues nothing.
+  @Get("google")
+  async getGoogleDispatchStatus() {
+    return this.googleFreeDispatchService.getStatus();
+  }
+
+  // Deactivates the Google free-daily-quota dispatch cycle so it stops
+  // scheduling further ticks — a no-op (not an error) if it wasn't running.
+  // Simpler than stopFreeTierDispatch above: there's only one Google cycle,
+  // not per-tier, so no tier param and no 'both' fan-out.
+  @Delete("google")
+  async stopGoogleDispatch() {
+    return this.googleFreeDispatchService.stop();
   }
 
   // How many strategy runs are currently in the 'error' status. Read-only,

@@ -15,6 +15,7 @@ import { Puzzle } from "./modules/game/entities/puzzle.entity";
 import { StrategyModule } from "./modules/strategy/strategy.module";
 import { DispatchModule } from "./modules/dispatch/dispatch.module";
 import { CategoryEvaluationModule } from "./modules/category-evaluation/category-evaluation.module";
+import { AutomationModule } from "./modules/automation/automation.module";
 import { Guess } from "./modules/strategy/entities/guess.entity";
 import { LlmProposal } from "./modules/strategy/entities/llm-proposal.entity";
 import { SolvePrompt } from "./modules/strategy/entities/solve-prompt.entity";
@@ -24,6 +25,8 @@ import { StrategyRun } from "./modules/strategy/entities/strategy-run.entity";
 import { SupportedModel } from "./modules/supported-model/entities/supported-model.entity";
 import { ModelPrice } from "./modules/supported-model/entities/model-price.entity";
 import { FreeTierDispatchState } from "./modules/free-tier-dispatch/entities/free-tier-dispatch-state.entity";
+import { AutomationRunLog } from "./modules/automation/entities/automation-run-log.entity";
+import { GoogleDispatchState } from "./modules/google-free-dispatch/entities/google-dispatch-state.entity";
 
 @Module({
   imports: [
@@ -60,6 +63,8 @@ import { FreeTierDispatchState } from "./modules/free-tier-dispatch/entities/fre
           SupportedModel,
           ModelPrice,
           FreeTierDispatchState,
+          AutomationRunLog,
+          GoogleDispatchState,
         ],
         synchronize: false,
         migrations: [__dirname + "/migrations/*{.ts,.js}"],
@@ -76,6 +81,7 @@ import { FreeTierDispatchState } from "./modules/free-tier-dispatch/entities/fre
     StrategyModule,
     DispatchModule,
     CategoryEvaluationModule,
+    AutomationModule,
   ],
   controllers: [AppController],
   providers: [

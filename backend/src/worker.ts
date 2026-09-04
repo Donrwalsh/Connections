@@ -11,11 +11,13 @@ import {
   type RunStrategyJobData,
 } from "./modules/strategy/llm-job-handler";
 import { FreeTierDispatchService } from "./modules/free-tier-dispatch/free-tier-dispatch.service";
+import { GoogleFreeDispatchService } from "./modules/google-free-dispatch/google-free-dispatch.service";
 import type { FreeTierId } from "./modules/strategy/free-tier-usage.service";
 import { redisConnection } from "./modules/queue/redis.config";
 import { PuzzleIngestionService } from "./modules/game/puzzle-ingestion.service";
 import { ModelMetadataRefreshService } from "./modules/supported-model/model-metadata-refresh.service";
 import { GoogleRpdResumeService } from "./modules/strategy/google-rpd-resume.service";
+import { DailyAutomationService } from "./modules/automation/daily-automation.service";
 import {
   isLlmStrategy,
   LLM_OPENAI,
@@ -43,8 +45,10 @@ async function bootstrap() {
   const categoryEvaluatorService = appContext.get(CategoryEvaluatorService);
   const puzzleIngestionService = appContext.get(PuzzleIngestionService);
   const freeTierDispatchService = appContext.get(FreeTierDispatchService);
+  const googleFreeDispatchService = appContext.get(GoogleFreeDispatchService);
   const modelMetadataRefreshService = appContext.get(ModelMetadataRefreshService);
   const googleRpdResumeService = appContext.get(GoogleRpdResumeService);
+  const dailyAutomationService = appContext.get(DailyAutomationService);
 
   const activeWorkers: Worker[] = [];
   const activeQueueNames: string[] = [];
@@ -242,6 +246,29 @@ async function bootstrap() {
     activeWorkers.push(freeTierDispatchWorker);
     activeQueueNames.push("free-tier-dispatch");
 
+    // Each job is one tick of the Google free-daily-quota dispatch cycle
+    // (see GoogleFreeDispatchService) — same self-chaining shape as the
+    // free-tier-dispatch worker above, just with no token budget involved.
+    const googleFreeDispatchWorker = new Worker(
+      "google-free-dispatch",
+      async (job: Job) => {
+        logger.log(`starting google free-tier dispatch tick ${job.id}`);
+        await googleFreeDispatchService.runTick();
+        logger.log(`finished google free-tier dispatch tick ${job.id}`);
+      },
+      {
+        connection: redisConnection,
+        concurrency: 1,
+      },
+    );
+
+    googleFreeDispatchWorker.on("failed", (job, err) => {
+      logger.error(`google free-tier dispatch tick ${job?.id} failed`, err?.stack || err);
+    });
+
+    activeWorkers.push(googleFreeDispatchWorker);
+    activeQueueNames.push("google-free-dispatch");
+
     const googleRpdResumeWorker = new Worker(
       "google-rpd-resume",
       async (job) => {
@@ -262,6 +289,26 @@ async function bootstrap() {
 
     activeWorkers.push(googleRpdResumeWorker);
     activeQueueNames.push("google-rpd-resume");
+
+    const dailyAutomationWorker = new Worker(
+      "daily-automation",
+      async (job) => {
+        logger.log(`starting daily automation run ${job.id}`);
+        await dailyAutomationService.run();
+        logger.log(`finished daily automation run ${job.id}`);
+      },
+      {
+        connection: redisConnection,
+        concurrency: 1,
+      },
+    );
+
+    dailyAutomationWorker.on("failed", (job, err) => {
+      logger.error(`daily automation run ${job?.id} failed`, err?.stack || err);
+    });
+
+    activeWorkers.push(dailyAutomationWorker);
+    activeQueueNames.push("daily-automation");
   }
 
   // Graceful shutdown: let BullMQ finish (or safely abandon, mid-transaction-safe)

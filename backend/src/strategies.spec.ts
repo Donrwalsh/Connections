@@ -30,6 +30,7 @@ import {
   llmGoogleRateLimitFallbackSeconds,
   llmTemperature,
   llmMaxTrialsPerModel,
+  nextDailyAutomationRunAt,
   shuffleTrialCount,
   strategyTrialNumbers,
   SUPPORTED_STRATEGIES,
@@ -320,6 +321,23 @@ describe("strategies", () => {
     it("should include every non-LLM strategy", () => {
       const expected = SUPPORTED_STRATEGIES.filter((s) => !isLlmStrategy(s));
       expect([...AUTOMATIC_STRATEGIES].sort()).toEqual([...expected].sort());
+    });
+  });
+
+  describe("nextDailyAutomationRunAt", () => {
+    it("returns today's 00:15 UTC when called before that time", () => {
+      const now = new Date("2024-06-01T00:00:00.000Z");
+      expect(nextDailyAutomationRunAt(now).toISOString()).toBe("2024-06-01T00:15:00.000Z");
+    });
+
+    it("returns tomorrow's 00:15 UTC when called after that time", () => {
+      const now = new Date("2024-06-01T12:00:00.000Z");
+      expect(nextDailyAutomationRunAt(now).toISOString()).toBe("2024-06-02T00:15:00.000Z");
+    });
+
+    it("returns tomorrow's 00:15 UTC when called exactly at that time", () => {
+      const now = new Date("2024-06-01T00:15:00.000Z");
+      expect(nextDailyAutomationRunAt(now).toISOString()).toBe("2024-06-02T00:15:00.000Z");
     });
   });
 });

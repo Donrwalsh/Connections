@@ -332,4 +332,29 @@ describe("SupportedModelService", () => {
       expect(result).toEqual([]);
     });
   });
+
+  describe("findModelNamesByStrategy", () => {
+    it("should return only model names matching the given strategy, supported only", async () => {
+      mockRepo.find.mockResolvedValueOnce([
+        { id: 1, strategyName: "llm-google", modelName: "gemini-2.5-flash", supported: true },
+        { id: 2, strategyName: "llm-google", modelName: "gemini-2.5-pro", supported: true },
+      ]);
+
+      const result = await service.findModelNamesByStrategy("llm-google");
+
+      expect(result).toEqual(["gemini-2.5-flash", "gemini-2.5-pro"]);
+      expect(mockRepo.find).toHaveBeenCalledWith({
+        where: { strategyName: "llm-google", supported: true },
+        order: { id: "ASC" },
+      });
+    });
+
+    it("should return an empty array when no models are configured for the strategy", async () => {
+      mockRepo.find.mockResolvedValueOnce([]);
+
+      const result = await service.findModelNamesByStrategy("llm-ollama");
+
+      expect(result).toEqual([]);
+    });
+  });
 });

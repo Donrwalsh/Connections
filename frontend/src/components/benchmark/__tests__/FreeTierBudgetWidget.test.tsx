@@ -326,4 +326,33 @@ describe("FreeTierBudgetWidget", () => {
 
     expect(await screen.findByText("Auto-dispatch active · 90%")).toBeInTheDocument();
   });
+
+  it("shows the auto-run line when an automation prop is given", async () => {
+    stubFetch(miniUsage);
+
+    render(
+      <FreeTierBudgetWidget
+        tier="mini"
+        automation={{
+          message: "started at 80%",
+          lastRunAt: "2024-06-01T00:15:00.000Z",
+          nextRunAt: "2024-06-02T00:15:00.000Z",
+          isError: false,
+        }}
+      />,
+    );
+
+    expect(
+      await screen.findByText("Auto-run: started at 80% (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM"),
+    ).toBeInTheDocument();
+  });
+
+  it("omits the auto-run line when no automation prop is given", async () => {
+    stubFetch(flagshipUsage);
+
+    render(<FreeTierBudgetWidget tier="flagship" />);
+
+    await screen.findByText("238,000 tokens remaining today");
+    expect(screen.queryByText(/Auto-run:/)).not.toBeInTheDocument();
+  });
 });

@@ -290,6 +290,59 @@ export interface FreeTierDispatchBothStopResult {
   mini: FreeTierDispatchStatus;
 }
 
+export type AutomationLegOutcome = "started" | "alreadyActive" | "alreadyExhausted" | "error";
+
+/** One leg's outcome from the judge-dispatch side of GET /automation/status —
+ * see the backend's AutomationRunLog.judgeEnqueued/judgeError. */
+export interface AutomationJudgeLeg {
+  enqueued: number | null;
+  error: string | null;
+}
+
+/** One leg's outcome from the mini-burn or Google-burn side of
+ * GET /automation/status — see the backend's AutomationRunLog
+ * miniBurnOutcome/miniBurnMessage (or googleBurnOutcome/googleBurnMessage). */
+export interface AutomationBurnLeg {
+  outcome: AutomationLegOutcome | null;
+  message: string | null;
+}
+
+/** GET /automation/status — today's daily-automation run (see the backend's
+ * DailyAutomationService/AutomationRunLog): the judge-dispatch leg, the
+ * mini/nano burn leg, and the Google burn leg, plus when the chain is next
+ * expected to fire. `lastRunAt` is null until the first automatic run of the
+ * day has fired. */
+export interface AutomationStatus {
+  lastRunAt: string | null;
+  nextRunAt: string;
+  judge: AutomationJudgeLeg;
+  miniBurn: AutomationBurnLeg;
+  googleBurn: AutomationBurnLeg;
+}
+
+/** GET /dispatch/google — whether the Google free-daily-quota dispatch cycle
+ * (see the backend's GoogleFreeDispatchService) is currently running. Unlike
+ * FreeTierDispatchStatus there's no threshold — Google's constraint is a
+ * per-day request cap, not a token budget. */
+export interface GoogleDispatchStatus {
+  active: boolean;
+  startedAt: string | null;
+}
+
+/** One daily-automation leg as a widget presents it: a single
+ * human-readable message (already assembled server-side for the burn legs,
+ * or derived client-side for the judge leg from its enqueued/error fields —
+ * see ActivityPage), when it last ran, when it's expected next, and whether
+ * that last outcome was an error. Shared shape consumed by
+ * FreeTierBudgetWidget (mini), CategoryJudgingWidget, and
+ * GoogleDispatchWidget via formatAutomationLine. */
+export interface AutomationLegDisplay {
+  message: string | null;
+  lastRunAt: string | null;
+  nextRunAt: string;
+  isError: boolean;
+}
+
 /** A run row from GET /strategy/:strategyName/puzzle-id/:puzzleId. The
  * backend never returns "queued" (a StrategyRun row only exists once a job
  * has actually started), so this is always one of the other RunStatus

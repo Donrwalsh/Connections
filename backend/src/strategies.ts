@@ -249,6 +249,35 @@ export function startOfTodayUtc(now: Date = new Date()): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
+/**
+ * The cron pattern DailyAutomationBootstrap schedules its BullMQ job
+ * scheduler with — 00:15 UTC, a quarter-hour after the OpenAI mini/nano
+ * tier's UTC-midnight usage window resets. Shared source of truth for the
+ * schedule's instant: nextDailyAutomationRunAt below hardcodes the same
+ * 00:15 UTC via its own date math (not derived from this string, since a
+ * cron pattern isn't trivially convertible to "next instant" logic), so
+ * changing one without the other would silently desync the bootstrap's
+ * actual schedule from what the UI reports as "next run".
+ */
+export const DAILY_AUTOMATION_CRON = "15 0 * * *";
+
+/**
+ * The next 00:15 UTC instant at or after `now` — when DailyAutomationBootstrap's
+ * cron next fires (or just fired, if called exactly at that instant, in
+ * which case this returns tomorrow's). Used by AutomationController to tell
+ * the UI when the next daily-automation run is expected. Keep this in sync
+ * with DAILY_AUTOMATION_CRON above if the schedule ever changes.
+ */
+export function nextDailyAutomationRunAt(now: Date = new Date()): Date {
+  const next = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 15, 0, 0),
+  );
+  if (next.getTime() <= now.getTime()) {
+    next.setUTCDate(next.getUTCDate() + 1);
+  }
+  return next;
+}
+
 export const DEFAULT_FREE_TIER_DISPATCH_TICK_MS = 60_000;
 export const DEFAULT_FREE_TIER_DISPATCH_MAX_BATCH = 5;
 // Conservative per-trial token estimate used to size a dispatch batch
