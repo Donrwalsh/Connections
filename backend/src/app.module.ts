@@ -15,6 +15,7 @@ import { Puzzle } from "./modules/game/entities/puzzle.entity";
 import { StrategyModule } from "./modules/strategy/strategy.module";
 import { DispatchModule } from "./modules/dispatch/dispatch.module";
 import { CategoryEvaluationModule } from "./modules/category-evaluation/category-evaluation.module";
+import { AutomationModule } from "./modules/automation/automation.module";
 import { Guess } from "./modules/strategy/entities/guess.entity";
 import { LlmProposal } from "./modules/strategy/entities/llm-proposal.entity";
 import { SolvePrompt } from "./modules/strategy/entities/solve-prompt.entity";
@@ -80,6 +81,7 @@ import { GoogleDispatchState } from "./modules/google-free-dispatch/entities/goo
     StrategyModule,
     DispatchModule,
     CategoryEvaluationModule,
+    AutomationModule,
   ],
   controllers: [AppController],
   providers: [
