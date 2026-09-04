@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from "@nestjs/common";
 import { Queue } from "bullmq";
 import { DAILY_AUTOMATION_QUEUE } from "../queue/queue.module";
+import { DAILY_AUTOMATION_CRON } from "../../strategies";
 
 /**
  * Schedules the daily free-tier-automation chain at 00:15 UTC — a
@@ -36,7 +37,7 @@ export class DailyAutomationBootstrap implements OnApplicationBootstrap {
 
     await this.queue.upsertJobScheduler(
       "daily-automation",
-      { pattern: "15 0 * * *", tz: "UTC" },
+      { pattern: DAILY_AUTOMATION_CRON, tz: "UTC" },
       {
         name: "run-daily-automation",
         data: {},
@@ -49,6 +50,6 @@ export class DailyAutomationBootstrap implements OnApplicationBootstrap {
       },
     );
 
-    this.logger.log('daily-automation scheduled: "15 0 * * *" (UTC)');
+    this.logger.log(`daily-automation scheduled: "${DAILY_AUTOMATION_CRON}" (UTC)`);
   }
 }

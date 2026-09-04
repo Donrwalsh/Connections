@@ -220,6 +220,12 @@ export function fetchGoogleDispatchStatus(signal?: AbortSignal): Promise<GoogleD
   return fetchJson("/dispatch/google", signal);
 }
 
+/** Stops the Google dispatch cycle — a no-op (not an error) if it wasn't
+ * running. No password body, same as stopFreeTierDispatch. */
+export function stopGoogleDispatch(signal?: AbortSignal): Promise<GoogleDispatchStatus> {
+  return fetchJson("/dispatch/google", signal, { method: "DELETE" });
+}
+
 const DETAIL_PAGE_SIZE = 200;
 
 /** Fetches every page of a paginated run-detail response and concatenates

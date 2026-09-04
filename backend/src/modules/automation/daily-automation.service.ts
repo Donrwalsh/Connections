@@ -20,9 +20,11 @@ function todayUtcDateStamp(): string {
 }
 
 /**
- * Runs on a daily UTC cron (see DailyAutomationBootstrap). Fires three
- * independent legs — none waits for another to finish — and records each
- * one's outcome into today's AutomationRunLog row as soon as it resolves:
+ * Runs on a daily UTC cron (see DailyAutomationBootstrap). Runs three legs
+ * in turn — each leg is awaited before the next starts, but one leg's
+ * failure never prevents the next from running (see each leg's own
+ * try/catch) — and records each one's outcome into today's AutomationRunLog
+ * row as soon as it resolves:
  *
  *  - judge: enqueues the category-judge backlog (its spend already lands in
  *    the same mini-tier budget FreeTierUsageService tracks);

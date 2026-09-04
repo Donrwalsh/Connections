@@ -304,6 +304,15 @@ export class DispatchController {
     return this.googleFreeDispatchService.getStatus();
   }
 
+  // Deactivates the Google free-daily-quota dispatch cycle so it stops
+  // scheduling further ticks — a no-op (not an error) if it wasn't running.
+  // Simpler than stopFreeTierDispatch above: there's only one Google cycle,
+  // not per-tier, so no tier param and no 'both' fan-out.
+  @Delete("google")
+  async stopGoogleDispatch() {
+    return this.googleFreeDispatchService.stop();
+  }
+
   // Permanently deletes a strategy run and every row that belongs to it —
   // for scrubbing a run that errored out after the underlying bug is fixed
   // in code, so a rerun doesn't leave the broken attempt cluttering its

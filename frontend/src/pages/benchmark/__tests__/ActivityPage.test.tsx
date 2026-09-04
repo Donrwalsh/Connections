@@ -421,4 +421,20 @@ describe("ActivityPage", () => {
     );
     expect(line).toHaveClass("bench-error");
   });
+
+  it("shows the mini-burn leg's auto-run line as a failure when it errored", async () => {
+    stubFetch({
+      automation: {
+        ...defaultAutomation,
+        lastRunAt: "2024-06-01T00:15:00.000Z",
+        miniBurn: { outcome: "error", message: "threshold exceeded" },
+      },
+    });
+    renderActivity();
+
+    const line = await screen.findByText(
+      "Auto-run: failed: threshold exceeded (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM",
+    );
+    expect(line).toHaveClass("bench-error");
+  });
 });

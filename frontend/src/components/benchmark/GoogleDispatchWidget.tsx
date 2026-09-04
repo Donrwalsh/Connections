@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchGoogleDispatchStatus } from "../../data/benchmark/api";
+import { fetchGoogleDispatchStatus, stopGoogleDispatch } from "../../data/benchmark/api";
 import type { AutomationLegDisplay, GoogleDispatchStatus } from "../../data/benchmark/types";
 import { formatAutomationLine } from "./automationFormat";
 import { StatusPill } from "./StatusPill";
@@ -23,6 +23,8 @@ export interface GoogleDispatchWidgetProps {
 export function GoogleDispatchWidget({ automation }: GoogleDispatchWidgetProps = {}) {
   const [status, setStatus] = useState<GoogleDispatchStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isDisabling, setIsDisabling] = useState(false);
+  const [disableError, setDisableError] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -47,6 +49,19 @@ export function GoogleDispatchWidget({ automation }: GoogleDispatchWidgetProps =
     };
   }, []);
 
+  function handleDisable() {
+    setIsDisabling(true);
+    setDisableError(null);
+
+    stopGoogleDispatch()
+      .then(() => fetchGoogleDispatchStatus())
+      .then(setStatus)
+      .catch((err: unknown) => {
+        setDisableError(err instanceof Error ? err.message : "Failed to disable auto-dispatch");
+      })
+      .finally(() => setIsDisabling(false));
+  }
+
   if (error) {
     return (
       <div className="bench-free-tier" role="status">
@@ -69,11 +84,24 @@ export function GoogleDispatchWidget({ automation }: GoogleDispatchWidgetProps =
     <div className="bench-free-tier" role="status" aria-label="Google daily quota dispatch">
       <div className="bench-free-tier__head">
         <span className="bench-free-tier__title">{TITLE}</span>
-        {status.active ? <StatusPill label="Auto-dispatch active" tone="active" /> : null}
+        {status.active ? (
+          <>
+            <StatusPill label="Auto-dispatch active" tone="active" />
+            <button
+              type="button"
+              className="bench-sort-btn"
+              onClick={handleDisable}
+              disabled={isDisabling}
+            >
+              {isDisabling ? "Disabling…" : "Disable"}
+            </button>
+          </>
+        ) : null}
       </div>
       <span className="bench-muted">
         {status.active ? "Dispatching trials against unrun puzzles." : "Not currently dispatching."}
       </span>
+      {disableError ? <p className="bench-error">{disableError}</p> : null}
       {automation ? (
         <p className={automation.isError ? "bench-error" : "bench-muted"}>
           {formatAutomationLine(automation)}

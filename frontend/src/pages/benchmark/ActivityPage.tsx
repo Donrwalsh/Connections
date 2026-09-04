@@ -73,7 +73,10 @@ export function ActivityPage() {
 
   const miniBurnAutomation: AutomationLegDisplay | null = automationStatus
     ? {
-        message: automationStatus.miniBurn.message,
+        message:
+          automationStatus.miniBurn.outcome === "error"
+            ? `failed: ${automationStatus.miniBurn.message}`
+            : automationStatus.miniBurn.message,
         lastRunAt: automationStatus.lastRunAt,
         nextRunAt: automationStatus.nextRunAt,
         isError: automationStatus.miniBurn.outcome === "error",
@@ -82,7 +85,10 @@ export function ActivityPage() {
 
   const googleBurnAutomation: AutomationLegDisplay | null = automationStatus
     ? {
-        message: automationStatus.googleBurn.message,
+        message:
+          automationStatus.googleBurn.outcome === "error"
+            ? `failed: ${automationStatus.googleBurn.message}`
+            : automationStatus.googleBurn.message,
         lastRunAt: automationStatus.lastRunAt,
         nextRunAt: automationStatus.nextRunAt,
         isError: automationStatus.googleBurn.outcome === "error",
