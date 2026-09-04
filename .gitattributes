@@ -1,2 +1,4 @@
-# Normalize all text files to LF on commit
-* text=auto
+# Force LF everywhere (index, working tree, commit) so tools that write LF
+# line endings (e.g. prettier) never produce spurious diffs under
+# core.autocrlf
+* text=auto eol=lf
