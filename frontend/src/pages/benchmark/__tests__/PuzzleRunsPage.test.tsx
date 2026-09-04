@@ -323,6 +323,7 @@ describe("PuzzleRunsPage", () => {
               deletedGuesses: 0,
               deletedSolvePrompts: 0,
               deletedLlmProposals: 0,
+              deletedCategoryEvaluations: 0,
             }),
           });
         }

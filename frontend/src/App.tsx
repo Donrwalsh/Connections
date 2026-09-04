@@ -19,6 +19,9 @@ const PuzzleRunsPage = lazy(() =>
 const ActivityPage = lazy(() =>
   import("./pages/benchmark/ActivityPage").then((m) => ({ default: m.ActivityPage })),
 );
+const MaintenancePage = lazy(() =>
+  import("./pages/benchmark/MaintenancePage").then((m) => ({ default: m.MaintenancePage })),
+);
 
 function RouteFallback() {
   return <p className="bench-muted">Loading…</p>;
@@ -59,6 +62,14 @@ function App() {
           element={
             <Suspense fallback={<RouteFallback />}>
               <ActivityPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="maintenance"
+          element={
+            <Suspense fallback={<RouteFallback />}>
+              <MaintenancePage />
             </Suspense>
           }
         />

@@ -35,6 +35,7 @@ describe("StrategyService", () => {
     find: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
+    count: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
   let mockPuzzleRepo: { findOne: jest.Mock; count: jest.Mock; createQueryBuilder: jest.Mock };
@@ -65,7 +66,13 @@ describe("StrategyService", () => {
     findAll: jest.Mock;
     findPriceHistory: jest.Mock;
   };
-  let mockManager: { insert: jest.Mock; save: jest.Mock; count: jest.Mock; delete: jest.Mock };
+  let mockManager: {
+    insert: jest.Mock;
+    save: jest.Mock;
+    count: jest.Mock;
+    delete: jest.Mock;
+    find: jest.Mock;
+  };
   let mockDataSource: { transaction: jest.Mock };
 
   const makeRun = (overrides: Partial<StrategyRun> = {}) => ({
@@ -129,6 +136,7 @@ describe("StrategyService", () => {
       find: jest.fn(),
       create: jest.fn(),
       save: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
       createQueryBuilder: jest.fn(),
     };
     mockPuzzleRepo = {
@@ -188,6 +196,7 @@ describe("StrategyService", () => {
       save: jest.fn().mockResolvedValue(undefined),
       count: jest.fn().mockResolvedValue(0),
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
+      find: jest.fn().mockResolvedValue([]),
     };
     mockDataSource = {
       transaction: jest.fn(async (cb: (manager: unknown) => Promise<unknown>) => cb(mockManager)),
@@ -716,12 +725,56 @@ describe("StrategyService", () => {
       mockManager.count
         .mockResolvedValueOnce(3) // Guess
         .mockResolvedValueOnce(5) // SolvePrompt
-        .mockResolvedValueOnce(2); // LlmProposal
+        .mockResolvedValueOnce(2) // LlmProposal
+        .mockResolvedValueOnce(4); // CategoryEvaluation
 
       const result = await service.deleteRun(7);
 
-      expect(result).toEqual({ deletedGuesses: 3, deletedSolvePrompts: 5, deletedLlmProposals: 2 });
+      expect(result).toEqual({
+        deletedGuesses: 3,
+        deletedSolvePrompts: 5,
+        deletedLlmProposals: 2,
+        deletedCategoryEvaluations: 4,
+      });
       expect(mockStrategyRunRepo.findOne).toHaveBeenCalledWith({ where: { id: 7 } });
+    });
+  });
+
+  describe("deleteErroredRuns", () => {
+    it("should delegate to the run store and return its aggregated deleted counts", async () => {
+      mockManager.find.mockResolvedValueOnce([{ id: 11 }]);
+      mockManager.count
+        .mockResolvedValueOnce(1) // Guess
+        .mockResolvedValueOnce(2) // SolvePrompt
+        .mockResolvedValueOnce(3) // LlmProposal
+        .mockResolvedValueOnce(4); // CategoryEvaluation
+
+      const result = await service.deleteErroredRuns();
+
+      expect(result).toEqual({
+        deletedRuns: 1,
+        deletedGuesses: 1,
+        deletedSolvePrompts: 2,
+        deletedLlmProposals: 3,
+        deletedCategoryEvaluations: 4,
+      });
+      expect(mockManager.find).toHaveBeenCalledWith(StrategyRun, {
+        where: { status: StrategyRunStatus.ERROR },
+        select: { id: true },
+      });
+    });
+  });
+
+  describe("countErroredRuns", () => {
+    it("should count only runs in the error status, for the maintenance panel's button", async () => {
+      mockStrategyRunRepo.count.mockResolvedValueOnce(5);
+
+      const result = await service.countErroredRuns();
+
+      expect(result).toEqual({ erroredRuns: 5 });
+      expect(mockStrategyRunRepo.count).toHaveBeenCalledWith({
+        where: { status: StrategyRunStatus.ERROR },
+      });
     });
   });
 
