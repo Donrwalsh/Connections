@@ -10,6 +10,9 @@ import { DAILY_AUTOMATION_CRON } from "../../strategies";
  * Also enqueues a startup catch-up run (fixed per-UTC-day jobId) so a
  * backend/worker that was down at 00:15 still gets the day's automation,
  * the same pattern GoogleRpdResumeBootstrap uses for its own daily sweep.
+ * The catch-up run carries `{ skipJudgeLeg: true }` so a redeploy never
+ * re-triggers the category-judge batch — that leg belongs only to the
+ * scheduled cron run (see DailyAutomationService.run).
  */
 @Injectable()
 export class DailyAutomationBootstrap implements OnApplicationBootstrap {
@@ -25,7 +28,7 @@ export class DailyAutomationBootstrap implements OnApplicationBootstrap {
 
     await this.queue.add(
       "run-daily-automation",
-      {},
+      { skipJudgeLeg: true },
       {
         jobId: `daily-automation-startup-catch-up-${new Date().toISOString().slice(0, 10)}`,
         removeOnComplete: true,

@@ -352,7 +352,7 @@ async function bootstrap() {
       "daily-automation",
       async (job) => {
         logger.log(`starting daily automation run ${job.id}`);
-        await dailyAutomationService.run();
+        await dailyAutomationService.run({ skipJudgeLeg: job.data?.skipJudgeLeg === true });
         logger.log(`finished daily automation run ${job.id}`);
       },
       {

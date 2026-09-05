@@ -147,6 +147,26 @@ describe("DailyAutomationService", () => {
       expect(mockGroqFreeDispatchService.start).toHaveBeenCalled();
     });
 
+    it("skips the judge leg but still runs every other leg when skipJudgeLeg is set", async () => {
+      await service.run({ skipJudgeLeg: true });
+
+      expect(mockCategoryEvaluatorService.enqueuePending).not.toHaveBeenCalled();
+      expect(mockRunLogRepo.update).not.toHaveBeenCalledWith(
+        { date: todayStamp() },
+        expect.objectContaining({ judgeEnqueued: expect.anything() }),
+      );
+      expect(mockModelMetadataRefreshService.refreshAll).toHaveBeenCalled();
+      expect(mockFreeTierDispatchService.start).toHaveBeenCalled();
+      expect(mockGoogleFreeDispatchService.start).toHaveBeenCalled();
+      expect(mockGroqFreeDispatchService.start).toHaveBeenCalled();
+    });
+
+    it("runs the judge leg when skipJudgeLeg is absent or false", async () => {
+      await service.run({ skipJudgeLeg: false });
+
+      expect(mockCategoryEvaluatorService.enqueuePending).toHaveBeenCalledWith({ limit: 500 });
+    });
+
     it("starts the mini burn at an 80% ceiling when no cycle is already running", async () => {
       await service.run();
 
