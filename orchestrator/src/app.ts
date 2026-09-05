@@ -11,6 +11,7 @@ import { SolveError } from "./solver.js";
 import { runAssistStep } from "./assist.js";
 import { solveAssist } from "./solve-assist.js";
 import { judgeCategory } from "./judge-category.js";
+import type { ModelProvider } from "./provider.js";
 
 export const app = new Hono();
 
@@ -113,7 +114,7 @@ app.post(
       const result = await solveAssist(
         parsed.data.messages,
         parsed.data.model,
-        parsed.data.provider,
+        parsed.data.provider as ModelProvider,
         parsed.data.contextWindow,
         c.req.raw.signal,
       );
@@ -159,7 +160,7 @@ app.post(
         parsed.data.proposedCategory,
         parsed.data.actualCategory,
         parsed.data.model,
-        parsed.data.provider,
+        parsed.data.provider as ModelProvider,
         c.req.raw.signal,
       );
       const response: JudgeCategoryResponse = result;

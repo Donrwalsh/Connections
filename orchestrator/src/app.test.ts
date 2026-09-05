@@ -289,6 +289,31 @@ describe("orchestrator app", () => {
       );
     });
 
+    it("accepts mistral as a provider value", async () => {
+      solveAssistMock.mockResolvedValueOnce({
+        response: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
+        groups: [["AAAA", "BBBB", "CCCC", "DDDD"]],
+        proposals: [],
+        model: "mistral-small-latest",
+        latencyMs: 5,
+      });
+
+      const res = await solveAssistRequest({
+        messages: SOLVE_ASSIST_BODY.messages,
+        model: "mistral-small-latest",
+        provider: "mistral",
+      });
+
+      expect(res.status).toBe(200);
+      expect(solveAssistMock).toHaveBeenCalledWith(
+        SOLVE_ASSIST_BODY.messages,
+        "mistral-small-latest",
+        "mistral",
+        undefined,
+        expect.any(AbortSignal),
+      );
+    });
+
     it("returns 429 with retryAfterSeconds for a rate_limited failure", async () => {
       const { SolveError } = await import("./solver.js");
       solveAssistMock.mockRejectedValueOnce(
@@ -352,6 +377,31 @@ describe("orchestrator app", () => {
         "B",
         undefined,
         undefined,
+        expect.any(AbortSignal),
+      );
+    });
+
+    it("accepts mistral as a provider value", async () => {
+      judgeCategoryMock.mockResolvedValueOnce({
+        verdict: "correct",
+        rationale: "Same connection.",
+        model: "mistral-small-latest",
+        latencyMs: 5,
+      });
+
+      const res = await judgeCategoryRequest({
+        proposedCategory: "A",
+        actualCategory: "B",
+        model: "mistral-small-latest",
+        provider: "mistral",
+      });
+
+      expect(res.status).toBe(200);
+      expect(judgeCategoryMock).toHaveBeenCalledWith(
+        "A",
+        "B",
+        "mistral-small-latest",
+        "mistral",
         expect.any(AbortSignal),
       );
     });
