@@ -299,9 +299,10 @@ export interface AutomationJudgeLeg {
   error: string | null;
 }
 
-/** One leg's outcome from the mini-burn or Google-burn side of
+/** One leg's outcome from the mini-burn, Google-burn, or Groq-burn side of
  * GET /automation/status — see the backend's AutomationRunLog
- * miniBurnOutcome/miniBurnMessage (or googleBurnOutcome/googleBurnMessage). */
+ * miniBurnOutcome/miniBurnMessage (or googleBurnOutcome/googleBurnMessage,
+ * or groqBurnOutcome/groqBurnMessage). */
 export interface AutomationBurnLeg {
   outcome: AutomationLegOutcome | null;
   message: string | null;
@@ -309,15 +310,16 @@ export interface AutomationBurnLeg {
 
 /** GET /automation/status — today's daily-automation run (see the backend's
  * DailyAutomationService/AutomationRunLog): the judge-dispatch leg, the
- * mini/nano burn leg, and the Google burn leg, plus when the chain is next
- * expected to fire. `lastRunAt` is null until the first automatic run of the
- * day has fired. */
+ * mini/nano burn leg, the Google burn leg, and the Groq burn leg, plus when
+ * the chain is next expected to fire. `lastRunAt` is null until the first
+ * automatic run of the day has fired. */
 export interface AutomationStatus {
   lastRunAt: string | null;
   nextRunAt: string;
   judge: AutomationJudgeLeg;
   miniBurn: AutomationBurnLeg;
   googleBurn: AutomationBurnLeg;
+  groqBurn: AutomationBurnLeg;
 }
 
 /** GET /dispatch/google — whether the Google free-daily-quota dispatch cycle
@@ -325,6 +327,15 @@ export interface AutomationStatus {
  * FreeTierDispatchStatus there's no threshold — Google's constraint is a
  * per-day request cap, not a token budget. */
 export interface GoogleDispatchStatus {
+  active: boolean;
+  startedAt: string | null;
+}
+
+/** GET /dispatch/groq — whether the Groq free-daily-quota dispatch cycle
+ * (see the backend's GroqFreeDispatchService) is currently running. Same
+ * shape as GoogleDispatchStatus — no token threshold, Groq's constraint is
+ * a per-model per-day request cap enforced by Groq itself. */
+export interface GroqDispatchStatus {
   active: boolean;
   startedAt: string | null;
 }
