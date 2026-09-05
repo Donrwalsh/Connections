@@ -11,6 +11,8 @@ const createOllamaMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 const openaiMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 const createGoogleGenerativeAIMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 const createGroqMock = vi.hoisted(() => vi.fn(() => vi.fn()));
+const openRouterChatMock = vi.hoisted(() => vi.fn(() => vi.fn()));
+const createOpenRouterMock = vi.hoisted(() => vi.fn(() => ({ chat: openRouterChatMock })));
 
 vi.mock("ai-sdk-ollama", () => ({
   createOllama: createOllamaMock,
@@ -28,6 +30,10 @@ vi.mock("@ai-sdk/groq", () => ({
   createGroq: createGroqMock,
 }));
 
+vi.mock("@openrouter/ai-sdk-provider", () => ({
+  createOpenRouter: createOpenRouterMock,
+}));
+
 describe("getModel", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -35,6 +41,8 @@ describe("getModel", () => {
     openaiMock.mockClear();
     createGoogleGenerativeAIMock.mockClear();
     createGroqMock.mockClear();
+    createOpenRouterMock.mockClear();
+    openRouterChatMock.mockClear();
   });
 
   it("passes num_ctx from MODEL_CONTEXT_WINDOW to the Ollama model", () => {
@@ -186,6 +194,37 @@ describe("getModel", () => {
     const modelFactory = createGroqMock.mock.results[0].value;
     expect(modelFactory).toHaveBeenCalledWith("openai/gpt-oss-20b");
   });
+
+  it("resolves the OpenRouter model via createOpenRouter().chat, without num_ctx", () => {
+    getModel("openrouter");
+
+    expect(createOpenRouterMock).toHaveBeenCalledTimes(1);
+    expect(openRouterChatMock).toHaveBeenCalledWith("google/gemma-4-31b-it:free");
+    expect(openaiMock).not.toHaveBeenCalled();
+    expect(createOllamaMock).not.toHaveBeenCalled();
+  });
+
+  it("passes OPENROUTER_API_KEY to createOpenRouter", () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+
+    getModel("openrouter");
+
+    expect(createOpenRouterMock).toHaveBeenCalledWith({ apiKey: "test-or-key" });
+  });
+
+  it("uses the model override instead of OPENROUTER_MODEL when given", () => {
+    vi.stubEnv("OPENROUTER_MODEL", "z-ai/glm-5.2:free");
+
+    getModel("openrouter", "minimax/minimax-m3:free");
+
+    expect(openRouterChatMock).toHaveBeenCalledWith("minimax/minimax-m3:free");
+  });
+
+  it("accepts a contextWindow for openrouter without using it", () => {
+    getModel("openrouter", undefined, 262144);
+
+    expect(openRouterChatMock).toHaveBeenCalledWith("google/gemma-4-31b-it:free");
+  });
 });
 
 describe("getModelName", () => {
@@ -240,6 +279,20 @@ describe("getModelName", () => {
     vi.stubEnv("GROQ_MODEL", "openai/gpt-oss-120b");
     expect(getModelName("groq", "qwen/qwen3.6-27b")).toBe("qwen/qwen3.6-27b");
   });
+
+  it("returns the configured OpenRouter model for the openrouter provider", () => {
+    vi.stubEnv("OPENROUTER_MODEL", "z-ai/glm-5.2:free");
+    expect(getModelName("openrouter")).toBe("z-ai/glm-5.2:free");
+  });
+
+  it("falls back to the OpenRouter default when unset", () => {
+    expect(getModelName("openrouter")).toBe("google/gemma-4-31b-it:free");
+  });
+
+  it("prefers the model override over OPENROUTER_MODEL", () => {
+    vi.stubEnv("OPENROUTER_MODEL", "z-ai/glm-5.2:free");
+    expect(getModelName("openrouter", "minimax/minimax-m3:free")).toBe("minimax/minimax-m3:free");
+  });
 });
 
 describe("defaultProvider", () => {
@@ -261,6 +314,11 @@ describe("defaultProvider", () => {
   it("returns google when MODEL_PROVIDER is set to google", () => {
     vi.stubEnv("MODEL_PROVIDER", "google");
     expect(defaultProvider()).toBe("google");
+  });
+
+  it("returns openrouter when MODEL_PROVIDER is set to openrouter", () => {
+    vi.stubEnv("MODEL_PROVIDER", "openrouter");
+    expect(defaultProvider()).toBe("openrouter");
   });
 });
 
@@ -295,6 +353,10 @@ describe("effectiveContextWindow", () => {
 
   it("never caps groq — returns the given contextWindow unchanged", () => {
     expect(effectiveContextWindow("groq", 131072)).toBe(131072);
+  });
+
+  it("never caps openrouter — returns the given contextWindow unchanged", () => {
+    expect(effectiveContextWindow("openrouter", 262144)).toBe(262144);
   });
 });
 
