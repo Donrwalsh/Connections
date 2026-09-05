@@ -154,7 +154,7 @@ export function PuzzleRunsPage() {
     return (
       <div className="bench-page">
         <p className="bench-muted">Unknown puzzle.</p>
-        <Link to={`/leaderboard/${strategyId}`} className="bench-page-header__back">
+        <Link to={`/leaderboard/${encodeURIComponent(strategyId)}`} className="bench-page-header__back">
           ← Back to {meta.name}
         </Link>
       </div>
@@ -165,7 +165,7 @@ export function PuzzleRunsPage() {
     <div className="bench-page">
       <header className="bench-page-header">
         <div className="bench-page-header__nav">
-          <Link to={`/leaderboard/${strategyId}`} className="bench-page-header__back">
+          <Link to={`/leaderboard/${encodeURIComponent(strategyId)}`} className="bench-page-header__back">
             ← {meta.name}
           </Link>
           {date ? (

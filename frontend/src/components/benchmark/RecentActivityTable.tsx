@@ -42,7 +42,7 @@ export function RecentActivityTable({ events }: RecentActivityTableProps) {
         {events.map((event) => {
           const routeId = event.modelName ?? event.strategyName;
           const modelLabel = event.modelName ?? humanizeStrategyName(event.strategyName);
-          const goToRun = () => navigate(`/leaderboard/${routeId}/${event.puzzleId}`);
+          const goToRun = () => navigate(`/leaderboard/${encodeURIComponent(routeId)}/${event.puzzleId}`);
 
           return (
             <tr

@@ -110,11 +110,11 @@ export function StrategyTable({ rows, metricKey, variant, freeTierModels }: Stra
             <tr
               key={row.id}
               className={index === 0 ? "bench-row bench-row--leading" : "bench-row"}
-              onClick={() => navigate(`/leaderboard/${row.id}`)}
+              onClick={() => navigate(`/leaderboard/${encodeURIComponent(row.id)}`)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault();
-                  navigate(`/leaderboard/${row.id}`);
+                  navigate(`/leaderboard/${encodeURIComponent(row.id)}`);
                 }
               }}
               role="link"
