@@ -233,10 +233,14 @@ export class LlmStrategyRunner {
 
     // OpenRouter's free tier is account-wide, not per-model, so its hold
     // check takes no model and lives outside the per-model rpdHoldService
-    // ternary above. A live 'daily' or 'per-minute-cooldown' hold both park
-    // the run — the openrouter-rpd-resume sweep re-dispatches it after the
-    // (brief, for a cooldown) reset.
-    if (strategyName === LLM_OPENROUTER && (await this.openRouterHold.isHeld())) {
+    // ternary above. Only a 'daily' hold parks a run (resumed by the
+    // 00:05 UTC openrouter-rpd-resume cron); a 'per-minute-cooldown' hold
+    // is a signal to the *dispatch tick chain*, not a reason to park a
+    // run — a run that hits 20 RPM mid-flight just waits and retries.
+    if (
+      strategyName === LLM_OPENROUTER &&
+      (await this.openRouterHold.heldReason()) === "daily"
+    ) {
       run.status = StrategyRunStatus.RATE_LIMITED_DAILY;
       run.finishedAt = new Date();
       await this.store.saveRun(run);

@@ -1364,8 +1364,8 @@ describe("LlmStrategyRunner", () => {
       expect(delaySpy).toHaveBeenCalledWith(DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS * 1000);
     });
 
-    it("parks a held openrouter run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {
-      mockOpenRouterHold.isHeld.mockResolvedValue(true);
+    it("parks a daily-held openrouter run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {
+      mockOpenRouterHold.heldReason.mockResolvedValue("daily");
       mockStrategyRunRepo.findOne.mockResolvedValue(
         makeRun({ strategyName: "llm-openrouter", modelName: "z-ai/glm-5.2:free" }),
       );
@@ -1377,6 +1377,26 @@ describe("LlmStrategyRunner", () => {
       expect(mockOrchestratorService.solveAssist).not.toHaveBeenCalled();
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
       expect(mockOpenRouterHold.hold).not.toHaveBeenCalled();
+    });
+
+    it("does NOT park an openrouter run for a per-minute-cooldown hold — it proceeds", async () => {
+      mockOpenRouterHold.heldReason.mockResolvedValue("per-minute-cooldown");
+      mockStrategyRunRepo.findOne.mockResolvedValue(
+        makeRun({ strategyName: "llm-openrouter", modelName: "z-ai/glm-5.2:free" }),
+      );
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist.mockResolvedValue(
+        makeAssistResponse([
+          ["APPLE", "BANANA", "CHERRY", "DATE"],
+          ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        ]),
+      );
+
+      const result = await runner.runLlmStrategy(100, "llm-openrouter", 0, "z-ai/glm-5.2:free");
+
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalled();
+      expect(result.status).not.toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
     });
 
     it("records a daily OpenRouter hold using dailyResetSeconds and parks the run", async () => {
