@@ -8,6 +8,7 @@ import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { CategoryEvaluation } from "./entities/category-evaluation.entity";
 import { StrategyRun } from "./entities/strategy-run.entity";
 import { GoogleRateLimitHold } from "./entities/google-rate-limit-hold.entity";
+import { GroqRateLimitHold } from "./entities/groq-rate-limit-hold.entity";
 import { StrategyController } from "./strategy.controller";
 import { StrategyService } from "./strategy.service";
 import { LlmStrategyRunner } from "./llm-strategy-runner.service";
@@ -16,6 +17,7 @@ import { OrchestratorService } from "./orchestrator.service";
 import { CategoryEvaluatorService } from "./category-evaluator.service";
 import { FreeTierUsageService } from "./free-tier-usage.service";
 import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
+import { GroqRateLimitHoldService } from "./groq-rate-limit-hold.service";
 import { GoogleRpdResumeService } from "./google-rpd-resume.service";
 import { GoogleRpdResumeBootstrap } from "./google-rpd-resume.bootstrap";
 import { GameModule } from "../game/game.module";
@@ -31,6 +33,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
       SolvePrompt,
       CategoryEvaluation,
       GoogleRateLimitHold,
+      GroqRateLimitHold,
     ]),
     QueueModule,
     GameModule,
@@ -47,6 +50,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     GoogleRateLimitHoldService,
     GoogleRpdResumeService,
     GoogleRpdResumeBootstrap,
+    GroqRateLimitHoldService,
   ],
   exports: [
     StrategyService,
@@ -55,6 +59,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     FreeTierUsageService,
     GoogleRateLimitHoldService,
     GoogleRpdResumeService,
+    GroqRateLimitHoldService,
   ],
 })
 export class StrategyModule {}
