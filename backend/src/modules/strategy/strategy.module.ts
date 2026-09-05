@@ -20,6 +20,8 @@ import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
 import { GroqRateLimitHoldService } from "./groq-rate-limit-hold.service";
 import { GoogleRpdResumeService } from "./google-rpd-resume.service";
 import { GoogleRpdResumeBootstrap } from "./google-rpd-resume.bootstrap";
+import { GroqRpdResumeService } from "./groq-rpd-resume.service";
+import { GroqRpdResumeBootstrap } from "./groq-rpd-resume.bootstrap";
 import { GameModule } from "../game/game.module";
 import { SupportedModelModule } from "../supported-model/supported-model.module";
 
@@ -51,6 +53,8 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     GoogleRpdResumeService,
     GoogleRpdResumeBootstrap,
     GroqRateLimitHoldService,
+    GroqRpdResumeService,
+    GroqRpdResumeBootstrap,
   ],
   exports: [
     StrategyService,
@@ -60,6 +64,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     GoogleRateLimitHoldService,
     GoogleRpdResumeService,
     GroqRateLimitHoldService,
+    GroqRpdResumeService,
   ],
 })
 export class StrategyModule {}

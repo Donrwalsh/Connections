@@ -4,6 +4,7 @@ import { puzzleQueue } from "./puzzle.queue";
 import { freeTierDispatchQueue } from "./free-tier-dispatch.queue";
 import { modelMetadataQueue } from "./model-metadata.queue";
 import { googleRpdResumeQueue } from "./google-rpd-resume.queue";
+import { groqRpdResumeQueue } from "./groq-rpd-resume.queue";
 import { googleFreeDispatchQueue } from "./google-free-dispatch.queue";
 import { groqFreeDispatchQueue } from "./groq-free-dispatch.queue";
 import { dailyAutomationQueue } from "./daily-automation.queue";
@@ -17,6 +18,7 @@ export const PUZZLE_QUEUE = "PUZZLE_QUEUE";
 export const FREE_TIER_DISPATCH_QUEUE = "FREE_TIER_DISPATCH_QUEUE";
 export const MODEL_METADATA_QUEUE = "MODEL_METADATA_QUEUE";
 export const GOOGLE_RPD_RESUME_QUEUE = "GOOGLE_RPD_RESUME_QUEUE";
+export const GROQ_RPD_RESUME_QUEUE = "GROQ_RPD_RESUME_QUEUE";
 export const GOOGLE_FREE_DISPATCH_QUEUE = "GOOGLE_FREE_DISPATCH_QUEUE";
 export const GROQ_FREE_DISPATCH_QUEUE = "GROQ_FREE_DISPATCH_QUEUE";
 export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
@@ -32,6 +34,7 @@ export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
     { provide: FREE_TIER_DISPATCH_QUEUE, useValue: freeTierDispatchQueue },
     { provide: MODEL_METADATA_QUEUE, useValue: modelMetadataQueue },
     { provide: GOOGLE_RPD_RESUME_QUEUE, useValue: googleRpdResumeQueue },
+    { provide: GROQ_RPD_RESUME_QUEUE, useValue: groqRpdResumeQueue },
     { provide: GOOGLE_FREE_DISPATCH_QUEUE, useValue: googleFreeDispatchQueue },
     { provide: GROQ_FREE_DISPATCH_QUEUE, useValue: groqFreeDispatchQueue },
     { provide: DAILY_AUTOMATION_QUEUE, useValue: dailyAutomationQueue },
@@ -46,6 +49,7 @@ export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
     FREE_TIER_DISPATCH_QUEUE,
     MODEL_METADATA_QUEUE,
     GOOGLE_RPD_RESUME_QUEUE,
+    GROQ_RPD_RESUME_QUEUE,
     GOOGLE_FREE_DISPATCH_QUEUE,
     GROQ_FREE_DISPATCH_QUEUE,
     DAILY_AUTOMATION_QUEUE,
