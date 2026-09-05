@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  ADMIN_SESSION_EXPIRED_EVENT,
   deleteErroredRuns,
   deleteFailedJudgeCalls,
   fetchErroredRunCount,
@@ -43,7 +44,7 @@ describe("maintenance-panel API", () => {
   });
 
   describe("deleteErroredRuns", () => {
-    it("sends the password to DELETE /dispatch/runs/errored", async () => {
+    it("DELETEs /dispatch/runs/errored with credentials and the admin header", async () => {
       const calls = stubFetch({
         message: "Deleted 2 errored strategy run(s) and all related data",
         deletedRuns: 2,
@@ -53,18 +54,24 @@ describe("maintenance-panel API", () => {
         deletedCategoryEvaluations: 44,
       });
 
-      const result = await deleteErroredRuns("hunter2");
+      const result = await deleteErroredRuns();
 
       expect(result.deletedRuns).toBe(2);
       expect(calls[0].url).toContain("/dispatch/runs/errored");
       expect(calls[0].init?.method).toBe("DELETE");
-      expect(JSON.parse(String(calls[0].init?.body))).toEqual({ password: "hunter2" });
+      expect(calls[0].init?.credentials).toBe("include");
+      expect((calls[0].init?.headers as Record<string, string>)["X-Admin-Request"]).toBe("1");
     });
 
-    it("rejects with the backend message on a failure", async () => {
-      stubFetchError(401, "Bad password");
+    it("rejects with a session-expired message and fires ADMIN_SESSION_EXPIRED_EVENT on a 403", async () => {
+      stubFetchError(403, "Invalid or missing dispatch password.");
+      const handler = vi.fn();
+      window.addEventListener(ADMIN_SESSION_EXPIRED_EVENT, handler);
 
-      await expect(deleteErroredRuns("nope")).rejects.toThrow("Bad password");
+      await expect(deleteErroredRuns()).rejects.toThrow("Session expired");
+      expect(handler).toHaveBeenCalledOnce();
+
+      window.removeEventListener(ADMIN_SESSION_EXPIRED_EVENT, handler);
     });
   });
 
@@ -81,18 +88,19 @@ describe("maintenance-panel API", () => {
   });
 
   describe("deleteFailedJudgeCalls", () => {
-    it("sends the password to DELETE /category-evaluation/failed", async () => {
+    it("DELETEs /category-evaluation/failed with credentials and the admin header", async () => {
       const calls = stubFetch({
         message: "Deleted 7 failed judge call(s); the next dispatch will re-judge them",
         deleted: 7,
       });
 
-      const result = await deleteFailedJudgeCalls("hunter2");
+      const result = await deleteFailedJudgeCalls();
 
       expect(result.deleted).toBe(7);
       expect(calls[0].url).toContain("/category-evaluation/failed");
       expect(calls[0].init?.method).toBe("DELETE");
-      expect(JSON.parse(String(calls[0].init?.body))).toEqual({ password: "hunter2" });
+      expect(calls[0].init?.credentials).toBe("include");
+      expect((calls[0].init?.headers as Record<string, string>)["X-Admin-Request"]).toBe("1");
     });
   });
 });

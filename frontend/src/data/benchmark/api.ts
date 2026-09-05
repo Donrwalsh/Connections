@@ -30,7 +30,7 @@ import type {
 } from "./types";
 import { computeDurationMs } from "./metrics";
 
-const apiUrl = (path: string) => `${import.meta.env.VITE_API_URL}${path}`;
+export const apiUrl = (path: string) => `${import.meta.env.VITE_API_URL}${path}`;
 
 async function fetchJson<T>(path: string, signal?: AbortSignal, init?: RequestInit): Promise<T> {
   const res = await fetch(apiUrl(path), { ...init, signal });
@@ -38,6 +38,38 @@ async function fetchJson<T>(path: string, signal?: AbortSignal, init?: RequestIn
     const body = await res.json().catch(() => null);
     throw new Error(body?.message ?? `Request failed with status ${res.status}`);
   }
+  return res.json();
+}
+
+/** Fired whenever an admin-only call gets a 401/403 back — the session
+ * cookie is missing or expired. AdminAuthProvider (see auth/AdminAuthContext)
+ * listens for this to flip `isAdmin` false immediately, without waiting for
+ * a manual /auth/me refresh. */
+export const ADMIN_SESSION_EXPIRED_EVENT = "admin-session-expired";
+
+const ADMIN_REQUEST_HEADER = "X-Admin-Request";
+
+/** Like fetchJson, but for the admin-only actions gated by DispatchAuthGuard
+ * — sends the session cookie and the CSRF marker header it requires (see
+ * session.ts on the backend), and turns a 401/403 into a clear "log in
+ * again" message instead of the backend's generic guard-rejection text. */
+async function fetchJsonAdmin<T>(path: string, signal?: AbortSignal, init?: RequestInit): Promise<T> {
+  const res = await fetch(apiUrl(path), {
+    ...init,
+    signal,
+    credentials: "include",
+    headers: { ...init?.headers, [ADMIN_REQUEST_HEADER]: "1" },
+  });
+
+  if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      window.dispatchEvent(new Event(ADMIN_SESSION_EXPIRED_EVENT));
+      throw new Error("Session expired — log in again at /admin-login.");
+    }
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.message ?? `Request failed with status ${res.status}`);
+  }
+
   return res.json();
 }
 
@@ -168,18 +200,10 @@ export function fetchErroredRunCount(signal?: AbortSignal): Promise<ErroredRunCo
 
 /** Permanently deletes every strategy run in the 'error' status, plus all
  * rows tied to each (guesses, solve prompts, LLM proposals, category-judge
- * verdicts). Rejects (thrown Error, message from the backend) on a bad
- * password. `password` is only checked by the backend in production
- * (DispatchAuthGuard) — harmless to send blank elsewhere. */
-export function deleteErroredRuns(
-  password: string,
-  signal?: AbortSignal,
-): Promise<DeleteErroredRunsResult> {
-  return fetchJson("/dispatch/runs/errored", signal, {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password }),
-  });
+ * verdicts). Rejects (thrown Error, message from the backend) if the admin
+ * session has expired. */
+export function deleteErroredRuns(signal?: AbortSignal): Promise<DeleteErroredRunsResult> {
+  return fetchJsonAdmin("/dispatch/runs/errored", signal, { method: "DELETE" });
 }
 
 /** How many CategoryEvaluation rows are failed judge calls (status
@@ -192,34 +216,23 @@ export function fetchFailedJudgeCallCount(signal?: AbortSignal): Promise<FailedJ
 /** Permanently deletes every failed judge call (CategoryEvaluation with
  * status 'callError') across all runs, so the next evaluate-categories
  * dispatch re-judges those proposals. Rejects (thrown Error, message from
- * the backend) on a bad password. */
-export function deleteFailedJudgeCalls(
-  password: string,
-  signal?: AbortSignal,
-): Promise<DeleteFailedJudgeCallsResult> {
-  return fetchJson("/category-evaluation/failed", signal, {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password }),
-  });
+ * the backend) if the admin session has expired. */
+export function deleteFailedJudgeCalls(signal?: AbortSignal): Promise<DeleteFailedJudgeCallsResult> {
+  return fetchJsonAdmin("/category-evaluation/failed", signal, { method: "DELETE" });
 }
 
 /** Starts a continuous free-tier dispatch cycle for one tier at
  * `thresholdPercent` (a whole number, 1-100). Rejects (thrown Error, message
  * from the backend) if a cycle for this tier is already running, or the
  * threshold is out of range — see FreeTierDispatchModal, which surfaces
- * that message directly. `password` is only checked by the backend in
- * production (DispatchAuthGuard) — harmless to send blank elsewhere. */
+ * that message directly. */
 export function startFreeTierDispatch(
   tier: FreeTierId,
   thresholdPercent: number,
-  password: string,
   signal?: AbortSignal,
 ): Promise<FreeTierDispatchStatus> {
-  return fetchJson(`/dispatch/free-tier/${tier}?threshold=${thresholdPercent}`, signal, {
+  return fetchJsonAdmin(`/dispatch/free-tier/${tier}?threshold=${thresholdPercent}`, signal, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password }),
   });
 }
 
@@ -229,13 +242,10 @@ export function startFreeTierDispatch(
  * already running doesn't prevent the other from starting. */
 export function startBothFreeTierDispatch(
   thresholdPercent: number,
-  password: string,
   signal?: AbortSignal,
 ): Promise<FreeTierDispatchBothStartResult> {
-  return fetchJson(`/dispatch/free-tier/both?threshold=${thresholdPercent}`, signal, {
+  return fetchJsonAdmin(`/dispatch/free-tier/both?threshold=${thresholdPercent}`, signal, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password }),
   });
 }
 
@@ -307,19 +317,10 @@ export function fetchRunDetail(runId: number, signal?: AbortSignal): Promise<Str
 
 /** Permanently deletes a run and everything tied to it (guesses, solve
  * prompts, LLM proposals). Rejects (thrown Error, message from the backend)
- * if the run is still running, or doesn't exist. `password` is only checked
- * by the backend in production (DispatchAuthGuard) — harmless to send blank
- * elsewhere. */
-export function deleteRun(
-  runId: number,
-  password: string,
-  signal?: AbortSignal,
-): Promise<DeleteRunResult> {
-  return fetchJson(`/dispatch/run/${runId}`, signal, {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password }),
-  });
+ * if the run is still running, doesn't exist, or the admin session has
+ * expired. */
+export function deleteRun(runId: number, signal?: AbortSignal): Promise<DeleteRunResult> {
+  return fetchJsonAdmin(`/dispatch/run/${runId}`, signal, { method: "DELETE" });
 }
 
 /** Same detail payload as fetchRunDetail, keyed by (strategyName, date,
