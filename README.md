@@ -129,6 +129,14 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `LLM_GROQ_CONCURRENCY` | `1` | Maximum `llm-groq` runs the worker processes at once (own queue, so it never blocks the other three providers or the deterministic strategies) |
 | `LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS` | `60` | Fallback wait before retrying a Groq per-minute rate-limit hit, used only when Groq's own headers don't yield one. Never a run failure — waits and retries indefinitely |
 | `LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS` | `86400` | Fallback daily-hold duration when a Groq daily-quota hit carries no parseable reset header at all |
+| `LLM_OPENROUTER_CONCURRENCY` | `1` | Maximum `llm-openrouter` runs the worker processes at once (own queue, so it never blocks the other four providers or the deterministic strategies) |
+| `LLM_OPENROUTER_RATE_LIMIT_FALLBACK_SECONDS` | `60` | Fallback wait before retrying an OpenRouter per-minute (20 RPM) rate-limit hit, used only when the 429's own headers don't yield one. Never a run failure — waits and retries |
+| `OPENROUTER_FREE_DAILY_BUDGET` | `50` | Account-wide OpenRouter free-tier requests-per-day budget the dispatch cycle counts today's logged calls against. OpenRouter allows 50/day until a one-time $10 credit purchase raises it to 1000/day; failed calls count too |
+| `OPENROUTER_CALLS_PER_TRIAL_ESTIMATE` | `6` | Assumed API calls per solve trial, for the OpenRouter dispatch cycle's in-flight budget estimate |
+| `OPENROUTER_DISPATCH_TICK_MS` | `15000` | Delay between OpenRouter dispatch ticks — dedicated conservative pacing for the fixed 20 req/min account-wide ceiling |
+| `OPENROUTER_DISPATCH_MAX_BATCH` | `3` | Max new trials a single OpenRouter dispatch tick may queue |
+| `OPENROUTER_DISPATCH_MAX_IN_FLIGHT` | `3` | Max `llm-openrouter` trials queued/running at once before a tick dispatches nothing new |
+| `OPENROUTER_DISPATCH_RPM_COOLDOWN_MS` | `60000` | How long the whole OpenRouter dispatch tick chain backs off after a per-minute 429 |
 | `PORT` | `3001` | Orchestrator listen port |
 | `POSTGRES_USER` | `postgres` | Postgres user (compose-level; the backend reads it as `DB_USER`) |
 | `POSTGRES_PASSWORD` | `postgres` | Postgres password (compose-level; the backend reads it as `DB_PASSWORD`) |

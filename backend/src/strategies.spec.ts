@@ -15,12 +15,21 @@ import {
   DEFAULT_LLM_GROQ_CONCURRENCY,
   DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS,
   DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
+  DEFAULT_LLM_OPENROUTER_CONCURRENCY,
+  DEFAULT_LLM_OPENROUTER_RATE_LIMIT_FALLBACK_SECONDS,
+  DEFAULT_OPENROUTER_FREE_DAILY_BUDGET,
+  DEFAULT_OPENROUTER_CALLS_PER_TRIAL_ESTIMATE,
+  DEFAULT_OPENROUTER_DISPATCH_TICK_MS,
+  DEFAULT_OPENROUTER_DISPATCH_MAX_BATCH,
+  DEFAULT_OPENROUTER_DISPATCH_MAX_IN_FLIGHT,
+  DEFAULT_OPENROUTER_DISPATCH_RPM_COOLDOWN_MS,
   DEFAULT_SHUFFLE_TRIALS,
   isLlmStrategy,
   LLM_OPENAI,
   LLM_OLLAMA,
   LLM_GOOGLE,
   LLM_GROQ,
+  LLM_OPENROUTER,
   LLM_STRATEGIES,
   llmMaxDuplicateGuesses,
   llmMaxFailedGuesses,
@@ -35,6 +44,14 @@ import {
   llmGroqConcurrency,
   llmGroqRateLimitFallbackSeconds,
   llmGroqDailyHoldFallbackSeconds,
+  llmOpenRouterConcurrency,
+  llmOpenRouterRateLimitFallbackSeconds,
+  openRouterFreeDailyBudget,
+  openRouterCallsPerTrialEstimate,
+  openRouterDispatchTickMs,
+  openRouterDispatchMaxBatch,
+  openRouterDispatchMaxInFlight,
+  openRouterDispatchRpmCooldownSeconds,
   llmTemperature,
   llmMaxTrialsPerModel,
   nextDailyAutomationRunAt,
@@ -210,6 +227,96 @@ describe("strategies", () => {
     });
   });
 
+  describe("llmOpenRouterConcurrency", () => {
+    it("should default when the env var is missing", () => {
+      expect(llmOpenRouterConcurrency({})).toBe(DEFAULT_LLM_OPENROUTER_CONCURRENCY);
+    });
+
+    it("should default when the env var is invalid", () => {
+      expect(llmOpenRouterConcurrency({ LLM_OPENROUTER_CONCURRENCY: "abc" })).toBe(
+        DEFAULT_LLM_OPENROUTER_CONCURRENCY,
+      );
+      expect(llmOpenRouterConcurrency({ LLM_OPENROUTER_CONCURRENCY: "0" })).toBe(
+        DEFAULT_LLM_OPENROUTER_CONCURRENCY,
+      );
+    });
+
+    it("should read a valid positive integer", () => {
+      expect(llmOpenRouterConcurrency({ LLM_OPENROUTER_CONCURRENCY: "3" })).toBe(3);
+    });
+  });
+
+  describe("llmOpenRouterRateLimitFallbackSeconds", () => {
+    it("should default when the env var is missing", () => {
+      expect(llmOpenRouterRateLimitFallbackSeconds({})).toBe(
+        DEFAULT_LLM_OPENROUTER_RATE_LIMIT_FALLBACK_SECONDS,
+      );
+    });
+
+    it("should default when the env var is invalid", () => {
+      expect(
+        llmOpenRouterRateLimitFallbackSeconds({ LLM_OPENROUTER_RATE_LIMIT_FALLBACK_SECONDS: "abc" }),
+      ).toBe(DEFAULT_LLM_OPENROUTER_RATE_LIMIT_FALLBACK_SECONDS);
+    });
+
+    it("should read a valid positive integer", () => {
+      expect(
+        llmOpenRouterRateLimitFallbackSeconds({ LLM_OPENROUTER_RATE_LIMIT_FALLBACK_SECONDS: "90" }),
+      ).toBe(90);
+    });
+  });
+
+  describe("openRouterFreeDailyBudget", () => {
+    it("should default to 50 when the env var is missing", () => {
+      expect(openRouterFreeDailyBudget({})).toBe(DEFAULT_OPENROUTER_FREE_DAILY_BUDGET);
+      expect(DEFAULT_OPENROUTER_FREE_DAILY_BUDGET).toBe(50);
+    });
+
+    it("should default when the env var is invalid", () => {
+      expect(openRouterFreeDailyBudget({ OPENROUTER_FREE_DAILY_BUDGET: "abc" })).toBe(
+        DEFAULT_OPENROUTER_FREE_DAILY_BUDGET,
+      );
+      expect(openRouterFreeDailyBudget({ OPENROUTER_FREE_DAILY_BUDGET: "0" })).toBe(
+        DEFAULT_OPENROUTER_FREE_DAILY_BUDGET,
+      );
+    });
+
+    it("should read a valid positive integer (e.g. 1000 after the $10 unlock)", () => {
+      expect(openRouterFreeDailyBudget({ OPENROUTER_FREE_DAILY_BUDGET: "1000" })).toBe(1000);
+    });
+  });
+
+  describe("openRouterCallsPerTrialEstimate", () => {
+    it("should default to 6 when the env var is missing", () => {
+      expect(openRouterCallsPerTrialEstimate({})).toBe(DEFAULT_OPENROUTER_CALLS_PER_TRIAL_ESTIMATE);
+      expect(DEFAULT_OPENROUTER_CALLS_PER_TRIAL_ESTIMATE).toBe(6);
+    });
+
+    it("should read a valid positive integer", () => {
+      expect(openRouterCallsPerTrialEstimate({ OPENROUTER_CALLS_PER_TRIAL_ESTIMATE: "4" })).toBe(4);
+    });
+  });
+
+  describe("openRouterDispatch* pacing knobs", () => {
+    it("should default correctly", () => {
+      expect(openRouterDispatchTickMs({})).toBe(DEFAULT_OPENROUTER_DISPATCH_TICK_MS);
+      expect(openRouterDispatchMaxBatch({})).toBe(DEFAULT_OPENROUTER_DISPATCH_MAX_BATCH);
+      expect(openRouterDispatchMaxInFlight({})).toBe(DEFAULT_OPENROUTER_DISPATCH_MAX_IN_FLIGHT);
+      expect(openRouterDispatchRpmCooldownSeconds({})).toBe(
+        DEFAULT_OPENROUTER_DISPATCH_RPM_COOLDOWN_MS / 1000,
+      );
+    });
+
+    it("should read valid overrides", () => {
+      expect(openRouterDispatchTickMs({ OPENROUTER_DISPATCH_TICK_MS: "20000" })).toBe(20000);
+      expect(openRouterDispatchMaxBatch({ OPENROUTER_DISPATCH_MAX_BATCH: "5" })).toBe(5);
+      expect(openRouterDispatchMaxInFlight({ OPENROUTER_DISPATCH_MAX_IN_FLIGHT: "5" })).toBe(5);
+      expect(
+        openRouterDispatchRpmCooldownSeconds({ OPENROUTER_DISPATCH_RPM_COOLDOWN_MS: "90000" }),
+      ).toBe(90);
+    });
+  });
+
   describe("workerRole", () => {
     it("should default to 'all' when the env var is missing or invalid", () => {
       expect(workerRole({})).toBe("all");
@@ -347,11 +454,12 @@ describe("strategies", () => {
   });
 
   describe("isLlmStrategy", () => {
-    it("should identify all four LLM strategies", () => {
+    it("should identify all five LLM strategies", () => {
       expect(isLlmStrategy(LLM_OPENAI)).toBe(true);
       expect(isLlmStrategy(LLM_OLLAMA)).toBe(true);
       expect(isLlmStrategy(LLM_GOOGLE)).toBe(true);
       expect(isLlmStrategy(LLM_GROQ)).toBe(true);
+      expect(isLlmStrategy(LLM_OPENROUTER)).toBe(true);
     });
 
     it("should reject non-LLM strategies", () => {

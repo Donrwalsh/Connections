@@ -9,6 +9,7 @@ export const SUPPORTED_STRATEGIES = [
   "llm-ollama",
   "llm-google",
   "llm-groq",
+  "llm-openrouter",
 ] as const;
 
 export type SupportedStrategy = (typeof SUPPORTED_STRATEGIES)[number];
@@ -21,8 +22,15 @@ export const LLM_OPENAI = "llm-openai" as const;
 export const LLM_OLLAMA = "llm-ollama" as const;
 export const LLM_GOOGLE = "llm-google" as const;
 export const LLM_GROQ = "llm-groq" as const;
+export const LLM_OPENROUTER = "llm-openrouter" as const;
 
-export const LLM_STRATEGIES = [LLM_OPENAI, LLM_OLLAMA, LLM_GOOGLE, LLM_GROQ] as const;
+export const LLM_STRATEGIES = [
+  LLM_OPENAI,
+  LLM_OLLAMA,
+  LLM_GOOGLE,
+  LLM_GROQ,
+  LLM_OPENROUTER,
+] as const;
 
 export function isLlmStrategy(strategyName: string): boolean {
   return (LLM_STRATEGIES as readonly string[]).includes(strategyName);
@@ -79,6 +87,35 @@ export const DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS = 60;
 // since (unlike Google's fixed Pacific-midnight reset) there is no shared
 // clock boundary to fall back to for Groq.
 export const DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS = 24 * 60 * 60;
+
+export const DEFAULT_LLM_OPENROUTER_CONCURRENCY = 1;
+
+// Fallback wait (seconds) before retrying an OpenRouter per-minute (20 RPM)
+// rate-limit hit, used only when neither retry-after nor a short
+// X-RateLimit-Reset parsed — see orchestrator/src/solver.ts.
+export const DEFAULT_LLM_OPENROUTER_RATE_LIMIT_FALLBACK_SECONDS = 60;
+
+// Account-wide requests-per-day budget the OpenRouter dispatch cycle counts
+// toward (OpenRouter's free tier is 50/day until a one-time $10 credit
+// purchase raises it to 1000/day — no API exposes which, so the operator
+// sets this). Counted from SolvePrompt rows, not trials, and OpenRouter
+// counts failed calls too. See
+// docs/superpowers/specs/2026-09-05-openrouter-free-tier-design.md §5a.
+export const DEFAULT_OPENROUTER_FREE_DAILY_BUDGET = 50;
+
+// Assumed API calls per solve trial, for the dispatch cycle's in-flight
+// cost estimate — one Connections solve is ~4 steps x 1-2 prompts.
+export const DEFAULT_OPENROUTER_CALLS_PER_TRIAL_ESTIMATE = 6;
+
+// Dedicated conservative pacing for the fixed account-wide 20 req/min
+// ceiling — NOT the FREE_TIER_DISPATCH_* knobs, which aren't tuned for it.
+export const DEFAULT_OPENROUTER_DISPATCH_TICK_MS = 15_000;
+export const DEFAULT_OPENROUTER_DISPATCH_MAX_BATCH = 3;
+export const DEFAULT_OPENROUTER_DISPATCH_MAX_IN_FLIGHT = 3;
+
+// How long the whole dispatch tick chain backs off after a per-minute 429
+// is observed (the runner writes a 'per-minute-cooldown' hold this long).
+export const DEFAULT_OPENROUTER_DISPATCH_RPM_COOLDOWN_MS = 60_000;
 
 // How many prompts a single solve step may make before the orchestrator
 // gives up on a fresh candidate and reports a duplicate/invalid failure.
@@ -214,6 +251,90 @@ export function llmGroqDailyHoldFallbackSeconds(env: NodeJS.ProcessEnv = process
     env.LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
     DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
   );
+}
+
+/**
+ * How many llm-openrouter runs the worker may process at once, from
+ * LLM_OPENROUTER_CONCURRENCY. Falls back to
+ * DEFAULT_LLM_OPENROUTER_CONCURRENCY for missing/invalid values.
+ */
+export function llmOpenRouterConcurrency(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.LLM_OPENROUTER_CONCURRENCY, DEFAULT_LLM_OPENROUTER_CONCURRENCY);
+}
+
+/**
+ * Fallback wait (seconds) before retrying an OpenRouter per-minute
+ * rate-limit hit, from LLM_OPENROUTER_RATE_LIMIT_FALLBACK_SECONDS. Only used
+ * when the 429's own headers didn't yield a wait. Falls back to
+ * DEFAULT_LLM_OPENROUTER_RATE_LIMIT_FALLBACK_SECONDS for missing/invalid
+ * values.
+ */
+export function llmOpenRouterRateLimitFallbackSeconds(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  return positiveTrialCount(
+    env.LLM_OPENROUTER_RATE_LIMIT_FALLBACK_SECONDS,
+    DEFAULT_LLM_OPENROUTER_RATE_LIMIT_FALLBACK_SECONDS,
+  );
+}
+
+/**
+ * The account-wide OpenRouter free-tier requests-per-day budget the
+ * dispatch cycle counts today's logged calls against, from
+ * OPENROUTER_FREE_DAILY_BUDGET. Falls back to
+ * DEFAULT_OPENROUTER_FREE_DAILY_BUDGET for missing/invalid values.
+ */
+export function openRouterFreeDailyBudget(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.OPENROUTER_FREE_DAILY_BUDGET, DEFAULT_OPENROUTER_FREE_DAILY_BUDGET);
+}
+
+/**
+ * Assumed API calls per solve trial, for the OpenRouter dispatch cycle's
+ * in-flight budget estimate, from OPENROUTER_CALLS_PER_TRIAL_ESTIMATE.
+ * Falls back to DEFAULT_OPENROUTER_CALLS_PER_TRIAL_ESTIMATE.
+ */
+export function openRouterCallsPerTrialEstimate(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(
+    env.OPENROUTER_CALLS_PER_TRIAL_ESTIMATE,
+    DEFAULT_OPENROUTER_CALLS_PER_TRIAL_ESTIMATE,
+  );
+}
+
+/** Delay between OpenRouter dispatch ticks, from OPENROUTER_DISPATCH_TICK_MS. */
+export function openRouterDispatchTickMs(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.OPENROUTER_DISPATCH_TICK_MS, DEFAULT_OPENROUTER_DISPATCH_TICK_MS);
+}
+
+/** Max new trials a single OpenRouter dispatch tick may queue, from OPENROUTER_DISPATCH_MAX_BATCH. */
+export function openRouterDispatchMaxBatch(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(
+    env.OPENROUTER_DISPATCH_MAX_BATCH,
+    DEFAULT_OPENROUTER_DISPATCH_MAX_BATCH,
+  );
+}
+
+/** Max trials queued/running at once for the OpenRouter cycle, from OPENROUTER_DISPATCH_MAX_IN_FLIGHT. */
+export function openRouterDispatchMaxInFlight(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(
+    env.OPENROUTER_DISPATCH_MAX_IN_FLIGHT,
+    DEFAULT_OPENROUTER_DISPATCH_MAX_IN_FLIGHT,
+  );
+}
+
+/**
+ * How long (seconds) the whole OpenRouter dispatch tick chain backs off
+ * after a per-minute 429, from OPENROUTER_DISPATCH_RPM_COOLDOWN_MS (a
+ * milliseconds knob, rounded up to whole seconds here). Falls back to
+ * DEFAULT_OPENROUTER_DISPATCH_RPM_COOLDOWN_MS for missing/invalid values.
+ */
+export function openRouterDispatchRpmCooldownSeconds(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const ms = positiveTrialCount(
+    env.OPENROUTER_DISPATCH_RPM_COOLDOWN_MS,
+    DEFAULT_OPENROUTER_DISPATCH_RPM_COOLDOWN_MS,
+  );
+  return Math.ceil(ms / 1000);
 }
 
 /**
