@@ -21,6 +21,10 @@ export class AutomationController {
     return {
       lastRunAt: log?.triggeredAt?.toISOString() ?? null,
       nextRunAt: nextDailyAutomationRunAt().toISOString(),
+      metadataRefresh: {
+        updated: log?.metadataRefreshUpdated ?? null,
+        error: log?.metadataRefreshError ?? null,
+      },
       judge: {
         enqueued: log?.judgeEnqueued ?? null,
         error: log?.judgeError ?? null,

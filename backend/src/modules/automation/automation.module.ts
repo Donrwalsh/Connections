@@ -4,6 +4,7 @@ import { StrategyModule } from "../strategy/strategy.module";
 import { FreeTierDispatchModule } from "../free-tier-dispatch/free-tier-dispatch.module";
 import { GoogleFreeDispatchModule } from "../google-free-dispatch/google-free-dispatch.module";
 import { GroqFreeDispatchModule } from "../groq-free-dispatch/groq-free-dispatch.module";
+import { SupportedModelModule } from "../supported-model/supported-model.module";
 import { QueueModule } from "../queue/queue.module";
 import { AutomationRunLog } from "./entities/automation-run-log.entity";
 import { DailyAutomationService } from "./daily-automation.service";
@@ -17,6 +18,7 @@ import { AutomationController } from "./automation.controller";
     FreeTierDispatchModule,
     GoogleFreeDispatchModule,
     GroqFreeDispatchModule,
+    SupportedModelModule,
     QueueModule,
   ],
   controllers: [AutomationController],

@@ -6,6 +6,7 @@ import { CategoryEvaluatorService } from "../strategy/category-evaluator.service
 import { FreeTierDispatchService } from "../free-tier-dispatch/free-tier-dispatch.service";
 import { GoogleFreeDispatchService } from "../google-free-dispatch/google-free-dispatch.service";
 import { GroqFreeDispatchService } from "../groq-free-dispatch/groq-free-dispatch.service";
+import { ModelMetadataRefreshService } from "../supported-model/model-metadata-refresh.service";
 
 // The same MAX_LIMIT CategoryEvaluatorService.enqueuePending already
 // enforces internally — the daily leg asks for as much as a manual dispatch
@@ -21,12 +22,20 @@ function todayUtcDateStamp(): string {
 }
 
 /**
- * Runs on a daily UTC cron (see DailyAutomationBootstrap). Runs four legs
+ * Runs on a daily UTC cron (see DailyAutomationBootstrap). Runs five legs
  * in turn — each leg is awaited before the next starts, but one leg's
  * failure never prevents the next from running (see each leg's own
  * try/catch) — and records each one's outcome into today's AutomationRunLog
  * row as soon as it resolves:
  *
+ *  - metadataRefresh: refreshes SupportedModel's OpenRouter-sourced
+ *    metadata/pricing first, awaited in-process before any dispatch leg
+ *    runs — the only thing that actually guarantees "metadata refresh
+ *    happens before automated dispatch" rather than relying on two
+ *    independent cron schedules to stay out of each other's way. A failed
+ *    refresh doesn't block dispatch (stale/missing metadata only means
+ *    blank leaderboard fields, not broken dispatch), so this never stops
+ *    the legs below from running;
  *  - judge: enqueues the category-judge backlog (its spend already lands in
  *    the same mini-tier budget FreeTierUsageService tracks);
  *  - miniBurn: starts a FreeTierDispatchService "mini" cycle at an 80%
@@ -57,6 +66,8 @@ export class DailyAutomationService {
     private readonly googleFreeDispatchService: GoogleFreeDispatchService,
     @Inject(GroqFreeDispatchService)
     private readonly groqFreeDispatchService: GroqFreeDispatchService,
+    @Inject(ModelMetadataRefreshService)
+    private readonly modelMetadataRefreshService: ModelMetadataRefreshService,
   ) {}
 
   async run(): Promise<void> {
@@ -67,6 +78,7 @@ export class DailyAutomationService {
     // whichever legs already recorded an outcome from an earlier run today.
     await this.runLogRepo.upsert({ date, triggeredAt }, ["date"]);
 
+    await this.runMetadataRefreshLeg(date);
     await this.runJudgeLeg(date);
     await this.runMiniBurnLeg(date);
     await this.runGoogleBurnLeg(date);
@@ -75,6 +87,20 @@ export class DailyAutomationService {
 
   async getTodayStatus(): Promise<AutomationRunLog | null> {
     return this.runLogRepo.findOne({ where: { date: todayUtcDateStamp() } });
+  }
+
+  private async runMetadataRefreshLeg(date: string): Promise<void> {
+    try {
+      const result = await this.modelMetadataRefreshService.refreshAll();
+      await this.runLogRepo.update(
+        { date },
+        { metadataRefreshUpdated: result.updated, metadataRefreshError: null },
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to refresh model metadata";
+      this.logger.error(`daily automation metadata-refresh leg failed: ${message}`);
+      await this.runLogRepo.update({ date }, { metadataRefreshUpdated: null, metadataRefreshError: message });
+    }
   }
 
   private async runJudgeLeg(date: string): Promise<void> {

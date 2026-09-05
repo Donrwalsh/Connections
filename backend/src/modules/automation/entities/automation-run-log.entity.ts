@@ -9,9 +9,10 @@ export type AutomationLegOutcome = "started" | "alreadyActive" | "alreadyExhaust
 
 /**
  * One row per UTC calendar day (`date`, "YYYY-MM-DD"), upserted as each leg
- * of the daily-automation chain (judge dispatch, OpenAI mini/nano burn,
- * Google burn, Groq burn — see DailyAutomationService) reports its outcome.
- * This is the single source of truth the UI reads to answer "did today's
+ * of the daily-automation chain (model-metadata refresh, judge dispatch,
+ * OpenAI mini/nano burn, Google burn, Groq burn — see DailyAutomationService)
+ * reports its outcome. This is the single source of truth the UI reads to
+ * answer "did today's
  * automatic run happen, and what did it do" — rather than inferring it from
  * several different subsystems' own live state. See
  * docs/superpowers/specs/2026-09-04-daily-free-tier-automation-design.md.
@@ -23,6 +24,12 @@ export class AutomationRunLog {
 
   @Column({ type: "timestamptz" })
   triggeredAt: Date;
+
+  @Column({ type: "int", nullable: true })
+  metadataRefreshUpdated: number | null;
+
+  @Column({ type: "text", nullable: true })
+  metadataRefreshError: string | null;
 
   @Column({ type: "int", nullable: true })
   judgeEnqueued: number | null;
