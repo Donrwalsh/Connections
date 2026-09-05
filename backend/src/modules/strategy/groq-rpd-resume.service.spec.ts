@@ -6,6 +6,13 @@ import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { GROQ_RPD_RESUME_QUEUE, LLM_GROQ_QUEUE } from "../queue/queue.module";
 import { runStrategyJobId } from "../queue/strategy.queue";
 
+// Frozen so every Date.now() call — in the test body and inside the
+// service's own rearm() math — reads the exact same instant. Without this,
+// `soonest.getTime() - Date.now()` in rearm() can drift by a millisecond or
+// two between when a test computes its mocked nextResetAt and when the
+// service actually subtracts, flaking exact-delay assertions.
+const FROZEN_NOW = new Date("2026-01-15T20:00:00Z");
+
 describe("GroqRpdResumeService", () => {
   let service: GroqRpdResumeService;
   let strategyRunRepo: { find: jest.Mock; save: jest.Mock };
@@ -44,9 +51,16 @@ describe("GroqRpdResumeService", () => {
     }).compile();
 
     service = module.get(GroqRpdResumeService);
+
+    // Frozen only *after* the Nest module compiles — installing fake timers
+    // first also fakes setImmediate/nextTick, which compile() awaits.
+    jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate"] }).setSystemTime(FROZEN_NOW);
   });
 
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => {
+    jest.clearAllMocks();
+    jest.useRealTimers();
+  });
 
   it("revives parked runs whose model is no longer held and re-enqueues them", async () => {
     holdService.clearExpired.mockResolvedValue(["openai/gpt-oss-20b"]);
