@@ -14,6 +14,7 @@ import { googleRpdResumeQueue } from "./google-rpd-resume.queue";
 import { groqRpdResumeQueue } from "./groq-rpd-resume.queue";
 import { googleFreeDispatchQueue } from "./google-free-dispatch.queue";
 import { groqFreeDispatchQueue } from "./groq-free-dispatch.queue";
+import { openRouterFreeDispatchQueue } from "./openrouter-free-dispatch.queue";
 import { dailyAutomationQueue } from "./daily-automation.queue";
 
 export const STRATEGY_QUEUE = "STRATEGY_QUEUE";
@@ -29,6 +30,7 @@ export const GOOGLE_RPD_RESUME_QUEUE = "GOOGLE_RPD_RESUME_QUEUE";
 export const GROQ_RPD_RESUME_QUEUE = "GROQ_RPD_RESUME_QUEUE";
 export const GOOGLE_FREE_DISPATCH_QUEUE = "GOOGLE_FREE_DISPATCH_QUEUE";
 export const GROQ_FREE_DISPATCH_QUEUE = "GROQ_FREE_DISPATCH_QUEUE";
+export const OPENROUTER_FREE_DISPATCH_QUEUE = "OPENROUTER_FREE_DISPATCH_QUEUE";
 export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
 
 @Module({
@@ -46,6 +48,7 @@ export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
     { provide: GROQ_RPD_RESUME_QUEUE, useValue: groqRpdResumeQueue },
     { provide: GOOGLE_FREE_DISPATCH_QUEUE, useValue: googleFreeDispatchQueue },
     { provide: GROQ_FREE_DISPATCH_QUEUE, useValue: groqFreeDispatchQueue },
+    { provide: OPENROUTER_FREE_DISPATCH_QUEUE, useValue: openRouterFreeDispatchQueue },
     { provide: DAILY_AUTOMATION_QUEUE, useValue: dailyAutomationQueue },
   ],
   exports: [
@@ -62,6 +65,7 @@ export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
     GROQ_RPD_RESUME_QUEUE,
     GOOGLE_FREE_DISPATCH_QUEUE,
     GROQ_FREE_DISPATCH_QUEUE,
+    OPENROUTER_FREE_DISPATCH_QUEUE,
     DAILY_AUTOMATION_QUEUE,
   ],
 })
