@@ -135,6 +135,45 @@ describe("OrchestratorService", () => {
     );
   });
 
+  it("should include the openrouter provider in the request body when given", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
+
+    await service.solveAssist(messages, "z-ai/glm-5.2:free", "openrouter");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://orchestrator.test/solve-assist",
+      expect.objectContaining({
+        body: JSON.stringify({
+          messages,
+          model: "z-ai/glm-5.2:free",
+          provider: "openrouter",
+        }),
+      }),
+    );
+  });
+
+  it("should extract dailyResetSeconds from an OpenRouter rate_limited_daily failure", async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockResponse({
+        ok: false,
+        status: 429,
+        body: {
+          error: "OpenRouter daily quota exhausted",
+          code: "rate_limited_daily",
+          details: { dailyResetSeconds: 7200 },
+        },
+      }),
+    );
+
+    const outcome = await service.solveAssist(messages, "z-ai/glm-5.2:free", "openrouter");
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.error.code).toBe("rate_limited_daily");
+      expect(outcome.error.dailyResetSeconds).toBe(7200);
+    }
+  });
+
   it("should extract retryAfterSeconds from a rate_limited failure", async () => {
     mockFetch.mockResolvedValueOnce(
       mockResponse({
