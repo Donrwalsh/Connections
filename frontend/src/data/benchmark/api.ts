@@ -19,6 +19,7 @@ import type {
   GoogleDispatchStatus,
   GroqDispatchStatus,
   OpenRouterDispatchStatus,
+  MistralDispatchStatus,
   Leaderboard,
   RecentActivityEvent,
   RunHistory,
@@ -315,6 +316,18 @@ export function stopOpenRouterDispatch(
   signal?: AbortSignal,
 ): Promise<OpenRouterDispatchStatus> {
   return fetchJson("/dispatch/openrouter", signal, { method: "DELETE" });
+}
+
+/** Whether the Mistral free-dispatch cycle is currently running — see
+ * MistralDispatchStatus. Polled the same way fetchGroqDispatchStatus is. */
+export function fetchMistralDispatchStatus(signal?: AbortSignal): Promise<MistralDispatchStatus> {
+  return fetchJson("/dispatch/mistral", signal);
+}
+
+/** Stops the Mistral dispatch cycle — a no-op (not an error) if it wasn't
+ * running. */
+export function stopMistralDispatch(signal?: AbortSignal): Promise<MistralDispatchStatus> {
+  return fetchJson("/dispatch/mistral", signal, { method: "DELETE" });
 }
 
 const DETAIL_PAGE_SIZE = 200;

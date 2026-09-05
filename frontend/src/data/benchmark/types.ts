@@ -305,10 +305,10 @@ export interface AutomationJudgeLeg {
   error: string | null;
 }
 
-/** One leg's outcome from the mini-burn, Google-burn, or Groq-burn side of
- * GET /automation/status — see the backend's AutomationRunLog
- * miniBurnOutcome/miniBurnMessage (or googleBurnOutcome/googleBurnMessage,
- * or groqBurnOutcome/groqBurnMessage). */
+/** One leg's outcome from the mini-burn, Google-burn, Groq-burn, OpenRouter-burn,
+ * or Mistral-burn side of GET /automation/status — see the backend's
+ * AutomationRunLog miniBurnOutcome/miniBurnMessage (or the matching
+ * googleBurn / groqBurn / openRouterBurn / mistralBurn column pair). */
 export interface AutomationBurnLeg {
   outcome: AutomationLegOutcome | null;
   message: string | null;
@@ -316,9 +316,9 @@ export interface AutomationBurnLeg {
 
 /** GET /automation/status — today's daily-automation run (see the backend's
  * DailyAutomationService/AutomationRunLog): the judge-dispatch leg, the
- * mini/nano burn leg, the Google burn leg, and the Groq burn leg, plus when
- * the chain is next expected to fire. `lastRunAt` is null until the first
- * automatic run of the day has fired. */
+ * mini/nano burn leg, and the Google / Groq / OpenRouter / Mistral burn
+ * legs, plus when the chain is next expected to fire. `lastRunAt` is null
+ * until the first automatic run of the day has fired. */
 export interface AutomationStatus {
   lastRunAt: string | null;
   nextRunAt: string;
@@ -327,6 +327,7 @@ export interface AutomationStatus {
   googleBurn: AutomationBurnLeg;
   groqBurn: AutomationBurnLeg;
   openRouterBurn: AutomationBurnLeg;
+  mistralBurn: AutomationBurnLeg;
 }
 
 /** GET /dispatch/google — whether the Google free-daily-quota dispatch cycle
@@ -357,6 +358,15 @@ export interface OpenRouterDispatchStatus {
   startedAt: string | null;
   callsToday: number;
   dailyBudget: number;
+}
+
+/** GET /dispatch/mistral — whether the Mistral free-dispatch cycle (see the
+ * backend's MistralFreeDispatchService) is currently running. Same shape as
+ * GroqDispatchStatus — no token threshold; Mistral's constraints (1 req/sec,
+ * per-pool TPM, per-pool monthly tokens) are enforced by Mistral itself. */
+export interface MistralDispatchStatus {
+  active: boolean;
+  startedAt: string | null;
 }
 
 /** One daily-automation leg as a widget presents it: a single

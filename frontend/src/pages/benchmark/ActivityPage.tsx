@@ -7,6 +7,7 @@ import { FreeTierDispatchModal } from "../../components/benchmark/FreeTierDispat
 import { GoogleDispatchWidget } from "../../components/benchmark/GoogleDispatchWidget";
 import { GroqDispatchWidget } from "../../components/benchmark/GroqDispatchWidget";
 import { OpenRouterDispatchWidget } from "../../components/benchmark/OpenRouterDispatchWidget";
+import { MistralDispatchWidget } from "../../components/benchmark/MistralDispatchWidget";
 import { RecentActivityTable } from "../../components/benchmark/RecentActivityTable";
 import type { FreeTierModelSets } from "../../components/benchmark/StrategyTable";
 import { fetchAutomationStatus, fetchFreeTierUsage, fetchLeaderboard, fetchRecentActivity } from "../../data/benchmark/api";
@@ -126,6 +127,18 @@ export function ActivityPage() {
       }
     : null;
 
+  const mistralBurnAutomation: AutomationLegDisplay | null = automationStatus
+    ? {
+        message:
+          automationStatus.mistralBurn.outcome === "error"
+            ? `failed: ${automationStatus.mistralBurn.message}`
+            : automationStatus.mistralBurn.message,
+        lastRunAt: automationStatus.lastRunAt,
+        nextRunAt: automationStatus.nextRunAt,
+        isError: automationStatus.mistralBurn.outcome === "error",
+      }
+    : null;
+
   const {
     data: recentActivity,
     isLoading: isLoadingActivity,
@@ -175,6 +188,7 @@ export function ActivityPage() {
           <GoogleDispatchWidget automation={googleBurnAutomation} />
           <GroqDispatchWidget automation={groqBurnAutomation} />
           <OpenRouterDispatchWidget automation={openRouterBurnAutomation} />
+          <MistralDispatchWidget automation={mistralBurnAutomation} />
         </div>
       ) : null}
 
