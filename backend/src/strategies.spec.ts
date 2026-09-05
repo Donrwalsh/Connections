@@ -23,6 +23,11 @@ import {
   DEFAULT_OPENROUTER_DISPATCH_MAX_BATCH,
   DEFAULT_OPENROUTER_DISPATCH_MAX_IN_FLIGHT,
   DEFAULT_OPENROUTER_DISPATCH_RPM_COOLDOWN_MS,
+  DEFAULT_LLM_MISTRAL_CONCURRENCY,
+  DEFAULT_LLM_MISTRAL_RATE_LIMIT_FALLBACK_SECONDS,
+  DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS,
+  DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ELAPSED_SECONDS,
+  DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
   DEFAULT_SHUFFLE_TRIALS,
   isLlmStrategy,
   LLM_OPENAI,
@@ -30,6 +35,7 @@ import {
   LLM_GOOGLE,
   LLM_GROQ,
   LLM_OPENROUTER,
+  LLM_MISTRAL,
   LLM_STRATEGIES,
   llmMaxDuplicateGuesses,
   llmMaxFailedGuesses,
@@ -52,6 +58,11 @@ import {
   openRouterDispatchMaxBatch,
   openRouterDispatchMaxInFlight,
   openRouterDispatchRpmCooldownSeconds,
+  llmMistralConcurrency,
+  llmMistralRateLimitFallbackSeconds,
+  mistralPersistentRateLimitAttempts,
+  mistralPersistentRateLimitElapsedMs,
+  mistralModelHoldFallbackSeconds,
   llmTemperature,
   llmMaxTrialsPerModel,
   nextDailyAutomationRunAt,
@@ -314,6 +325,86 @@ describe("strategies", () => {
       expect(
         openRouterDispatchRpmCooldownSeconds({ OPENROUTER_DISPATCH_RPM_COOLDOWN_MS: "90000" }),
       ).toBe(90);
+    });
+  });
+
+  describe("llmMistralConcurrency", () => {
+    it("should default when the env var is missing or invalid", () => {
+      expect(llmMistralConcurrency({})).toBe(DEFAULT_LLM_MISTRAL_CONCURRENCY);
+      expect(llmMistralConcurrency({ LLM_MISTRAL_CONCURRENCY: "abc" })).toBe(
+        DEFAULT_LLM_MISTRAL_CONCURRENCY,
+      );
+      expect(llmMistralConcurrency({ LLM_MISTRAL_CONCURRENCY: "0" })).toBe(
+        DEFAULT_LLM_MISTRAL_CONCURRENCY,
+      );
+    });
+
+    it("should read a valid override", () => {
+      expect(llmMistralConcurrency({ LLM_MISTRAL_CONCURRENCY: "2" })).toBe(2);
+    });
+  });
+
+  describe("llmMistralRateLimitFallbackSeconds", () => {
+    it("should default when the env var is missing", () => {
+      expect(llmMistralRateLimitFallbackSeconds({})).toBe(
+        DEFAULT_LLM_MISTRAL_RATE_LIMIT_FALLBACK_SECONDS,
+      );
+    });
+
+    it("should read a valid override", () => {
+      expect(
+        llmMistralRateLimitFallbackSeconds({ LLM_MISTRAL_RATE_LIMIT_FALLBACK_SECONDS: "90" }),
+      ).toBe(90);
+    });
+  });
+
+  describe("mistralPersistentRateLimitAttempts", () => {
+    it("should default when the env var is missing", () => {
+      expect(mistralPersistentRateLimitAttempts({})).toBe(
+        DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS,
+      );
+    });
+
+    it("should read a valid override", () => {
+      expect(
+        mistralPersistentRateLimitAttempts({ MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS: "6" }),
+      ).toBe(6);
+    });
+  });
+
+  describe("mistralPersistentRateLimitElapsedMs", () => {
+    it("should default to the seconds constant times 1000", () => {
+      expect(mistralPersistentRateLimitElapsedMs({})).toBe(
+        DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ELAPSED_SECONDS * 1000,
+      );
+    });
+
+    it("should read an override in seconds and return milliseconds", () => {
+      expect(
+        mistralPersistentRateLimitElapsedMs({ MISTRAL_PERSISTENT_RATE_LIMIT_ELAPSED_SECONDS: "120" }),
+      ).toBe(120000);
+    });
+  });
+
+  describe("mistralModelHoldFallbackSeconds", () => {
+    it("should default when the env var is missing", () => {
+      expect(mistralModelHoldFallbackSeconds({})).toBe(
+        DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
+      );
+    });
+
+    it("should read a valid override", () => {
+      expect(mistralModelHoldFallbackSeconds({ MISTRAL_MODEL_HOLD_FALLBACK_SECONDS: "3600" })).toBe(
+        3600,
+      );
+    });
+  });
+
+  describe("LLM_MISTRAL membership", () => {
+    it("is a supported LLM strategy", () => {
+      expect(SUPPORTED_STRATEGIES).toContain("llm-mistral");
+      expect(isLlmStrategy("llm-mistral")).toBe(true);
+      expect(LLM_STRATEGIES).toContain(LLM_MISTRAL);
     });
   });
 
