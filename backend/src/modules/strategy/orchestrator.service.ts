@@ -43,6 +43,10 @@ export interface SolveAssistFailure {
   isRetryable?: boolean;
   // Seconds to wait before retrying — set only when code is "rate_limited".
   retryAfterSeconds?: number;
+  // Seconds until a Groq per-model daily quota resets — set only when code
+  // is "rate_limited_daily" for a Groq call. See the orchestrator's
+  // SolveErrorDetails.dailyResetSeconds.
+  dailyResetSeconds?: number;
 }
 
 export type SolveAssistOutcome =
@@ -99,7 +103,7 @@ export class OrchestratorService {
   async solveAssist(
     messages: ChatMessage[],
     model?: string,
-    provider?: "openai" | "ollama" | "google",
+    provider?: "openai" | "ollama" | "google" | "groq",
     contextWindow?: number | null,
   ): Promise<SolveAssistOutcome> {
     return this.executeCall<SolveAssistSuccess>(
@@ -131,7 +135,7 @@ export class OrchestratorService {
     proposedCategory: string,
     actualCategory: string,
     model?: string,
-    provider?: "openai" | "ollama" | "google",
+    provider?: "openai" | "ollama" | "google" | "groq",
   ): Promise<JudgeCategoryOutcome> {
     return this.executeCall<JudgeCategorySuccess>(
       "/judge-category",
@@ -213,6 +217,7 @@ export class OrchestratorService {
     | "errorName"
     | "isRetryable"
     | "retryAfterSeconds"
+    | "dailyResetSeconds"
   > {
     if (!details) return {};
     return {
@@ -224,6 +229,7 @@ export class OrchestratorService {
       errorName: details.errorName as string | undefined,
       isRetryable: details.isRetryable as boolean | undefined,
       retryAfterSeconds: details.retryAfterSeconds as number | undefined,
+      dailyResetSeconds: details.dailyResetSeconds as number | undefined,
     };
   }
 
