@@ -22,12 +22,14 @@ import { LlmProposal } from "./modules/strategy/entities/llm-proposal.entity";
 import { SolvePrompt } from "./modules/strategy/entities/solve-prompt.entity";
 import { CategoryEvaluation } from "./modules/strategy/entities/category-evaluation.entity";
 import { GoogleRateLimitHold } from "./modules/strategy/entities/google-rate-limit-hold.entity";
+import { GroqRateLimitHold } from "./modules/strategy/entities/groq-rate-limit-hold.entity";
 import { StrategyRun } from "./modules/strategy/entities/strategy-run.entity";
 import { SupportedModel } from "./modules/supported-model/entities/supported-model.entity";
 import { ModelPrice } from "./modules/supported-model/entities/model-price.entity";
 import { FreeTierDispatchState } from "./modules/free-tier-dispatch/entities/free-tier-dispatch-state.entity";
 import { AutomationRunLog } from "./modules/automation/entities/automation-run-log.entity";
 import { GoogleDispatchState } from "./modules/google-free-dispatch/entities/google-dispatch-state.entity";
+import { GroqDispatchState } from "./modules/groq-free-dispatch/entities/groq-dispatch-state.entity";
 
 @Module({
   imports: [
@@ -61,11 +63,13 @@ import { GoogleDispatchState } from "./modules/google-free-dispatch/entities/goo
           SolvePrompt,
           CategoryEvaluation,
           GoogleRateLimitHold,
+          GroqRateLimitHold,
           SupportedModel,
           ModelPrice,
           FreeTierDispatchState,
           AutomationRunLog,
           GoogleDispatchState,
+          GroqDispatchState,
         ],
         synchronize: false,
         migrations: [__dirname + "/migrations/*{.ts,.js}"],
