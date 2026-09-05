@@ -20,7 +20,11 @@ import { VerdictSquares } from "./VerdictSquares";
 
 export interface RunHistoryTableProps {
   /** The route's :strategyId — a model name for LLM rows, the strategy name
-   * otherwise. Rows navigate to /leaderboard/:strategyId/:puzzleId. */
+   * otherwise. Rows navigate to /leaderboard/:strategyId/:puzzleId. Passed
+   * here decoded (as React Router's own useParams() hands it back); this
+   * component re-encodes it into the built URL, since a Groq model id like
+   * "qwen/qwen3.6-27b" contains a literal "/" that would otherwise split
+   * into an extra path segment no route matches. */
   strategyId: string;
   rows: RunHistoryRow[];
   sortBy: RunHistorySortBy;
@@ -108,11 +112,11 @@ export function RunHistoryTable({
               className="bench-row"
               role="link"
               tabIndex={0}
-              onClick={() => navigate(`/leaderboard/${strategyId}/${row.puzzleId}`)}
+              onClick={() => navigate(`/leaderboard/${encodeURIComponent(strategyId)}/${row.puzzleId}`)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault();
-                  navigate(`/leaderboard/${strategyId}/${row.puzzleId}`);
+                  navigate(`/leaderboard/${encodeURIComponent(strategyId)}/${row.puzzleId}`);
                 }
               }}
               aria-label={`View runs for puzzle #${row.puzzleId}`}
