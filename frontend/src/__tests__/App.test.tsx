@@ -223,11 +223,14 @@ describe("App leaderboard routes", () => {
     expect(await screen.findByRole("heading", { name: "Guess chain" })).toBeInTheDocument();
   });
 
-  it("renders the maintenance panel at /maintenance", async () => {
+  it("renders the maintenance panel at /maintenance for an admin session", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((url: unknown) => {
         const href = String(url);
+        if (href.includes("/auth/me")) {
+          return Promise.resolve({ ok: true, json: async () => ({ isAdmin: true }) });
+        }
         if (href.includes("/dispatch/runs/errored")) {
           return Promise.resolve({ ok: true, json: async () => ({ erroredRuns: 2 }) });
         }
@@ -247,6 +250,24 @@ describe("App leaderboard routes", () => {
       await screen.findByRole("button", { name: /delete errored runs/i }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /delete failed judge calls/i })).toBeInTheDocument();
+  });
+
+  it("hides the maintenance panel behind a not-found for a non-admin visitor", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        const href = String(url);
+        if (href.includes("/auth/me")) {
+          return Promise.resolve({ ok: true, json: async () => ({ isAdmin: false }) });
+        }
+        return Promise.resolve({ ok: true, json: async () => ({}) });
+      }),
+    );
+
+    renderApp(["/maintenance"]);
+
+    expect(await screen.findByText("Not found.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Bulk cleanup" })).not.toBeInTheDocument();
   });
 
   it("renders the free-tier budget widgets at /activity for an admin session", async () => {

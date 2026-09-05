@@ -1,9 +1,34 @@
+import { Link } from "react-router-dom";
+import { useAdminAuth } from "../../auth/AdminAuthContext";
 import { MaintenancePanel } from "../../components/benchmark/MaintenancePanel";
 
 /** Destructive bulk-cleanup actions, kept on their own route so they're
  * away from the day-to-day dashboards: clear out errored strategy runs, and
- * clear out failed category-judge calls so they get re-judged. */
+ * clear out failed category-judge calls so they get re-judged. Admin-only —
+ * a non-admin visitor (or one whose session expired) sees the same
+ * not-found treatment as an unknown route, not the panel. */
 export function MaintenancePage() {
+  const { isAdmin, isLoading } = useAdminAuth();
+
+  if (isLoading) {
+    return (
+      <div className="bench-page">
+        <p className="bench-muted">Loading…</p>
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="bench-page">
+        <p className="bench-muted">Not found.</p>
+        <Link to="/" className="bench-page-header__back">
+          ← Back home
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <div className="bench-page">
       <header className="bench-page-header">
