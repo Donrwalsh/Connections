@@ -10,6 +10,7 @@ import { StrategyRun } from "./entities/strategy-run.entity";
 import { GoogleRateLimitHold } from "./entities/google-rate-limit-hold.entity";
 import { GroqRateLimitHold } from "./entities/groq-rate-limit-hold.entity";
 import { OpenRouterRateLimitHold } from "./entities/openrouter-rate-limit-hold.entity";
+import { MistralRateLimitHold } from "./entities/mistral-rate-limit-hold.entity";
 import { StrategyController } from "./strategy.controller";
 import { StrategyService } from "./strategy.service";
 import { LlmStrategyRunner } from "./llm-strategy-runner.service";
@@ -20,6 +21,7 @@ import { FreeTierUsageService } from "./free-tier-usage.service";
 import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
 import { GroqRateLimitHoldService } from "./groq-rate-limit-hold.service";
 import { OpenRouterRateLimitHoldService } from "./openrouter-rate-limit-hold.service";
+import { MistralRateLimitHoldService } from "./mistral-rate-limit-hold.service";
 import { OpenRouterRpdResumeService } from "./openrouter-rpd-resume.service";
 import { OpenRouterRpdResumeBootstrap } from "./openrouter-rpd-resume.bootstrap";
 import { GoogleRpdResumeService } from "./google-rpd-resume.service";
@@ -41,6 +43,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
       GoogleRateLimitHold,
       GroqRateLimitHold,
       OpenRouterRateLimitHold,
+      MistralRateLimitHold,
     ]),
     QueueModule,
     GameModule,
@@ -63,6 +66,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     OpenRouterRateLimitHoldService,
     OpenRouterRpdResumeService,
     OpenRouterRpdResumeBootstrap,
+    MistralRateLimitHoldService,
   ],
   exports: [
     StrategyService,
@@ -75,6 +79,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     GroqRpdResumeService,
     OpenRouterRateLimitHoldService,
     OpenRouterRpdResumeService,
+    MistralRateLimitHoldService,
   ],
 })
 export class StrategyModule {}
