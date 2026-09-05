@@ -20,6 +20,8 @@ import { FreeTierUsageService } from "./free-tier-usage.service";
 import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
 import { GroqRateLimitHoldService } from "./groq-rate-limit-hold.service";
 import { OpenRouterRateLimitHoldService } from "./openrouter-rate-limit-hold.service";
+import { OpenRouterRpdResumeService } from "./openrouter-rpd-resume.service";
+import { OpenRouterRpdResumeBootstrap } from "./openrouter-rpd-resume.bootstrap";
 import { GoogleRpdResumeService } from "./google-rpd-resume.service";
 import { GoogleRpdResumeBootstrap } from "./google-rpd-resume.bootstrap";
 import { GroqRpdResumeService } from "./groq-rpd-resume.service";
@@ -59,6 +61,8 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     GroqRpdResumeService,
     GroqRpdResumeBootstrap,
     OpenRouterRateLimitHoldService,
+    OpenRouterRpdResumeService,
+    OpenRouterRpdResumeBootstrap,
   ],
   exports: [
     StrategyService,
@@ -70,6 +74,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     GroqRateLimitHoldService,
     GroqRpdResumeService,
     OpenRouterRateLimitHoldService,
+    OpenRouterRpdResumeService,
   ],
 })
 export class StrategyModule {}

@@ -12,6 +12,7 @@ import { freeTierDispatchQueue } from "./free-tier-dispatch.queue";
 import { modelMetadataQueue } from "./model-metadata.queue";
 import { googleRpdResumeQueue } from "./google-rpd-resume.queue";
 import { groqRpdResumeQueue } from "./groq-rpd-resume.queue";
+import { openRouterRpdResumeQueue } from "./openrouter-rpd-resume.queue";
 import { googleFreeDispatchQueue } from "./google-free-dispatch.queue";
 import { groqFreeDispatchQueue } from "./groq-free-dispatch.queue";
 import { openRouterFreeDispatchQueue } from "./openrouter-free-dispatch.queue";
@@ -28,6 +29,7 @@ export const FREE_TIER_DISPATCH_QUEUE = "FREE_TIER_DISPATCH_QUEUE";
 export const MODEL_METADATA_QUEUE = "MODEL_METADATA_QUEUE";
 export const GOOGLE_RPD_RESUME_QUEUE = "GOOGLE_RPD_RESUME_QUEUE";
 export const GROQ_RPD_RESUME_QUEUE = "GROQ_RPD_RESUME_QUEUE";
+export const OPENROUTER_RPD_RESUME_QUEUE = "OPENROUTER_RPD_RESUME_QUEUE";
 export const GOOGLE_FREE_DISPATCH_QUEUE = "GOOGLE_FREE_DISPATCH_QUEUE";
 export const GROQ_FREE_DISPATCH_QUEUE = "GROQ_FREE_DISPATCH_QUEUE";
 export const OPENROUTER_FREE_DISPATCH_QUEUE = "OPENROUTER_FREE_DISPATCH_QUEUE";
@@ -46,6 +48,7 @@ export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
     { provide: MODEL_METADATA_QUEUE, useValue: modelMetadataQueue },
     { provide: GOOGLE_RPD_RESUME_QUEUE, useValue: googleRpdResumeQueue },
     { provide: GROQ_RPD_RESUME_QUEUE, useValue: groqRpdResumeQueue },
+    { provide: OPENROUTER_RPD_RESUME_QUEUE, useValue: openRouterRpdResumeQueue },
     { provide: GOOGLE_FREE_DISPATCH_QUEUE, useValue: googleFreeDispatchQueue },
     { provide: GROQ_FREE_DISPATCH_QUEUE, useValue: groqFreeDispatchQueue },
     { provide: OPENROUTER_FREE_DISPATCH_QUEUE, useValue: openRouterFreeDispatchQueue },
@@ -63,6 +66,7 @@ export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
     MODEL_METADATA_QUEUE,
     GOOGLE_RPD_RESUME_QUEUE,
     GROQ_RPD_RESUME_QUEUE,
+    OPENROUTER_RPD_RESUME_QUEUE,
     GOOGLE_FREE_DISPATCH_QUEUE,
     GROQ_FREE_DISPATCH_QUEUE,
     OPENROUTER_FREE_DISPATCH_QUEUE,
