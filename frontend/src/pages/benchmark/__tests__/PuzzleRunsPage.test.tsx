@@ -16,6 +16,7 @@ const singleRun: StrategyRunListItem[] = [
     contextWindow: null,
     startedAt: "2025-01-01T00:00:00Z",
     finishedAt: "2025-01-01T00:00:02Z",
+    solveDurationMs: null,
     guessCount: 4,
   },
 ];
@@ -36,6 +37,7 @@ const multiRun: StrategyRunListItem[] = [
     contextWindow: 128_000,
     startedAt: "2025-01-01T00:00:00Z",
     finishedAt: "2025-01-01T00:00:05Z",
+    solveDurationMs: null,
     guessCount: 4,
   },
   {
@@ -47,6 +49,7 @@ const multiRun: StrategyRunListItem[] = [
     contextWindow: 128_000,
     startedAt: "2025-01-01T00:01:00Z",
     finishedAt: "2025-01-01T00:01:08Z",
+    solveDurationMs: null,
     guessCount: 6,
   },
 ];
@@ -61,6 +64,7 @@ function runDetailFor(id: number) {
     contextWindow: null,
     startedAt: "2025-01-01T00:00:00Z",
     finishedAt: "2025-01-01T00:00:02Z",
+    solveDurationMs: null,
     guessCount: 0,
     guesses: [],
     solvePrompts: [],
@@ -166,6 +170,7 @@ describe("PuzzleRunsPage", () => {
         contextWindow: null,
         startedAt: "2025-01-01T00:00:00Z",
         finishedAt: "2025-01-01T00:00:02Z",
+        solveDurationMs: null,
         guessCount: 3,
       },
     ];

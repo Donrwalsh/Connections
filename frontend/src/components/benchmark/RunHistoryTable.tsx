@@ -1,6 +1,5 @@
 import { useNavigate } from "react-router-dom";
 import {
-  computeDurationMs,
   formatCostUsd,
   formatDuration,
   formatGuessCount,
@@ -103,54 +102,52 @@ export function RunHistoryTable({
         </tr>
       </thead>
       <tbody>
-        {rows.map((row) => {
-          const durationMs = computeDurationMs(row.startedAt, row.finishedAt);
-
-          return (
-            <tr
-              key={row.id}
-              className="bench-row"
-              role="link"
-              tabIndex={0}
-              onClick={() => navigate(`/leaderboard/${encodeURIComponent(strategyId)}/${row.puzzleId}`)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  navigate(`/leaderboard/${encodeURIComponent(strategyId)}/${row.puzzleId}`);
-                }
-              }}
-              aria-label={`View runs for puzzle #${row.puzzleId}`}
-            >
-              <td className="bench-mono">{formatDateLabel(row.puzzleDate)}</td>
-              <td className="bench-mono">{formatTimestamp(row.startedAt)}</td>
-              <td className="bench-mono">{formatGuessCount(row.guessCount)}</td>
-              <td className="bench-mono">{durationMs === null ? "—" : formatDuration(durationMs)}</td>
-              {showTokenCost ? (
-                <td className="bench-mono">
-                  {row.tokenCostUsd === null ? "—" : formatCostUsd(row.tokenCostUsd)}
-                </td>
-              ) : null}
-              <td>
-                <span className="bench-badges">
-                  <StatusPill label={runStatusLabel(row.status)} tone={runStatusTone(row.status)} />
-                  {row.issueCount > 0 ? (
-                    <span title="At least one solve step in this run had a detected model-response issue — see the run's detail view for which.">
-                      <StatusPill
-                        label={`${row.issueCount} issue${row.issueCount === 1 ? "" : "s"}`}
-                        tone="neutral"
-                      />
-                    </span>
-                  ) : null}
-                  <VerdictSquares
-                    correct={row.categoryCorrect}
-                    partial={row.categoryPartial}
-                    lucky={row.categoryLucky}
-                  />
-                </span>
+        {rows.map((row) => (
+          <tr
+            key={row.id}
+            className="bench-row"
+            role="link"
+            tabIndex={0}
+            onClick={() => navigate(`/leaderboard/${encodeURIComponent(strategyId)}/${row.puzzleId}`)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                navigate(`/leaderboard/${encodeURIComponent(strategyId)}/${row.puzzleId}`);
+              }
+            }}
+            aria-label={`View runs for puzzle #${row.puzzleId}`}
+          >
+            <td className="bench-mono">{formatDateLabel(row.puzzleDate)}</td>
+            <td className="bench-mono">{formatTimestamp(row.startedAt)}</td>
+            <td className="bench-mono">{formatGuessCount(row.guessCount)}</td>
+            <td className="bench-mono">
+              {row.solveDurationMs === null ? "—" : formatDuration(row.solveDurationMs)}
+            </td>
+            {showTokenCost ? (
+              <td className="bench-mono">
+                {row.tokenCostUsd === null ? "—" : formatCostUsd(row.tokenCostUsd)}
               </td>
-            </tr>
-          );
-        })}
+            ) : null}
+            <td>
+              <span className="bench-badges">
+                <StatusPill label={runStatusLabel(row.status)} tone={runStatusTone(row.status)} />
+                {row.issueCount > 0 ? (
+                  <span title="At least one solve step in this run had a detected model-response issue — see the run's detail view for which.">
+                    <StatusPill
+                      label={`${row.issueCount} issue${row.issueCount === 1 ? "" : "s"}`}
+                      tone="neutral"
+                    />
+                  </span>
+                ) : null}
+                <VerdictSquares
+                  correct={row.categoryCorrect}
+                  partial={row.categoryPartial}
+                  lucky={row.categoryLucky}
+                />
+              </span>
+            </td>
+          </tr>
+        ))}
         {rows.length === 0 ? (
           <tr>
             <td colSpan={columnCount} className="bench-muted">

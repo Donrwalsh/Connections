@@ -29,7 +29,7 @@ describe("DailyAutomationBootstrap", () => {
     );
   });
 
-  it("enqueues one date-stamped startup catch-up run", async () => {
+  it("enqueues one date-stamped startup catch-up run that skips the judge leg", async () => {
     process.env.NODE_ENV = "development";
     const bootstrap = new DailyAutomationBootstrap(queue as unknown as Queue);
 
@@ -38,10 +38,20 @@ describe("DailyAutomationBootstrap", () => {
     expect(queue.add).toHaveBeenCalledTimes(1);
     const [name, data, opts] = queue.add.mock.calls[0];
     expect(name).toBe("run-daily-automation");
-    expect(data).toEqual({});
+    expect(data).toEqual({ skipJudgeLeg: true });
     expect((opts as { jobId: string }).jobId).toBe(
       `daily-automation-startup-catch-up-${new Date().toISOString().slice(0, 10)}`,
     );
+  });
+
+  it("leaves the scheduled cron run to include the judge leg", async () => {
+    process.env.NODE_ENV = "development";
+    const bootstrap = new DailyAutomationBootstrap(queue as unknown as Queue);
+
+    await bootstrap.onApplicationBootstrap();
+
+    const [, , jobTemplate] = queue.upsertJobScheduler.mock.calls[0];
+    expect((jobTemplate as { data: unknown }).data).toEqual({});
   });
 
   it("skips scheduling under NODE_ENV=test", async () => {

@@ -26,7 +26,16 @@ function todayUtcDateStamp(): string {
  * in turn — each leg is awaited before the next starts, but one leg's
  * failure never prevents the next from running (see each leg's own
  * try/catch) — and records each one's outcome into today's AutomationRunLog
- * row as soon as it resolves:
+ * row as soon as it resolves.
+ *
+ * The startup catch-up run the bootstrap enqueues on every redeploy passes
+ * `{ skipJudgeLeg: true }`: the judge leg enqueues a batch of up to
+ * JUDGE_LEG_LIMIT category-judge calls and its spend lands in the mini-tier
+ * budget, so it should fire once a day at the scheduled cron time, not
+ * again every time the backend restarts. The other legs are safe to repeat
+ * — each checks live status first or is naturally idempotent for the day.
+ *
+ * The legs:
  *
  *  - metadataRefresh: refreshes SupportedModel's OpenRouter-sourced
  *    metadata/pricing first, awaited in-process before any dispatch leg
@@ -70,7 +79,7 @@ export class DailyAutomationService {
     private readonly modelMetadataRefreshService: ModelMetadataRefreshService,
   ) {}
 
-  async run(): Promise<void> {
+  async run(options: { skipJudgeLeg?: boolean } = {}): Promise<void> {
     const date = todayUtcDateStamp();
     const triggeredAt = new Date();
     // Upsert only {date, triggeredAt} (not a full save()) so a defensive
@@ -79,7 +88,11 @@ export class DailyAutomationService {
     await this.runLogRepo.upsert({ date, triggeredAt }, ["date"]);
 
     await this.runMetadataRefreshLeg(date);
-    await this.runJudgeLeg(date);
+    if (options.skipJudgeLeg) {
+      this.logger.log("daily automation: skipping judge leg (startup catch-up run)");
+    } else {
+      await this.runJudgeLeg(date);
+    }
     await this.runMiniBurnLeg(date);
     await this.runGoogleBurnLeg(date);
     await this.runGroqBurnLeg(date);

@@ -823,6 +823,50 @@ describe("StrategyService", () => {
       });
       expect(mockGameService.resolveDateToPuzzleId).not.toHaveBeenCalled();
     });
+
+    it("attaches summed SolvePrompt latency per run, null when a run has none", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([
+        {
+          id: 8,
+          strategyName: "llm-openai",
+          trialNumber: 0,
+          status: StrategyRunStatus.COMPLETED,
+          modelName: "gpt-4.1-nano",
+          contextWindow: null,
+          startedAt: new Date("2024-01-01T00:00:00Z"),
+          finishedAt: new Date("2024-01-01T02:00:00Z"),
+        },
+        {
+          id: 9,
+          strategyName: "llm-openai",
+          trialNumber: 1,
+          status: StrategyRunStatus.FAILED,
+          modelName: "gpt-4.1-nano",
+          contextWindow: null,
+          startedAt: new Date("2024-01-01T00:00:00Z"),
+          finishedAt: new Date("2024-01-01T00:00:10Z"),
+        },
+      ]);
+      mockGuessRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ strategyRunId: 8, count: "4" }]),
+      });
+      mockSolvePromptRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ strategyRunId: 8, latencyMs: "6000" }]),
+      });
+
+      const result = await service.getRunsForPuzzleId(5, "llm-openai");
+
+      expect(result.find((r) => r.id === 8)!.solveDurationMs).toBe(6000);
+      expect(result.find((r) => r.id === 9)!.solveDurationMs).toBeNull();
+    });
   });
 
   describe("getGuessDetail", () => {
@@ -953,6 +997,7 @@ describe("StrategyService", () => {
           status: StrategyRunStatus.FAILED,
           startedAt,
           finishedAt: new Date("2024-01-02T02:00:00Z"),
+          solveDurationMs: null,
           guessCount: 120,
         },
         {
@@ -962,6 +1007,7 @@ describe("StrategyService", () => {
           status: StrategyRunStatus.COMPLETED,
           startedAt,
           finishedAt: new Date("2024-01-02T01:30:00Z"),
+          solveDurationMs: null,
           guessCount: 40,
         },
       ]);
@@ -1426,6 +1472,50 @@ describe("StrategyService", () => {
       });
     }
 
+    it("averages solve duration from summed SolvePrompt latency, not the wall-clock span", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([
+        {
+          id: 1,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          status: StrategyRunStatus.COMPLETED,
+          puzzleId: 1,
+          // 3-hour wall-clock span — dominated by a rate-limit park, not real work.
+          startedAt: new Date("2024-01-01T00:00:00Z"),
+          finishedAt: new Date("2024-01-01T03:00:00Z"),
+        },
+        {
+          id: 2,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          status: StrategyRunStatus.COMPLETED,
+          puzzleId: 2,
+          startedAt: new Date("2024-01-02T00:00:00Z"),
+          finishedAt: new Date("2024-01-02T00:00:30Z"),
+        },
+      ]);
+      mockGuessCounts([
+        { strategyRunId: 1, count: "4" },
+        { strategyRunId: 2, count: "4" },
+      ]);
+      mockPuzzleRepo.count.mockResolvedValueOnce(10);
+      mockSolvePromptRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          { strategyRunId: 1, promptTokens: "0", completionTokens: "0", latencyMs: "2000" },
+          { strategyRunId: 2, promptTokens: "0", completionTokens: "0", latencyMs: "4000" },
+        ]),
+      });
+
+      const result = await service.getLeaderboard();
+
+      const row = result.llm.find((r) => r.id === "gpt-4.1-nano")!;
+      // (2000 + 4000) / 2 = 3000 — NOT the wall-clock average of ~5.4M ms.
+      expect(row.avgDurationMs).toBe(3000);
+    });
+
     it("should treat a lost LLM run (hit the mistake cap) as a normal completed attempt for progress/averages, while success rate still counts it as a loss", async () => {
       mockStrategyRunRepo.find.mockResolvedValueOnce([
         {
@@ -1467,6 +1557,19 @@ describe("StrategyService", () => {
         { strategyRunId: 3, count: "2" },
       ]);
       mockPuzzleRepo.count.mockResolvedValueOnce(10);
+      // Duration now comes from summed SolvePrompt.latencyMs, not the
+      // finishedAt - startedAt span. Runs 1 (COMPLETED) and 2 (cap-FAILED)
+      // count; run 3 (DUPLICATE) must be excluded even though it has a row.
+      mockSolvePromptRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          { strategyRunId: 1, promptTokens: "0", completionTokens: "0", latencyMs: "30000" },
+          { strategyRunId: 2, promptTokens: "0", completionTokens: "0", latencyMs: "60000" },
+          { strategyRunId: 3, promptTokens: "0", completionTokens: "0", latencyMs: "5000" },
+        ]),
+      });
 
       const result = await service.getLeaderboard();
 
@@ -1478,9 +1581,9 @@ describe("StrategyService", () => {
       // (COMPLETED + FAILED) — DUPLICATE doesn't count as either a win or a
       // "real" playthrough loss here since it never got that far. 1/3.
       expect(row.successRate).toBeCloseTo(33.333, 2);
-      // Guesses/duration include the FAILED run (8 guesses, 60s) alongside
-      // the COMPLETED one (4 guesses, 30s) — DUPLICATE's 2 guesses/5s are
-      // excluded entirely.
+      // Guesses/duration include the FAILED run (8 guesses, 60s latency)
+      // alongside the COMPLETED one (4 guesses, 30s latency) — DUPLICATE's
+      // 2 guesses / 5s latency are excluded entirely.
       expect(row.avgGuessesToSolve).toBe(6);
       expect(row.minGuesses).toBe(4);
       expect(row.maxGuesses).toBe(8);
@@ -2009,6 +2112,7 @@ describe("StrategyService", () => {
         categoryPartial: 0,
         categoryLucky: 0,
         tokenCostUsd: null,
+        solveDurationMs: null,
         ...overrides,
       };
     }
@@ -2069,6 +2173,7 @@ describe("StrategyService", () => {
           startedAt: new Date("2024-01-01T00:00:00Z"),
           finishedAt: new Date("2024-01-01T00:00:05Z"),
           guessCount: 4,
+          solveDurationMs: null,
           tokenCostUsd: null,
           issueCount: 0,
           categoryCorrect: 0,
@@ -2136,10 +2241,40 @@ describe("StrategyService", () => {
       expect(qb.orderBy).toHaveBeenLastCalledWith('run."startedAt"', "DESC");
 
       await service.getRunHistory("alphabetical", { sortBy: "duration" });
-      expect(qb.orderBy).toHaveBeenLastCalledWith('(run."finishedAt" - run."startedAt")', "DESC");
+      expect(qb.orderBy).toHaveBeenLastCalledWith(
+        '(SELECT SUM(sp."latencyMs") FROM "SolvePrompt" sp WHERE sp."strategyRunId" = run.id)',
+        "DESC",
+      );
 
       await service.getRunHistory("llm-openai", { sortBy: "tokenCost", sortDir: "asc" });
       expect(qb.orderBy).toHaveBeenLastCalledWith('"tokenCostUsd"', "ASC");
+    });
+
+    it("casts the SQL-summed solveDurationMs to a number, leaving NULL as null", async () => {
+      mockRunHistoryQuery(2, [
+        rawRun({ id: 1, modelName: "gpt-4.1-nano", solveDurationMs: "5500" }),
+        rawRun({ id: 2, modelName: null, solveDurationMs: null }),
+      ]);
+
+      const result = await service.getRunHistory("llm-openai", {});
+
+      expect(result.rows[0].solveDurationMs).toBe(5500);
+      expect(result.rows[1].solveDurationMs).toBeNull();
+    });
+
+    it("sorts by duration on the summed-latency subquery, not the wall-clock span", async () => {
+      const qb = mockRunHistoryQuery(0, []);
+
+      await service.getRunHistory("llm-openai", { sortBy: "duration" });
+
+      expect(qb.orderBy).toHaveBeenLastCalledWith(
+        expect.stringContaining('SUM(sp."latencyMs")'),
+        "DESC",
+      );
+      expect(qb.orderBy).not.toHaveBeenLastCalledWith(
+        '(run."finishedAt" - run."startedAt")',
+        "DESC",
+      );
     });
 
     it("should fall back to puzzleDate desc for an unrecognized sortBy/sortDir", async () => {

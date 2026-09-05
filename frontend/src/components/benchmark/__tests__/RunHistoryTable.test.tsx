@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useParams } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { RunHistoryRow } from "../../../data/benchmark/types";
+import { formatDuration } from "../../../data/benchmark/metrics";
 import { RunHistoryTable } from "../RunHistoryTable";
 
 function makeRow(overrides: Partial<RunHistoryRow> = {}): RunHistoryRow {
@@ -16,6 +17,7 @@ function makeRow(overrides: Partial<RunHistoryRow> = {}): RunHistoryRow {
     status: "completed",
     startedAt: "2026-01-01T00:00:00Z",
     finishedAt: "2026-01-01T00:00:05Z",
+    solveDurationMs: null,
     guessCount: 4,
     tokenCostUsd: null,
     issueCount: 0,
@@ -23,7 +25,24 @@ function makeRow(overrides: Partial<RunHistoryRow> = {}): RunHistoryRow {
     categoryPartial: 0,
     categoryLucky: 0,
     ...overrides,
-  } as RunHistoryRow;
+  };
+}
+
+function renderTable(rows: RunHistoryRow[]) {
+  render(
+    <MemoryRouter>
+      <RunHistoryTable
+        strategyId="gpt-4.1-nano"
+        rows={rows}
+        sortBy="puzzleDate"
+        sortDir="desc"
+        onSortChange={vi.fn()}
+        showTokenCost={false}
+        status={null}
+        onStatusChange={vi.fn()}
+      />
+    </MemoryRouter>,
+  );
 }
 
 /** Renders the captured :strategyId param as plain text, so a test can
@@ -35,6 +54,22 @@ function ParamProbe() {
 }
 
 describe("RunHistoryTable", () => {
+  it("shows solveDurationMs formatted, and a dash when it is null", () => {
+    renderTable([
+      makeRow({
+        id: 1,
+        solveDurationMs: 6000,
+        // 3-hour wall-clock span — must NOT be what the cell shows.
+        startedAt: "2024-01-01T00:00:00Z",
+        finishedAt: "2024-01-01T03:00:00Z",
+      }),
+      makeRow({ id: 2, solveDurationMs: null }),
+    ]);
+
+    expect(screen.getByText(formatDuration(6000))).toBeInTheDocument();
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+
   // Regression: Groq model ids follow a "provider/model" convention
   // (e.g. "qwen/qwen3.6-27b") and contain a literal "/" — unlike every
   // OpenAI/Google model id this route param design was built around (see

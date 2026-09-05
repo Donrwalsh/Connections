@@ -133,6 +133,10 @@ export interface StrategyRunListItemDto {
   contextWindow: number | null;
   startedAt: Date;
   finishedAt: Date | null;
+  // Summed model-call time for this run (SUM(SolvePrompt.latencyMs)) — see
+  // RunHistoryRowDto.solveDurationMs. Null for non-LLM runs and for LLM
+  // runs with no recorded call latency.
+  solveDurationMs: number | null;
   guessCount: number;
 }
 
@@ -230,6 +234,14 @@ export interface RunHistoryRowDto {
   status: StrategyRunStatus;
   startedAt: Date;
   finishedAt: Date | null;
+  // Summed model-call time for this run: SUM(SolvePrompt.latencyMs). This is
+  // the "duration" the run-history table shows and sorts on — deliberately
+  // NOT finishedAt - startedAt, which for LLM runs is inflated by rate-limit
+  // sleeps, daily parks, and backoffs. Null for non-LLM strategies (no
+  // SolvePrompt rows) and for an LLM run whose only rows are callErrors (no
+  // latency recorded). startedAt/finishedAt remain above for anyone who
+  // still wants the wall-clock span.
+  solveDurationMs: number | null;
   guessCount: number;
   // Total USD cost of this run's LLM calls, from the model's current
   // per-million-token rate (ModelPrice) applied to its summed SolvePrompt
