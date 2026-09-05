@@ -196,6 +196,27 @@ function parseGroqResetDuration(value: string | undefined): number | undefined {
   return hours * 3600 + minutes * 60 + seconds;
 }
 
+// A 429 whose reset window is more than this far out is OpenRouter's
+// account-wide daily-quota hit (resets at UTC midnight); anything sooner is
+// the fixed 20 req/min per-minute hit. Not configurable — this is a shape
+// discriminator, not a tuning knob. See
+// docs/superpowers/specs/2026-09-05-openrouter-free-tier-design.md §2.
+const DAILY_RESET_THRESHOLD_SECONDS = 120;
+
+/**
+ * Parses OpenRouter's `X-RateLimit-Reset` header — a Unix-milliseconds
+ * timestamp — into whole seconds from now (never negative). Returns
+ * undefined for a missing, non-numeric, or non-finite value rather than
+ * throwing. Confirm the ms-epoch interpretation against a real captured 429
+ * before relying on it, per this repo's never-guess-a-response-shape policy.
+ */
+function parseResetTimestampSeconds(value: string | undefined): number | undefined {
+  if (typeof value !== "string") return undefined;
+  const resetMs = Number(value);
+  if (!Number.isFinite(resetMs)) return undefined;
+  return Math.max(0, Math.ceil((resetMs - Date.now()) / 1000));
+}
+
 /**
  * Groq's 429 body message names the exact limit that tripped and its
  * window, e.g. "...on tokens per day (TPD): Limit 200000, Used 198984..."
@@ -340,6 +361,31 @@ export function classifyModelCallError(
       errorName: err.name,
       retryAfterSeconds,
     });
+  }
+
+  if (provider === "openrouter" && APICallError.isInstance(err) && err.statusCode === 429) {
+    const headers = err.responseHeaders ?? {};
+    const resetSeconds = parseResetTimestampSeconds(headers["x-ratelimit-reset"]);
+    const retryAfter = parseSecondsHeader(headers["retry-after"]);
+
+    if (resetSeconds !== undefined || retryAfter !== undefined) {
+      if (resetSeconds !== undefined && resetSeconds > DAILY_RESET_THRESHOLD_SECONDS) {
+        return new SolveError("rate_limited_daily", `OpenRouter daily quota exhausted: ${message}`, {
+          ...details,
+          ...apiDetails,
+          errorName: err.name,
+          dailyResetSeconds: resetSeconds,
+        });
+      }
+      return new SolveError("rate_limited", `OpenRouter rate limit hit: ${message}`, {
+        ...details,
+        ...apiDetails,
+        errorName: err.name,
+        retryAfterSeconds: retryAfter ?? resetSeconds,
+      });
+    }
+    // No usable rate-limit signal — fall through to model_error, same as the
+    // Groq branch does when its headers are absent.
   }
 
   return new SolveError("model_error", `Model call failed: ${message}`, {

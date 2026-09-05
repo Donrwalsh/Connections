@@ -21,6 +21,7 @@ import {
 } from "../free-tier-dispatch/free-tier-dispatch.service";
 import { GoogleFreeDispatchService } from "../google-free-dispatch/google-free-dispatch.service";
 import { GroqFreeDispatchService } from "../groq-free-dispatch/groq-free-dispatch.service";
+import { OpenRouterFreeDispatchService } from "../openrouter-free-dispatch/openrouter-free-dispatch.service";
 import { FreeTierId } from "../strategy/free-tier-usage.service";
 import { AUTOMATIC_STRATEGIES, LLM_STRATEGIES, STRATEGY_SET, isLlmStrategy } from "../../strategies";
 import { DispatchAuthGuard } from "./dispatch-auth.guard";
@@ -50,6 +51,8 @@ export class DispatchController {
     @Inject(FreeTierDispatchService) private readonly freeTierDispatchService: FreeTierDispatchService,
     @Inject(GoogleFreeDispatchService) private readonly googleFreeDispatchService: GoogleFreeDispatchService,
     @Inject(GroqFreeDispatchService) private readonly groqFreeDispatchService: GroqFreeDispatchService,
+    @Inject(OpenRouterFreeDispatchService)
+    private readonly openRouterFreeDispatchService: OpenRouterFreeDispatchService,
     @Inject(ModelMetadataRefreshService)
     private readonly modelMetadataRefreshService: ModelMetadataRefreshService,
   ) {}
@@ -328,6 +331,21 @@ export class DispatchController {
   @Delete("groq")
   async stopGroqDispatch() {
     return this.groqFreeDispatchService.stop();
+  }
+
+  // Read-only OpenRouter free-daily-budget dispatch status — see
+  // OpenRouterFreeDispatchService. Includes callsToday / dailyBudget since
+  // OpenRouter's spend is a single countable account-wide number.
+  @Get("openrouter")
+  async getOpenRouterDispatchStatus() {
+    return this.openRouterFreeDispatchService.getStatus();
+  }
+
+  // Deactivates the OpenRouter free-daily-budget dispatch cycle — a no-op
+  // (not an error) if it wasn't running.
+  @Delete("openrouter")
+  async stopOpenRouterDispatch() {
+    return this.openRouterFreeDispatchService.stop();
   }
 
   // How many strategy runs are currently in the 'error' status. Read-only,

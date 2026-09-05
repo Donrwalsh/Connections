@@ -41,6 +41,10 @@ export class AutomationController {
         outcome: log?.groqBurnOutcome ?? null,
         message: log?.groqBurnMessage ?? null,
       },
+      openRouterBurn: {
+        outcome: log?.openRouterBurnOutcome ?? null,
+        message: log?.openRouterBurnMessage ?? null,
+      },
     };
   }
 }

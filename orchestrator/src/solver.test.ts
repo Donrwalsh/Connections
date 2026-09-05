@@ -558,3 +558,91 @@ describe("classifyModelCallError — groq", () => {
     expect(result.details.dailyResetSeconds).toBe(3600);
   });
 });
+
+describe("classifyModelCallError — openrouter", () => {
+  const HOUR_MS = 3_600_000;
+
+  it("classifies a 429 whose X-RateLimit-Reset is hours out as rate_limited_daily", () => {
+    const resetMs = Date.now() + 3 * HOUR_MS;
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseHeaders: {
+        "x-ratelimit-limit": "50",
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": String(resetMs),
+      },
+    });
+
+    const result = classifyModelCallError(err, "openrouter", { model: "z-ai/glm-5.2:free" });
+
+    expect(result).toBeInstanceOf(SolveError);
+    expect(result.code).toBe("rate_limited_daily");
+    expect(result.details.dailyResetSeconds).toBeGreaterThan(2 * 3600);
+    expect(result.details.dailyResetSeconds).toBeLessThanOrEqual(3 * 3600 + 1);
+  });
+
+  it("classifies a 429 whose X-RateLimit-Reset is seconds away as rate_limited (per-minute)", () => {
+    const resetMs = Date.now() + 8_000;
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseHeaders: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(resetMs) },
+    });
+
+    const result = classifyModelCallError(err, "openrouter", { model: "z-ai/glm-5.2:free" });
+
+    expect(result.code).toBe("rate_limited");
+    expect(result.details.retryAfterSeconds).toBeGreaterThan(0);
+    expect(result.details.retryAfterSeconds).toBeLessThanOrEqual(9);
+  });
+
+  it("prefers retry-after seconds for a per-minute hit when present", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseHeaders: { "retry-after": "5", "x-ratelimit-reset": String(Date.now() + 5_000) },
+    });
+
+    const result = classifyModelCallError(err, "openrouter", { model: "z-ai/glm-5.2:free" });
+
+    expect(result.code).toBe("rate_limited");
+    expect(result.details.retryAfterSeconds).toBe(5);
+  });
+
+  it("classifies a 429 with no parseable rate-limit headers as model_error", () => {
+    const err = makeAPICallError({ statusCode: 429, responseHeaders: {} });
+
+    const result = classifyModelCallError(err, "openrouter", { model: "z-ai/glm-5.2:free" });
+
+    expect(result.code).toBe("model_error");
+  });
+
+  it("does not classify a non-openrouter provider's 429 using OpenRouter headers", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseHeaders: { "x-ratelimit-reset": String(Date.now() + 3 * HOUR_MS) },
+    });
+
+    const result = classifyModelCallError(err, "openai", { model: "gpt-4.1-nano" });
+
+    expect(result.code).toBe("model_error");
+  });
+
+  it("unwraps a RetryError around an OpenRouter daily-limit APICallError", () => {
+    const inner = makeAPICallError({
+      statusCode: 429,
+      responseHeaders: {
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": String(Date.now() + 5 * HOUR_MS),
+      },
+    });
+    const err = new RetryError({
+      message: "Failed after 3 attempts",
+      reason: "maxRetriesExceeded",
+      errors: [inner],
+    });
+
+    const result = classifyModelCallError(err, "openrouter", { model: "z-ai/glm-5.2:free" });
+
+    expect(result.code).toBe("rate_limited_daily");
+    expect(result.details.dailyResetSeconds).toBeGreaterThan(4 * 3600);
+  });
+});

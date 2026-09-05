@@ -326,6 +326,7 @@ export interface AutomationStatus {
   miniBurn: AutomationBurnLeg;
   googleBurn: AutomationBurnLeg;
   groqBurn: AutomationBurnLeg;
+  openRouterBurn: AutomationBurnLeg;
 }
 
 /** GET /dispatch/google — whether the Google free-daily-quota dispatch cycle
@@ -344,6 +345,18 @@ export interface GoogleDispatchStatus {
 export interface GroqDispatchStatus {
   active: boolean;
   startedAt: string | null;
+}
+
+/** GET /dispatch/openrouter — whether the OpenRouter free-daily-budget
+ * dispatch cycle (see the backend's OpenRouterFreeDispatchService) is
+ * running, plus the account-wide daily-call counter. OpenRouter's free tier
+ * caps total requests across all :free models (not per-model), so unlike
+ * Groq/Google there IS a single number to show. */
+export interface OpenRouterDispatchStatus {
+  active: boolean;
+  startedAt: string | null;
+  callsToday: number;
+  dailyBudget: number;
 }
 
 /** One daily-automation leg as a widget presents it: a single

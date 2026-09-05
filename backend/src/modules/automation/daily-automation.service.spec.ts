@@ -7,6 +7,7 @@ import { CategoryEvaluatorService } from "../strategy/category-evaluator.service
 import { FreeTierDispatchService } from "../free-tier-dispatch/free-tier-dispatch.service";
 import { GoogleFreeDispatchService } from "../google-free-dispatch/google-free-dispatch.service";
 import { GroqFreeDispatchService } from "../groq-free-dispatch/groq-free-dispatch.service";
+import { OpenRouterFreeDispatchService } from "../openrouter-free-dispatch/openrouter-free-dispatch.service";
 import { ModelMetadataRefreshService } from "../supported-model/model-metadata-refresh.service";
 
 describe("DailyAutomationService", () => {
@@ -16,6 +17,7 @@ describe("DailyAutomationService", () => {
   let mockFreeTierDispatchService: { getStatus: jest.Mock; start: jest.Mock };
   let mockGoogleFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
   let mockGroqFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
+  let mockOpenRouterFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
   let mockModelMetadataRefreshService: { refreshAll: jest.Mock };
 
   const todayStamp = () => new Date().toISOString().slice(0, 10);
@@ -41,6 +43,15 @@ describe("DailyAutomationService", () => {
       getStatus: jest.fn().mockResolvedValue({ active: false, startedAt: null }),
       start: jest.fn().mockResolvedValue({ status: { active: true, startedAt: new Date() }, outcome: "started" }),
     };
+    mockOpenRouterFreeDispatchService = {
+      getStatus: jest
+        .fn()
+        .mockResolvedValue({ active: false, startedAt: null, callsToday: 0, dailyBudget: 50 }),
+      start: jest.fn().mockResolvedValue({
+        status: { active: true, startedAt: new Date(), callsToday: 0, dailyBudget: 50 },
+        outcome: "started",
+      }),
+    };
     mockModelMetadataRefreshService = {
       refreshAll: jest.fn().mockResolvedValue({ updated: 3, skipped: 1, errored: 0 }),
     };
@@ -53,6 +64,7 @@ describe("DailyAutomationService", () => {
         { provide: FreeTierDispatchService, useValue: mockFreeTierDispatchService },
         { provide: GoogleFreeDispatchService, useValue: mockGoogleFreeDispatchService },
         { provide: GroqFreeDispatchService, useValue: mockGroqFreeDispatchService },
+        { provide: OpenRouterFreeDispatchService, useValue: mockOpenRouterFreeDispatchService },
         { provide: ModelMetadataRefreshService, useValue: mockModelMetadataRefreshService },
       ],
     }).compile();
@@ -94,10 +106,24 @@ describe("DailyAutomationService", () => {
         order.push("groqBurn");
         return { status: { active: true, startedAt: new Date() }, outcome: "started" };
       });
+      mockOpenRouterFreeDispatchService.start.mockImplementation(async () => {
+        order.push("openRouterBurn");
+        return {
+          status: { active: true, startedAt: new Date(), callsToday: 0, dailyBudget: 50 },
+          outcome: "started",
+        };
+      });
 
       await service.run();
 
-      expect(order).toEqual(["metadataRefresh", "judge", "miniBurn", "googleBurn", "groqBurn"]);
+      expect(order).toEqual([
+        "metadataRefresh",
+        "judge",
+        "miniBurn",
+        "googleBurn",
+        "groqBurn",
+        "openRouterBurn",
+      ]);
     });
 
     it("records the metadata-refresh leg's updated count on success", async () => {
@@ -122,6 +148,7 @@ describe("DailyAutomationService", () => {
       expect(mockFreeTierDispatchService.start).toHaveBeenCalled();
       expect(mockGoogleFreeDispatchService.start).toHaveBeenCalled();
       expect(mockGroqFreeDispatchService.start).toHaveBeenCalled();
+      expect(mockOpenRouterFreeDispatchService.start).toHaveBeenCalled();
     });
 
     it("records the judge leg's enqueued count on success", async () => {
@@ -145,6 +172,7 @@ describe("DailyAutomationService", () => {
       expect(mockFreeTierDispatchService.start).toHaveBeenCalled();
       expect(mockGoogleFreeDispatchService.start).toHaveBeenCalled();
       expect(mockGroqFreeDispatchService.start).toHaveBeenCalled();
+      expect(mockOpenRouterFreeDispatchService.start).toHaveBeenCalled();
     });
 
     it("skips the judge leg but still runs every other leg when skipJudgeLeg is set", async () => {
@@ -159,6 +187,7 @@ describe("DailyAutomationService", () => {
       expect(mockFreeTierDispatchService.start).toHaveBeenCalled();
       expect(mockGoogleFreeDispatchService.start).toHaveBeenCalled();
       expect(mockGroqFreeDispatchService.start).toHaveBeenCalled();
+      expect(mockOpenRouterFreeDispatchService.start).toHaveBeenCalled();
     });
 
     it("runs the judge leg when skipJudgeLeg is absent or false", async () => {
@@ -286,6 +315,61 @@ describe("DailyAutomationService", () => {
       expect(mockRunLogRepo.update).toHaveBeenCalledWith(
         { date: todayStamp() },
         { groqBurnOutcome: "error", groqBurnMessage: "groq down" },
+      );
+    });
+
+    it("starts the OpenRouter burn when no cycle is already running", async () => {
+      await service.run();
+
+      expect(mockOpenRouterFreeDispatchService.start).toHaveBeenCalled();
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        { openRouterBurnOutcome: "started", openRouterBurnMessage: "started" },
+      );
+    });
+
+    it("records alreadyExhausted for the OpenRouter leg from start()'s own outcome", async () => {
+      mockOpenRouterFreeDispatchService.start.mockResolvedValueOnce({
+        status: { active: false, startedAt: null, callsToday: 50, dailyBudget: 50 },
+        outcome: "alreadyExhausted",
+      });
+
+      await service.run();
+
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        {
+          openRouterBurnOutcome: "alreadyExhausted",
+          openRouterBurnMessage: "OpenRouter daily budget spent or account held",
+        },
+      );
+    });
+
+    it("records alreadyActive for the OpenRouter leg without calling start", async () => {
+      mockOpenRouterFreeDispatchService.getStatus.mockResolvedValueOnce({
+        active: true,
+        startedAt: new Date(),
+        callsToday: 5,
+        dailyBudget: 50,
+      });
+
+      await service.run();
+
+      expect(mockOpenRouterFreeDispatchService.start).not.toHaveBeenCalled();
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        { openRouterBurnOutcome: "alreadyActive", openRouterBurnMessage: "already running" },
+      );
+    });
+
+    it("records an OpenRouter leg failure without throwing, and still lets the other legs run", async () => {
+      mockOpenRouterFreeDispatchService.start.mockRejectedValueOnce(new Error("openrouter down"));
+
+      await expect(service.run()).resolves.toBeUndefined();
+
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        { openRouterBurnOutcome: "error", openRouterBurnMessage: "openrouter down" },
       );
     });
   });

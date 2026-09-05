@@ -1,4 +1,4 @@
-import { LLM_GOOGLE, LLM_GROQ, LLM_OLLAMA, LLM_OPENAI } from "../../strategies";
+import { LLM_GOOGLE, LLM_GROQ, LLM_OLLAMA, LLM_OPENAI, LLM_OPENROUTER } from "../../strategies";
 import {
   categoryEvalJobId,
   queueForJudgeProvider,
@@ -9,15 +9,21 @@ const openai = { name: "openai" } as never;
 const ollama = { name: "ollama" } as never;
 const google = { name: "google" } as never;
 const groq = { name: "groq" } as never;
+const openrouter = { name: "openrouter" } as never;
 const shared = { name: "shared" } as never;
 
 describe("queueForStrategy", () => {
   it("routes each LLM strategy to its own queue and everything else to the shared queue", () => {
-    expect(queueForStrategy(shared, openai, ollama, google, groq, LLM_OPENAI)).toBe(openai);
-    expect(queueForStrategy(shared, openai, ollama, google, groq, LLM_OLLAMA)).toBe(ollama);
-    expect(queueForStrategy(shared, openai, ollama, google, groq, LLM_GOOGLE)).toBe(google);
-    expect(queueForStrategy(shared, openai, ollama, google, groq, LLM_GROQ)).toBe(groq);
-    expect(queueForStrategy(shared, openai, ollama, google, groq, "alphabetical")).toBe(shared);
+    expect(queueForStrategy(shared, openai, ollama, google, groq, openrouter, LLM_OPENAI)).toBe(openai);
+    expect(queueForStrategy(shared, openai, ollama, google, groq, openrouter, LLM_OLLAMA)).toBe(ollama);
+    expect(queueForStrategy(shared, openai, ollama, google, groq, openrouter, LLM_GOOGLE)).toBe(google);
+    expect(queueForStrategy(shared, openai, ollama, google, groq, openrouter, LLM_GROQ)).toBe(groq);
+    expect(queueForStrategy(shared, openai, ollama, google, groq, openrouter, LLM_OPENROUTER)).toBe(
+      openrouter,
+    );
+    expect(queueForStrategy(shared, openai, ollama, google, groq, openrouter, "alphabetical")).toBe(
+      shared,
+    );
   });
 });
 

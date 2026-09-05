@@ -13,12 +13,14 @@ import {
 import { FreeTierDispatchService } from "./modules/free-tier-dispatch/free-tier-dispatch.service";
 import { GoogleFreeDispatchService } from "./modules/google-free-dispatch/google-free-dispatch.service";
 import { GroqFreeDispatchService } from "./modules/groq-free-dispatch/groq-free-dispatch.service";
+import { OpenRouterFreeDispatchService } from "./modules/openrouter-free-dispatch/openrouter-free-dispatch.service";
 import type { FreeTierId } from "./modules/strategy/free-tier-usage.service";
 import { redisConnection } from "./modules/queue/redis.config";
 import { PuzzleIngestionService } from "./modules/game/puzzle-ingestion.service";
 import { ModelMetadataRefreshService } from "./modules/supported-model/model-metadata-refresh.service";
 import { GoogleRpdResumeService } from "./modules/strategy/google-rpd-resume.service";
 import { GroqRpdResumeService } from "./modules/strategy/groq-rpd-resume.service";
+import { OpenRouterRpdResumeService } from "./modules/strategy/openrouter-rpd-resume.service";
 import { DailyAutomationService } from "./modules/automation/daily-automation.service";
 import {
   isLlmStrategy,
@@ -26,10 +28,12 @@ import {
   LLM_OLLAMA,
   LLM_GOOGLE,
   LLM_GROQ,
+  LLM_OPENROUTER,
   llmOllamaConcurrency,
   llmOpenAIConcurrency,
   llmGoogleConcurrency,
   llmGroqConcurrency,
+  llmOpenRouterConcurrency,
   STRATEGY_SET,
   workerRole,
 } from "./strategies";
@@ -51,9 +55,11 @@ async function bootstrap() {
   const freeTierDispatchService = appContext.get(FreeTierDispatchService);
   const googleFreeDispatchService = appContext.get(GoogleFreeDispatchService);
   const groqFreeDispatchService = appContext.get(GroqFreeDispatchService);
+  const openRouterFreeDispatchService = appContext.get(OpenRouterFreeDispatchService);
   const modelMetadataRefreshService = appContext.get(ModelMetadataRefreshService);
   const googleRpdResumeService = appContext.get(GoogleRpdResumeService);
   const groqRpdResumeService = appContext.get(GroqRpdResumeService);
+  const openRouterRpdResumeService = appContext.get(OpenRouterRpdResumeService);
   const dailyAutomationService = appContext.get(DailyAutomationService);
 
   const activeWorkers: Worker[] = [];
@@ -122,7 +128,12 @@ async function bootstrap() {
    * at boot.
    */
   const createLlmWorker = (
-    queueName: "llm-openai-runs" | "llm-ollama-runs" | "llm-google-runs" | "llm-groq-runs",
+    queueName:
+      | "llm-openai-runs"
+      | "llm-ollama-runs"
+      | "llm-google-runs"
+      | "llm-groq-runs"
+      | "llm-openrouter-runs",
     expectedStrategy: string,
     concurrency: number,
   ) => {
@@ -190,6 +201,14 @@ async function bootstrap() {
     );
     activeWorkers.push(llmGroqWorker);
     activeQueueNames.push("llm-groq-runs");
+
+    const llmOpenRouterWorker = createLlmWorker(
+      "llm-openrouter-runs",
+      LLM_OPENROUTER,
+      llmOpenRouterConcurrency(),
+    );
+    activeWorkers.push(llmOpenRouterWorker);
+    activeQueueNames.push("llm-openrouter-runs");
 
     const puzzleWorker = new Worker(
       "puzzle-population",
@@ -306,6 +325,29 @@ async function bootstrap() {
     activeWorkers.push(groqFreeDispatchWorker);
     activeQueueNames.push("groq-free-dispatch");
 
+    // Each job is one tick of the OpenRouter free-daily-budget dispatch
+    // cycle (see OpenRouterFreeDispatchService) — same self-chaining shape
+    // as the Groq/Google dispatch workers above.
+    const openRouterFreeDispatchWorker = new Worker(
+      "openrouter-free-dispatch",
+      async (job: Job) => {
+        logger.log(`starting openrouter free-tier dispatch tick ${job.id}`);
+        await openRouterFreeDispatchService.runTick();
+        logger.log(`finished openrouter free-tier dispatch tick ${job.id}`);
+      },
+      {
+        connection: redisConnection,
+        concurrency: 1,
+      },
+    );
+
+    openRouterFreeDispatchWorker.on("failed", (job, err) => {
+      logger.error(`openrouter free-tier dispatch tick ${job?.id} failed`, err?.stack || err);
+    });
+
+    activeWorkers.push(openRouterFreeDispatchWorker);
+    activeQueueNames.push("openrouter-free-dispatch");
+
     const googleRpdResumeWorker = new Worker(
       "google-rpd-resume",
       async (job) => {
@@ -347,6 +389,27 @@ async function bootstrap() {
 
     activeWorkers.push(groqRpdResumeWorker);
     activeQueueNames.push("groq-rpd-resume");
+
+    const openRouterRpdResumeWorker = new Worker(
+      "openrouter-rpd-resume",
+      async (job) => {
+        logger.log(`starting openrouter-rpd resume sweep ${job.id}`);
+        const result = await openRouterRpdResumeService.runResume();
+        logger.log(`finished openrouter-rpd resume sweep ${job.id}: ${JSON.stringify(result)}`);
+        return result;
+      },
+      {
+        connection: redisConnection,
+        concurrency: 1,
+      },
+    );
+
+    openRouterRpdResumeWorker.on("failed", (job, err) => {
+      logger.error(`openrouter-rpd resume sweep ${job?.id} failed`, err?.stack || err);
+    });
+
+    activeWorkers.push(openRouterRpdResumeWorker);
+    activeQueueNames.push("openrouter-rpd-resume");
 
     const dailyAutomationWorker = new Worker(
       "daily-automation",

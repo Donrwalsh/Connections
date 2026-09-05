@@ -55,6 +55,12 @@ export class AutomationRunLog {
   @Column({ type: "text", nullable: true })
   groqBurnMessage: string | null;
 
+  @Column({ type: "varchar", nullable: true })
+  openRouterBurnOutcome: AutomationLegOutcome | null;
+
+  @Column({ type: "text", nullable: true })
+  openRouterBurnMessage: string | null;
+
   @UpdateDateColumn({
     type: "timestamptz",
     default: () => "CURRENT_TIMESTAMP",

@@ -115,6 +115,7 @@ const defaultAutomation: AutomationStatus = {
   miniBurn: { outcome: null, message: null },
   googleBurn: { outcome: null, message: null },
   groqBurn: { outcome: null, message: null },
+  openRouterBurn: { outcome: null, message: null },
 };
 
 function stubFetch({
@@ -397,6 +398,10 @@ describe("ActivityPage", () => {
         miniBurn: { outcome: "started", message: "started at 80%" },
         googleBurn: { outcome: "started", message: "started" },
         groqBurn: { outcome: "alreadyExhausted", message: "every Groq model is currently RPD-held" },
+        openRouterBurn: {
+          outcome: "alreadyExhausted",
+          message: "OpenRouter daily budget spent or account held",
+        },
       },
     });
     renderActivity();
@@ -415,6 +420,12 @@ describe("ActivityPage", () => {
     expect(
       screen.getByText(
         "Auto-run: every Groq model is currently RPD-held (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("OpenRouter daily quota")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Auto-run: OpenRouter daily budget spent or account held (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM",
       ),
     ).toBeInTheDocument();
   });

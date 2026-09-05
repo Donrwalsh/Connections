@@ -6,6 +6,7 @@ import { FreeTierBudgetWidget } from "../../components/benchmark/FreeTierBudgetW
 import { FreeTierDispatchModal } from "../../components/benchmark/FreeTierDispatchModal";
 import { GoogleDispatchWidget } from "../../components/benchmark/GoogleDispatchWidget";
 import { GroqDispatchWidget } from "../../components/benchmark/GroqDispatchWidget";
+import { OpenRouterDispatchWidget } from "../../components/benchmark/OpenRouterDispatchWidget";
 import { RecentActivityTable } from "../../components/benchmark/RecentActivityTable";
 import type { FreeTierModelSets } from "../../components/benchmark/StrategyTable";
 import { fetchAutomationStatus, fetchFreeTierUsage, fetchLeaderboard, fetchRecentActivity } from "../../data/benchmark/api";
@@ -113,6 +114,18 @@ export function ActivityPage() {
       }
     : null;
 
+  const openRouterBurnAutomation: AutomationLegDisplay | null = automationStatus
+    ? {
+        message:
+          automationStatus.openRouterBurn.outcome === "error"
+            ? `failed: ${automationStatus.openRouterBurn.message}`
+            : automationStatus.openRouterBurn.message,
+        lastRunAt: automationStatus.lastRunAt,
+        nextRunAt: automationStatus.nextRunAt,
+        isError: automationStatus.openRouterBurn.outcome === "error",
+      }
+    : null;
+
   const {
     data: recentActivity,
     isLoading: isLoadingActivity,
@@ -161,6 +174,7 @@ export function ActivityPage() {
           <CategoryJudgingWidget automation={judgeAutomation} />
           <GoogleDispatchWidget automation={googleBurnAutomation} />
           <GroqDispatchWidget automation={groqBurnAutomation} />
+          <OpenRouterDispatchWidget automation={openRouterBurnAutomation} />
         </div>
       ) : null}
 

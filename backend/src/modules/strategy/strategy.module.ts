@@ -9,6 +9,7 @@ import { CategoryEvaluation } from "./entities/category-evaluation.entity";
 import { StrategyRun } from "./entities/strategy-run.entity";
 import { GoogleRateLimitHold } from "./entities/google-rate-limit-hold.entity";
 import { GroqRateLimitHold } from "./entities/groq-rate-limit-hold.entity";
+import { OpenRouterRateLimitHold } from "./entities/openrouter-rate-limit-hold.entity";
 import { StrategyController } from "./strategy.controller";
 import { StrategyService } from "./strategy.service";
 import { LlmStrategyRunner } from "./llm-strategy-runner.service";
@@ -18,6 +19,9 @@ import { CategoryEvaluatorService } from "./category-evaluator.service";
 import { FreeTierUsageService } from "./free-tier-usage.service";
 import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
 import { GroqRateLimitHoldService } from "./groq-rate-limit-hold.service";
+import { OpenRouterRateLimitHoldService } from "./openrouter-rate-limit-hold.service";
+import { OpenRouterRpdResumeService } from "./openrouter-rpd-resume.service";
+import { OpenRouterRpdResumeBootstrap } from "./openrouter-rpd-resume.bootstrap";
 import { GoogleRpdResumeService } from "./google-rpd-resume.service";
 import { GoogleRpdResumeBootstrap } from "./google-rpd-resume.bootstrap";
 import { GroqRpdResumeService } from "./groq-rpd-resume.service";
@@ -36,6 +40,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
       CategoryEvaluation,
       GoogleRateLimitHold,
       GroqRateLimitHold,
+      OpenRouterRateLimitHold,
     ]),
     QueueModule,
     GameModule,
@@ -55,6 +60,9 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     GroqRateLimitHoldService,
     GroqRpdResumeService,
     GroqRpdResumeBootstrap,
+    OpenRouterRateLimitHoldService,
+    OpenRouterRpdResumeService,
+    OpenRouterRpdResumeBootstrap,
   ],
   exports: [
     StrategyService,
@@ -65,6 +73,8 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     GoogleRpdResumeService,
     GroqRateLimitHoldService,
     GroqRpdResumeService,
+    OpenRouterRateLimitHoldService,
+    OpenRouterRpdResumeService,
   ],
 })
 export class StrategyModule {}
