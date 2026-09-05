@@ -110,7 +110,7 @@ export function MaintenancePanel() {
             "every row tied to them. This cannot be undone."
           }
           confirmLabel="Delete errored runs"
-          action={(password) => deleteErroredRuns(password)}
+          action={deleteErroredRuns}
           onClose={() => setOpenModal(null)}
           onDone={refetchCounts}
         />
@@ -124,7 +124,7 @@ export function MaintenancePanel() {
             "re-judged on the next dispatch. This cannot be undone."
           }
           confirmLabel="Delete failed judge calls"
-          action={(password) => deleteFailedJudgeCalls(password)}
+          action={deleteFailedJudgeCalls}
           onClose={() => setOpenModal(null)}
           onDone={refetchCounts}
         />

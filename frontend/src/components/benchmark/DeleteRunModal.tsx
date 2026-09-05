@@ -12,13 +12,11 @@ export interface DeleteRunModalProps {
 }
 
 /** Confirmation modal for permanently deleting a strategy run — same
- * overlay/password-prompt pattern as FreeTierDispatchModal, scaled down to
- * what a destructive single-run action needs: a warning, a password field,
- * Cancel/Delete. */
+ * overlay pattern as FreeTierDispatchModal, scaled down to what a
+ * destructive single-run action needs: a warning, Cancel/Delete. Auth
+ * travels via the admin session cookie (see AdminAuthContext), not a
+ * password field. */
 export function DeleteRunModal({ runId, onClose, onDeleted }: DeleteRunModalProps) {
-  // Only checked by the backend in production (DispatchAuthGuard) — left
-  // blank this has no effect against a local/dev backend.
-  const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,7 +34,7 @@ export function DeleteRunModal({ runId, onClose, onDeleted }: DeleteRunModalProp
     setError(null);
 
     try {
-      const result = await deleteRun(runId, password);
+      const result = await deleteRun(runId);
       onDeleted(result);
       onClose();
     } catch (err: unknown) {
@@ -67,17 +65,6 @@ export function DeleteRunModal({ runId, onClose, onDeleted }: DeleteRunModalProp
         </p>
 
         <form onSubmit={handleSubmit}>
-          <label className="bench-modal__field">
-            Password
-            <input
-              type="password"
-              className="bench-modal__number"
-              autoComplete="off"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          </label>
-
           {error ? <p className="bench-error">{error}</p> : null}
 
           <div className="bench-modal__actions">
