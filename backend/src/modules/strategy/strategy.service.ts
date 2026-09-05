@@ -6,6 +6,7 @@ import {
   LLM_OLLAMA_QUEUE,
   LLM_GOOGLE_QUEUE,
   LLM_GROQ_QUEUE,
+  LLM_OPENROUTER_QUEUE,
 } from "../queue/queue.module";
 import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/strategy-run.entity";
 import { InjectRepository } from "@nestjs/typeorm";
@@ -200,6 +201,7 @@ export class StrategyService {
     @Inject(LLM_OLLAMA_QUEUE) private readonly llmOllamaQueue: Queue,
     @Inject(LLM_GOOGLE_QUEUE) private readonly llmGoogleQueue: Queue,
     @Inject(LLM_GROQ_QUEUE) private readonly llmGroqQueue: Queue,
+    @Inject(LLM_OPENROUTER_QUEUE) private readonly llmOpenRouterQueue: Queue,
     @InjectRepository(StrategyRun)
     private readonly strategyRunRepo: Repository<StrategyRun>,
     @InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>,
@@ -225,6 +227,7 @@ export class StrategyService {
       this.llmOllamaQueue,
       this.llmGoogleQueue,
       this.llmGroqQueue,
+      this.llmOpenRouterQueue,
       strategyName,
     );
   }
@@ -360,6 +363,24 @@ export class StrategyService {
     }
 
     return counts;
+  }
+
+  /**
+   * How many model API calls this LLM strategy has made so far in the
+   * current UTC day — one row per call in SolvePrompt (initial prompt,
+   * re-prompt, and backend retries all count). Used by
+   * OpenRouterFreeDispatchService as the account-wide daily-budget counter,
+   * since OpenRouter's free tier caps *total* requests (and counts failed
+   * ones), not per-model requests. "Today" is the same UTC window
+   * startOfTodayUtc defines everywhere else.
+   */
+  async countTodayLlmCalls(strategyName: string): Promise<number> {
+    return this.solvePromptRepo
+      .createQueryBuilder("sp")
+      .innerJoin("sp.strategyRun", "run")
+      .where("run.strategyName = :strategyName", { strategyName })
+      .andWhere("sp.createdAt >= :startOfTodayUtc", { startOfTodayUtc: startOfTodayUtc() })
+      .getCount();
   }
 
   /**
@@ -805,7 +826,14 @@ export class StrategyService {
    */
   private async queuedCountsByKey(): Promise<Map<string, number>> {
     const counts = new Map<string, number>();
-    const queues = [this.queue, this.llmOpenAIQueue, this.llmOllamaQueue, this.llmGoogleQueue, this.llmGroqQueue];
+    const queues = [
+      this.queue,
+      this.llmOpenAIQueue,
+      this.llmOllamaQueue,
+      this.llmGoogleQueue,
+      this.llmGroqQueue,
+      this.llmOpenRouterQueue,
+    ];
 
     for (const queue of queues) {
       for (let start = 0; ; start += QUEUE_PAGE_SIZE) {

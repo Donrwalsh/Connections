@@ -8,6 +8,7 @@ import {
   LLM_OLLAMA_QUEUE,
   LLM_GOOGLE_QUEUE,
   LLM_GROQ_QUEUE,
+  LLM_OPENROUTER_QUEUE,
 } from "../queue/queue.module";
 import { StrategyService } from "./strategy.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
@@ -32,6 +33,7 @@ describe("StrategyService", () => {
   let mockOllamaQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockGoogleQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockGroqQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
+  let mockOpenRouterQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockStrategyRunRepo: {
     findOne: jest.Mock;
     find: jest.Mock;
@@ -138,6 +140,11 @@ describe("StrategyService", () => {
       addBulk: jest.fn().mockResolvedValue(undefined),
       getJobs: jest.fn().mockResolvedValue([]),
     };
+    mockOpenRouterQueue = {
+      add: jest.fn().mockResolvedValue(undefined),
+      addBulk: jest.fn().mockResolvedValue(undefined),
+      getJobs: jest.fn().mockResolvedValue([]),
+    };
     mockStrategyRunRepo = {
       findOne: jest.fn(),
       find: jest.fn(),
@@ -219,6 +226,7 @@ describe("StrategyService", () => {
         { provide: LLM_OLLAMA_QUEUE, useValue: mockOllamaQueue },
         { provide: LLM_GOOGLE_QUEUE, useValue: mockGoogleQueue },
         { provide: LLM_GROQ_QUEUE, useValue: mockGroqQueue },
+        { provide: LLM_OPENROUTER_QUEUE, useValue: mockOpenRouterQueue },
         { provide: getRepositoryToken(StrategyRun), useValue: mockStrategyRunRepo },
         { provide: getRepositoryToken(Puzzle), useValue: mockPuzzleRepo },
         { provide: getRepositoryToken(Guess), useValue: mockGuessRepo },
@@ -361,6 +369,28 @@ describe("StrategyService", () => {
       expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
       expect(mockOllamaQueue.add).not.toHaveBeenCalled();
       expect(mockGoogleQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("should route llm-openrouter runs to the OpenRouter queue after validating the model", async () => {
+      await service.triggerRun(100, "llm-openrouter", "2024-01-02", 0, "z-ai/glm-5.2:free");
+
+      expect(mockSupportedModelService.assertSupported).toHaveBeenCalledWith(
+        "llm-openrouter",
+        "z-ai/glm-5.2:free",
+      );
+      expect(mockOpenRouterQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
+        {
+          puzzleId: 100,
+          strategyName: "llm-openrouter",
+          date: "2024-01-02",
+          trialNumber: 0,
+          model: "z-ai/glm-5.2:free",
+        },
+        { jobId: "run-100-llm-openrouter-0" },
+      );
+      expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(mockGroqQueue.add).not.toHaveBeenCalled();
     });
 
     it("should not enqueue anything when the model is rejected", async () => {
@@ -1407,6 +1437,31 @@ describe("StrategyService", () => {
       expect(result).toEqual(new Map());
       expect(mockStrategyRunRepo.createQueryBuilder).not.toHaveBeenCalled();
       expect(mockOpenAIQueue.getJobs).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("countTodayLlmCalls", () => {
+    it("counts SolvePrompt rows joined to the strategy's runs since UTC midnight", async () => {
+      const qb = {
+        innerJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(17),
+      };
+      mockSolvePromptRepo.createQueryBuilder.mockReturnValueOnce(qb);
+
+      const n = await service.countTodayLlmCalls("llm-openrouter");
+
+      expect(n).toBe(17);
+      expect(qb.innerJoin).toHaveBeenCalledWith("sp.strategyRun", "run");
+      expect(qb.where).toHaveBeenCalledWith(
+        expect.stringContaining("strategyName"),
+        { strategyName: "llm-openrouter" },
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining("createdAt"),
+        expect.objectContaining({ startOfTodayUtc: expect.any(Date) }),
+      );
     });
   });
 
