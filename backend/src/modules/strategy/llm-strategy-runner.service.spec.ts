@@ -12,9 +12,11 @@ import { OrchestratorService, type SolveAssistOutcome, type ChatMessage } from "
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
 import { GroqRateLimitHoldService } from "./groq-rate-limit-hold.service";
+import { OpenRouterRateLimitHoldService } from "./openrouter-rate-limit-hold.service";
 import {
   DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
   DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS,
+  DEFAULT_OPENROUTER_DISPATCH_RPM_COOLDOWN_MS,
 } from "../../strategies";
 
 describe("LlmStrategyRunner", () => {
@@ -36,6 +38,13 @@ describe("LlmStrategyRunner", () => {
   let mockSupportedModelService: { getContextWindow: jest.Mock };
   let mockRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
   let mockGroqRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
+  let mockOpenRouterHold: {
+    isHeld: jest.Mock;
+    hold: jest.Mock;
+    heldReason: jest.Mock;
+    nextResetAt: jest.Mock;
+    clearExpired: jest.Mock;
+  };
   let mockManager: { insert: jest.Mock; save: jest.Mock };
   let mockDataSource: { transaction: jest.Mock };
 
@@ -101,6 +110,13 @@ describe("LlmStrategyRunner", () => {
       isHeld: jest.fn().mockResolvedValue(false),
       hold: jest.fn().mockResolvedValue(undefined),
     };
+    mockOpenRouterHold = {
+      isHeld: jest.fn().mockResolvedValue(false),
+      hold: jest.fn().mockResolvedValue(undefined),
+      heldReason: jest.fn().mockResolvedValue(null),
+      nextResetAt: jest.fn().mockResolvedValue(null),
+      clearExpired: jest.fn().mockResolvedValue(false),
+    };
     mockManager = {
       insert: jest.fn().mockImplementation((entity: string, data?: unknown[]) => {
         if (entity === "SolvePrompt")
@@ -128,6 +144,7 @@ describe("LlmStrategyRunner", () => {
         { provide: SupportedModelService, useValue: mockSupportedModelService },
         { provide: GoogleRateLimitHoldService, useValue: mockRpdHold },
         { provide: GroqRateLimitHoldService, useValue: mockGroqRpdHold },
+        { provide: OpenRouterRateLimitHoldService, useValue: mockOpenRouterHold },
       ],
     }).compile();
 
@@ -1345,6 +1362,100 @@ describe("LlmStrategyRunner", () => {
       await runner.runLlmStrategy(100, "llm-groq", 0, "openai/gpt-oss-20b");
 
       expect(delaySpy).toHaveBeenCalledWith(DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS * 1000);
+    });
+
+    it("parks a held openrouter run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {
+      mockOpenRouterHold.isHeld.mockResolvedValue(true);
+      mockStrategyRunRepo.findOne.mockResolvedValue(
+        makeRun({ strategyName: "llm-openrouter", modelName: "z-ai/glm-5.2:free" }),
+      );
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+
+      const result = await runner.runLlmStrategy(100, "llm-openrouter", 0, "z-ai/glm-5.2:free");
+
+      expect(mockOrchestratorService.solveAssist).not.toHaveBeenCalled();
+      expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+      expect(mockOpenRouterHold.hold).not.toHaveBeenCalled();
+    });
+
+    it("records a daily OpenRouter hold using dailyResetSeconds and parks the run", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValue(
+        makeRun({ strategyName: "llm-openrouter", modelName: "z-ai/glm-5.2:free" }),
+      );
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist.mockResolvedValue({
+        ok: false,
+        error: { error: "OpenRouter daily quota exhausted", code: "rate_limited_daily", dailyResetSeconds: 7200 },
+      });
+
+      const result = await runner.runLlmStrategy(100, "llm-openrouter", 0, "z-ai/glm-5.2:free");
+
+      expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+      expect(mockOpenRouterHold.hold).toHaveBeenCalledWith("daily", 7200);
+    });
+
+    it("falls back to secondsUntilNextUtcMidnight when a daily hit carries no dailyResetSeconds", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValue(
+        makeRun({ strategyName: "llm-openrouter", modelName: "z-ai/glm-5.2:free" }),
+      );
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist.mockResolvedValue({
+        ok: false,
+        error: { error: "quota", code: "rate_limited_daily" },
+      });
+
+      await runner.runLlmStrategy(100, "llm-openrouter", 0, "z-ai/glm-5.2:free");
+
+      const [reason, seconds] = mockOpenRouterHold.hold.mock.calls[0];
+      expect(reason).toBe("daily");
+      expect(seconds).toBeGreaterThan(0);
+      expect(seconds).toBeLessThanOrEqual(86_400);
+    });
+
+    it("writes a per-minute-cooldown hold on an openrouter per-minute rate_limited hit, and keeps retrying (not a failure)", async () => {
+      jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      mockStrategyRunRepo.findOne.mockResolvedValue(
+        makeRun({ strategyName: "llm-openrouter", modelName: "z-ai/glm-5.2:free" }),
+      );
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist
+        .mockResolvedValueOnce({ ok: false, error: { error: "rate limited", code: "rate_limited" } })
+        .mockResolvedValueOnce(
+          makeAssistResponse([
+            ["APPLE", "BANANA", "CHERRY", "DATE"],
+            ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+          ]),
+        );
+
+      const result = await runner.runLlmStrategy(100, "llm-openrouter", 0, "z-ai/glm-5.2:free");
+
+      expect(mockOpenRouterHold.hold).toHaveBeenCalledWith(
+        "per-minute-cooldown",
+        DEFAULT_OPENROUTER_DISPATCH_RPM_COOLDOWN_MS / 1000,
+      );
+      expect(result.status).not.toBe(StrategyRunStatus.ERROR);
+    });
+
+    it("never ends an openrouter run in ERROR on a rate_limited_daily hit", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValue(
+        makeRun({ strategyName: "llm-openrouter", modelName: "z-ai/glm-5.2:free" }),
+      );
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist.mockResolvedValue({
+        ok: false,
+        error: { error: "quota", code: "rate_limited_daily" },
+      });
+
+      const result = await runner.runLlmStrategy(100, "llm-openrouter", 0, "z-ai/glm-5.2:free");
+
+      expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
     });
 
     it("parks mid-solve keeping the progress already made, then resumes from the flushed guesses", async () => {
