@@ -331,7 +331,7 @@ async function bootstrap() {
       "groq-rpd-resume",
       async (job) => {
         logger.log(`starting groq-rpd resume sweep ${job.id}`);
-        const result = await groqRpdResumeService.runResume();
+        const result = await groqRpdResumeService.runResume(job.id ?? String(job.timestamp));
         logger.log(`finished groq-rpd resume sweep ${job.id}: ${JSON.stringify(result)}`);
         return result;
       },

@@ -34,7 +34,22 @@ export class GroqRpdResumeService {
     @Inject(GROQ_RPD_RESUME_QUEUE) private readonly resumeQueue: Queue,
   ) {}
 
-  async runResume(): Promise<{ cleared: string[]; redispatched: number; rearmedInMs?: number }> {
+  /**
+   * `triggerJobId` is the BullMQ job id of whichever job (startup catch-up
+   * or a rearm) invoked this sweep — see worker.ts's `groq-rpd-resume`
+   * handler, which passes its own `job.id`. It's used as the resume job-id
+   * stamp below instead of a wall-clock timestamp: BullMQ keeps a job's id
+   * stable across that job's own retries, so a sweep that gets retried
+   * (e.g. after a transient Redis error) reuses the same stamp and its
+   * re-dispatch enqueues collapse under the same ids rather than piling up
+   * a second set alongside whatever the first attempt already enqueued
+   * before failing. A *different* triggering job (the next rearm, or
+   * tomorrow's startup catch-up) naturally gets a different id, so separate
+   * sweeps never collide with each other.
+   */
+  async runResume(
+    triggerJobId: string,
+  ): Promise<{ cleared: string[]; redispatched: number; rearmedInMs?: number }> {
     const cleared = await this.holdService.clearExpired();
     const stillHeld = new Set(await this.holdService.heldModels(LLM_GROQ));
 
@@ -43,13 +58,7 @@ export class GroqRpdResumeService {
       relations: { puzzle: true },
     });
 
-    // One stamp for the whole sweep — see runStrategyJobId's callers below:
-    // the same reasoning as Google's pacificDateStamp (a fresh id relative
-    // to the run's original completed job, but stable across a retried
-    // sweep so duplicate enqueues collapse) without the calendar-day
-    // semantics, since Groq's resume sweeps aren't tied to a shared daily
-    // clock the way Google's are.
-    const stamp = Date.now().toString(36);
+    const stamp = triggerJobId;
 
     let redispatched = 0;
     let skipped = 0;

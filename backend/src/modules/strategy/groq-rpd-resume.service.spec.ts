@@ -57,7 +57,7 @@ describe("GroqRpdResumeService", () => {
       parkedRun({ id: 2, puzzleId: 11, trialNumber: 1, modelName: "openai/gpt-oss-120b", puzzle: { date: "2026-01-02" } }),
     ]);
 
-    const result = await service.runResume();
+    const result = await service.runResume("sweep-1");
 
     expect(strategyRunRepo.save).toHaveBeenCalledTimes(1);
     expect(strategyRunRepo.save).toHaveBeenCalledWith(
@@ -86,7 +86,7 @@ describe("GroqRpdResumeService", () => {
       parkedRun({ id: 1, puzzleId: 10, trialNumber: 0, puzzle: { date: "2026-01-01" } }),
     ]);
 
-    await service.runResume();
+    await service.runResume("sweep-1");
 
     const jobId = (queue.add.mock.calls[0][2] as { jobId: string }).jobId;
     expect(jobId).not.toBe(runStrategyJobId(10, "llm-groq", 0));
@@ -98,12 +98,25 @@ describe("GroqRpdResumeService", () => {
       parkedRun({ id: 1, puzzleId: 10, trialNumber: 0, puzzle: { date: "2026-01-01" } }),
     ]);
 
-    await service.runResume();
-    await service.runResume();
+    await service.runResume("sweep-1");
+    await service.runResume("sweep-1");
 
     const first = (queue.add.mock.calls[0][2] as { jobId: string }).jobId;
     const second = (queue.add.mock.calls[1][2] as { jobId: string }).jobId;
     expect(second).toBe(first);
+  });
+
+  it("uses a distinct id for a different triggering job, so separate sweeps don't collide", async () => {
+    strategyRunRepo.find.mockResolvedValue([
+      parkedRun({ id: 1, puzzleId: 10, trialNumber: 0, puzzle: { date: "2026-01-01" } }),
+    ]);
+
+    await service.runResume("sweep-1");
+    await service.runResume("sweep-2");
+
+    const first = (queue.add.mock.calls[0][2] as { jobId: string }).jobId;
+    const second = (queue.add.mock.calls[1][2] as { jobId: string }).jobId;
+    expect(second).not.toBe(first);
   });
 
   it("leaves a run parked (not flipped to RUNNING) when the enqueue fails", async () => {
@@ -112,7 +125,7 @@ describe("GroqRpdResumeService", () => {
     ]);
     queue.add.mockRejectedValue(new Error("redis down"));
 
-    await expect(service.runResume()).rejects.toThrow("redis down");
+    await expect(service.runResume("sweep-1")).rejects.toThrow("redis down");
 
     expect(strategyRunRepo.save).not.toHaveBeenCalled();
   });
@@ -122,7 +135,7 @@ describe("GroqRpdResumeService", () => {
       parkedRun({ id: 1, puzzleId: 10, trialNumber: 0, modelName: null, puzzle: { date: "2026-01-01" } }),
     ]);
 
-    const result = await service.runResume();
+    const result = await service.runResume("sweep-1");
 
     expect(queue.add).not.toHaveBeenCalled();
     expect(strategyRunRepo.save).not.toHaveBeenCalled();
@@ -136,7 +149,7 @@ describe("GroqRpdResumeService", () => {
       parkedRun({ id: 1, puzzleId: 10, trialNumber: 0, puzzle: { date: "2026-01-01" } }),
     ]);
 
-    const result = await service.runResume();
+    const result = await service.runResume("sweep-1");
 
     expect(result.rearmedInMs).toBe(5 * 60_000);
     expect(resumeQueue.add).toHaveBeenCalledWith(
@@ -153,7 +166,7 @@ describe("GroqRpdResumeService", () => {
       parkedRun({ id: 1, puzzleId: 10, trialNumber: 0, puzzle: { date: "2026-01-01" } }),
     ]);
 
-    const result = await service.runResume();
+    const result = await service.runResume("sweep-1");
 
     expect(result.rearmedInMs).toBe(15 * 60_000);
   });
@@ -163,7 +176,7 @@ describe("GroqRpdResumeService", () => {
       parkedRun({ id: 1, puzzleId: 10, trialNumber: 0, puzzle: { date: "2026-01-01" } }),
     ]);
 
-    const result = await service.runResume();
+    const result = await service.runResume("sweep-1");
 
     expect(resumeQueue.add).not.toHaveBeenCalled();
     expect(result.rearmedInMs).toBeUndefined();
@@ -173,7 +186,7 @@ describe("GroqRpdResumeService", () => {
     holdService.clearExpired.mockResolvedValue([]);
     strategyRunRepo.find.mockResolvedValue([]);
 
-    const result = await service.runResume();
+    const result = await service.runResume("sweep-1");
 
     expect(strategyRunRepo.save).not.toHaveBeenCalled();
     expect(queue.add).not.toHaveBeenCalled();
