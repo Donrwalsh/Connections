@@ -1,22 +1,25 @@
 import { openai } from "@ai-sdk/openai";
 import { createOllama } from "ai-sdk-ollama";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createGroq } from "@ai-sdk/groq";
 import type { LanguageModel } from "ai";
 
 export const DEFAULT_OPENAI_MODEL = "gpt-4.1-nano";
 export const DEFAULT_OLLAMA_MODEL = "llama3.2";
 export const DEFAULT_GOOGLE_MODEL = "gemini-3.6-flash";
+export const DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b";
 export const DEFAULT_JUDGE_MODEL = "gpt-4.1-nano";
 export const DEFAULT_JUDGE_PROVIDER: ModelProvider = "openai";
 export const DEFAULT_CONTEXT_WINDOW = 8192;
 
-export type ModelProvider = "openai" | "ollama" | "google";
+export type ModelProvider = "openai" | "ollama" | "google" | "groq";
 
 /**
  * Resolves the default model provider from the MODEL_PROVIDER env var.
  * Defaults to OpenAI to keep existing behavior unchanged; set it to
- * "ollama" to run models locally against the bundled Ollama service, or
- * "google" to call Google AI Studio's Gemini models.
+ * "ollama" to run models locally against the bundled Ollama service,
+ * "google" to call Google AI Studio's Gemini models, or "groq" to call
+ * Groq's hosted models.
  *
  * Unlike the strategy runs (which select their provider explicitly by
  * strategy name), this default is only used for provider-less requests —
@@ -26,6 +29,7 @@ export function defaultProvider(): ModelProvider {
   const provider = process.env.MODEL_PROVIDER?.toLowerCase();
   if (provider === "ollama") return "ollama";
   if (provider === "google") return "google";
+  if (provider === "groq") return "groq";
   return "openai";
 }
 
@@ -71,6 +75,11 @@ export function getModel(
     return google(modelOverride ?? process.env.GOOGLE_MODEL ?? DEFAULT_GOOGLE_MODEL);
   }
 
+  if (provider === "groq") {
+    const groq = createGroq({ apiKey: process.env.GROQ_API_KEY });
+    return groq(modelOverride ?? process.env.GROQ_MODEL ?? DEFAULT_GROQ_MODEL);
+  }
+
   return openai(modelOverride ?? process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL);
 }
 
@@ -102,6 +111,9 @@ export function getModelName(provider: ModelProvider, modelOverride?: string): s
   }
   if (provider === "google") {
     return modelOverride ?? process.env.GOOGLE_MODEL ?? DEFAULT_GOOGLE_MODEL;
+  }
+  if (provider === "groq") {
+    return modelOverride ?? process.env.GROQ_MODEL ?? DEFAULT_GROQ_MODEL;
   }
   return modelOverride ?? process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL;
 }

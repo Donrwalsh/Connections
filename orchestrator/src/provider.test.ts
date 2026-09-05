@@ -10,6 +10,7 @@ import {
 const createOllamaMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 const openaiMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 const createGoogleGenerativeAIMock = vi.hoisted(() => vi.fn(() => vi.fn()));
+const createGroqMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 
 vi.mock("ai-sdk-ollama", () => ({
   createOllama: createOllamaMock,
@@ -23,12 +24,17 @@ vi.mock("@ai-sdk/google", () => ({
   createGoogleGenerativeAI: createGoogleGenerativeAIMock,
 }));
 
+vi.mock("@ai-sdk/groq", () => ({
+  createGroq: createGroqMock,
+}));
+
 describe("getModel", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     createOllamaMock.mockClear();
     openaiMock.mockClear();
     createGoogleGenerativeAIMock.mockClear();
+    createGroqMock.mockClear();
   });
 
   it("passes num_ctx from MODEL_CONTEXT_WINDOW to the Ollama model", () => {
@@ -146,6 +152,40 @@ describe("getModel", () => {
     const modelFactory = createGoogleGenerativeAIMock.mock.results[0].value;
     expect(modelFactory).toHaveBeenCalledWith("gemini-3.6-flash");
   });
+
+  it("resolves the Groq model without num_ctx", () => {
+    getModel("groq");
+
+    expect(createGroqMock).toHaveBeenCalledTimes(1);
+    const modelFactory = createGroqMock.mock.results[0].value;
+    expect(modelFactory).toHaveBeenCalledWith("openai/gpt-oss-20b");
+    expect(openaiMock).not.toHaveBeenCalled();
+    expect(createOllamaMock).not.toHaveBeenCalled();
+  });
+
+  it("passes GROQ_API_KEY to createGroq", () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+
+    getModel("groq");
+
+    expect(createGroqMock).toHaveBeenCalledWith({ apiKey: "test-groq-key" });
+  });
+
+  it("uses the model override instead of GROQ_MODEL when given", () => {
+    vi.stubEnv("GROQ_MODEL", "openai/gpt-oss-120b");
+
+    getModel("groq", "qwen/qwen3.6-27b");
+
+    const modelFactory = createGroqMock.mock.results[0].value;
+    expect(modelFactory).toHaveBeenCalledWith("qwen/qwen3.6-27b");
+  });
+
+  it("accepts a contextWindow for groq without using it", () => {
+    getModel("groq", undefined, 131072);
+
+    const modelFactory = createGroqMock.mock.results[0].value;
+    expect(modelFactory).toHaveBeenCalledWith("openai/gpt-oss-20b");
+  });
 });
 
 describe("getModelName", () => {
@@ -185,6 +225,20 @@ describe("getModelName", () => {
   it("prefers the model override over GOOGLE_MODEL", () => {
     vi.stubEnv("GOOGLE_MODEL", "gemini-3.5-flash-lite");
     expect(getModelName("google", "gemini-2.5-pro")).toBe("gemini-2.5-pro");
+  });
+
+  it("returns the configured Groq model for the groq provider", () => {
+    vi.stubEnv("GROQ_MODEL", "openai/gpt-oss-120b");
+    expect(getModelName("groq")).toBe("openai/gpt-oss-120b");
+  });
+
+  it("falls back to the Groq default when unset", () => {
+    expect(getModelName("groq")).toBe("openai/gpt-oss-20b");
+  });
+
+  it("prefers the model override over GROQ_MODEL", () => {
+    vi.stubEnv("GROQ_MODEL", "openai/gpt-oss-120b");
+    expect(getModelName("groq", "qwen/qwen3.6-27b")).toBe("qwen/qwen3.6-27b");
   });
 });
 
@@ -237,6 +291,10 @@ describe("effectiveContextWindow", () => {
 
   it("returns undefined for openai when no contextWindow is given", () => {
     expect(effectiveContextWindow("openai")).toBeUndefined();
+  });
+
+  it("never caps groq — returns the given contextWindow unchanged", () => {
+    expect(effectiveContextWindow("groq", 131072)).toBe(131072);
   });
 });
 

@@ -160,6 +160,31 @@ describe("OrchestratorService", () => {
     });
   });
 
+  it("should extract dailyResetSeconds from a Groq rate_limited_daily failure", async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockResponse({
+        ok: false,
+        status: 429,
+        body: {
+          error: "Groq daily quota exhausted",
+          code: "rate_limited_daily",
+          details: { dailyResetSeconds: 3600 },
+        },
+      }),
+    );
+
+    const outcome = await service.solveAssist(messages);
+
+    expect(outcome).toEqual({
+      ok: false,
+      error: expect.objectContaining({
+        code: "rate_limited_daily",
+        dailyResetSeconds: 3600,
+        statusCode: 429,
+      }),
+    });
+  });
+
   it("should pass rate_limited_daily through instead of coercing it to model_error", async () => {
     mockFetch.mockResolvedValueOnce(
       mockResponse({

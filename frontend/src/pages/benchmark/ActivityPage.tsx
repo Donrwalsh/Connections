@@ -1,11 +1,15 @@
 import { useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
+import { useAdminAuth } from "../../auth/useAdminAuth";
 import { CategoryJudgingWidget } from "../../components/benchmark/CategoryJudgingWidget";
 import { FreeTierBudgetWidget } from "../../components/benchmark/FreeTierBudgetWidget";
 import { FreeTierDispatchModal } from "../../components/benchmark/FreeTierDispatchModal";
+import { GoogleDispatchWidget } from "../../components/benchmark/GoogleDispatchWidget";
+import { GroqDispatchWidget } from "../../components/benchmark/GroqDispatchWidget";
 import { RecentActivityTable } from "../../components/benchmark/RecentActivityTable";
 import type { FreeTierModelSets } from "../../components/benchmark/StrategyTable";
-import { fetchFreeTierUsage, fetchLeaderboard, fetchRecentActivity } from "../../data/benchmark/api";
+import { fetchAutomationStatus, fetchFreeTierUsage, fetchLeaderboard, fetchRecentActivity } from "../../data/benchmark/api";
+import type { AutomationLegDisplay } from "../../data/benchmark/types";
 import { sumSpendUsd } from "../../data/benchmark/metrics";
 
 // How often the recent-activity table refetches. Frequent enough to feel
@@ -20,6 +24,7 @@ const RECENT_ACTIVITY_POLL_MS = 10_000;
  * performance) since both of these are operational concerns, not
  * leaderboard metrics. */
 export function ActivityPage() {
+  const { isAdmin } = useAdminAuth();
   const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
   // Bumped after FreeTierDispatchModal starts a cycle, so both widgets
   // refetch their dispatch status immediately instead of waiting out their
@@ -29,6 +34,7 @@ export function ActivityPage() {
   const { data: leaderboard } = useQuery({
     queryKey: ["leaderboard"],
     queryFn: ({ signal }) => fetchLeaderboard(signal),
+    enabled: isAdmin,
   });
 
   // Best-effort: which models belong to which free tier is only used for
@@ -38,6 +44,7 @@ export function ActivityPage() {
     queries: (["flagship", "mini"] as const).map((tier) => ({
       queryKey: ["free-tier-usage", tier],
       queryFn: ({ signal }: { signal: AbortSignal }) => fetchFreeTierUsage(tier, signal),
+      enabled: isAdmin,
     })),
     combine: (results): FreeTierModelSets => ({
       flagship: new Set(results[0].data?.models ?? []),
@@ -48,6 +55,63 @@ export function ActivityPage() {
   const llmRows = leaderboard ? leaderboard.llm : null;
   const flagshipSpentUsd = sumSpendUsd(llmRows, freeTierModels.flagship);
   const miniSpentUsd = sumSpendUsd(llmRows, freeTierModels.mini);
+
+  const { data: automationStatus } = useQuery({
+    queryKey: ["automation-status"],
+    queryFn: ({ signal }) => fetchAutomationStatus(signal),
+    refetchInterval: 30_000,
+    enabled: isAdmin,
+  });
+
+  const judgeAutomation: AutomationLegDisplay | null = automationStatus
+    ? {
+        message:
+          automationStatus.judge.error !== null
+            ? `failed: ${automationStatus.judge.error}`
+            : automationStatus.judge.enqueued !== null
+              ? `enqueued ${automationStatus.judge.enqueued}`
+              : null,
+        lastRunAt: automationStatus.lastRunAt,
+        nextRunAt: automationStatus.nextRunAt,
+        isError: automationStatus.judge.error !== null,
+      }
+    : null;
+
+  const miniBurnAutomation: AutomationLegDisplay | null = automationStatus
+    ? {
+        message:
+          automationStatus.miniBurn.outcome === "error"
+            ? `failed: ${automationStatus.miniBurn.message}`
+            : automationStatus.miniBurn.message,
+        lastRunAt: automationStatus.lastRunAt,
+        nextRunAt: automationStatus.nextRunAt,
+        isError: automationStatus.miniBurn.outcome === "error",
+      }
+    : null;
+
+  const googleBurnAutomation: AutomationLegDisplay | null = automationStatus
+    ? {
+        message:
+          automationStatus.googleBurn.outcome === "error"
+            ? `failed: ${automationStatus.googleBurn.message}`
+            : automationStatus.googleBurn.message,
+        lastRunAt: automationStatus.lastRunAt,
+        nextRunAt: automationStatus.nextRunAt,
+        isError: automationStatus.googleBurn.outcome === "error",
+      }
+    : null;
+
+  const groqBurnAutomation: AutomationLegDisplay | null = automationStatus
+    ? {
+        message:
+          automationStatus.groqBurn.outcome === "error"
+            ? `failed: ${automationStatus.groqBurn.message}`
+            : automationStatus.groqBurn.message,
+        lastRunAt: automationStatus.lastRunAt,
+        nextRunAt: automationStatus.nextRunAt,
+        isError: automationStatus.groqBurn.outcome === "error",
+      }
+    : null;
 
   const {
     data: recentActivity,
@@ -69,21 +133,36 @@ export function ActivityPage() {
               Daily free-token usage and the latest runs across every strategy.
             </p>
           </div>
-          <button type="button" className="bench-btn-primary" onClick={() => setIsDispatchModalOpen(true)}>
-            Enable Auto-Dispatch
-          </button>
+          {isAdmin ? (
+            <button
+              type="button"
+              className="bench-btn-primary"
+              onClick={() => setIsDispatchModalOpen(true)}
+            >
+              Enable Auto-Dispatch
+            </button>
+          ) : null}
         </div>
       </header>
 
-      <div className="bench-free-tiers" aria-label="Daily free-token budgets">
-        <FreeTierBudgetWidget
-          tier="flagship"
-          spentUsd={flagshipSpentUsd}
-          refreshSignal={dispatchRefreshSignal}
-        />
-        <FreeTierBudgetWidget tier="mini" spentUsd={miniSpentUsd} refreshSignal={dispatchRefreshSignal} />
-        <CategoryJudgingWidget />
-      </div>
+      {isAdmin ? (
+        <div className="bench-free-tiers" aria-label="Daily free-token budgets">
+          <FreeTierBudgetWidget
+            tier="flagship"
+            spentUsd={flagshipSpentUsd}
+            refreshSignal={dispatchRefreshSignal}
+          />
+          <FreeTierBudgetWidget
+            tier="mini"
+            spentUsd={miniSpentUsd}
+            refreshSignal={dispatchRefreshSignal}
+            automation={miniBurnAutomation}
+          />
+          <CategoryJudgingWidget automation={judgeAutomation} />
+          <GoogleDispatchWidget automation={googleBurnAutomation} />
+          <GroqDispatchWidget automation={groqBurnAutomation} />
+        </div>
+      ) : null}
 
       {isDispatchModalOpen ? (
         <FreeTierDispatchModal

@@ -10,6 +10,7 @@ const deletedResult: DeleteRunResult = {
   deletedGuesses: 3,
   deletedSolvePrompts: 5,
   deletedLlmProposals: 2,
+  deletedCategoryEvaluations: 1,
 };
 
 function stubFetch(handler: (url: string, init: RequestInit | undefined) => unknown) {
@@ -43,7 +44,7 @@ describe("DeleteRunModal", () => {
     expect(screen.getByText(/cannot be undone/i)).toBeInTheDocument();
   });
 
-  it("submits the password to DELETE /dispatch/run/:runId, then reports the deletion and closes", async () => {
+  it("DELETEs /dispatch/run/:runId with the admin session, then reports the deletion and closes", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     const onDeleted = vi.fn();
@@ -57,14 +58,14 @@ describe("DeleteRunModal", () => {
 
     render(<DeleteRunModal runId={12292} onClose={onClose} onDeleted={onDeleted} />);
 
-    await user.type(screen.getByLabelText("Password"), "hunter2");
     await user.click(screen.getByRole("button", { name: "Delete" }));
 
     await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(onDeleted).toHaveBeenCalledWith(deletedResult);
     expect(capturedUrl).toContain("/dispatch/run/12292");
     expect(capturedInit?.method).toBe("DELETE");
-    expect(JSON.parse(String(capturedInit?.body))).toEqual({ password: "hunter2" });
+    expect(capturedInit?.credentials).toBe("include");
+    expect((capturedInit?.headers as Record<string, string>)["X-Admin-Request"]).toBe("1");
   });
 
   it("shows the backend's error message and stays open when the delete fails", async () => {

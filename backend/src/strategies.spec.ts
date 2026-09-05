@@ -12,11 +12,15 @@ import {
   DEFAULT_LLM_OLLAMA_CONCURRENCY,
   DEFAULT_LLM_GOOGLE_CONCURRENCY,
   DEFAULT_LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS,
+  DEFAULT_LLM_GROQ_CONCURRENCY,
+  DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS,
+  DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
   DEFAULT_SHUFFLE_TRIALS,
   isLlmStrategy,
   LLM_OPENAI,
   LLM_OLLAMA,
   LLM_GOOGLE,
+  LLM_GROQ,
   LLM_STRATEGIES,
   llmMaxDuplicateGuesses,
   llmMaxFailedGuesses,
@@ -28,8 +32,12 @@ import {
   llmOpenAIConcurrency,
   llmGoogleConcurrency,
   llmGoogleRateLimitFallbackSeconds,
+  llmGroqConcurrency,
+  llmGroqRateLimitFallbackSeconds,
+  llmGroqDailyHoldFallbackSeconds,
   llmTemperature,
   llmMaxTrialsPerModel,
+  nextDailyAutomationRunAt,
   shuffleTrialCount,
   strategyTrialNumbers,
   SUPPORTED_STRATEGIES,
@@ -152,6 +160,53 @@ describe("strategies", () => {
 
     it("should read a valid positive integer", () => {
       expect(llmGoogleRateLimitFallbackSeconds({ LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS: "90" })).toBe(90);
+    });
+  });
+
+  describe("llmGroqConcurrency", () => {
+    it("should default when the env var is missing", () => {
+      expect(llmGroqConcurrency({})).toBe(DEFAULT_LLM_GROQ_CONCURRENCY);
+    });
+
+    it("should default when the env var is invalid", () => {
+      expect(llmGroqConcurrency({ LLM_GROQ_CONCURRENCY: "abc" })).toBe(DEFAULT_LLM_GROQ_CONCURRENCY);
+      expect(llmGroqConcurrency({ LLM_GROQ_CONCURRENCY: "0" })).toBe(DEFAULT_LLM_GROQ_CONCURRENCY);
+    });
+
+    it("should read a valid positive integer", () => {
+      expect(llmGroqConcurrency({ LLM_GROQ_CONCURRENCY: "4" })).toBe(4);
+    });
+  });
+
+  describe("llmGroqRateLimitFallbackSeconds", () => {
+    it("should default when the env var is missing", () => {
+      expect(llmGroqRateLimitFallbackSeconds({})).toBe(DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS);
+    });
+
+    it("should default when the env var is invalid", () => {
+      expect(llmGroqRateLimitFallbackSeconds({ LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS: "abc" })).toBe(
+        DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS,
+      );
+    });
+
+    it("should read a valid positive integer", () => {
+      expect(llmGroqRateLimitFallbackSeconds({ LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS: "90" })).toBe(90);
+    });
+  });
+
+  describe("llmGroqDailyHoldFallbackSeconds", () => {
+    it("should default when the env var is missing", () => {
+      expect(llmGroqDailyHoldFallbackSeconds({})).toBe(DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS);
+    });
+
+    it("should default when the env var is invalid", () => {
+      expect(llmGroqDailyHoldFallbackSeconds({ LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS: "abc" })).toBe(
+        DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
+      );
+    });
+
+    it("should read a valid positive integer", () => {
+      expect(llmGroqDailyHoldFallbackSeconds({ LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS: "3600" })).toBe(3600);
     });
   });
 
@@ -292,10 +347,11 @@ describe("strategies", () => {
   });
 
   describe("isLlmStrategy", () => {
-    it("should identify all three LLM strategies", () => {
+    it("should identify all four LLM strategies", () => {
       expect(isLlmStrategy(LLM_OPENAI)).toBe(true);
       expect(isLlmStrategy(LLM_OLLAMA)).toBe(true);
       expect(isLlmStrategy(LLM_GOOGLE)).toBe(true);
+      expect(isLlmStrategy(LLM_GROQ)).toBe(true);
     });
 
     it("should reject non-LLM strategies", () => {
@@ -320,6 +376,23 @@ describe("strategies", () => {
     it("should include every non-LLM strategy", () => {
       const expected = SUPPORTED_STRATEGIES.filter((s) => !isLlmStrategy(s));
       expect([...AUTOMATIC_STRATEGIES].sort()).toEqual([...expected].sort());
+    });
+  });
+
+  describe("nextDailyAutomationRunAt", () => {
+    it("returns today's 00:15 UTC when called before that time", () => {
+      const now = new Date("2024-06-01T00:00:00.000Z");
+      expect(nextDailyAutomationRunAt(now).toISOString()).toBe("2024-06-01T00:15:00.000Z");
+    });
+
+    it("returns tomorrow's 00:15 UTC when called after that time", () => {
+      const now = new Date("2024-06-01T12:00:00.000Z");
+      expect(nextDailyAutomationRunAt(now).toISOString()).toBe("2024-06-02T00:15:00.000Z");
+    });
+
+    it("returns tomorrow's 00:15 UTC when called exactly at that time", () => {
+      const now = new Date("2024-06-01T00:15:00.000Z");
+      expect(nextDailyAutomationRunAt(now).toISOString()).toBe("2024-06-02T00:15:00.000Z");
     });
   });
 });

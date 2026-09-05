@@ -19,6 +19,8 @@ import {
   FreeTierDispatchService,
   FreeTierDispatchStatusDto,
 } from "../free-tier-dispatch/free-tier-dispatch.service";
+import { GoogleFreeDispatchService } from "../google-free-dispatch/google-free-dispatch.service";
+import { GroqFreeDispatchService } from "../groq-free-dispatch/groq-free-dispatch.service";
 import { FreeTierId } from "../strategy/free-tier-usage.service";
 import { AUTOMATIC_STRATEGIES, LLM_STRATEGIES, STRATEGY_SET, isLlmStrategy } from "../../strategies";
 import { DispatchAuthGuard } from "./dispatch-auth.guard";
@@ -46,6 +48,8 @@ export class DispatchController {
     @Inject(GameService) private readonly gameService: GameService,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
     @Inject(FreeTierDispatchService) private readonly freeTierDispatchService: FreeTierDispatchService,
+    @Inject(GoogleFreeDispatchService) private readonly googleFreeDispatchService: GoogleFreeDispatchService,
+    @Inject(GroqFreeDispatchService) private readonly groqFreeDispatchService: GroqFreeDispatchService,
     @Inject(ModelMetadataRefreshService)
     private readonly modelMetadataRefreshService: ModelMetadataRefreshService,
   ) {}
@@ -291,6 +295,64 @@ export class DispatchController {
   @ApiParam({ name: "tier", type: String, example: "mini" })
   async getFreeTierDispatchStatus(@Param("tier") tier: string) {
     return this.freeTierDispatchService.getStatus(tier as FreeTierId);
+  }
+
+  // Read-only Google free-daily-quota dispatch status — see
+  // GoogleFreeDispatchService. No token threshold like the OpenAI tiers:
+  // active/startedAt only. Not password-gated, same as the free-tier status
+  // route above — it enqueues nothing.
+  @Get("google")
+  async getGoogleDispatchStatus() {
+    return this.googleFreeDispatchService.getStatus();
+  }
+
+  // Deactivates the Google free-daily-quota dispatch cycle so it stops
+  // scheduling further ticks — a no-op (not an error) if it wasn't running.
+  // Simpler than stopFreeTierDispatch above: there's only one Google cycle,
+  // not per-tier, so no tier param and no 'both' fan-out.
+  @Delete("google")
+  async stopGoogleDispatch() {
+    return this.googleFreeDispatchService.stop();
+  }
+
+  // Read-only Groq free-daily-quota dispatch status — see
+  // GroqFreeDispatchService. Same shape as the Google route: no token
+  // threshold, active/startedAt only.
+  @Get("groq")
+  async getGroqDispatchStatus() {
+    return this.groqFreeDispatchService.getStatus();
+  }
+
+  // Deactivates the Groq free-daily-quota dispatch cycle so it stops
+  // scheduling further ticks — a no-op (not an error) if it wasn't running.
+  @Delete("groq")
+  async stopGroqDispatch() {
+    return this.groqFreeDispatchService.stop();
+  }
+
+  // How many strategy runs are currently in the 'error' status. Read-only,
+  // un-gated — backs the maintenance panel's "delete errored runs" button
+  // (the figure the DELETE below would remove).
+  @Get("runs/errored")
+  async countErroredRuns() {
+    return this.strategyService.countErroredRuns();
+  }
+
+  // Bulk version of DELETE run/:runId — permanently deletes every strategy
+  // run currently in the 'error' status, plus all rows tied to each (guesses,
+  // solve prompts, LLM proposals, and category-judge verdicts). For clearing
+  // out a batch of runs that blew up on a since-fixed bug in one shot. The
+  // 'error' filter can't match a still-'running' run, so unlike the
+  // single-run route there's no per-run running check.
+  @Delete("runs/errored")
+  @UseGuards(DispatchAuthGuard)
+  @ApiBody({ type: DispatchAuthDto })
+  async deleteErroredRuns() {
+    const result = await this.strategyService.deleteErroredRuns();
+    return {
+      message: `Deleted ${result.deletedRuns} errored strategy run(s) and all related data`,
+      ...result,
+    };
   }
 
   // Permanently deletes a strategy run and every row that belongs to it —

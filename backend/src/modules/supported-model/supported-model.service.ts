@@ -199,4 +199,20 @@ export class SupportedModelService {
     });
     return rows.map((row) => row.modelName);
   }
+
+  /**
+   * Model names currently configured for `strategyName` and marked
+   * `supported: true` — the strategy-keyed counterpart to
+   * findModelNamesByFreeTier above (which is keyed by the freeTier column
+   * instead). Used by GoogleFreeDispatchService to find which models the
+   * Google burn cycle should spread across. Ordered by id, same convention
+   * as every other lookup in this service.
+   */
+  async findModelNamesByStrategy(strategyName: string): Promise<string[]> {
+    const rows = await this.repo.find({
+      where: { strategyName, supported: true },
+      order: { id: "ASC" },
+    });
+    return rows.map((row) => row.modelName);
+  }
 }

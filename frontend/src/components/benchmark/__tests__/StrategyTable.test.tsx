@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { render, screen, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Route, Routes, useParams } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import type { LeaderboardRow } from "../../../data/benchmark/types";
 import { StrategyTable } from "../StrategyTable";
@@ -97,5 +98,49 @@ describe("StrategyTable — Category IQ column", () => {
     expect(
       screen.queryByRole("columnheader", { name: "Category IQ" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("StrategyTable — routing a model id containing a slash", () => {
+  // Regression: Groq model ids ("qwen/qwen3.6-27b", "openai/gpt-oss-120b")
+  // contain a literal "/", unlike every prior model id this route was built
+  // around (see StrategyMeta's doc comment). An un-encoded link splits into
+  // two path segments, which /leaderboard/:strategyId (one segment) can't
+  // match — React Router logs "No routes matched" and never navigates.
+  it("navigates to a correctly-encoded /leaderboard/:strategyId URL", async () => {
+    function ParamProbe() {
+      const { strategyId } = useParams();
+      return <div data-testid="probe">{strategyId}</div>;
+    }
+
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={["/from"]}>
+        <Routes>
+          <Route
+            path="/from"
+            element={
+              <StrategyTable
+                rows={[
+                  makeRow({
+                    id: "qwen/qwen3.6-27b",
+                    strategyName: "llm-groq",
+                    modelName: "qwen/qwen3.6-27b",
+                    kind: "llm",
+                  }),
+                ]}
+                metricKey="successRate"
+                variant="llm"
+              />
+            }
+          />
+          <Route path="/leaderboard/:strategyId" element={<ParamProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("link"));
+
+    expect(await screen.findByTestId("probe")).toHaveTextContent("qwen/qwen3.6-27b");
   });
 });

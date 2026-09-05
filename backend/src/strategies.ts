@@ -8,6 +8,7 @@ export const SUPPORTED_STRATEGIES = [
   "llm-openai",
   "llm-ollama",
   "llm-google",
+  "llm-groq",
 ] as const;
 
 export type SupportedStrategy = (typeof SUPPORTED_STRATEGIES)[number];
@@ -19,8 +20,9 @@ export const SHUFFLE_FOOLISH = "shuffle-foolish" as const;
 export const LLM_OPENAI = "llm-openai" as const;
 export const LLM_OLLAMA = "llm-ollama" as const;
 export const LLM_GOOGLE = "llm-google" as const;
+export const LLM_GROQ = "llm-groq" as const;
 
-export const LLM_STRATEGIES = [LLM_OPENAI, LLM_OLLAMA, LLM_GOOGLE] as const;
+export const LLM_STRATEGIES = [LLM_OPENAI, LLM_OLLAMA, LLM_GOOGLE, LLM_GROQ] as const;
 
 export function isLlmStrategy(strategyName: string): boolean {
   return (LLM_STRATEGIES as readonly string[]).includes(strategyName);
@@ -64,6 +66,19 @@ export const DEFAULT_LLM_GOOGLE_CONCURRENCY = 1;
 // rate-limit hit, used only when Google's own RetryInfo.retryDelay is
 // absent from the error — see llm-strategy-runner.service.ts.
 export const DEFAULT_LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS = 60;
+
+export const DEFAULT_LLM_GROQ_CONCURRENCY = 1;
+
+// Fallback wait (seconds) before retrying after a Groq per-minute
+// rate-limit hit, used only when neither Groq's retry-after nor
+// x-ratelimit-reset-tokens header parsed — see orchestrator/src/solver.ts.
+export const DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS = 60;
+
+// Fallback hold duration (seconds) when a Groq daily-quota 429 carried no
+// parseable reset-requests/retry-after header at all — a generous 24h,
+// since (unlike Google's fixed Pacific-midnight reset) there is no shared
+// clock boundary to fall back to for Groq.
+export const DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS = 24 * 60 * 60;
 
 // How many prompts a single solve step may make before the orchestrator
 // gives up on a fresh candidate and reports a duplicate/invalid failure.
@@ -167,6 +182,41 @@ export function llmGoogleRateLimitFallbackSeconds(env: NodeJS.ProcessEnv = proce
 }
 
 /**
+ * How many llm-groq runs the worker may process at once, from
+ * LLM_GROQ_CONCURRENCY. Falls back to DEFAULT_LLM_GROQ_CONCURRENCY for
+ * missing/invalid values.
+ */
+export function llmGroqConcurrency(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.LLM_GROQ_CONCURRENCY, DEFAULT_LLM_GROQ_CONCURRENCY);
+}
+
+/**
+ * Fallback wait (seconds) before retrying a Groq per-minute rate-limit hit,
+ * from LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS. Only used when Groq's own
+ * headers didn't yield a wait. Falls back to
+ * DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS for missing/invalid values.
+ */
+export function llmGroqRateLimitFallbackSeconds(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(
+    env.LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS,
+    DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS,
+  );
+}
+
+/**
+ * Fallback daily-hold duration (seconds) when a Groq daily-quota hit carried
+ * no parseable reset duration at all, from LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS.
+ * Falls back to DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS for
+ * missing/invalid values.
+ */
+export function llmGroqDailyHoldFallbackSeconds(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(
+    env.LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
+    DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
+  );
+}
+
+/**
  * Maximum duplicate guesses before an LLM run is terminated with a
  * 'duplicate' status, from LLM_MAX_DUPLICATE_GUESSES. Guards against a
  * cooperative-but-confused model that keeps re-proposing the same group.
@@ -247,6 +297,35 @@ export function llmTemperature(env: NodeJS.ProcessEnv = process.env): number {
  */
 export function startOfTodayUtc(now: Date = new Date()): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+/**
+ * The cron pattern DailyAutomationBootstrap schedules its BullMQ job
+ * scheduler with — 00:15 UTC, a quarter-hour after the OpenAI mini/nano
+ * tier's UTC-midnight usage window resets. Shared source of truth for the
+ * schedule's instant: nextDailyAutomationRunAt below hardcodes the same
+ * 00:15 UTC via its own date math (not derived from this string, since a
+ * cron pattern isn't trivially convertible to "next instant" logic), so
+ * changing one without the other would silently desync the bootstrap's
+ * actual schedule from what the UI reports as "next run".
+ */
+export const DAILY_AUTOMATION_CRON = "15 0 * * *";
+
+/**
+ * The next 00:15 UTC instant at or after `now` — when DailyAutomationBootstrap's
+ * cron next fires (or just fired, if called exactly at that instant, in
+ * which case this returns tomorrow's). Used by AutomationController to tell
+ * the UI when the next daily-automation run is expected. Keep this in sync
+ * with DAILY_AUTOMATION_CRON above if the schedule ever changes.
+ */
+export function nextDailyAutomationRunAt(now: Date = new Date()): Date {
+  const next = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 15, 0, 0),
+  );
+  if (next.getTime() <= now.getTime()) {
+    next.setUTCDate(next.getUTCDate() + 1);
+  }
+  return next;
 }
 
 export const DEFAULT_FREE_TIER_DISPATCH_TICK_MS = 60_000;

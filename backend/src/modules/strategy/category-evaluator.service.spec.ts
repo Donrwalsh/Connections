@@ -390,3 +390,72 @@ describe("CategoryEvaluatorService.deleteRunEvaluations", () => {
     expect(catEvalRepo.delete).not.toHaveBeenCalled();
   });
 });
+
+describe("CategoryEvaluatorService failed-judge-call maintenance", () => {
+  let service: CategoryEvaluatorService;
+  let catEvalRepo: { delete: jest.Mock; count: jest.Mock };
+
+  beforeEach(async () => {
+    process.env.INTERNAL_API_KEY = "test-key";
+    catEvalRepo = {
+      delete: jest.fn().mockResolvedValue({ affected: 4 }),
+      count: jest.fn().mockResolvedValue(4),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        CategoryEvaluatorService,
+        {
+          provide: getRepositoryToken(CategoryEvaluation),
+          useValue: { findOne: jest.fn(), save: jest.fn(), ...catEvalRepo },
+        },
+        { provide: getRepositoryToken(LlmProposal), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(Puzzle), useValue: { findOne: jest.fn() } },
+        {
+          provide: getRepositoryToken(StrategyRun),
+          useValue: { findOne: jest.fn(), delete: jest.fn() },
+        },
+        { provide: OrchestratorService, useValue: { judgeCategory: jest.fn() } },
+        { provide: LLM_OPENAI_QUEUE, useValue: { add: jest.fn() } },
+        { provide: LLM_OLLAMA_QUEUE, useValue: { add: jest.fn() } },
+        { provide: LLM_GOOGLE_QUEUE, useValue: { add: jest.fn() } },
+      ],
+    }).compile();
+    service = module.get(CategoryEvaluatorService);
+  });
+
+  afterEach(() => {
+    delete process.env.INTERNAL_API_KEY;
+    jest.restoreAllMocks();
+  });
+
+  describe("countFailedEvaluations", () => {
+    it("counts only the callError rows", async () => {
+      catEvalRepo.count.mockResolvedValue(7);
+
+      const result = await service.countFailedEvaluations();
+
+      expect(result).toEqual({ failed: 7 });
+      expect(catEvalRepo.count).toHaveBeenCalledWith({
+        where: { status: CategoryEvalStatus.CALL_ERROR },
+      });
+    });
+  });
+
+  describe("deleteFailedEvaluations", () => {
+    it("deletes every callError row so the next dispatch re-judges those proposals, and reports the count", async () => {
+      const result = await service.deleteFailedEvaluations();
+
+      expect(result).toEqual({ deleted: 4 });
+      expect(catEvalRepo.delete).toHaveBeenCalledWith({
+        status: CategoryEvalStatus.CALL_ERROR,
+      });
+    });
+
+    it("reports zero when no judge call has failed", async () => {
+      catEvalRepo.delete.mockResolvedValue({ affected: 0 });
+
+      expect(await service.deleteFailedEvaluations()).toEqual({ deleted: 0 });
+    });
+  });
+});

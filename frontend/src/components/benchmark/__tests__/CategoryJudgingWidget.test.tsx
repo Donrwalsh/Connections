@@ -58,4 +58,32 @@ describe("CategoryJudgingWidget", () => {
     await vi.advanceTimersByTimeAsync(10_000);
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
+
+  it("shows the auto-run line when an automation prop is given", async () => {
+    stubCoverage({ eligible: 50, judged: 42, pending: 8 });
+
+    render(
+      <CategoryJudgingWidget
+        automation={{
+          message: "enqueued 8",
+          lastRunAt: "2024-06-01T00:15:00.000Z",
+          nextRunAt: "2024-06-02T00:15:00.000Z",
+          isError: false,
+        }}
+      />,
+    );
+
+    expect(
+      await screen.findByText("Auto-run: enqueued 8 (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM"),
+    ).toBeInTheDocument();
+  });
+
+  it("omits the auto-run line when no automation prop is given", async () => {
+    stubCoverage({ eligible: 12, judged: 12, pending: 0 });
+
+    render(<CategoryJudgingWidget />);
+
+    await screen.findByText("All 12 judged");
+    expect(screen.queryByText(/Auto-run:/)).not.toBeInTheDocument();
+  });
 });

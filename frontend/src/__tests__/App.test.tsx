@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
+import { AdminAuthProvider } from "../auth/AdminAuthContext";
 import type { Category } from "../data/types";
 
 function renderApp(initialEntries: string[]) {
@@ -14,9 +15,11 @@ function renderApp(initialEntries: string[]) {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={initialEntries}>
-        <App />
-      </MemoryRouter>
+      <AdminAuthProvider>
+        <MemoryRouter initialEntries={initialEntries}>
+          <App />
+        </MemoryRouter>
+      </AdminAuthProvider>
     </QueryClientProvider>,
   );
 }
@@ -220,11 +223,61 @@ describe("App leaderboard routes", () => {
     expect(await screen.findByRole("heading", { name: "Guess chain" })).toBeInTheDocument();
   });
 
-  it("renders the free-tier budget widgets at /activity", async () => {
+  it("renders the maintenance panel at /maintenance for an admin session", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((url: unknown) => {
         const href = String(url);
+        if (href.includes("/auth/me")) {
+          return Promise.resolve({ ok: true, json: async () => ({ isAdmin: true }) });
+        }
+        if (href.includes("/dispatch/runs/errored")) {
+          return Promise.resolve({ ok: true, json: async () => ({ erroredRuns: 2 }) });
+        }
+        if (href.includes("/category-evaluation/failed")) {
+          return Promise.resolve({ ok: true, json: async () => ({ failed: 5 }) });
+        }
+        return Promise.resolve({ ok: true, json: async () => ({}) });
+      }),
+    );
+
+    renderApp(["/maintenance"]);
+
+    expect(
+      await screen.findByRole("heading", { name: "Bulk cleanup" }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /delete errored runs/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /delete failed judge calls/i })).toBeInTheDocument();
+  });
+
+  it("hides the maintenance panel behind a not-found for a non-admin visitor", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        const href = String(url);
+        if (href.includes("/auth/me")) {
+          return Promise.resolve({ ok: true, json: async () => ({ isAdmin: false }) });
+        }
+        return Promise.resolve({ ok: true, json: async () => ({}) });
+      }),
+    );
+
+    renderApp(["/maintenance"]);
+
+    expect(await screen.findByText("Not found.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Bulk cleanup" })).not.toBeInTheDocument();
+  });
+
+  it("renders the free-tier budget widgets at /activity for an admin session", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        const href = String(url);
+        if (href.includes("/auth/me")) {
+          return Promise.resolve({ ok: true, json: async () => ({ isAdmin: true }) });
+        }
         if (href.includes("/strategy/free-tier-usage/flagship")) {
           return Promise.resolve({
             ok: true,
@@ -251,6 +304,30 @@ describe("App leaderboard routes", () => {
             }),
           });
         }
+        if (href.includes("/strategy/activity/recent")) {
+          return Promise.resolve({ ok: true, json: async () => [] });
+        }
+        if (href.includes("/category-evaluation/coverage")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ eligible: 0, judged: 0, pending: 0 }),
+          });
+        }
+        if (href.includes("/automation/status")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              lastRunAt: null,
+              nextRunAt: "2024-06-02T00:15:00.000Z",
+              judge: { enqueued: null, error: null },
+              miniBurn: { outcome: null, message: null },
+              googleBurn: { outcome: null, message: null },
+            }),
+          });
+        }
+        if (href.includes("/dispatch/google")) {
+          return Promise.resolve({ ok: true, json: async () => ({ active: false, startedAt: null }) });
+        }
         return Promise.resolve({ ok: true, json: async () => ({ deterministic: [], llm: [] }) });
       }),
     );
@@ -258,7 +335,33 @@ describe("App leaderboard routes", () => {
     renderApp(["/activity"]);
 
     expect(await screen.findByRole("heading", { name: "Activity" })).toBeInTheDocument();
-    expect(screen.getByText("Flagship daily tokens")).toBeInTheDocument();
+    // Waits on the admin-only widgets, which only render once AdminAuthProvider's
+    // /auth/me check resolves — plain vi.waitFor (rather than
+    // screen.findByText's own timeout option) polls reliably here.
+    await vi.waitFor(() => {
+      expect(screen.getByText("Flagship daily tokens")).toBeInTheDocument();
+    });
     expect(screen.getByText("Mini & nano daily tokens")).toBeInTheDocument();
+  });
+
+  it("hides the operational widgets at /activity for a non-admin visitor", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        const href = String(url);
+        if (href.includes("/auth/me")) {
+          return Promise.resolve({ ok: true, json: async () => ({ isAdmin: false }) });
+        }
+        if (href.includes("/strategy/activity/recent")) {
+          return Promise.resolve({ ok: true, json: async () => [] });
+        }
+        return Promise.resolve({ ok: true, json: async () => ({ deterministic: [], llm: [] }) });
+      }),
+    );
+
+    renderApp(["/activity"]);
+
+    expect(await screen.findByRole("heading", { name: "Activity" })).toBeInTheDocument();
+    expect(screen.queryByText("Flagship daily tokens")).not.toBeInTheDocument();
   });
 });

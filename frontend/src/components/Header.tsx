@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { useAdminAuth } from "../auth/useAdminAuth";
 import { randomPuzzleDate, todayUtcString } from "../data/calendarMock";
 import { CalendarPopover } from "./CalendarPopover";
 
@@ -64,6 +65,14 @@ function ActivityIcon() {
   );
 }
 
+function WrenchIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path d="M10.5 1.5a3.5 3.5 0 0 0-3.4 4.3L1.8 11l1.4 1.4 5.2-5.2A3.5 3.5 0 1 0 10.5 1.5z" />
+    </svg>
+  );
+}
+
 function navLinkClass({ isActive }: { isActive: boolean }): string {
   return `site-header__link${isActive ? " site-header__link--active" : ""}`;
 }
@@ -72,6 +81,7 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
  * the 2px accent bottom border — the first place the accent-border convention
  * is established (see DESIGN.md "Navigation"). */
 export function Header() {
+  const { isAdmin, logout } = useAdminAuth();
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
@@ -151,6 +161,24 @@ export function Header() {
           <ActivityIcon />
           <span className="site-header__link-label">Activity</span>
         </NavLink>
+
+        {isAdmin ? (
+          <NavLink to="/maintenance" className={navLinkClass} aria-label="Maintenance">
+            <WrenchIcon />
+            <span className="site-header__link-label">Maintenance</span>
+          </NavLink>
+        ) : null}
+
+        {isAdmin ? (
+          <button
+            type="button"
+            className="site-header__icon-btn"
+            aria-label="Log out"
+            onClick={() => void logout()}
+          >
+            Log out
+          </button>
+        ) : null}
       </nav>
     </header>
   );

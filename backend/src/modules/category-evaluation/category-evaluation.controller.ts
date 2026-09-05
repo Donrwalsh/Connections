@@ -48,6 +48,30 @@ export class CategoryEvaluationController {
     return this.categoryEvaluatorService.getCoverage();
   }
 
+  // How many CategoryEvaluation rows are failed judge calls (status
+  // 'callError'). Read-only, un-gated — backs the maintenance panel's
+  // "delete failed judge calls" button (the figure it would remove).
+  @Get("failed")
+  async failedCount() {
+    return this.categoryEvaluatorService.countFailedEvaluations();
+  }
+
+  // Bulk-deletes every failed judge call (CategoryEvaluation with status
+  // 'callError') across all runs. Each removed row leaves its proposal
+  // un-evaluated again, so the next un-forced /category-evaluation/dispatch
+  // re-enqueues it — for requeueing judge calls that failed on a
+  // since-fixed problem. Password-gated like the other mutating routes.
+  @Delete("failed")
+  @UseGuards(DispatchAuthGuard)
+  @ApiBody({ type: DispatchAuthDto })
+  async deleteFailedEvaluations() {
+    const result = await this.categoryEvaluatorService.deleteFailedEvaluations();
+    return {
+      message: `Deleted ${result.deleted} failed judge call(s); the next dispatch will re-judge them`,
+      ...result,
+    };
+  }
+
   // Wipes every CategoryEvaluation row for one strategy run so it can be
   // re-judged from scratch. Modelled on DELETE /dispatch/run/:runId:
   // password-gated, 404s on an unknown run id.

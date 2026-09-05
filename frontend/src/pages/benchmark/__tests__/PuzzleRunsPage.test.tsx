@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AdminAuthContext } from "../../../auth/useAdminAuth";
 import { PuzzleRunsPage } from "../PuzzleRunsPage";
 import type { StrategyRunListItem, SupportedModelRecord } from "../../../data/benchmark/types";
 
@@ -114,13 +115,21 @@ function stubFetch(
   );
 }
 
+// Admin context: this page (via GuessChainVisualizer) offers the delete-run
+// button used by the tests below, which is now admin-gated. Every test in
+// this file runs as an admin session — the non-admin case is covered by
+// GuessChainVisualizer's own tests.
 function renderRuns(path: string) {
   render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/leaderboard/:strategyId/:puzzleId" element={<PuzzleRunsPage />} />
-      </Routes>
-    </MemoryRouter>,
+    <AdminAuthContext.Provider
+      value={{ isAdmin: true, isLoading: false, login: vi.fn(), logout: vi.fn() }}
+    >
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/leaderboard/:strategyId/:puzzleId" element={<PuzzleRunsPage />} />
+        </Routes>
+      </MemoryRouter>
+    </AdminAuthContext.Provider>,
   );
 }
 
@@ -328,6 +337,7 @@ describe("PuzzleRunsPage", () => {
               deletedGuesses: 0,
               deletedSolvePrompts: 0,
               deletedLlmProposals: 0,
+              deletedCategoryEvaluations: 0,
             }),
           });
         }

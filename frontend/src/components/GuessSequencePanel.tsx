@@ -274,7 +274,7 @@ export function GuessSequencePanel({
                * produce a link to ".../undefined" — see PuzzlePage's fetch. */}
               {Number.isInteger(puzzleId) && (
                 <Link
-                  to={`/leaderboard/${selectedRun.modelName ?? selectedRun.strategyName}/${puzzleId}`}
+                  to={`/leaderboard/${encodeURIComponent(selectedRun.modelName ?? selectedRun.strategyName)}/${puzzleId}`}
                   className="guess-sequence__run-link"
                 >
                   View full run details →

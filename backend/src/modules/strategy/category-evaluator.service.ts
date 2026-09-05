@@ -188,6 +188,33 @@ export class CategoryEvaluatorService {
   }
 
   /**
+   * How many CategoryEvaluation rows are failed judge calls (status
+   * 'callError', verdict null). Backs the maintenance panel's "delete
+   * failed judge calls" button — the figure it deletes.
+   */
+  async countFailedEvaluations(): Promise<{ failed: number }> {
+    const failed = await this.categoryEvalRepo.count({
+      where: { status: CategoryEvalStatus.CALL_ERROR },
+    });
+    return { failed };
+  }
+
+  /**
+   * Delete every failed judge call (CategoryEvaluation with status
+   * 'callError') across all runs. Each removed row leaves its used
+   * successful proposal with no CategoryEvaluation again, so the next
+   * un-forced `evaluate-categories` dispatch re-enqueues it — the way to
+   * requeue judge calls that failed on a since-fixed problem. Reports how
+   * many rows were removed.
+   */
+  async deleteFailedEvaluations(): Promise<{ deleted: number }> {
+    const { affected } = await this.categoryEvalRepo.delete({
+      status: CategoryEvalStatus.CALL_ERROR,
+    });
+    return { deleted: affected ?? 0 };
+  }
+
+  /**
    * Judge one proposal's category. Idempotent: a no-op if a row already
    * exists (unless `force`). Writes exactly one CategoryEvaluation row on a
    * judged or callError outcome; writes nothing (and returns "skipped") when
