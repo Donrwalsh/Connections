@@ -22,6 +22,7 @@ import {
 import { GoogleFreeDispatchService } from "../google-free-dispatch/google-free-dispatch.service";
 import { GroqFreeDispatchService } from "../groq-free-dispatch/groq-free-dispatch.service";
 import { OpenRouterFreeDispatchService } from "../openrouter-free-dispatch/openrouter-free-dispatch.service";
+import { MistralFreeDispatchService } from "../mistral-free-dispatch/mistral-free-dispatch.service";
 import { FreeTierId } from "../strategy/free-tier-usage.service";
 import { AUTOMATIC_STRATEGIES, LLM_STRATEGIES, STRATEGY_SET, isLlmStrategy } from "../../strategies";
 import { DispatchAuthGuard } from "./dispatch-auth.guard";
@@ -53,6 +54,8 @@ export class DispatchController {
     @Inject(GroqFreeDispatchService) private readonly groqFreeDispatchService: GroqFreeDispatchService,
     @Inject(OpenRouterFreeDispatchService)
     private readonly openRouterFreeDispatchService: OpenRouterFreeDispatchService,
+    @Inject(MistralFreeDispatchService)
+    private readonly mistralFreeDispatchService: MistralFreeDispatchService,
     @Inject(ModelMetadataRefreshService)
     private readonly modelMetadataRefreshService: ModelMetadataRefreshService,
   ) {}
@@ -346,6 +349,22 @@ export class DispatchController {
   @Delete("openrouter")
   async stopOpenRouterDispatch() {
     return this.openRouterFreeDispatchService.stop();
+  }
+
+  // Read-only Mistral free-dispatch status — see MistralFreeDispatchService.
+  // Same shape as the Groq route: no token threshold, active/startedAt only.
+  // Mistral's constraints (1 req/sec, per-pool TPM, per-pool monthly tokens)
+  // are enforced by Mistral itself and surface only as 429s.
+  @Get("mistral")
+  async getMistralDispatchStatus() {
+    return this.mistralFreeDispatchService.getStatus();
+  }
+
+  // Deactivates the Mistral free-dispatch cycle so it stops scheduling
+  // further ticks — a no-op (not an error) if it wasn't running.
+  @Delete("mistral")
+  async stopMistralDispatch() {
+    return this.mistralFreeDispatchService.stop();
   }
 
   // How many strategy runs are currently in the 'error' status. Read-only,
