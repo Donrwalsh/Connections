@@ -1,7 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { AdminAuthContext } from "../../auth/AdminAuthContext";
 import { Header } from "../Header";
 import { monthLabel, todayUtcString } from "../../data/calendarMock";
 
@@ -10,6 +11,18 @@ function renderHeader(initialEntry = "/leaderboard") {
     <MemoryRouter initialEntries={[initialEntry]}>
       <Header />
     </MemoryRouter>,
+  );
+}
+
+function renderHeaderAsAdmin(initialEntry = "/leaderboard") {
+  return render(
+    <AdminAuthContext.Provider
+      value={{ isAdmin: true, isLoading: false, login: vi.fn(), logout: vi.fn() }}
+    >
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Header />
+      </MemoryRouter>
+    </AdminAuthContext.Provider>,
   );
 }
 
@@ -145,6 +158,38 @@ describe("Header", () => {
     expect(screen.getByRole("button", { name: today }).className).not.toContain(
       "calendar-popover__cell--selected",
     );
+  });
+
+  it("hides the Maintenance link and Log out button for a non-admin visitor", () => {
+    renderHeader();
+
+    expect(screen.queryByRole("link", { name: "Maintenance" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Log out" })).not.toBeInTheDocument();
+  });
+
+  it("shows the Maintenance link and Log out button for an admin session", () => {
+    renderHeaderAsAdmin();
+
+    expect(screen.getByRole("link", { name: "Maintenance" })).toHaveAttribute(
+      "href",
+      "/maintenance",
+    );
+    expect(screen.getByRole("button", { name: "Log out" })).toBeInTheDocument();
+  });
+
+  it("calls logout when the Log out button is clicked", async () => {
+    const user = userEvent.setup();
+    const logout = vi.fn();
+    render(
+      <AdminAuthContext.Provider value={{ isAdmin: true, isLoading: false, login: vi.fn(), logout }}>
+        <MemoryRouter initialEntries={["/leaderboard"]}>
+          <Header />
+        </MemoryRouter>
+      </AdminAuthContext.Provider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Log out" }));
+    expect(logout).toHaveBeenCalled();
   });
 
   it("navigates to a random puzzle from the shuffle icon", async () => {
