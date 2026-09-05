@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { useAdminAuth } from "../auth/AdminAuthContext";
+import { useAdminAuth } from "../auth/useAdminAuth";
 import { randomPuzzleDate, todayUtcString } from "../data/calendarMock";
 import { CalendarPopover } from "./CalendarPopover";
 

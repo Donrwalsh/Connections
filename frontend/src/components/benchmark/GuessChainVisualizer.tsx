@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useAdminAuth } from "../../auth/AdminAuthContext";
+import { useAdminAuth } from "../../auth/useAdminAuth";
 import { fetchRunDetail } from "../../data/benchmark/api";
 import { formatDuration } from "../../data/benchmark/metrics";
 import {

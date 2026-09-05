@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AdminAuthContext } from "../../../auth/AdminAuthContext";
+import { AdminAuthContext } from "../../../auth/useAdminAuth";
 import { MaintenancePage } from "../MaintenancePage";
 
 function renderPage(isAdmin: boolean) {

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAdminAuth } from "../auth/AdminAuthContext";
+import { useAdminAuth } from "../auth/useAdminAuth";
 
 /** Hidden login form for the site's one admin identity — not linked from
  * site navigation (see Header.tsx); reached only by visiting /admin-login

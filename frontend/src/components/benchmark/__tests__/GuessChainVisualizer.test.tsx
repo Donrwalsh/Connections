@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AdminAuthContext } from "../../../auth/AdminAuthContext";
+import { AdminAuthContext } from "../../../auth/useAdminAuth";
 import { GuessChainVisualizer } from "../GuessChainVisualizer";
 import type { StrategyRunDetail } from "../../../data/benchmark/types";
 

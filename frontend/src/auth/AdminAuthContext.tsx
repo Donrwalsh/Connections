@@ -1,40 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ADMIN_SESSION_EXPIRED_EVENT } from "../data/benchmark/api";
 import { fetchAuthMe, loginAdmin, logoutAdmin } from "../data/authApi";
-
-export interface AdminAuthValue {
-  /** Whether this browser session is currently logged in as admin. Always
-   * true outside production (see backend AuthController.me) and false while
-   * the initial /auth/me check is still in flight. */
-  isAdmin: boolean;
-  /** True only until the first /auth/me check resolves. */
-  isLoading: boolean;
-  /** Logs in against DISPATCH_PASSWORD; rejects (thrown Error, backend
-   * message) on a wrong password. Refreshes isAdmin on success. */
-  login: (password: string) => Promise<void>;
-  /** Clears the session cookie and flips isAdmin false. */
-  logout: () => Promise<void>;
-}
-
-const defaultValue: AdminAuthValue = {
-  isAdmin: false,
-  isLoading: false,
-  login: async () => {},
-  logout: async () => {},
-};
-
-/** Exported (not just the hook below) so tests can override it directly via
- * `<AdminAuthContext.Provider value={...}>` without going through a real
- * login flow. */
-export const AdminAuthContext = createContext<AdminAuthValue>(defaultValue);
-
-/** Reads the current admin session — defaults to a logged-out, non-loading
- * state when no AdminAuthProvider is mounted (e.g. a component rendered in
- * isolation in a test), so consumers never need to guard against a missing
- * provider. */
-export function useAdminAuth(): AdminAuthValue {
-  return useContext(AdminAuthContext);
-}
+import { AdminAuthContext } from "./useAdminAuth";
 
 /** Mounted once near the app root (see main.tsx). Checks /auth/me on mount
  * to learn whether this browser already holds a valid session cookie, and

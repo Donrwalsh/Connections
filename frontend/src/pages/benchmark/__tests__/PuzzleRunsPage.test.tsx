@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AdminAuthContext } from "../../../auth/AdminAuthContext";
+import { AdminAuthContext } from "../../../auth/useAdminAuth";
 import { PuzzleRunsPage } from "../PuzzleRunsPage";
 import type { StrategyRunListItem, SupportedModelRecord } from "../../../data/benchmark/types";
 

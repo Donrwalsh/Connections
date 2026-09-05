@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { useAdminAuth } from "../../auth/AdminAuthContext";
+import { useAdminAuth } from "../../auth/useAdminAuth";
 import { CategoryJudgingWidget } from "../../components/benchmark/CategoryJudgingWidget";
 import { FreeTierBudgetWidget } from "../../components/benchmark/FreeTierBudgetWidget";
 import { FreeTierDispatchModal } from "../../components/benchmark/FreeTierDispatchModal";

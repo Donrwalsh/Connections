@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useAdminAuth } from "../../auth/AdminAuthContext";
+import { useAdminAuth } from "../../auth/useAdminAuth";
 import { MaintenancePanel } from "../../components/benchmark/MaintenancePanel";
 
 /** Destructive bulk-cleanup actions, kept on their own route so they're

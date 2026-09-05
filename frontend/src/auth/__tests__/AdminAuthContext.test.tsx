@@ -2,7 +2,8 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ADMIN_SESSION_EXPIRED_EVENT } from "../../data/benchmark/api";
-import { AdminAuthProvider, useAdminAuth } from "../AdminAuthContext";
+import { AdminAuthProvider } from "../AdminAuthContext";
+import { useAdminAuth } from "../useAdminAuth";
 
 function Probe() {
   const { isAdmin, isLoading, login, logout } = useAdminAuth();
