@@ -1,6 +1,6 @@
 import { Queue } from "bullmq";
 import { redisConnection } from "./redis.config";
-import { LLM_OPENAI, LLM_OLLAMA, LLM_GOOGLE } from "../../strategies";
+import { LLM_OPENAI, LLM_OLLAMA, LLM_GOOGLE, LLM_GROQ } from "../../strategies";
 
 export const strategyQueue = new Queue("strategy-runs", {
   connection: redisConnection,
@@ -49,6 +49,16 @@ export const llmGoogleQueue = new Queue("llm-google-runs", {
   },
 });
 
+export const llmGroqQueue = new Queue("llm-groq-runs", {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 1000 },
+    removeOnComplete: { count: 1000 },
+    removeOnFail: { count: 5000 },
+  },
+});
+
 /**
  * Routes a strategy run to the queue that processes it: the three LLM
  * strategies get their per-provider queues, everything else stays on the
@@ -60,11 +70,13 @@ export function queueForStrategy(
   openAIQueue: Queue,
   ollamaQueue: Queue,
   googleQueue: Queue,
+  groqQueue: Queue,
   strategyName: string,
 ): Queue {
   if (strategyName === LLM_OPENAI) return openAIQueue;
   if (strategyName === LLM_OLLAMA) return ollamaQueue;
   if (strategyName === LLM_GOOGLE) return googleQueue;
+  if (strategyName === LLM_GROQ) return groqQueue;
   return defaultQueue;
 }
 
