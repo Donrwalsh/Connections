@@ -33,6 +33,10 @@ export class AutomationController {
         outcome: log?.googleBurnOutcome ?? null,
         message: log?.googleBurnMessage ?? null,
       },
+      groqBurn: {
+        outcome: log?.groqBurnOutcome ?? null,
+        message: log?.groqBurnMessage ?? null,
+      },
     };
   }
 }

@@ -6,6 +6,7 @@ import { AutomationRunLog } from "./entities/automation-run-log.entity";
 import { CategoryEvaluatorService } from "../strategy/category-evaluator.service";
 import { FreeTierDispatchService } from "../free-tier-dispatch/free-tier-dispatch.service";
 import { GoogleFreeDispatchService } from "../google-free-dispatch/google-free-dispatch.service";
+import { GroqFreeDispatchService } from "../groq-free-dispatch/groq-free-dispatch.service";
 
 describe("DailyAutomationService", () => {
   let service: DailyAutomationService;
@@ -13,6 +14,7 @@ describe("DailyAutomationService", () => {
   let mockCategoryEvaluatorService: { enqueuePending: jest.Mock };
   let mockFreeTierDispatchService: { getStatus: jest.Mock; start: jest.Mock };
   let mockGoogleFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
+  let mockGroqFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
 
   const todayStamp = () => new Date().toISOString().slice(0, 10);
 
@@ -33,6 +35,10 @@ describe("DailyAutomationService", () => {
       getStatus: jest.fn().mockResolvedValue({ active: false, startedAt: null }),
       start: jest.fn().mockResolvedValue({ status: { active: true, startedAt: new Date() }, outcome: "started" }),
     };
+    mockGroqFreeDispatchService = {
+      getStatus: jest.fn().mockResolvedValue({ active: false, startedAt: null }),
+      start: jest.fn().mockResolvedValue({ status: { active: true, startedAt: new Date() }, outcome: "started" }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -41,6 +47,7 @@ describe("DailyAutomationService", () => {
         { provide: CategoryEvaluatorService, useValue: mockCategoryEvaluatorService },
         { provide: FreeTierDispatchService, useValue: mockFreeTierDispatchService },
         { provide: GoogleFreeDispatchService, useValue: mockGoogleFreeDispatchService },
+        { provide: GroqFreeDispatchService, useValue: mockGroqFreeDispatchService },
       ],
     }).compile();
 
@@ -79,6 +86,7 @@ describe("DailyAutomationService", () => {
       );
       expect(mockFreeTierDispatchService.start).toHaveBeenCalled();
       expect(mockGoogleFreeDispatchService.start).toHaveBeenCalled();
+      expect(mockGroqFreeDispatchService.start).toHaveBeenCalled();
     });
 
     it("starts the mini burn at an 80% ceiling when no cycle is already running", async () => {
@@ -153,6 +161,53 @@ describe("DailyAutomationService", () => {
       expect(mockRunLogRepo.update).toHaveBeenCalledWith(
         { date: todayStamp() },
         { googleBurnOutcome: "alreadyActive", googleBurnMessage: "already running" },
+      );
+    });
+
+    it("starts the Groq burn when no cycle is already running", async () => {
+      await service.run();
+
+      expect(mockGroqFreeDispatchService.start).toHaveBeenCalled();
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        { groqBurnOutcome: "started", groqBurnMessage: "started" },
+      );
+    });
+
+    it("records alreadyExhausted for the Groq leg from start()'s own outcome", async () => {
+      mockGroqFreeDispatchService.start.mockResolvedValueOnce({
+        status: { active: false, startedAt: null },
+        outcome: "alreadyExhausted",
+      });
+
+      await service.run();
+
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        { groqBurnOutcome: "alreadyExhausted", groqBurnMessage: "every Groq model is currently RPD-held" },
+      );
+    });
+
+    it("records alreadyActive for the Groq leg without calling start, when a cycle is already running", async () => {
+      mockGroqFreeDispatchService.getStatus.mockResolvedValueOnce({ active: true, startedAt: new Date() });
+
+      await service.run();
+
+      expect(mockGroqFreeDispatchService.start).not.toHaveBeenCalled();
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        { groqBurnOutcome: "alreadyActive", groqBurnMessage: "already running" },
+      );
+    });
+
+    it("records a Groq leg failure without throwing, and still lets the other legs run", async () => {
+      mockGroqFreeDispatchService.start.mockRejectedValueOnce(new Error("groq down"));
+
+      await expect(service.run()).resolves.toBeUndefined();
+
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        { groqBurnOutcome: "error", groqBurnMessage: "groq down" },
       );
     });
   });
