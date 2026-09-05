@@ -97,11 +97,13 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `GOOGLE_API_KEY` | — | Google AI Studio API key (orchestrator only) |
 | `GROQ_API_KEY` | — | Groq API key (orchestrator only) |
 | `OPENROUTER_API_KEY` | — | OpenRouter API key (orchestrator only) |
-| `MODEL_PROVIDER` | `openai` | Default provider for provider-less requests (e.g. in-game AI Assist): `openai`, `ollama`, `google`, `groq`, or `openrouter`. Strategy runs pick their provider via strategy name (`llm-openai` / `llm-ollama` / `llm-google` / `llm-groq` / `llm-openrouter`), so all five are always active |
+| `MISTRAL_API_KEY` | — | Mistral La Plateforme API key (orchestrator only) |
+| `MODEL_PROVIDER` | `openai` | Default provider for provider-less requests (e.g. in-game AI Assist): `openai`, `ollama`, `google`, `groq`, `openrouter`, or `mistral`. Strategy runs pick their provider via strategy name (`llm-openai` / `llm-ollama` / `llm-google` / `llm-groq` / `llm-openrouter` / `llm-mistral`), so all six are always active |
 | `OPENAI_MODEL` | `gpt-4.1-nano` | OpenAI model id (used by the `llm-openai` strategy and provider-less requests) |
 | `GOOGLE_MODEL` | `gemini-3.6-flash` | Google AI Studio model id (used by the `llm-google` strategy and provider-less requests) |
 | `GROQ_MODEL` | `openai/gpt-oss-20b` | Groq model id (used by the `llm-groq` strategy and provider-less requests) |
 | `OPENROUTER_MODEL` | `google/gemma-4-31b-it:free` | OpenRouter model id (used by the `llm-openrouter` strategy and provider-less requests) |
+| `MISTRAL_MODEL` | `mistral-small-latest` | Mistral model id (used by the `llm-mistral` strategy and provider-less requests). Mistral's free ("Experiment") tier enforces a global 1 req/sec cap plus per-pool tokens-per-minute and tokens-per-month limits, and sends no `X-RateLimit-*` headers — see `LLM_MISTRAL_*` / `MISTRAL_*` below |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server base URL (used by the `llm-ollama` strategy) |
 | `OLLAMA_MODEL` | `llama3.2` | Ollama model id (used by the `llm-ollama` strategy) |
 | `MODEL_CONTEXT_WINDOW` | `8192` | Hard ceiling (in tokens) on Ollama's `num_ctx`, never exceeded regardless of a model's real `contextWindow` (see `SupportedModel`) — llama.cpp reserves `num_ctx`'s full KV-cache footprint at model-load time rather than scaling it to actual usage, so requesting a model's true context in full (e.g. 131K) can OOM-kill Ollama on memory-constrained hardware even though real prompts never come close to using it. Also the fallback when no per-model `contextWindow` is known at all (e.g. the provider-less AI Assist path) |
@@ -137,6 +139,11 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `OPENROUTER_DISPATCH_MAX_BATCH` | `3` | Max new trials a single OpenRouter dispatch tick may queue |
 | `OPENROUTER_DISPATCH_MAX_IN_FLIGHT` | `3` | Max `llm-openrouter` trials queued/running at once before a tick dispatches nothing new |
 | `OPENROUTER_DISPATCH_RPM_COOLDOWN_MS` | `60000` | How long the whole OpenRouter dispatch tick chain backs off after a per-minute 429 |
+| `LLM_MISTRAL_CONCURRENCY` | `1` | Maximum `llm-mistral` runs the worker processes at once (own queue). Keep at 1 — this is the guard for Mistral's global 1-request-per-second ceiling |
+| `LLM_MISTRAL_RATE_LIMIT_FALLBACK_SECONDS` | `60` | Fallback wait before retrying a Mistral per-minute rate-limit hit, used only when the 429 carried no parseable `retry-after` header. Never a run failure — waits and retries |
+| `MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS` | `4` | Mistral sends no rate-limit headers, so a monthly-cap 429 and a transient per-minute 429 look identical when the 429 body has no monthly wording. The runner parks a model after this many consecutive per-minute 429s on one run |
+| `MISTRAL_PERSISTENT_RATE_LIMIT_ELAPSED_SECONDS` | `300` | …or once that 429 streak has spanned this many wall-clock seconds, whichever trips first |
+| `MISTRAL_MODEL_HOLD_FALLBACK_SECONDS` | `21600` | How long a parked Mistral model stays held before the resume sweep re-checks it. Short and fixed (6h): a real monthly wall just re-parks each cycle until the calendar month rolls; a misclassified TPM blip recovers within the window |
 | `PORT` | `3001` | Orchestrator listen port |
 | `POSTGRES_USER` | `postgres` | Postgres user (compose-level; the backend reads it as `DB_USER`) |
 | `POSTGRES_PASSWORD` | `postgres` | Postgres password (compose-level; the backend reads it as `DB_PASSWORD`) |
