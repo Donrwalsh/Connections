@@ -22,7 +22,7 @@ describe("BulkActionModal", () => {
     expect(screen.getByText(/cannot be undone/i)).toBeInTheDocument();
   });
 
-  it("runs the action with the typed password, then shows its result message and reports done", async () => {
+  it("runs the action, then shows its result message and reports done", async () => {
     const user = userEvent.setup();
     const action = vi.fn().mockResolvedValue({ message: "Deleted 3 errored strategy run(s)" });
     const onDone = vi.fn();
@@ -37,12 +37,17 @@ describe("BulkActionModal", () => {
       />,
     );
 
-    await user.type(screen.getByLabelText("Password"), "hunter2");
     await user.click(screen.getByRole("button", { name: "Delete" }));
 
     expect(await screen.findByText("Deleted 3 errored strategy run(s)")).toBeInTheDocument();
-    expect(action).toHaveBeenCalledWith("hunter2");
+    expect(action).toHaveBeenCalledWith();
     expect(onDone).toHaveBeenCalledWith("Deleted 3 errored strategy run(s)");
+  });
+
+  it("has no password field", () => {
+    render(<BulkActionModal title="t" warning="w" action={vi.fn()} onClose={vi.fn()} />);
+
+    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
   });
 
   it("uses a custom confirm label when given one", () => {
@@ -63,17 +68,14 @@ describe("BulkActionModal", () => {
 
   it("shows the thrown error message and stays open when the action fails", async () => {
     const user = userEvent.setup();
-    const action = vi.fn().mockRejectedValue(new Error("Bad password"));
+    const action = vi.fn().mockRejectedValue(new Error("The action failed."));
     const onClose = vi.fn();
 
-    render(
-      <BulkActionModal title="t" warning="w" action={action} onClose={onClose} />,
-    );
+    render(<BulkActionModal title="t" warning="w" action={action} onClose={onClose} />);
     await user.click(screen.getByRole("button", { name: "Delete" }));
 
-    expect(await screen.findByText("Bad password")).toBeInTheDocument();
+    expect(await screen.findByText("The action failed.")).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
-    expect(screen.getByLabelText("Password")).toBeInTheDocument();
   });
 
   it("closes on Cancel, overlay click, and Escape", async () => {

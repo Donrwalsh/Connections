@@ -3,14 +3,15 @@ import { useEffect, useState, type FormEvent } from "react";
 export interface BulkActionModalProps {
   /** Modal heading — names the destructive bulk action, e.g. "Delete errored runs". */
   title: string;
-  /** Red permanence warning shown above the password field. */
+  /** Red permanence warning shown above the actions. */
   warning: string;
   /** Confirm button label. Defaults to "Delete". */
   confirmLabel?: string;
-  /** The actual bulk call. Given the typed password, resolves with the
-   * backend's response (its `message` is shown on success); rejects with an
-   * Error whose message is surfaced in-place. */
-  action: (password: string) => Promise<{ message: string }>;
+  /** The actual bulk call. Resolves with the backend's response (its
+   * `message` is shown on success); rejects with an Error whose message is
+   * surfaced in-place. Auth travels via the admin session cookie (see
+   * AdminAuthContext), not a password argument. */
+  action: () => Promise<{ message: string }>;
   onClose: () => void;
   /** Called once with the backend's message after the action succeeds — the
    * maintenance panel uses this to refetch its counts. */
@@ -31,9 +32,6 @@ export function BulkActionModal({
   onClose,
   onDone,
 }: BulkActionModalProps) {
-  // Only checked by the backend in production (DispatchAuthGuard) — left
-  // blank this has no effect against a local/dev backend.
-  const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
@@ -52,7 +50,7 @@ export function BulkActionModal({
     setError(null);
 
     try {
-      const result = await action(password);
+      const result = await action();
       setResultMessage(result.message);
       onDone?.(result.message);
     } catch (err: unknown) {
@@ -91,17 +89,6 @@ export function BulkActionModal({
             <p className="bench-error">{warning}</p>
 
             <form onSubmit={handleSubmit}>
-              <label className="bench-modal__field">
-                Password
-                <input
-                  type="password"
-                  className="bench-modal__number"
-                  autoComplete="off"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                />
-              </label>
-
               {error ? <p className="bench-error">{error}</p> : null}
 
               <div className="bench-modal__actions">

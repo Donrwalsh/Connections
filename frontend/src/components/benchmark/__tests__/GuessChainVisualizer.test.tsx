@@ -1,8 +1,19 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AdminAuthContext } from "../../../auth/useAdminAuth";
 import { GuessChainVisualizer } from "../GuessChainVisualizer";
 import type { StrategyRunDetail } from "../../../data/benchmark/types";
+
+function renderAsAdmin(ui: Parameters<typeof render>[0]) {
+  return render(
+    <AdminAuthContext.Provider
+      value={{ isAdmin: true, isLoading: false, login: vi.fn(), logout: vi.fn() }}
+    >
+      {ui}
+    </AdminAuthContext.Provider>,
+  );
+}
 
 const baseDetail: Omit<StrategyRunDetail, "solvePrompts" | "guesses"> = {
   id: 12345,
@@ -381,16 +392,25 @@ describe("GuessChainVisualizer", () => {
     expect(await screen.findByText("No guesses recorded for this run.")).toBeInTheDocument();
   });
 
-  it("shows a 'Delete this run' button only when the run's status is 'error'", async () => {
+  it("shows a 'Delete this run' button only when the run's status is 'error' for an admin session", async () => {
     stubFetch({ ...plainDetail, status: "error" });
 
-    render(<GuessChainVisualizer runId={12345} />);
+    renderAsAdmin(<GuessChainVisualizer runId={12345} />);
 
     expect(await screen.findByRole("button", { name: "Delete this run" })).toBeInTheDocument();
   });
 
   it("does not show the delete button for a non-error status", async () => {
     stubFetch({ ...plainDetail, status: "completed" });
+
+    renderAsAdmin(<GuessChainVisualizer runId={12345} />);
+
+    await screen.findByText("APPLE, BANANA, CHERRY, DATE");
+    expect(screen.queryByRole("button", { name: "Delete this run" })).not.toBeInTheDocument();
+  });
+
+  it("does not show the delete button for a non-admin visitor, even on an errored run", async () => {
+    stubFetch({ ...plainDetail, status: "error" });
 
     render(<GuessChainVisualizer runId={12345} />);
 
@@ -402,7 +422,7 @@ describe("GuessChainVisualizer", () => {
     const user = userEvent.setup();
     stubFetch({ ...plainDetail, status: "error" });
 
-    render(<GuessChainVisualizer runId={12345} />);
+    renderAsAdmin(<GuessChainVisualizer runId={12345} />);
 
     await user.click(await screen.findByRole("button", { name: "Delete this run" }));
 

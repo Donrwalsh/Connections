@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { useAdminAuth } from "../auth/useAdminAuth";
 import { randomPuzzleDate, todayUtcString } from "../data/calendarMock";
 import { CalendarPopover } from "./CalendarPopover";
 
@@ -80,6 +81,7 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
  * the 2px accent bottom border — the first place the accent-border convention
  * is established (see DESIGN.md "Navigation"). */
 export function Header() {
+  const { isAdmin, logout } = useAdminAuth();
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
@@ -160,10 +162,23 @@ export function Header() {
           <span className="site-header__link-label">Activity</span>
         </NavLink>
 
-        <NavLink to="/maintenance" className={navLinkClass} aria-label="Maintenance">
-          <WrenchIcon />
-          <span className="site-header__link-label">Maintenance</span>
-        </NavLink>
+        {isAdmin ? (
+          <NavLink to="/maintenance" className={navLinkClass} aria-label="Maintenance">
+            <WrenchIcon />
+            <span className="site-header__link-label">Maintenance</span>
+          </NavLink>
+        ) : null}
+
+        {isAdmin ? (
+          <button
+            type="button"
+            className="site-header__icon-btn"
+            aria-label="Log out"
+            onClick={() => void logout()}
+          >
+            Log out
+          </button>
+        ) : null}
       </nav>
     </header>
   );
