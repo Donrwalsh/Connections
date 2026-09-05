@@ -323,7 +323,137 @@ describe("classifyModelCallError", () => {
   });
 });
 
+// A real Groq 429 body for a tokens-per-day (TPD) exhaustion: the daily
+// request budget is untouched (remaining-requests > 0), only the daily
+// token bucket is drained, and Groq's "try again in 3m" merely covers the
+// next token trickle — not the daily reset.
+const GROQ_TPD_BODY = JSON.stringify({
+  error: {
+    message:
+      "Rate limit reached for model `openai/gpt-oss-120b` in organization `org_01m1q7na0seg49qdc64kzfa3az` " +
+      "service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 198984, Requested 1483. " +
+      "Please try again in 3m21.744s. Need more tokens? Upgrade to Dev Tier today at " +
+      "https://console.groq.com/settings/billing",
+    type: "tokens",
+    code: "rate_limit_exceeded",
+  },
+});
+
+// A Groq 429 body for a requests-per-day (RPD) exhaustion.
+const GROQ_RPD_BODY = JSON.stringify({
+  error: {
+    message:
+      "Rate limit reached for model `openai/gpt-oss-20b` in organization `org_x` service tier " +
+      "`on_demand` on requests per day (RPD): Limit 1000, Used 1000, Requested 1. " +
+      "Please try again in 2h14m3s.",
+    type: "requests",
+    code: "rate_limit_exceeded",
+  },
+});
+
+// A Groq 429 body for a tokens-per-minute (TPM) burst — a per-minute hit
+// that must stay `rate_limited`, retried in place.
+const GROQ_TPM_BODY = JSON.stringify({
+  error: {
+    message:
+      "Rate limit reached for model `openai/gpt-oss-120b` in organization `org_x` service tier " +
+      "`on_demand` on tokens per minute (TPM): Limit 15000, Used 14980, Requested 200. " +
+      "Please try again in 720ms.",
+    type: "tokens",
+    code: "rate_limit_exceeded",
+  },
+});
+
 describe("classifyModelCallError — groq", () => {
+  it("classifies a Groq tokens-per-day (TPD) 429 as rate_limited_daily even with daily requests remaining", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseBody: GROQ_TPD_BODY,
+      responseHeaders: {
+        "x-ratelimit-remaining-requests": "742",
+        "x-ratelimit-remaining-tokens": "0",
+        "x-ratelimit-reset-tokens": "3m21.744s",
+        "retry-after": "202",
+      },
+    });
+
+    const result = classifyModelCallError(err, "groq", { model: "openai/gpt-oss-120b" });
+
+    expect(result.code).toBe("rate_limited_daily");
+    // The short token-trickle reset must NOT become the hold duration — a
+    // TPD hit with no reset-requests header carries no dailyResetSeconds, so
+    // the backend falls back to LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS.
+    expect(result.details.dailyResetSeconds).toBeUndefined();
+  });
+
+  it("uses reset-requests as the daily hold duration for a TPD hit when that header is present", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseBody: GROQ_TPD_BODY,
+      responseHeaders: {
+        "x-ratelimit-remaining-requests": "742",
+        "x-ratelimit-reset-requests": "2h14m3s",
+        "x-ratelimit-reset-tokens": "3m21.744s",
+        "retry-after": "202",
+      },
+    });
+
+    const result = classifyModelCallError(err, "groq", { model: "openai/gpt-oss-120b" });
+
+    expect(result.code).toBe("rate_limited_daily");
+    expect(result.details.dailyResetSeconds).toBeCloseTo(2 * 3600 + 14 * 60 + 3);
+  });
+
+  it("classifies a Groq requests-per-day (RPD) 429 body as rate_limited_daily", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseBody: GROQ_RPD_BODY,
+      responseHeaders: {
+        "x-ratelimit-remaining-requests": "0",
+        "x-ratelimit-reset-requests": "2h14m3s",
+      },
+    });
+
+    const result = classifyModelCallError(err, "groq", { model: "openai/gpt-oss-20b" });
+
+    expect(result.code).toBe("rate_limited_daily");
+    expect(result.details.dailyResetSeconds).toBeCloseTo(2 * 3600 + 14 * 60 + 3);
+  });
+
+  it("keeps a Groq tokens-per-minute (TPM) 429 as rate_limited despite zero remaining tokens", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseBody: GROQ_TPM_BODY,
+      responseHeaders: {
+        "x-ratelimit-remaining-requests": "58",
+        "x-ratelimit-remaining-tokens": "0",
+        "retry-after": "1",
+      },
+    });
+
+    const result = classifyModelCallError(err, "groq", { model: "openai/gpt-oss-120b" });
+
+    expect(result.code).toBe("rate_limited");
+    expect(result.details.retryAfterSeconds).toBe(1);
+  });
+
+  it("unwraps a RetryError around a Groq TPD APICallError as rate_limited_daily", () => {
+    const inner = makeAPICallError({
+      statusCode: 429,
+      responseBody: GROQ_TPD_BODY,
+      responseHeaders: { "x-ratelimit-remaining-requests": "742" },
+    });
+    const err = new RetryError({
+      message: "Failed after 3 attempts",
+      reason: "maxRetriesExceeded",
+      errors: [inner, inner, inner],
+    });
+
+    const result = classifyModelCallError(err, "groq", { model: "openai/gpt-oss-120b" });
+
+    expect(result.code).toBe("rate_limited_daily");
+  });
+
   it("classifies a Groq 429 with zero remaining daily requests as rate_limited_daily, parsing the reset-requests duration", () => {
     const err = makeAPICallError({
       statusCode: 429,

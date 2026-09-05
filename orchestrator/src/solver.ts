@@ -197,6 +197,39 @@ function parseGroqResetDuration(value: string | undefined): number | undefined {
 }
 
 /**
+ * Groq's 429 body message names the exact limit that tripped and its
+ * window, e.g. "...on tokens per day (TPD): Limit 200000, Used 198984..."
+ * or "...on requests per minute (RPM)...". A per-day limit (RPD or TPD)
+ * does not clear inside any in-run wait — Groq's own "try again in 3m"
+ * only frees a sliver of the daily bucket that the very next call
+ * re-exhausts — so, like Google's PerDay path, it must park the run under
+ * a per-model hold rather than be retried in place. Returns "tokens" or
+ * "requests" for a per-day hit, or null for anything else (a per-minute
+ * hit, or an absent/unrecognized message). Reads the structured
+ * `error.message` from the JSON body when present, and also matches
+ * against the raw body and the AI SDK's flattened error message. Never
+ * throws.
+ */
+function groqPerDayRateLimitDimension(
+  responseBody: unknown,
+  fallbackMessage: string,
+): "tokens" | "requests" | null {
+  const texts = [fallbackMessage];
+  if (typeof responseBody === "string") {
+    texts.push(responseBody);
+    try {
+      const parsed = JSON.parse(responseBody) as { error?: { message?: unknown } };
+      if (typeof parsed?.error?.message === "string") texts.push(parsed.error.message);
+    } catch {
+      // Not JSON — the raw string is already in `texts`.
+    }
+  }
+  const text = texts.join("\n");
+  if (!/\bper day\b/i.test(text) && !/\((?:RPD|TPD)\)/i.test(text)) return null;
+  return /\btokens?\s+per\s+day\b/i.test(text) || /\(TPD\)/i.test(text) ? "tokens" : "requests";
+}
+
+/**
  * Classifies an AI SDK failure from generateObject/generateText into a typed
  * SolveError. Malformed-but-present output (no/undecodable object) is
  * recoverable — callers may re-prompt. Provider/network failures are not,
@@ -273,11 +306,23 @@ export function classifyModelCallError(
   if (provider === "groq" && APICallError.isInstance(err) && err.statusCode === 429) {
     const headers = err.responseHeaders ?? {};
     const remainingRequests = headers["x-ratelimit-remaining-requests"];
+    const perDayDimension = groqPerDayRateLimitDimension(err.responseBody, message);
 
-    if (remainingRequests === "0") {
+    if (remainingRequests === "0" || perDayDimension !== null) {
+      // `x-ratelimit-reset-requests` counts down to the daily request reset
+      // (hours out), so it's a sound proxy for when any per-day quota —
+      // requests or tokens — clears. `retry-after` / `reset-tokens` on a
+      // tokens-per-day hit only measure the seconds until a sliver of
+      // today's token bucket trickles back, which would re-park the run
+      // minutes later, so they're a fallback for a requests-per-day hit
+      // only. A tokens-per-day hit with no `reset-requests` header carries
+      // no dailyResetSeconds at all — the backend then holds the model for
+      // LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS.
+      const resetRequests = parseGroqResetDuration(headers["x-ratelimit-reset-requests"]);
       const dailyResetSeconds =
-        parseGroqResetDuration(headers["x-ratelimit-reset-requests"]) ??
-        parseSecondsHeader(headers["retry-after"]);
+        perDayDimension === "tokens"
+          ? resetRequests
+          : (resetRequests ?? parseSecondsHeader(headers["retry-after"]));
       return new SolveError("rate_limited_daily", `Groq daily quota exhausted: ${message}`, {
         ...details,
         ...apiDetails,
