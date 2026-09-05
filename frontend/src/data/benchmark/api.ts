@@ -17,6 +17,7 @@ import type {
   FreeTierId,
   FreeTierUsage,
   GoogleDispatchStatus,
+  GroqDispatchStatus,
   Leaderboard,
   RecentActivityEvent,
   RunHistory,
@@ -283,6 +284,19 @@ export function fetchGoogleDispatchStatus(signal?: AbortSignal): Promise<GoogleD
  * running. No password body, same as stopFreeTierDispatch. */
 export function stopGoogleDispatch(signal?: AbortSignal): Promise<GoogleDispatchStatus> {
   return fetchJson("/dispatch/google", signal, { method: "DELETE" });
+}
+
+/** Whether the Groq free-daily-quota dispatch cycle is currently running —
+ * see GroqDispatchStatus. Backs GroqDispatchWidget's active/inactive
+ * indicator, polled the same way fetchGoogleDispatchStatus is. */
+export function fetchGroqDispatchStatus(signal?: AbortSignal): Promise<GroqDispatchStatus> {
+  return fetchJson("/dispatch/groq", signal);
+}
+
+/** Stops the Groq dispatch cycle — a no-op (not an error) if it wasn't
+ * running. No password body, same as stopGoogleDispatch. */
+export function stopGroqDispatch(signal?: AbortSignal): Promise<GroqDispatchStatus> {
+  return fetchJson("/dispatch/groq", signal, { method: "DELETE" });
 }
 
 const DETAIL_PAGE_SIZE = 200;

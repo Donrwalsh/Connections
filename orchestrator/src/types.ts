@@ -84,7 +84,7 @@ export const SolveAssistRequestSchema = AssistRequestSchema.extend({
     .optional()
     .describe("Model to call, overriding the orchestrator's env-configured default"),
   provider: z
-    .enum(["openai", "ollama", "google"])
+    .enum(["openai", "ollama", "google", "groq"])
     .optional()
     .describe("Provider to call, overriding MODEL_PROVIDER"),
   contextWindow: z
@@ -131,7 +131,7 @@ export const JudgeCategoryRequestSchema = z.object({
   proposedCategory: z.string().min(1),
   actualCategory: z.string().min(1),
   model: z.string().min(1).optional(),
-  provider: z.enum(["openai", "ollama", "google"]).optional(),
+  provider: z.enum(["openai", "ollama", "google", "groq"]).optional(),
 });
 export type JudgeCategoryRequest = z.infer<typeof JudgeCategoryRequestSchema>;
 

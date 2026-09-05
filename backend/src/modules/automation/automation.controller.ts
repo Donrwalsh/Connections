@@ -21,6 +21,10 @@ export class AutomationController {
     return {
       lastRunAt: log?.triggeredAt?.toISOString() ?? null,
       nextRunAt: nextDailyAutomationRunAt().toISOString(),
+      metadataRefresh: {
+        updated: log?.metadataRefreshUpdated ?? null,
+        error: log?.metadataRefreshError ?? null,
+      },
       judge: {
         enqueued: log?.judgeEnqueued ?? null,
         error: log?.judgeError ?? null,
@@ -32,6 +36,10 @@ export class AutomationController {
       googleBurn: {
         outcome: log?.googleBurnOutcome ?? null,
         message: log?.googleBurnMessage ?? null,
+      },
+      groqBurn: {
+        outcome: log?.groqBurnOutcome ?? null,
+        message: log?.groqBurnMessage ?? null,
       },
     };
   }

@@ -5,6 +5,7 @@ import { CategoryJudgingWidget } from "../../components/benchmark/CategoryJudgin
 import { FreeTierBudgetWidget } from "../../components/benchmark/FreeTierBudgetWidget";
 import { FreeTierDispatchModal } from "../../components/benchmark/FreeTierDispatchModal";
 import { GoogleDispatchWidget } from "../../components/benchmark/GoogleDispatchWidget";
+import { GroqDispatchWidget } from "../../components/benchmark/GroqDispatchWidget";
 import { RecentActivityTable } from "../../components/benchmark/RecentActivityTable";
 import type { FreeTierModelSets } from "../../components/benchmark/StrategyTable";
 import { fetchAutomationStatus, fetchFreeTierUsage, fetchLeaderboard, fetchRecentActivity } from "../../data/benchmark/api";
@@ -100,6 +101,18 @@ export function ActivityPage() {
       }
     : null;
 
+  const groqBurnAutomation: AutomationLegDisplay | null = automationStatus
+    ? {
+        message:
+          automationStatus.groqBurn.outcome === "error"
+            ? `failed: ${automationStatus.groqBurn.message}`
+            : automationStatus.groqBurn.message,
+        lastRunAt: automationStatus.lastRunAt,
+        nextRunAt: automationStatus.nextRunAt,
+        isError: automationStatus.groqBurn.outcome === "error",
+      }
+    : null;
+
   const {
     data: recentActivity,
     isLoading: isLoadingActivity,
@@ -147,6 +160,7 @@ export function ActivityPage() {
           />
           <CategoryJudgingWidget automation={judgeAutomation} />
           <GoogleDispatchWidget automation={googleBurnAutomation} />
+          <GroqDispatchWidget automation={groqBurnAutomation} />
         </div>
       ) : null}
 

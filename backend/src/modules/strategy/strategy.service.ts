@@ -5,6 +5,7 @@ import {
   LLM_OPENAI_QUEUE,
   LLM_OLLAMA_QUEUE,
   LLM_GOOGLE_QUEUE,
+  LLM_GROQ_QUEUE,
 } from "../queue/queue.module";
 import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/strategy-run.entity";
 import { InjectRepository } from "@nestjs/typeorm";
@@ -197,6 +198,7 @@ export class StrategyService {
     @Inject(LLM_OPENAI_QUEUE) private readonly llmOpenAIQueue: Queue,
     @Inject(LLM_OLLAMA_QUEUE) private readonly llmOllamaQueue: Queue,
     @Inject(LLM_GOOGLE_QUEUE) private readonly llmGoogleQueue: Queue,
+    @Inject(LLM_GROQ_QUEUE) private readonly llmGroqQueue: Queue,
     @InjectRepository(StrategyRun)
     private readonly strategyRunRepo: Repository<StrategyRun>,
     @InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>,
@@ -221,6 +223,7 @@ export class StrategyService {
       this.llmOpenAIQueue,
       this.llmOllamaQueue,
       this.llmGoogleQueue,
+      this.llmGroqQueue,
       strategyName,
     );
   }
@@ -781,7 +784,7 @@ export class StrategyService {
    */
   private async queuedCountsByKey(): Promise<Map<string, number>> {
     const counts = new Map<string, number>();
-    const queues = [this.queue, this.llmOpenAIQueue, this.llmOllamaQueue, this.llmGoogleQueue];
+    const queues = [this.queue, this.llmOpenAIQueue, this.llmOllamaQueue, this.llmGoogleQueue, this.llmGroqQueue];
 
     for (const queue of queues) {
       for (let start = 0; ; start += QUEUE_PAGE_SIZE) {

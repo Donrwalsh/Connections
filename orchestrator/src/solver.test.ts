@@ -62,6 +62,7 @@ const GOOGLE_RPD_BODY = JSON.stringify({
 function makeAPICallError(overrides: {
   statusCode: number;
   responseBody?: string;
+  responseHeaders?: Record<string, string>;
 }): APICallError {
   return new APICallError({
     message: "Request failed",
@@ -69,7 +70,7 @@ function makeAPICallError(overrides: {
     requestBodyValues: {},
     statusCode: overrides.statusCode,
     responseBody: overrides.responseBody,
-    responseHeaders: {},
+    responseHeaders: overrides.responseHeaders ?? {},
     isRetryable: overrides.statusCode === 429,
   });
 }
@@ -319,5 +320,111 @@ describe("classifyModelCallError", () => {
     const result = classifyModelCallError(err, "google", { model: "gemini-3.6-flash" });
 
     expect(result.code).toBe("model_error");
+  });
+});
+
+describe("classifyModelCallError — groq", () => {
+  it("classifies a Groq 429 with zero remaining daily requests as rate_limited_daily, parsing the reset-requests duration", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseHeaders: {
+        "x-ratelimit-remaining-requests": "0",
+        "x-ratelimit-reset-requests": "2h59m59.56s",
+      },
+    });
+
+    const result = classifyModelCallError(err, "groq", { model: "openai/gpt-oss-20b" });
+
+    expect(result).toBeInstanceOf(SolveError);
+    expect(result.code).toBe("rate_limited_daily");
+    expect(result.details.dailyResetSeconds).toBeCloseTo(2 * 3600 + 59 * 60 + 59.56);
+  });
+
+  it("falls back to retry-after for dailyResetSeconds when reset-requests is missing", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseHeaders: { "x-ratelimit-remaining-requests": "0", "retry-after": "86399" },
+    });
+
+    const result = classifyModelCallError(err, "groq", { model: "openai/gpt-oss-20b" });
+
+    expect(result.code).toBe("rate_limited_daily");
+    expect(result.details.dailyResetSeconds).toBe(86399);
+  });
+
+  it("classifies a Groq 429 with nonzero remaining requests as rate_limited, using retry-after", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseHeaders: {
+        "x-ratelimit-remaining-requests": "17",
+        "x-ratelimit-remaining-tokens": "0",
+        "retry-after": "8",
+      },
+    });
+
+    const result = classifyModelCallError(err, "groq", { model: "openai/gpt-oss-20b" });
+
+    expect(result.code).toBe("rate_limited");
+    expect(result.details.retryAfterSeconds).toBe(8);
+  });
+
+  it("falls back to reset-tokens for retryAfterSeconds when retry-after is missing", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseHeaders: {
+        "x-ratelimit-remaining-requests": "17",
+        "x-ratelimit-reset-tokens": "45.2s",
+      },
+    });
+
+    const result = classifyModelCallError(err, "groq", { model: "openai/gpt-oss-20b" });
+
+    expect(result.code).toBe("rate_limited");
+    expect(result.details.retryAfterSeconds).toBeCloseTo(45.2);
+  });
+
+  it("classifies a Groq 429 with no rate-limit headers at all as rate_limited (no counter available)", () => {
+    const err = makeAPICallError({ statusCode: 429, responseHeaders: {} });
+
+    const result = classifyModelCallError(err, "groq", { model: "openai/gpt-oss-20b" });
+
+    expect(result.code).toBe("rate_limited");
+    expect(result.details.retryAfterSeconds).toBeUndefined();
+  });
+
+  it("does not classify a non-groq provider's 429 using Groq headers", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseHeaders: { "x-ratelimit-remaining-requests": "0" },
+    });
+
+    const result = classifyModelCallError(err, "openai", { model: "gpt-4.1-nano" });
+
+    expect(result.code).toBe("model_error");
+  });
+
+  it("still classifies a non-429 groq error as model_error", () => {
+    const err = new Error("network blip");
+
+    const result = classifyModelCallError(err, "groq", { model: "openai/gpt-oss-20b" });
+
+    expect(result.code).toBe("model_error");
+  });
+
+  it("unwraps a RetryError around a Groq daily-limit APICallError as rate_limited_daily", () => {
+    const inner = makeAPICallError({
+      statusCode: 429,
+      responseHeaders: { "x-ratelimit-remaining-requests": "0", "x-ratelimit-reset-requests": "1h0m0s" },
+    });
+    const err = new RetryError({
+      message: "Failed after 3 attempts",
+      reason: "maxRetriesExceeded",
+      errors: [inner],
+    });
+
+    const result = classifyModelCallError(err, "groq", { model: "openai/gpt-oss-20b" });
+
+    expect(result.code).toBe("rate_limited_daily");
+    expect(result.details.dailyResetSeconds).toBe(3600);
   });
 });

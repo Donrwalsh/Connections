@@ -114,6 +114,7 @@ const defaultAutomation: AutomationStatus = {
   judge: { enqueued: null, error: null },
   miniBurn: { outcome: null, message: null },
   googleBurn: { outcome: null, message: null },
+  groqBurn: { outcome: null, message: null },
 };
 
 function stubFetch({
@@ -395,11 +396,13 @@ describe("ActivityPage", () => {
         judge: { enqueued: 4, error: null },
         miniBurn: { outcome: "started", message: "started at 80%" },
         googleBurn: { outcome: "started", message: "started" },
+        groqBurn: { outcome: "alreadyExhausted", message: "every Groq model is currently RPD-held" },
       },
     });
     renderActivity();
 
     expect(screen.getByText("Google daily quota")).toBeInTheDocument();
+    expect(screen.getByText("Groq daily quota")).toBeInTheDocument();
     expect(
       await screen.findByText("Auto-run: enqueued 4 (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM"),
     ).toBeInTheDocument();
@@ -408,6 +411,11 @@ describe("ActivityPage", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText("Auto-run: started (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Auto-run: every Groq model is currently RPD-held (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM",
+      ),
     ).toBeInTheDocument();
   });
 
