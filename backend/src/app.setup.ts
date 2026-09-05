@@ -170,6 +170,7 @@ export async function configureApp(app: INestApplication): Promise<INestApplicat
 
   app.enableCors({
     origin: env.CORS_ORIGIN.split(",").map((origin) => origin.trim()),
+    credentials: true,
   });
 
   app.useGlobalPipes(
