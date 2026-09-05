@@ -24,6 +24,14 @@ export interface SolveErrorDetails {
   // Seconds to wait before retrying — set only for a Google "rate_limited"
   // classification, from the response's own RetryInfo.retryDelay.
   retryAfterSeconds?: number;
+  // Seconds until a Groq per-model daily (RPD) quota resets — set only for
+  // a Groq "rate_limited_daily" classification, parsed from that response's
+  // own x-ratelimit-reset-requests header (or its retry-after header as a
+  // fallback). Groq's reset is a duration from the hit, not a fixed daily
+  // clock boundary the way Google's Pacific-midnight reset is — see
+  // GroqRateLimitHoldService on the backend, which uses this value directly
+  // as `heldAt + dailyResetSeconds` rather than computing a shared boundary.
+  dailyResetSeconds?: number;
 }
 
 /**
@@ -158,6 +166,37 @@ function isGoogleDailyRateLimit(responseBody: unknown): boolean {
 }
 
 /**
+ * Parses an HTTP-style plain seconds count (e.g. Groq's `retry-after`
+ * header, or a fallback read of the same value): a non-negative integer or
+ * float string. Returns undefined for anything else (missing, negative,
+ * non-numeric) rather than throwing.
+ */
+function parseSecondsHeader(value: string | undefined): number | undefined {
+  if (typeof value !== "string") return undefined;
+  const seconds = Number(value);
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
+}
+
+/**
+ * Parses a Groq-style rate-limit reset duration (e.g. "2h59m59.56s",
+ * mirroring OpenAI's own rate-limit header format) into seconds. Every
+ * component is optional but at least one must be present — an empty or
+ * unrecognized string returns undefined rather than throwing or silently
+ * treating garbage as a zero-second wait.
+ */
+function parseGroqResetDuration(value: string | undefined): number | undefined {
+  if (typeof value !== "string") return undefined;
+  const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/.exec(value.trim());
+  if (!match || (match[1] === undefined && match[2] === undefined && match[3] === undefined)) {
+    return undefined;
+  }
+  const hours = Number(match[1] ?? 0);
+  const minutes = Number(match[2] ?? 0);
+  const seconds = Number(match[3] ?? 0);
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+/**
  * Classifies an AI SDK failure from generateObject/generateText into a typed
  * SolveError. Malformed-but-present output (no/undecodable object) is
  * recoverable — callers may re-prompt. Provider/network failures are not,
@@ -229,6 +268,33 @@ export function classifyModelCallError(
         errorName: err.name,
       });
     }
+  }
+
+  if (provider === "groq" && APICallError.isInstance(err) && err.statusCode === 429) {
+    const headers = err.responseHeaders ?? {};
+    const remainingRequests = headers["x-ratelimit-remaining-requests"];
+
+    if (remainingRequests === "0") {
+      const dailyResetSeconds =
+        parseGroqResetDuration(headers["x-ratelimit-reset-requests"]) ??
+        parseSecondsHeader(headers["retry-after"]);
+      return new SolveError("rate_limited_daily", `Groq daily quota exhausted: ${message}`, {
+        ...details,
+        ...apiDetails,
+        errorName: err.name,
+        dailyResetSeconds,
+      });
+    }
+
+    const retryAfterSeconds =
+      parseSecondsHeader(headers["retry-after"]) ??
+      parseGroqResetDuration(headers["x-ratelimit-reset-tokens"]);
+    return new SolveError("rate_limited", `Groq rate limit hit: ${message}`, {
+      ...details,
+      ...apiDetails,
+      errorName: err.name,
+      retryAfterSeconds,
+    });
   }
 
   return new SolveError("model_error", `Model call failed: ${message}`, {
