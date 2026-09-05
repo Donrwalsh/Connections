@@ -3,6 +3,7 @@ import { createOllama } from "ai-sdk-ollama";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createGroq } from "@ai-sdk/groq";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { createMistral } from "@ai-sdk/mistral";
 import type { LanguageModel } from "ai";
 
 export const DEFAULT_OPENAI_MODEL = "gpt-4.1-nano";
@@ -10,11 +11,12 @@ export const DEFAULT_OLLAMA_MODEL = "llama3.2";
 export const DEFAULT_GOOGLE_MODEL = "gemini-3.6-flash";
 export const DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b";
 export const DEFAULT_OPENROUTER_MODEL = "google/gemma-4-31b-it:free";
+export const DEFAULT_MISTRAL_MODEL = "mistral-small-latest";
 export const DEFAULT_JUDGE_MODEL = "gpt-4.1-nano";
 export const DEFAULT_JUDGE_PROVIDER: ModelProvider = "openai";
 export const DEFAULT_CONTEXT_WINDOW = 8192;
 
-export type ModelProvider = "openai" | "ollama" | "google" | "groq" | "openrouter";
+export type ModelProvider = "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral";
 
 /**
  * Resolves the default model provider from the MODEL_PROVIDER env var.
@@ -33,6 +35,7 @@ export function defaultProvider(): ModelProvider {
   if (provider === "google") return "google";
   if (provider === "groq") return "groq";
   if (provider === "openrouter") return "openrouter";
+  if (provider === "mistral") return "mistral";
   return "openai";
 }
 
@@ -90,6 +93,11 @@ export function getModel(
     );
   }
 
+  if (provider === "mistral") {
+    const mistral = createMistral({ apiKey: process.env.MISTRAL_API_KEY });
+    return mistral(modelOverride ?? process.env.MISTRAL_MODEL ?? DEFAULT_MISTRAL_MODEL);
+  }
+
   return openai(modelOverride ?? process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL);
 }
 
@@ -127,6 +135,9 @@ export function getModelName(provider: ModelProvider, modelOverride?: string): s
   }
   if (provider === "openrouter") {
     return modelOverride ?? process.env.OPENROUTER_MODEL ?? DEFAULT_OPENROUTER_MODEL;
+  }
+  if (provider === "mistral") {
+    return modelOverride ?? process.env.MISTRAL_MODEL ?? DEFAULT_MISTRAL_MODEL;
   }
   return modelOverride ?? process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL;
 }

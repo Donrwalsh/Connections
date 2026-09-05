@@ -13,6 +13,7 @@ const createGoogleGenerativeAIMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 const createGroqMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 const openRouterChatMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 const createOpenRouterMock = vi.hoisted(() => vi.fn(() => ({ chat: openRouterChatMock })));
+const createMistralMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 
 vi.mock("ai-sdk-ollama", () => ({
   createOllama: createOllamaMock,
@@ -34,6 +35,10 @@ vi.mock("@openrouter/ai-sdk-provider", () => ({
   createOpenRouter: createOpenRouterMock,
 }));
 
+vi.mock("@ai-sdk/mistral", () => ({
+  createMistral: createMistralMock,
+}));
+
 describe("getModel", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -43,6 +48,7 @@ describe("getModel", () => {
     createGroqMock.mockClear();
     createOpenRouterMock.mockClear();
     openRouterChatMock.mockClear();
+    createMistralMock.mockClear();
   });
 
   it("passes num_ctx from MODEL_CONTEXT_WINDOW to the Ollama model", () => {
@@ -225,6 +231,40 @@ describe("getModel", () => {
 
     expect(openRouterChatMock).toHaveBeenCalledWith("google/gemma-4-31b-it:free");
   });
+
+  it("resolves the Mistral model without num_ctx", () => {
+    getModel("mistral");
+
+    expect(createMistralMock).toHaveBeenCalledTimes(1);
+    const modelFactory = createMistralMock.mock.results[0].value;
+    expect(modelFactory).toHaveBeenCalledWith("mistral-small-latest");
+    expect(openaiMock).not.toHaveBeenCalled();
+    expect(createOllamaMock).not.toHaveBeenCalled();
+  });
+
+  it("passes MISTRAL_API_KEY to createMistral", () => {
+    vi.stubEnv("MISTRAL_API_KEY", "test-mistral-key");
+
+    getModel("mistral");
+
+    expect(createMistralMock).toHaveBeenCalledWith({ apiKey: "test-mistral-key" });
+  });
+
+  it("uses the model override instead of MISTRAL_MODEL when given", () => {
+    vi.stubEnv("MISTRAL_MODEL", "mistral-medium-latest");
+
+    getModel("mistral", "ministral-8b-latest");
+
+    const modelFactory = createMistralMock.mock.results[0].value;
+    expect(modelFactory).toHaveBeenCalledWith("ministral-8b-latest");
+  });
+
+  it("accepts a contextWindow for mistral without using it", () => {
+    getModel("mistral", undefined, 131072);
+
+    const modelFactory = createMistralMock.mock.results[0].value;
+    expect(modelFactory).toHaveBeenCalledWith("mistral-small-latest");
+  });
 });
 
 describe("getModelName", () => {
@@ -293,6 +333,20 @@ describe("getModelName", () => {
     vi.stubEnv("OPENROUTER_MODEL", "z-ai/glm-5.2:free");
     expect(getModelName("openrouter", "minimax/minimax-m3:free")).toBe("minimax/minimax-m3:free");
   });
+
+  it("returns the configured Mistral model for the mistral provider", () => {
+    vi.stubEnv("MISTRAL_MODEL", "mistral-medium-latest");
+    expect(getModelName("mistral")).toBe("mistral-medium-latest");
+  });
+
+  it("falls back to the Mistral default when unset", () => {
+    expect(getModelName("mistral")).toBe("mistral-small-latest");
+  });
+
+  it("prefers the model override over MISTRAL_MODEL", () => {
+    vi.stubEnv("MISTRAL_MODEL", "mistral-medium-latest");
+    expect(getModelName("mistral", "ministral-8b-latest")).toBe("ministral-8b-latest");
+  });
 });
 
 describe("defaultProvider", () => {
@@ -319,6 +373,11 @@ describe("defaultProvider", () => {
   it("returns openrouter when MODEL_PROVIDER is set to openrouter", () => {
     vi.stubEnv("MODEL_PROVIDER", "openrouter");
     expect(defaultProvider()).toBe("openrouter");
+  });
+
+  it("returns mistral when MODEL_PROVIDER is set to mistral", () => {
+    vi.stubEnv("MODEL_PROVIDER", "mistral");
+    expect(defaultProvider()).toBe("mistral");
   });
 });
 
