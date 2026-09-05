@@ -22,6 +22,8 @@ import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
 import { GroqRateLimitHoldService } from "./groq-rate-limit-hold.service";
 import { OpenRouterRateLimitHoldService } from "./openrouter-rate-limit-hold.service";
 import { MistralRateLimitHoldService } from "./mistral-rate-limit-hold.service";
+import { MistralRpdResumeService } from "./mistral-rpd-resume.service";
+import { MistralRpdResumeBootstrap } from "./mistral-rpd-resume.bootstrap";
 import { OpenRouterRpdResumeService } from "./openrouter-rpd-resume.service";
 import { OpenRouterRpdResumeBootstrap } from "./openrouter-rpd-resume.bootstrap";
 import { GoogleRpdResumeService } from "./google-rpd-resume.service";
@@ -67,6 +69,8 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     OpenRouterRpdResumeService,
     OpenRouterRpdResumeBootstrap,
     MistralRateLimitHoldService,
+    MistralRpdResumeService,
+    MistralRpdResumeBootstrap,
   ],
   exports: [
     StrategyService,
@@ -80,6 +84,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     OpenRouterRateLimitHoldService,
     OpenRouterRpdResumeService,
     MistralRateLimitHoldService,
+    MistralRpdResumeService,
   ],
 })
 export class StrategyModule {}
