@@ -33,6 +33,7 @@ import { AutomationRunLog } from "./modules/automation/entities/automation-run-l
 import { GoogleDispatchState } from "./modules/google-free-dispatch/entities/google-dispatch-state.entity";
 import { GroqDispatchState } from "./modules/groq-free-dispatch/entities/groq-dispatch-state.entity";
 import { OpenRouterDispatchState } from "./modules/openrouter-free-dispatch/entities/openrouter-dispatch-state.entity";
+import { MistralDispatchState } from "./modules/mistral-free-dispatch/entities/mistral-dispatch-state.entity";
 
 @Module({
   imports: [
@@ -76,6 +77,7 @@ import { OpenRouterDispatchState } from "./modules/openrouter-free-dispatch/enti
           GoogleDispatchState,
           GroqDispatchState,
           OpenRouterDispatchState,
+          MistralDispatchState,
         ],
         synchronize: false,
         migrations: [__dirname + "/migrations/*{.ts,.js}"],

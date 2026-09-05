@@ -19,6 +19,7 @@ import { AutomationRunLog } from "./modules/automation/entities/automation-run-l
 import { GoogleDispatchState } from "./modules/google-free-dispatch/entities/google-dispatch-state.entity";
 import { GroqDispatchState } from "./modules/groq-free-dispatch/entities/groq-dispatch-state.entity";
 import { OpenRouterDispatchState } from "./modules/openrouter-free-dispatch/entities/openrouter-dispatch-state.entity";
+import { MistralDispatchState } from "./modules/mistral-free-dispatch/entities/mistral-dispatch-state.entity";
 
 /**
  * Standalone DataSource used by the TypeORM CLI (migration:generate/run/
@@ -52,6 +53,7 @@ export const AppDataSource = new DataSource({
     GoogleDispatchState,
     GroqDispatchState,
     OpenRouterDispatchState,
+    MistralDispatchState,
   ],
   migrations: [__dirname + "/migrations/*{.ts,.js}"],
   synchronize: false,
