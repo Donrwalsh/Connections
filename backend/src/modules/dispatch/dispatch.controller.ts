@@ -20,6 +20,7 @@ import {
   FreeTierDispatchStatusDto,
 } from "../free-tier-dispatch/free-tier-dispatch.service";
 import { GoogleFreeDispatchService } from "../google-free-dispatch/google-free-dispatch.service";
+import { GroqFreeDispatchService } from "../groq-free-dispatch/groq-free-dispatch.service";
 import { FreeTierId } from "../strategy/free-tier-usage.service";
 import { AUTOMATIC_STRATEGIES, LLM_STRATEGIES, STRATEGY_SET, isLlmStrategy } from "../../strategies";
 import { DispatchAuthGuard } from "./dispatch-auth.guard";
@@ -48,6 +49,7 @@ export class DispatchController {
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
     @Inject(FreeTierDispatchService) private readonly freeTierDispatchService: FreeTierDispatchService,
     @Inject(GoogleFreeDispatchService) private readonly googleFreeDispatchService: GoogleFreeDispatchService,
+    @Inject(GroqFreeDispatchService) private readonly groqFreeDispatchService: GroqFreeDispatchService,
     @Inject(ModelMetadataRefreshService)
     private readonly modelMetadataRefreshService: ModelMetadataRefreshService,
   ) {}
@@ -311,6 +313,21 @@ export class DispatchController {
   @Delete("google")
   async stopGoogleDispatch() {
     return this.googleFreeDispatchService.stop();
+  }
+
+  // Read-only Groq free-daily-quota dispatch status — see
+  // GroqFreeDispatchService. Same shape as the Google route: no token
+  // threshold, active/startedAt only.
+  @Get("groq")
+  async getGroqDispatchStatus() {
+    return this.groqFreeDispatchService.getStatus();
+  }
+
+  // Deactivates the Groq free-daily-quota dispatch cycle so it stops
+  // scheduling further ticks — a no-op (not an error) if it wasn't running.
+  @Delete("groq")
+  async stopGroqDispatch() {
+    return this.groqFreeDispatchService.stop();
   }
 
   // How many strategy runs are currently in the 'error' status. Read-only,
