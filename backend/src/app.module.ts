@@ -23,6 +23,7 @@ import { SolvePrompt } from "./modules/strategy/entities/solve-prompt.entity";
 import { CategoryEvaluation } from "./modules/strategy/entities/category-evaluation.entity";
 import { GoogleRateLimitHold } from "./modules/strategy/entities/google-rate-limit-hold.entity";
 import { GroqRateLimitHold } from "./modules/strategy/entities/groq-rate-limit-hold.entity";
+import { OpenRouterRateLimitHold } from "./modules/strategy/entities/openrouter-rate-limit-hold.entity";
 import { StrategyRun } from "./modules/strategy/entities/strategy-run.entity";
 import { SupportedModel } from "./modules/supported-model/entities/supported-model.entity";
 import { ModelPrice } from "./modules/supported-model/entities/model-price.entity";
@@ -30,6 +31,7 @@ import { FreeTierDispatchState } from "./modules/free-tier-dispatch/entities/fre
 import { AutomationRunLog } from "./modules/automation/entities/automation-run-log.entity";
 import { GoogleDispatchState } from "./modules/google-free-dispatch/entities/google-dispatch-state.entity";
 import { GroqDispatchState } from "./modules/groq-free-dispatch/entities/groq-dispatch-state.entity";
+import { OpenRouterDispatchState } from "./modules/openrouter-free-dispatch/entities/openrouter-dispatch-state.entity";
 
 @Module({
   imports: [
@@ -64,12 +66,14 @@ import { GroqDispatchState } from "./modules/groq-free-dispatch/entities/groq-di
           CategoryEvaluation,
           GoogleRateLimitHold,
           GroqRateLimitHold,
+          OpenRouterRateLimitHold,
           SupportedModel,
           ModelPrice,
           FreeTierDispatchState,
           AutomationRunLog,
           GoogleDispatchState,
           GroqDispatchState,
+          OpenRouterDispatchState,
         ],
         synchronize: false,
         migrations: [__dirname + "/migrations/*{.ts,.js}"],
