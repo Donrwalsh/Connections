@@ -18,6 +18,7 @@ import type {
   FreeTierUsage,
   GoogleDispatchStatus,
   GroqDispatchStatus,
+  OpenRouterDispatchStatus,
   Leaderboard,
   RecentActivityEvent,
   RunHistory,
@@ -297,6 +298,23 @@ export function fetchGroqDispatchStatus(signal?: AbortSignal): Promise<GroqDispa
  * running. No password body, same as stopGoogleDispatch. */
 export function stopGroqDispatch(signal?: AbortSignal): Promise<GroqDispatchStatus> {
   return fetchJson("/dispatch/groq", signal, { method: "DELETE" });
+}
+
+/** Whether the OpenRouter free-daily-budget dispatch cycle is running —
+ * see OpenRouterDispatchStatus. Polled the same way fetchGroqDispatchStatus
+ * is. */
+export function fetchOpenRouterDispatchStatus(
+  signal?: AbortSignal,
+): Promise<OpenRouterDispatchStatus> {
+  return fetchJson("/dispatch/openrouter", signal);
+}
+
+/** Stops the OpenRouter dispatch cycle — a no-op (not an error) if it
+ * wasn't running. */
+export function stopOpenRouterDispatch(
+  signal?: AbortSignal,
+): Promise<OpenRouterDispatchStatus> {
+  return fetchJson("/dispatch/openrouter", signal, { method: "DELETE" });
 }
 
 const DETAIL_PAGE_SIZE = 200;
