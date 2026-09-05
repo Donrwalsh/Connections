@@ -7,7 +7,7 @@ import { LlmProposal } from "./entities/llm-proposal.entity";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { CategoryEvaluation } from "./entities/category-evaluation.entity";
 import { StrategyRun } from "./entities/strategy-run.entity";
-import { GoogleRateLimitHold } from "./entities/google-rate-limit-hold.entity";
+import { RateLimitHold } from "./entities/rate-limit-hold.entity";
 import { StrategyController } from "./strategy.controller";
 import { StrategyService } from "./strategy.service";
 import { LlmStrategyRunner } from "./llm-strategy-runner.service";
@@ -15,9 +15,9 @@ import { StrategyRunStore } from "./strategy-run-store.service";
 import { OrchestratorService } from "./orchestrator.service";
 import { CategoryEvaluatorService } from "./category-evaluator.service";
 import { FreeTierUsageService } from "./free-tier-usage.service";
-import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
-import { GoogleRpdResumeService } from "./google-rpd-resume.service";
-import { GoogleRpdResumeBootstrap } from "./google-rpd-resume.bootstrap";
+import { RateLimitHoldService } from "./rate-limit-hold.service";
+import { RpdResumeService } from "./rpd-resume.service";
+import { RpdResumeBootstrap } from "./rpd-resume.bootstrap";
 import { GameModule } from "../game/game.module";
 import { SupportedModelModule } from "../supported-model/supported-model.module";
 
@@ -30,7 +30,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
       LlmProposal,
       SolvePrompt,
       CategoryEvaluation,
-      GoogleRateLimitHold,
+      RateLimitHold,
     ]),
     QueueModule,
     GameModule,
@@ -44,17 +44,17 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     OrchestratorService,
     CategoryEvaluatorService,
     FreeTierUsageService,
-    GoogleRateLimitHoldService,
-    GoogleRpdResumeService,
-    GoogleRpdResumeBootstrap,
+    RateLimitHoldService,
+    RpdResumeService,
+    RpdResumeBootstrap,
   ],
   exports: [
     StrategyService,
     LlmStrategyRunner,
     CategoryEvaluatorService,
     FreeTierUsageService,
-    GoogleRateLimitHoldService,
-    GoogleRpdResumeService,
+    RateLimitHoldService,
+    RpdResumeService,
   ],
 })
 export class StrategyModule {}

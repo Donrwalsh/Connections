@@ -1,22 +1,25 @@
 import { openai } from "@ai-sdk/openai";
 import { createOllama } from "ai-sdk-ollama";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { groq } from "@ai-sdk/groq";
 import type { LanguageModel } from "ai";
 
 export const DEFAULT_OPENAI_MODEL = "gpt-4.1-nano";
 export const DEFAULT_OLLAMA_MODEL = "llama3.2";
 export const DEFAULT_GOOGLE_MODEL = "gemini-3.6-flash";
+export const DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant";
 export const DEFAULT_JUDGE_MODEL = "gpt-4.1-nano";
 export const DEFAULT_JUDGE_PROVIDER: ModelProvider = "openai";
 export const DEFAULT_CONTEXT_WINDOW = 8192;
 
-export type ModelProvider = "openai" | "ollama" | "google";
+export type ModelProvider = "openai" | "ollama" | "google" | "groq";
 
 /**
  * Resolves the default model provider from the MODEL_PROVIDER env var.
  * Defaults to OpenAI to keep existing behavior unchanged; set it to
- * "ollama" to run models locally against the bundled Ollama service, or
- * "google" to call Google AI Studio's Gemini models.
+ * "ollama" to run models locally against the bundled Ollama service,
+ * "google" to call Google AI Studio's Gemini models, or "groq" to call
+ * Groq's free-tier hosted models.
  *
  * Unlike the strategy runs (which select their provider explicitly by
  * strategy name), this default is only used for provider-less requests —
@@ -26,12 +29,13 @@ export function defaultProvider(): ModelProvider {
   const provider = process.env.MODEL_PROVIDER?.toLowerCase();
   if (provider === "ollama") return "ollama";
   if (provider === "google") return "google";
+  if (provider === "groq") return "groq";
   return "openai";
 }
 
 /**
  * Returns the AI SDK language model for the given provider.
- * All three providers are exposed through the same LanguageModel interface,
+ * All four providers are exposed through the same LanguageModel interface,
  * so solver.ts (and any future callers) never need to know which backend is
  * active. Config is read on every call so a restart isn't needed to flip
  * providers in development.
@@ -48,9 +52,9 @@ export function defaultProvider(): ModelProvider {
  * model) can OOM-kill Ollama on memory-constrained hardware even though
  * real prompts never come close to using it. The model's true spec still
  * shows correctly everywhere else (SupportedModel.contextWindow, the
- * leaderboard) — only what's actually sent to Ollama is capped. Google has
- * no per-call context-window setting at all, so `contextWindow` is accepted
- * for signature consistency but unused there.
+ * leaderboard) — only what's actually sent to Ollama is capped. Google and
+ * Groq have no per-call context-window setting at all, so `contextWindow`
+ * is accepted for signature consistency but unused there.
  */
 export function getModel(
   provider: ModelProvider,
@@ -69,6 +73,10 @@ export function getModel(
   if (provider === "google") {
     const google = createGoogleGenerativeAI({ apiKey: process.env.GOOGLE_API_KEY });
     return google(modelOverride ?? process.env.GOOGLE_MODEL ?? DEFAULT_GOOGLE_MODEL);
+  }
+
+  if (provider === "groq") {
+    return groq(modelOverride ?? process.env.GROQ_MODEL ?? DEFAULT_GROQ_MODEL);
   }
 
   return openai(modelOverride ?? process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL);
@@ -102,6 +110,9 @@ export function getModelName(provider: ModelProvider, modelOverride?: string): s
   }
   if (provider === "google") {
     return modelOverride ?? process.env.GOOGLE_MODEL ?? DEFAULT_GOOGLE_MODEL;
+  }
+  if (provider === "groq") {
+    return modelOverride ?? process.env.GROQ_MODEL ?? DEFAULT_GROQ_MODEL;
   }
   return modelOverride ?? process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL;
 }

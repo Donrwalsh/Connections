@@ -68,9 +68,7 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
   // instead of failing at boot.
   const judgeProvider = env.JUDGE_PROVIDER ?? "openai";
   if (!["openai", "ollama", "google"].includes(judgeProvider)) {
-    throw new Error(
-      `JUDGE_PROVIDER must be one of openai|ollama|google, got '${judgeProvider}'.`,
-    );
+    throw new Error(`JUDGE_PROVIDER must be one of openai|ollama|google, got '${judgeProvider}'.`);
   }
 
   // Only enforced by DispatchAuthGuard when NODE_ENV=production (see that

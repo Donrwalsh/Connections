@@ -8,9 +8,13 @@ import { Puzzle } from "../game/entities/puzzle.entity";
 import { Guess, GuessResult } from "./entities/guess.entity";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { LlmProposalStatus } from "./entities/llm-proposal.entity";
-import { OrchestratorService, type SolveAssistOutcome, type ChatMessage } from "./orchestrator.service";
+import {
+  OrchestratorService,
+  type SolveAssistOutcome,
+  type ChatMessage,
+} from "./orchestrator.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
-import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
+import { RateLimitHoldService } from "./rate-limit-hold.service";
 
 describe("LlmStrategyRunner", () => {
   let runner: LlmStrategyRunner;
@@ -116,7 +120,7 @@ describe("LlmStrategyRunner", () => {
         { provide: getRepositoryToken(SolvePrompt), useValue: mockSolvePromptRepo },
         { provide: OrchestratorService, useValue: mockOrchestratorService },
         { provide: SupportedModelService, useValue: mockSupportedModelService },
-        { provide: GoogleRateLimitHoldService, useValue: mockRpdHold },
+        { provide: RateLimitHoldService, useValue: mockRpdHold },
       ],
     }).compile();
 
@@ -302,8 +306,14 @@ describe("LlmStrategyRunner", () => {
         .filter((call) => call[0] === "SolvePrompt")
         .flatMap((call) => call[1] as Array<Record<string, unknown>>);
       expect(promptRows).toEqual([
-        expect.objectContaining({ issueTags: ["parentheticalStripped"], rawResponseText: responseOne }),
-        expect.objectContaining({ issueTags: ["parentheticalStripped"], rawResponseText: responseTwo }),
+        expect.objectContaining({
+          issueTags: ["parentheticalStripped"],
+          rawResponseText: responseOne,
+        }),
+        expect.objectContaining({
+          issueTags: ["parentheticalStripped"],
+          rawResponseText: responseTwo,
+        }),
       ]);
     });
 
@@ -417,7 +427,8 @@ describe("LlmStrategyRunner", () => {
       // NOT suppress the catch-all (that was the bug: an empty
       // parsedGroupWords was wrongly treated as "nothing to check" instead
       // of "this response's one heading never panned out").
-      const response = "### GROUPS\n#### Group 1\nCategory: Fruits\n\n### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
+      const response =
+        "### GROUPS\n#### Group 1\nCategory: Fruits\n\n### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
       mockOrchestratorService.solveAssist.mockResolvedValueOnce(
         makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]], response),
       );
@@ -544,7 +555,9 @@ describe("LlmStrategyRunner", () => {
         "Words: OCEAN, BANANA, CHERRY, DATE (a hallucinated word here)\n\n" +
         "### ANSWER\nOCEAN, BANANA, CHERRY, DATE";
       mockOrchestratorService.solveAssist
-        .mockResolvedValueOnce(makeAssistResponse([["OCEAN", "BANANA", "CHERRY", "DATE"]], response))
+        .mockResolvedValueOnce(
+          makeAssistResponse([["OCEAN", "BANANA", "CHERRY", "DATE"]], response),
+        )
         .mockResolvedValueOnce(
           makeAssistResponse([
             ["APPLE", "BANANA", "CHERRY", "DATE"],
@@ -562,7 +575,7 @@ describe("LlmStrategyRunner", () => {
           issueTags: expect.arrayContaining(["parentheticalStripped", "wordNotOnList"]),
         }),
       );
-      expect((promptRows[0].issueTags as string[])).toHaveLength(2);
+      expect(promptRows[0].issueTags as string[]).toHaveLength(2);
     });
 
     it("should send conversation history with prior guesses as RETRY prompts", async () => {
@@ -784,10 +797,16 @@ describe("LlmStrategyRunner", () => {
         // Both guesses cross the two answer groups, so neither is a one-away
         mockOrchestratorService.solveAssist
           .mockResolvedValueOnce(
-            makeAssistResponse([["APPLE", "EGGPLANT", "CHERRY", "FIG"], ["BANANA", "DATE", "GRAPE", "HONEY"]]),
+            makeAssistResponse([
+              ["APPLE", "EGGPLANT", "CHERRY", "FIG"],
+              ["BANANA", "DATE", "GRAPE", "HONEY"],
+            ]),
           )
           .mockResolvedValueOnce(
-            makeAssistResponse([["BANANA", "DATE", "GRAPE", "HONEY"], ["APPLE", "EGGPLANT", "CHERRY", "FIG"]]),
+            makeAssistResponse([
+              ["BANANA", "DATE", "GRAPE", "HONEY"],
+              ["APPLE", "EGGPLANT", "CHERRY", "FIG"],
+            ]),
           );
 
         const result = await runner.runLlmStrategy(100, "llm-openai");
@@ -817,10 +836,16 @@ describe("LlmStrategyRunner", () => {
         // First guess is 3 words of an answer group -> one-away
         mockOrchestratorService.solveAssist
           .mockResolvedValueOnce(
-            makeAssistResponse([["APPLE", "BANANA", "CHERRY", "EGGPLANT"], ["DATE", "FIG", "GRAPE", "HONEY"]]),
+            makeAssistResponse([
+              ["APPLE", "BANANA", "CHERRY", "EGGPLANT"],
+              ["DATE", "FIG", "GRAPE", "HONEY"],
+            ]),
           )
           .mockResolvedValueOnce(
-            makeAssistResponse([["APPLE", "EGGPLANT", "CHERRY", "FIG"], ["BANANA", "DATE", "GRAPE", "HONEY"]]),
+            makeAssistResponse([
+              ["APPLE", "EGGPLANT", "CHERRY", "FIG"],
+              ["BANANA", "DATE", "GRAPE", "HONEY"],
+            ]),
           );
 
         const result = await runner.runLlmStrategy(100, "llm-openai");

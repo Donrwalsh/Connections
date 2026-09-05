@@ -7,6 +7,7 @@ import {
   LLM_OPENAI_QUEUE,
   LLM_OLLAMA_QUEUE,
   LLM_GOOGLE_QUEUE,
+  LLM_GROQ_QUEUE,
 } from "../queue/queue.module";
 import { StrategyService } from "./strategy.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
@@ -30,6 +31,7 @@ describe("StrategyService", () => {
   let mockOpenAIQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockOllamaQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockGoogleQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
+  let mockGroqQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockStrategyRunRepo: {
     findOne: jest.Mock;
     find: jest.Mock;
@@ -131,6 +133,11 @@ describe("StrategyService", () => {
       addBulk: jest.fn().mockResolvedValue(undefined),
       getJobs: jest.fn().mockResolvedValue([]),
     };
+    mockGroqQueue = {
+      add: jest.fn().mockResolvedValue(undefined),
+      addBulk: jest.fn().mockResolvedValue(undefined),
+      getJobs: jest.fn().mockResolvedValue([]),
+    };
     mockStrategyRunRepo = {
       findOne: jest.fn(),
       find: jest.fn(),
@@ -211,6 +218,7 @@ describe("StrategyService", () => {
         { provide: LLM_OPENAI_QUEUE, useValue: mockOpenAIQueue },
         { provide: LLM_OLLAMA_QUEUE, useValue: mockOllamaQueue },
         { provide: LLM_GOOGLE_QUEUE, useValue: mockGoogleQueue },
+        { provide: LLM_GROQ_QUEUE, useValue: mockGroqQueue },
         { provide: getRepositoryToken(StrategyRun), useValue: mockStrategyRunRepo },
         { provide: getRepositoryToken(Puzzle), useValue: mockPuzzleRepo },
         { provide: getRepositoryToken(Guess), useValue: mockGuessRepo },
@@ -292,7 +300,10 @@ describe("StrategyService", () => {
     it("should route llm-ollama runs to the Ollama queue after validating the model", async () => {
       await service.triggerRun(100, "llm-ollama", "2024-01-02", 0, "mistral");
 
-      expect(mockSupportedModelService.assertSupported).toHaveBeenCalledWith("llm-ollama", "mistral");
+      expect(mockSupportedModelService.assertSupported).toHaveBeenCalledWith(
+        "llm-ollama",
+        "mistral",
+      );
       expect(mockOllamaQueue.add).toHaveBeenCalledWith(
         "run-strategy",
         {
@@ -333,12 +344,14 @@ describe("StrategyService", () => {
 
     it("should not enqueue anything when the model is rejected", async () => {
       mockSupportedModelService.assertSupported.mockRejectedValueOnce(
-        new BadRequestException("Model 'bogus' is not a supported model for strategy 'llm-openai'."),
+        new BadRequestException(
+          "Model 'bogus' is not a supported model for strategy 'llm-openai'.",
+        ),
       );
 
-      await expect(
-        service.triggerRun(100, "llm-openai", "2024-01-02", 0, "bogus"),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.triggerRun(100, "llm-openai", "2024-01-02", 0, "bogus")).rejects.toThrow(
+        BadRequestException,
+      );
       expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
     });
   });
@@ -721,7 +734,9 @@ describe("StrategyService", () => {
 
   describe("deleteRun", () => {
     it("should delegate to the run store and return its deleted counts", async () => {
-      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ id: 7, status: StrategyRunStatus.ERROR }));
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ id: 7, status: StrategyRunStatus.ERROR }),
+      );
       mockManager.count
         .mockResolvedValueOnce(3) // Guess
         .mockResolvedValueOnce(5) // SolvePrompt
@@ -1077,7 +1092,10 @@ describe("StrategyService", () => {
 
       await service.triggerStrategyRuns(100, "llm-ollama", "2024-01-02", "mistral");
 
-      expect(mockSupportedModelService.assertSupported).toHaveBeenCalledWith("llm-ollama", "mistral");
+      expect(mockSupportedModelService.assertSupported).toHaveBeenCalledWith(
+        "llm-ollama",
+        "mistral",
+      );
       expect(mockOllamaQueue.add).toHaveBeenCalledTimes(1);
       expect(mockQueue.addBulk).not.toHaveBeenCalled();
       expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
@@ -1286,7 +1304,10 @@ describe("StrategyService", () => {
       mockDbCountsQuery([]);
       mockOpenAIQueue.getJobs.mockResolvedValueOnce([]);
 
-      const result = await service.countTodayDispatchByModel("llm-openai", ["gpt-4.1-nano", "o3-mini"]);
+      const result = await service.countTodayDispatchByModel("llm-openai", [
+        "gpt-4.1-nano",
+        "o3-mini",
+      ]);
 
       expect(result).toEqual(
         new Map([
@@ -1307,7 +1328,10 @@ describe("StrategyService", () => {
         { data: { model: "mistral" } },
       ]);
 
-      const result = await service.countTodayDispatchByModel("llm-openai", ["gpt-4.1-nano", "o3-mini"]);
+      const result = await service.countTodayDispatchByModel("llm-openai", [
+        "gpt-4.1-nano",
+        "o3-mini",
+      ]);
 
       expect(result).toEqual(
         new Map([
@@ -1665,7 +1689,12 @@ describe("StrategyService", () => {
         addSelect: jest.fn().mockReturnThis(),
         groupBy: jest.fn().mockReturnThis(),
         getRawMany: jest.fn().mockResolvedValue([
-          { strategyRunId: 2, promptTokens: "1000000", completionTokens: "500000", issueCount: "3" },
+          {
+            strategyRunId: 2,
+            promptTokens: "1000000",
+            completionTokens: "500000",
+            issueCount: "3",
+          },
           { strategyRunId: 3, promptTokens: "1000000", completionTokens: "500000" },
           { strategyRunId: 4, promptTokens: "1000000", completionTokens: "0", issueCount: "0" },
         ]),
@@ -1724,9 +1753,11 @@ describe("StrategyService", () => {
         select: jest.fn().mockReturnThis(),
         addSelect: jest.fn().mockReturnThis(),
         groupBy: jest.fn().mockReturnThis(),
-        getRawMany: jest.fn().mockResolvedValue([
-          { strategyRunId: 1, promptTokens: "1000000", completionTokens: "1000000" },
-        ]),
+        getRawMany: jest
+          .fn()
+          .mockResolvedValue([
+            { strategyRunId: 1, promptTokens: "1000000", completionTokens: "1000000" },
+          ]),
       });
       mockSupportedModelService.findPriceHistory.mockResolvedValueOnce([
         {
@@ -1772,9 +1803,11 @@ describe("StrategyService", () => {
         select: jest.fn().mockReturnThis(),
         addSelect: jest.fn().mockReturnThis(),
         groupBy: jest.fn().mockReturnThis(),
-        getRawMany: jest.fn().mockResolvedValue([
-          { strategyRunId: 1, promptTokens: "1000000", completionTokens: "1000000" },
-        ]),
+        getRawMany: jest
+          .fn()
+          .mockResolvedValue([
+            { strategyRunId: 1, promptTokens: "1000000", completionTokens: "1000000" },
+          ]),
       });
       mockSupportedModelService.findPriceHistory.mockResolvedValueOnce([
         {
@@ -1903,8 +1936,24 @@ describe("StrategyService", () => {
     it("reports per-model category accuracy from CategoryEvaluation verdict counts", async () => {
       mockGuessCounts([]);
       mockStrategyRunRepo.find.mockResolvedValue([
-        { id: 1, strategyName: "llm-openai", modelName: "gpt-4.1-nano", status: "completed", puzzleId: 1, startedAt: new Date(), finishedAt: new Date() },
-        { id: 2, strategyName: "llm-openai", modelName: "gpt-4.1-nano", status: "failed", puzzleId: 2, startedAt: new Date(), finishedAt: new Date() },
+        {
+          id: 1,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          status: "completed",
+          puzzleId: 1,
+          startedAt: new Date(),
+          finishedAt: new Date(),
+        },
+        {
+          id: 2,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          status: "failed",
+          puzzleId: 2,
+          startedAt: new Date(),
+          finishedAt: new Date(),
+        },
       ]);
       mockCategoryEvaluationRepo.createQueryBuilder.mockReturnValue({
         select: jest.fn().mockReturnThis(),
@@ -1928,7 +1977,15 @@ describe("StrategyService", () => {
     it("gives categoryAccuracy null for a model with no evaluations and for deterministic rows", async () => {
       mockGuessCounts([]);
       mockStrategyRunRepo.find.mockResolvedValue([
-        { id: 1, strategyName: "alphabetical", modelName: null, status: "completed", puzzleId: 1, startedAt: new Date(), finishedAt: new Date() },
+        {
+          id: 1,
+          strategyName: "alphabetical",
+          modelName: null,
+          status: "completed",
+          puzzleId: 1,
+          startedAt: new Date(),
+          finishedAt: new Date(),
+        },
       ]);
       const board = await service.getLeaderboard();
       expect(board.deterministic[0].categoryAccuracy).toBeNull();
@@ -2144,10 +2201,7 @@ describe("StrategyService", () => {
       await service.getRunHistory("alphabetical", { status: "queued" });
       await service.getRunHistory("alphabetical", { status: "bogus" });
 
-      expect(qb.andWhere).not.toHaveBeenCalledWith(
-        "run.status = :status",
-        expect.anything(),
-      );
+      expect(qb.andWhere).not.toHaveBeenCalledWith("run.status = :status", expect.anything());
     });
 
     it("should cast the SQL-computed tokenCostUsd to a number, leaving NULL as null", async () => {
@@ -2638,11 +2692,7 @@ describe("StrategyService", () => {
         // draw (random()=0.99) samples the pool tail [EGGPLANT, FIG, GRAPE,
         // HONEY], which is an answer group, and the leftover words solve the
         // puzzle.
-        const randomValues = [
-          ...Array(24).fill(0),
-          ...Array(4).fill(0.99),
-          ...Array(4).fill(0.5),
-        ];
+        const randomValues = [...Array(24).fill(0), ...Array(4).fill(0.99), ...Array(4).fill(0.5)];
         jest.spyOn(Math, "random").mockImplementation(() => randomValues.shift() ?? 0.5);
         mockPuzzleRepo.findOne.mockResolvedValueOnce(
           makePuzzle([

@@ -71,6 +71,32 @@ describe("useStrategyMeta", () => {
     expect(result.current.meta?.strategyName).toBe("llm-google");
   });
 
+  it("resolves a Groq model's provider label correctly", async () => {
+    stubModelsFetch([
+      {
+        id: 3,
+        strategyName: "llm-groq",
+        modelName: "llama-3.1-8b-instant",
+        inputCostPerMillionTokens: 0.05,
+        outputCostPerMillionTokens: 0.08,
+        supported: true,
+        contextWindow: 131072,
+        paramCount: null,
+        providerDescription: null,
+        releaseDate: null,
+      },
+    ]);
+
+    const { result } = renderHook(() => useStrategyMeta("llama-3.1-8b-instant"));
+
+    await waitFor(() => {
+      expect(result.current.meta?.description).toBe("Groq llama-3.1-8b-instant · 131K context");
+    });
+
+    expect(result.current.meta?.name).toBe("LLM · llama-3.1-8b-instant");
+    expect(result.current.meta?.strategyName).toBe("llm-groq");
+  });
+
   it("does not fetch live model data for a non-LLM strategyId", async () => {
     stubModelsFetch([]);
 

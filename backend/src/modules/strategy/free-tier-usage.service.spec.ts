@@ -118,7 +118,9 @@ describe("FreeTierUsageService", () => {
 
       await service.getMiniUsage();
 
-      expect(qb.where).toHaveBeenCalledWith("run.modelName IN (:...models)", { models: MINI_MODELS });
+      expect(qb.where).toHaveBeenCalledWith("run.modelName IN (:...models)", {
+        models: MINI_MODELS,
+      });
       expect(MINI_MODELS.some((model) => FLAGSHIP_MODELS.includes(model))).toBe(false);
     });
 

@@ -10,9 +10,9 @@ describe("parseParamCount", () => {
   });
 
   it("parses a param count from description prose", () => {
-    expect(
-      parseParamCount("A high-performing, industry-standard 7.3B parameter model."),
-    ).toBe(7_300_000_000);
+    expect(parseParamCount("A high-performing, industry-standard 7.3B parameter model.")).toBe(
+      7_300_000_000,
+    );
   });
 
   it("returns null for a slug with no param count", () => {

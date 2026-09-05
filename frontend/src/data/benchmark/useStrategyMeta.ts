@@ -15,7 +15,9 @@ function buildDynamicMeta(model: SupportedModelRecord): StrategyMeta {
       ? "Ollama"
       : model.strategyName === "llm-google"
         ? "Google"
-        : "OpenAI";
+        : model.strategyName === "llm-groq"
+          ? "Groq"
+          : "OpenAI";
   return {
     id: model.modelName,
     name: `LLM · ${model.modelName}`,

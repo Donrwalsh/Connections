@@ -206,7 +206,11 @@ export async function configureApp(app: INestApplication): Promise<INestApplicat
 
   mountBullLogin(app, env.BULL_BOARD_USER, env.BULL_BOARD_PASS);
 
-  app.use(BULL_BOARD_PATH, bullBoardGuard(env.BULL_BOARD_USER, env.BULL_BOARD_PASS), serverAdapter.getRouter());
+  app.use(
+    BULL_BOARD_PATH,
+    bullBoardGuard(env.BULL_BOARD_USER, env.BULL_BOARD_PASS),
+    serverAdapter.getRouter(),
+  );
 
   // Swagger config
   const config = new DocumentBuilder()

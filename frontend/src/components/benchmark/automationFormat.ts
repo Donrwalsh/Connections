@@ -2,9 +2,9 @@ import { formatTimestamp } from "../../data/benchmark/metrics";
 import type { AutomationLegDisplay } from "../../data/benchmark/types";
 
 /** Builds the "Auto-run: ... · Next: ..." line shared by the mini
- * FreeTierBudgetWidget, CategoryJudgingWidget, and GoogleDispatchWidget —
- * one shared format so all three daily-automation legs read consistently on
- * the page. */
+ * FreeTierBudgetWidget, CategoryJudgingWidget, GoogleDispatchWidget, and
+ * GroqDispatchWidget — one shared format so all the daily-automation legs
+ * read consistently on the page. */
 export function formatAutomationLine(leg: AutomationLegDisplay): string {
   const last =
     leg.lastRunAt === null || leg.message === null

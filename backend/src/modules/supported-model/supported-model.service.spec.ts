@@ -134,7 +134,12 @@ describe("SupportedModelService", () => {
   describe("findAll", () => {
     it("should return every row, ordered by id, regardless of supported status", async () => {
       const rows = [
-        { id: 1, strategyName: "llm-openai", modelName: "gpt-4.1-nano-2025-04-14", supported: true },
+        {
+          id: 1,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano-2025-04-14",
+          supported: true,
+        },
         { id: 2, strategyName: "llm-openai", modelName: "gpt-5-nano", supported: true },
         { id: 3, strategyName: "llm-openai", modelName: "gpt-3.5-turbo", supported: false },
       ];
@@ -154,13 +159,28 @@ describe("SupportedModelService", () => {
 
     it("should price each model from its current (highest-id) ModelPrice row", async () => {
       mockRepo.find.mockResolvedValueOnce([
-        { id: 1, strategyName: "llm-openai", modelName: "gpt-4.1-nano-2025-04-14", supported: true },
+        {
+          id: 1,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano-2025-04-14",
+          supported: true,
+        },
       ]);
       // Ascending by id: the second row for supportedModelId 1 is the most
       // recent price and should win over the first.
       mockPriceRepo.find.mockResolvedValueOnce([
-        { id: 10, supportedModelId: 1, inputCostPerMillionTokens: 0.2, outputCostPerMillionTokens: 0.8 },
-        { id: 11, supportedModelId: 1, inputCostPerMillionTokens: 0.1, outputCostPerMillionTokens: 0.4 },
+        {
+          id: 10,
+          supportedModelId: 1,
+          inputCostPerMillionTokens: 0.2,
+          outputCostPerMillionTokens: 0.8,
+        },
+        {
+          id: 11,
+          supportedModelId: 1,
+          inputCostPerMillionTokens: 0.1,
+          outputCostPerMillionTokens: 0.4,
+        },
       ]);
 
       const result = await service.findAll();

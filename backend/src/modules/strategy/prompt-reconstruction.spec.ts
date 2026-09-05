@@ -92,7 +92,12 @@ describe("reconstructSolvePrompts", () => {
       status: LlmProposalStatus.NOT_SELECTED,
       guessId: null,
     });
-    const guess1 = makeGuess({ id: 1, sequenceNumber: 1, words: ["A", "B", "C", "D"], result: GuessResult.FAILURE });
+    const guess1 = makeGuess({
+      id: 1,
+      sequenceNumber: 1,
+      words: ["A", "B", "C", "D"],
+      result: GuessResult.FAILURE,
+    });
 
     // Step 2 (RETRY, since step 1 ended on a failure): proposes [E,F,G,H],
     // which succeeds.
@@ -110,12 +115,21 @@ describe("reconstructSolvePrompts", () => {
       status: LlmProposalStatus.USED,
       guessId: 2,
     });
-    const guess2 = makeGuess({ id: 2, sequenceNumber: 2, words: ["E", "F", "G", "H"], result: GuessResult.SUCCESS });
+    const guess2 = makeGuess({
+      id: 2,
+      sequenceNumber: 2,
+      words: ["E", "F", "G", "H"],
+      result: GuessResult.SUCCESS,
+    });
 
     // Step 3 (INITIAL again — a successful step resets lastFailedGuess, so
     // the runner goes back to the INITIAL branch even mid-run): solves the
     // remaining 4 words.
-    const prompt3 = makeSolvePrompt({ id: 103, promptNumber: 3, promptType: SolvePromptType.INITIAL_SOLVE });
+    const prompt3 = makeSolvePrompt({
+      id: 103,
+      promptNumber: 3,
+      promptType: SolvePromptType.INITIAL_SOLVE,
+    });
     const proposal4 = makeProposal({
       id: 4,
       solvePromptId: 103,
@@ -124,7 +138,12 @@ describe("reconstructSolvePrompts", () => {
       status: LlmProposalStatus.USED,
       guessId: 3,
     });
-    const guess3 = makeGuess({ id: 3, sequenceNumber: 3, words: ["A", "B", "C", "D"], result: GuessResult.SUCCESS });
+    const guess3 = makeGuess({
+      id: 3,
+      sequenceNumber: 3,
+      words: ["A", "B", "C", "D"],
+      result: GuessResult.SUCCESS,
+    });
 
     const guessesById = new Map([
       [1, guess1],
@@ -155,8 +174,22 @@ describe("reconstructSolvePrompts", () => {
       formatConversation([{ role: "user", content: initialPrompt }]),
     );
     expect(result[0]!.proposals).toEqual([
-      { id: 1, words: ["A", "B", "C", "D"], category: "Cat1", status: LlmProposalStatus.USED, guess: { sequenceNumber: 1, result: GuessResult.FAILURE, guessedAt: guess1.guessedAt }, categoryEvaluation: null },
-      { id: 2, words: ["E", "F", "G", "H"], category: "Cat2", status: LlmProposalStatus.NOT_SELECTED, guess: null, categoryEvaluation: null },
+      {
+        id: 1,
+        words: ["A", "B", "C", "D"],
+        category: "Cat1",
+        status: LlmProposalStatus.USED,
+        guess: { sequenceNumber: 1, result: GuessResult.FAILURE, guessedAt: guess1.guessedAt },
+        categoryEvaluation: null,
+      },
+      {
+        id: 2,
+        words: ["E", "F", "G", "H"],
+        category: "Cat2",
+        status: LlmProposalStatus.NOT_SELECTED,
+        guess: null,
+        categoryEvaluation: null,
+      },
     ]);
 
     // Step 2: the full transcript so far — step 1's prompt and response —
@@ -186,7 +219,11 @@ describe("reconstructSolvePrompts", () => {
   });
 
   it("labels an off-by-one guess as 'one away' guidance in the retry prompt", () => {
-    const prompt1 = makeSolvePrompt({ id: 1, promptNumber: 1, promptType: SolvePromptType.INITIAL_SOLVE });
+    const prompt1 = makeSolvePrompt({
+      id: 1,
+      promptNumber: 1,
+      promptType: SolvePromptType.INITIAL_SOLVE,
+    });
     const prompt2 = makeSolvePrompt({ id: 2, promptNumber: 2, promptType: SolvePromptType.RETRY });
     const proposal1 = makeProposal({
       id: 1,

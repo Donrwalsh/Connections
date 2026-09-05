@@ -29,7 +29,10 @@ const VERDICT_BY_STRING: Record<string, CategoryEvalVerdict> = {
 };
 
 function wordSetKey(words: string[]): string {
-  return [...words].map((w) => w.trim().toUpperCase()).sort().join("|");
+  return [...words]
+    .map((w) => w.trim().toUpperCase())
+    .sort()
+    .join("|");
 }
 
 /** The puzzle answer group whose member words equal `guessWords` as a set. */
@@ -102,7 +105,9 @@ export class CategoryEvaluatorService {
 
     const qb = this.llmProposalRepo
       .createQueryBuilder("proposal")
-      .innerJoin("proposal.guess", "guess", "guess.result = :success", { success: GuessResult.SUCCESS })
+      .innerJoin("proposal.guess", "guess", "guess.result = :success", {
+        success: GuessResult.SUCCESS,
+      })
       .leftJoin(CategoryEvaluation, "ce", 'ce."llmProposalId" = proposal.id')
       .where("proposal.status = :used", { used: LlmProposalStatus.USED });
 

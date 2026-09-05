@@ -200,7 +200,10 @@ export class FreeTierDispatchService {
       maxInFlight - inFlightTotal,
     );
 
-    const allocation = await this.strategyService.countTodayDispatchByModel(LLM_OPENAI, usage.models);
+    const allocation = await this.strategyService.countTodayDispatchByModel(
+      LLM_OPENAI,
+      usage.models,
+    );
     const exhausted = new Set<string>();
     let dispatched = 0;
 

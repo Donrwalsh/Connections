@@ -1,7 +1,11 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { getRepositoryToken } from "@nestjs/typeorm";
 import { CategoryEvaluatorService, matchAnswerGroup } from "./category-evaluator.service";
-import { CategoryEvaluation, CategoryEvalStatus, CategoryEvalVerdict } from "./entities/category-evaluation.entity";
+import {
+  CategoryEvaluation,
+  CategoryEvalStatus,
+  CategoryEvalVerdict,
+} from "./entities/category-evaluation.entity";
 import { LlmProposal, LlmProposalStatus } from "./entities/llm-proposal.entity";
 import { StrategyRun } from "./entities/strategy-run.entity";
 import { Guess, GuessResult } from "./entities/guess.entity";
@@ -12,8 +16,16 @@ import { LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE, LLM_GOOGLE_QUEUE } from "../queue/q
 const puzzle = {
   id: 7,
   answerGroups: [
-    { id: 100, group_name: "___ COBBLER", members: [{ word: "APPLE" }, { word: "PEACH" }, { word: "SHOE" }, { word: "COBBLE" }] },
-    { id: 101, group_name: "Citrus", members: [{ word: "LIME" }, { word: "LEMON" }, { word: "ORANGE" }, { word: "CITRON" }] },
+    {
+      id: 100,
+      group_name: "___ COBBLER",
+      members: [{ word: "APPLE" }, { word: "PEACH" }, { word: "SHOE" }, { word: "COBBLE" }],
+    },
+    {
+      id: 101,
+      group_name: "Citrus",
+      members: [{ word: "LIME" }, { word: "LEMON" }, { word: "ORANGE" }, { word: "CITRON" }],
+    },
   ],
 } as unknown as Puzzle;
 
@@ -39,7 +51,12 @@ describe("CategoryEvaluatorService.evaluateProposal", () => {
     strategyRunId: 9,
     category: "Fruits",
     status: LlmProposalStatus.USED,
-    guess: { id: 3, puzzleId: 7, words: ["APPLE", "PEACH", "SHOE", "COBBLE"], result: GuessResult.SUCCESS } as Guess,
+    guess: {
+      id: 3,
+      puzzleId: 7,
+      words: ["APPLE", "PEACH", "SHOE", "COBBLE"],
+      result: GuessResult.SUCCESS,
+    } as Guess,
   } as unknown as LlmProposal;
 
   beforeEach(async () => {
@@ -49,7 +66,10 @@ describe("CategoryEvaluatorService.evaluateProposal", () => {
     // orchestrator.service.spec.ts / app.service.spec.ts do.
     process.env.INTERNAL_API_KEY = "test-key";
 
-    catEvalRepo = { findOne: jest.fn().mockResolvedValue(null), save: jest.fn().mockImplementation((r) => r) };
+    catEvalRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+      save: jest.fn().mockImplementation((r) => r),
+    };
     llmProposalRepo = { findOne: jest.fn().mockResolvedValue(usedProposal) };
     puzzleRepo = { findOne: jest.fn().mockResolvedValue(puzzle) };
     orchestrator = {
@@ -76,7 +96,10 @@ describe("CategoryEvaluatorService.evaluateProposal", () => {
         { provide: getRepositoryToken(CategoryEvaluation), useValue: catEvalRepo },
         { provide: getRepositoryToken(LlmProposal), useValue: llmProposalRepo },
         { provide: getRepositoryToken(Puzzle), useValue: puzzleRepo },
-        { provide: getRepositoryToken(StrategyRun), useValue: { findOne: jest.fn(), delete: jest.fn() } },
+        {
+          provide: getRepositoryToken(StrategyRun),
+          useValue: { findOne: jest.fn(), delete: jest.fn() },
+        },
         { provide: OrchestratorService, useValue: orchestrator },
         { provide: LLM_OPENAI_QUEUE, useValue: noopQueue },
         { provide: LLM_OLLAMA_QUEUE, useValue: noopQueue },
@@ -115,7 +138,13 @@ describe("CategoryEvaluatorService.evaluateProposal", () => {
   it("writes a callError row (verdict null) without throwing when the judge fails", async () => {
     orchestrator.judgeCategory.mockResolvedValue({
       ok: false,
-      error: { error: "boom", code: "model_error", errorName: "APICallError", statusCode: 502, isRetryable: true },
+      error: {
+        error: "boom",
+        code: "model_error",
+        errorName: "APICallError",
+        statusCode: 502,
+        isRetryable: true,
+      },
     });
     const res = await service.evaluateProposal(55);
     expect(res.outcome).toBe("callError");
@@ -155,7 +184,10 @@ describe("CategoryEvaluatorService.evaluateProposal", () => {
   });
 
   it("skips when the proposal is not a successful used guess", async () => {
-    llmProposalRepo.findOne.mockResolvedValue({ ...usedProposal, guess: { ...usedProposal.guess, result: GuessResult.FAILURE } });
+    llmProposalRepo.findOne.mockResolvedValue({
+      ...usedProposal,
+      guess: { ...usedProposal.guess, result: GuessResult.FAILURE },
+    });
     const res = await service.evaluateProposal(55);
     expect(res.outcome).toBe("skipped");
     expect(orchestrator.judgeCategory).not.toHaveBeenCalled();
@@ -197,8 +229,14 @@ describe("CategoryEvaluatorService.enqueuePending", () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CategoryEvaluatorService,
-        { provide: getRepositoryToken(CategoryEvaluation), useValue: { findOne: jest.fn(), save: jest.fn() } },
-        { provide: getRepositoryToken(LlmProposal), useValue: { findOne: jest.fn(), createQueryBuilder: jest.fn().mockReturnValue(qb) } },
+        {
+          provide: getRepositoryToken(CategoryEvaluation),
+          useValue: { findOne: jest.fn(), save: jest.fn() },
+        },
+        {
+          provide: getRepositoryToken(LlmProposal),
+          useValue: { findOne: jest.fn(), createQueryBuilder: jest.fn().mockReturnValue(qb) },
+        },
         { provide: getRepositoryToken(Puzzle), useValue: { findOne: jest.fn() } },
         {
           provide: getRepositoryToken(StrategyRun),
@@ -252,11 +290,9 @@ describe("CategoryEvaluatorService.enqueuePending", () => {
     );
     // The force path must NOT reuse the deterministic jobId, or BullMQ's
     // completed-job dedupe silently drops the re-judge.
-    expect(openaiAdd).not.toHaveBeenCalledWith(
-      "evaluate-category",
-      expect.anything(),
-      { jobId: "cat-eval-90" },
-    );
+    expect(openaiAdd).not.toHaveBeenCalledWith("evaluate-category", expect.anything(), {
+      jobId: "cat-eval-90",
+    });
   });
 });
 
@@ -311,9 +347,14 @@ describe("CategoryEvaluatorService.getCoverage", () => {
     expect(qb.where).toHaveBeenCalledWith("proposal.status = :used", {
       used: LlmProposalStatus.USED,
     });
-    expect(qb.innerJoin).toHaveBeenCalledWith("proposal.guess", "guess", "guess.result = :success", {
-      success: GuessResult.SUCCESS,
-    });
+    expect(qb.innerJoin).toHaveBeenCalledWith(
+      "proposal.guess",
+      "guess",
+      "guess.result = :success",
+      {
+        success: GuessResult.SUCCESS,
+      },
+    );
     expect(qb.leftJoin).toHaveBeenCalledWith(
       CategoryEvaluation,
       "ce",

@@ -35,7 +35,9 @@ async function main() {
   try {
     const service = appContext.get(CategoryEvaluatorService);
     const result = await service.enqueuePending({ limit, force });
-    logger.log(`Enqueued ${result.enqueued} job(s): ${result.llmProposalIds.join(", ") || "(none)"}`);
+    logger.log(
+      `Enqueued ${result.enqueued} job(s): ${result.llmProposalIds.join(", ") || "(none)"}`,
+    );
   } finally {
     await appContext.close();
   }

@@ -21,8 +21,9 @@ export interface SolveErrorDetails {
   statusCode?: number;
   errorName?: string;
   isRetryable?: boolean;
-  // Seconds to wait before retrying — set only for a Google "rate_limited"
-  // classification, from the response's own RetryInfo.retryDelay.
+  // Seconds to wait before retrying — set for a "rate_limited"
+  // classification: the Google response's own RetryInfo.retryDelay, or the
+  // Groq response's retry-after header.
   retryAfterSeconds?: number;
 }
 
@@ -158,6 +159,61 @@ function isGoogleDailyRateLimit(responseBody: unknown): boolean {
 }
 
 /**
+ * A Groq 429 carries its per-minute and (on daily exhaustion) per-day status
+ * entirely in response headers, not the body — it has no google.rpc.Status
+ * shape to parse. The AI SDK flattens response headers into an object keyed
+ * by lowercase name:
+ *
+ *   x-ratelimit-remaining-requests  remaining requests, current minute window
+ *   x-ratelimit-remaining-tokens    remaining tokens, current minute window
+ *   retry-after                     seconds until the current window resets
+ *
+ * A per-minute request/token exhaustion always carries retry-after (the
+ * reset seconds). A per-day exhaustion reports remaining-requests of "0"
+ * with no retry-after — the allowance won't renew until the daily reset, so
+ * callers must check isGroqDailyRateLimit *before* calling this (a spent
+ * daily allowance also reports remaining-tokens "0", which this function
+ * would otherwise misread as a retryable token-limit hit). Returns the
+ * seconds to wait when a per-minute hit is found, `undefined` when a
+ * token-limit hit is found without a retry-after, or `null` when the
+ * headers aren't a per-minute rate-limit at all (including: absent headers,
+ * or any other shape this function doesn't recognize). Never throws.
+ */
+function parseGroqRateLimit(
+  responseHeaders: Record<string, string> | undefined,
+): number | undefined | null {
+  if (!responseHeaders) return null;
+
+  const retryAfter = responseHeaders["retry-after"];
+  const seconds = retryAfter !== undefined ? Number(retryAfter) : NaN;
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds;
+
+  const remainingTokens = responseHeaders["x-ratelimit-remaining-tokens"];
+  if (remainingTokens !== undefined && Number(remainingTokens) <= 0) return undefined;
+
+  return null;
+}
+
+/**
+ * True when a Groq 429 reports a spent daily allowance — the
+ * x-ratelimit-remaining-requests header is "0" with no retry-after (a
+ * per-minute request exhaustion also reports "0" but carries retry-after,
+ * so its absence is what makes this the daily case). Never throws; false for
+ * any shape it doesn't recognize. The daily reset time is not carried in
+ * the response; the backend computes it as the next UTC midnight.
+ */
+function isGroqDailyRateLimit(responseHeaders: Record<string, string> | undefined): boolean {
+  if (!responseHeaders) return false;
+
+  const remainingRequests = responseHeaders["x-ratelimit-remaining-requests"];
+  if (remainingRequests === undefined) return false;
+  if (!/^-?\d+$/.test(remainingRequests)) return false;
+  if (Number(remainingRequests) > 0) return false;
+
+  return responseHeaders["retry-after"] === undefined;
+}
+
+/**
  * Classifies an AI SDK failure from generateObject/generateText into a typed
  * SolveError. Malformed-but-present output (no/undecodable object) is
  * recoverable — callers may re-prompt. Provider/network failures are not,
@@ -227,6 +283,29 @@ export function classifyModelCallError(
         ...details,
         ...apiDetails,
         errorName: err.name,
+      });
+    }
+  }
+
+  if (provider === "groq" && APICallError.isInstance(err) && err.statusCode === 429) {
+    // Checked before parseGroqRateLimit: a spent daily allowance also
+    // reports x-ratelimit-remaining-tokens "0" (and remaining-requests "0"),
+    // so the token branch can't tell it apart — the absence of retry-after
+    // is the distinguishing signal.
+    if (isGroqDailyRateLimit(err.responseHeaders)) {
+      return new SolveError("rate_limited_daily", `Groq daily quota exhausted: ${message}`, {
+        ...details,
+        ...apiDetails,
+        errorName: err.name,
+      });
+    }
+    const retryAfterSeconds = parseGroqRateLimit(err.responseHeaders);
+    if (retryAfterSeconds !== null) {
+      return new SolveError("rate_limited", `Groq rate limit hit: ${message}`, {
+        ...details,
+        ...apiDetails,
+        errorName: err.name,
+        retryAfterSeconds,
       });
     }
   }

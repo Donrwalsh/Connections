@@ -2,11 +2,16 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { getRepositoryToken } from "@nestjs/typeorm";
 import { MoreThan, LessThanOrEqual } from "typeorm";
 import {
-  GoogleRateLimitHoldService,
+  RateLimitHoldService,
   nextPacificMidnight,
+  nextUtcMidnight,
   pacificDateStamp,
-} from "./google-rate-limit-hold.service";
-import { GoogleRateLimitHold } from "./entities/google-rate-limit-hold.entity";
+  utcDateStamp,
+  strategyResetAt,
+  strategyDateStamp,
+} from "./rate-limit-hold.service";
+import { RateLimitHold } from "./entities/rate-limit-hold.entity";
+import { LLM_GOOGLE, LLM_GROQ } from "../../strategies";
 
 describe("nextPacificMidnight", () => {
   it("returns the next Pacific midnight in UTC during PST (UTC-8)", () => {
@@ -52,6 +57,24 @@ describe("nextPacificMidnight", () => {
   });
 });
 
+describe("nextUtcMidnight", () => {
+  it("returns the following 00:00 UTC", () => {
+    const now = new Date("2026-01-15T20:00:00Z");
+    expect(nextUtcMidnight(now).toISOString()).toBe("2026-01-16T00:00:00.000Z");
+  });
+
+  it("returns the *next* midnight when now is exactly UTC midnight", () => {
+    // 2026-01-16 00:00:00.000 UTC exactly.
+    const now = new Date("2026-01-16T00:00:00.000Z");
+    expect(nextUtcMidnight(now).toISOString()).toBe("2026-01-17T00:00:00.000Z");
+  });
+
+  it("is unaffected by any DST — UTC has none", () => {
+    const now = new Date("2026-07-04T23:59:59Z");
+    expect(nextUtcMidnight(now).toISOString()).toBe("2026-07-05T00:00:00.000Z");
+  });
+});
+
 describe("pacificDateStamp", () => {
   it("returns the Pacific calendar date as YYYY-MM-DD", () => {
     // 2026-01-15 12:00 PST
@@ -70,8 +93,34 @@ describe("pacificDateStamp", () => {
   });
 });
 
-describe("GoogleRateLimitHoldService", () => {
-  let service: GoogleRateLimitHoldService;
+describe("utcDateStamp", () => {
+  it("returns the UTC calendar date as YYYY-MM-DD", () => {
+    expect(utcDateStamp(new Date("2026-01-15T20:00:00Z"))).toBe("2026-01-15");
+  });
+
+  it("uses the UTC day, not the Pacific day", () => {
+    // 2026-01-16 02:00 UTC is still 2026-01-15 18:00 PST — the Groq sweep
+    // must stamp the UTC day, since Groq's quota resets at UTC midnight.
+    expect(utcDateStamp(new Date("2026-01-16T02:00:00Z"))).toBe("2026-01-16");
+  });
+});
+
+describe("strategyResetAt / strategyDateStamp", () => {
+  it("uses Pacific midnight for llm-google", () => {
+    const now = new Date("2026-01-15T20:00:00Z");
+    expect(strategyResetAt(LLM_GOOGLE, now)).toEqual(nextPacificMidnight(now));
+    expect(strategyDateStamp(LLM_GOOGLE, now)).toBe(pacificDateStamp(now));
+  });
+
+  it("uses UTC midnight for llm-groq", () => {
+    const now = new Date("2026-01-15T20:00:00Z");
+    expect(strategyResetAt(LLM_GROQ, now)).toEqual(nextUtcMidnight(now));
+    expect(strategyDateStamp(LLM_GROQ, now)).toBe(utcDateStamp(now));
+  });
+});
+
+describe("RateLimitHoldService", () => {
+  let service: RateLimitHoldService;
   let repo: {
     upsert: jest.Mock;
     findOne: jest.Mock;
@@ -89,12 +138,12 @@ describe("GoogleRateLimitHoldService", () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        GoogleRateLimitHoldService,
-        { provide: getRepositoryToken(GoogleRateLimitHold), useValue: repo },
+        RateLimitHoldService,
+        { provide: getRepositoryToken(RateLimitHold), useValue: repo },
       ],
     }).compile();
 
-    service = module.get(GoogleRateLimitHoldService);
+    service = module.get(RateLimitHoldService);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -107,6 +156,17 @@ describe("GoogleRateLimitHoldService", () => {
     expect(row).toMatchObject({ strategyName: "llm-google", modelName: "gemini-3.6-flash" });
     expect(row.resetAt.getTime()).toBeGreaterThan(Date.now());
     expect(conflictPaths).toEqual(["strategyName", "modelName"]);
+  });
+
+  it("holds an llm-groq model until UTC midnight, not Pacific", async () => {
+    await service.hold("llm-groq", "llama-3.1-8b-instant");
+
+    const [row] = repo.upsert.mock.calls[0];
+    expect(row.strategyName).toBe("llm-groq");
+    // Frozen around a late-Pacific instant, the reset must be the UTC midnight
+    // (which the Pacific-day stamp would get wrong).
+    expect(row.resetAt.getTime()).toBeGreaterThan(Date.now());
+    expect(row.resetAt.toISOString().endsWith("T00:00:00.000Z")).toBe(true);
   });
 
   it("isHeld is true only while resetAt is in the future", async () => {

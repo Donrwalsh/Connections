@@ -3,7 +3,7 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { SupportedModel } from "./entities/supported-model.entity";
 import { ModelPrice } from "./entities/model-price.entity";
-import { OpenRouterClient, OpenRouterModel } from "./openrouter-client";
+import { OpenRouterClient, OpenRouterModel, OpenRouterEndpoint } from "./openrouter-client";
 import { parseParamCount, parseReleaseDate } from "./openrouter-metadata.util";
 
 export interface RefreshSummary {
@@ -81,8 +81,9 @@ export class ModelMetadataRefreshService {
     // error (e.g. "0.0000001" * 1_000_000 = 0.09999999999999999) — round to
     // 6 decimal places, well past any real pricing's precision, so an
     // unchanged price is actually detected as unchanged.
-    const inputCostPerMillionTokens = round6(Number(match.pricing.prompt) * 1_000_000);
-    const outputCostPerMillionTokens = round6(Number(match.pricing.completion) * 1_000_000);
+    const priced = await this.pricedPerMillionTokens(model, match);
+    if (!priced) return;
+    const { inputCostPerMillionTokens, outputCostPerMillionTokens } = priced;
 
     const existingPrices = await this.priceRepo.find({
       where: { supportedModelId: model.id },
@@ -105,5 +106,49 @@ export class ModelMetadataRefreshService {
       outputCostPerMillionTokens,
     });
     await this.priceRepo.save(newPrice);
+  }
+
+  /**
+   * Resolves the price a model should be measured at: the provider-scoped
+   * endpoint price when the model has a priceScopeProvider, otherwise the
+   * list-level aggregate. Returns null (and logs) when the scoped price
+   * can't be resolved — an endpoint fetch failure or a provider that
+   * OpenRouter no longer routes to — in which case nothing is inserted and
+   * the previous price stays authoritative.
+   */
+  private async pricedPerMillionTokens(
+    model: SupportedModel,
+    match: OpenRouterModel,
+  ): Promise<{ inputCostPerMillionTokens: number; outputCostPerMillionTokens: number } | null> {
+    const scope = model.priceScopeProvider;
+    if (!scope) {
+      return {
+        inputCostPerMillionTokens: round6(Number(match.pricing.prompt) * 1_000_000),
+        outputCostPerMillionTokens: round6(Number(match.pricing.completion) * 1_000_000),
+      };
+    }
+
+    let endpoints: OpenRouterEndpoint[];
+    try {
+      endpoints = await this.client.getModelEndpoints(match.id);
+    } catch (err) {
+      this.logger.warn(
+        `Failed to fetch endpoints for '${match.id}' — leaving pricing unchanged: ${
+          err instanceof Error ? err.message : err
+        }`,
+      );
+      return null;
+    }
+
+    const endpoint = endpoints.find((e) => e.provider_name.toLowerCase() === scope.toLowerCase());
+    if (!endpoint) {
+      this.logger.warn(`No '${scope}' endpoint for '${match.id}' — leaving pricing unchanged.`);
+      return null;
+    }
+
+    return {
+      inputCostPerMillionTokens: round6(Number(endpoint.pricing.prompt) * 1_000_000),
+      outputCostPerMillionTokens: round6(Number(endpoint.pricing.completion) * 1_000_000),
+    };
   }
 }

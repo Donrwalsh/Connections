@@ -62,6 +62,7 @@ const GOOGLE_RPD_BODY = JSON.stringify({
 function makeAPICallError(overrides: {
   statusCode: number;
   responseBody?: string;
+  responseHeaders?: Record<string, string>;
 }): APICallError {
   return new APICallError({
     message: "Request failed",
@@ -69,7 +70,7 @@ function makeAPICallError(overrides: {
     requestBodyValues: {},
     statusCode: overrides.statusCode,
     responseBody: overrides.responseBody,
-    responseHeaders: {},
+    responseHeaders: overrides.responseHeaders ?? {},
     isRetryable: overrides.statusCode === 429,
   });
 }
@@ -319,5 +320,120 @@ describe("classifyModelCallError", () => {
     const result = classifyModelCallError(err, "google", { model: "gemini-3.6-flash" });
 
     expect(result.code).toBe("model_error");
+  });
+
+  // Groq 429s (unlike Google's) carry their rate-limit state in response
+  // headers:
+  //   x-ratelimit-remaining-requests / x-ratelimit-remaining-tokens  (per-minute window)
+  //   retry-after (seconds until the current window resets)
+  // A per-day exhaustion reports remaining-requests "0" with no retry-after.
+  it("classifies a Groq per-minute hit with retry-after as rate_limited", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseBody: "{\"error\":{\"message\":\"RATE_LIMIT_REACHED\"}}",
+      responseHeaders: {
+        "retry-after": "12",
+        "x-ratelimit-remaining-requests": "0",
+        "x-ratelimit-remaining-tokens": "1000",
+      },
+    });
+
+    const result = classifyModelCallError(err, "groq", { model: "llama-3.1-8b-instant" });
+
+    expect(result.code).toBe("rate_limited");
+    expect(result.details.retryAfterSeconds).toBe(12);
+  });
+
+  it("classifies a Groq per-minute token-limit hit without retry-after as rate_limited", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseBody: "{\"error\":{\"message\":\"RATE_LIMIT_REACHED\"}}",
+      responseHeaders: {
+        "x-ratelimit-remaining-requests": "15",
+        "x-ratelimit-remaining-tokens": "0",
+      },
+    });
+
+    const result = classifyModelCallError(err, "groq", { model: "llama-3.1-8b-instant" });
+
+    expect(result.code).toBe("rate_limited");
+    expect(result.details.retryAfterSeconds).toBeUndefined();
+  });
+
+  it("classifies a Groq daily hit (remaining-requests 0, no retry-after) as rate_limited_daily", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseBody: "{\"error\":{\"message\":\"RATE_LIMIT_REACHED\"}}",
+      responseHeaders: {
+        "x-ratelimit-remaining-requests": "0",
+        "x-ratelimit-remaining-tokens": "0",
+      },
+    });
+
+    const result = classifyModelCallError(err, "groq", { model: "llama-3.1-8b-instant" });
+
+    expect(result.code).toBe("rate_limited_daily");
+    expect(result.details.retryAfterSeconds).toBeUndefined();
+  });
+
+  it("treats a remaining-requests 0 with retry-after as a per-minute hit, not daily", () => {
+    // A per-minute request-window exhaustion also reports remaining-requests
+    // "0" but carries retry-after — the per-minute path must win.
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseBody: "{\"error\":{\"message\":\"RATE_LIMIT_REACHED\"}}",
+      responseHeaders: {
+        "retry-after": "30",
+        "x-ratelimit-remaining-requests": "0",
+        "x-ratelimit-remaining-tokens": "0",
+      },
+    });
+
+    const result = classifyModelCallError(err, "groq", { model: "llama-3.1-8b-instant" });
+
+    expect(result.code).toBe("rate_limited");
+    expect(result.details.retryAfterSeconds).toBe(30);
+  });
+
+  it("does not classify a non-groq provider's 429 as a groq rate limit", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseHeaders: {
+        "retry-after": "12",
+        "x-ratelimit-remaining-requests": "0",
+        "x-ratelimit-remaining-tokens": "0",
+      },
+    });
+
+    const result = classifyModelCallError(err, "openai", { model: "gpt-4.1-nano" });
+
+    expect(result.code).toBe("model_error");
+  });
+
+  it("falls back to model_error for a Groq 429 with no rate-limit headers", () => {
+    const err = makeAPICallError({ statusCode: 429, responseBody: "<html>rate limited</html>" });
+
+    const result = classifyModelCallError(err, "groq", { model: "llama-3.1-8b-instant" });
+
+    expect(result.code).toBe("model_error");
+  });
+
+  it("unwraps a RetryError around a Groq daily APICallError as rate_limited_daily", () => {
+    const inner = makeAPICallError({
+      statusCode: 429,
+      responseHeaders: {
+        "x-ratelimit-remaining-requests": "0",
+        "x-ratelimit-remaining-tokens": "0",
+      },
+    });
+    const err = new RetryError({
+      message: "Failed after 3 attempts",
+      reason: "maxRetriesExceeded",
+      errors: [inner, inner, inner],
+    });
+
+    const result = classifyModelCallError(err, "groq", { model: "llama-3.1-8b-instant" });
+
+    expect(result.code).toBe("rate_limited_daily");
   });
 });

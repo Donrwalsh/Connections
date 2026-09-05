@@ -20,8 +20,14 @@ import {
   FreeTierDispatchStatusDto,
 } from "../free-tier-dispatch/free-tier-dispatch.service";
 import { GoogleFreeDispatchService } from "../google-free-dispatch/google-free-dispatch.service";
+import { GroqFreeDispatchService } from "../groq-free-dispatch/groq-free-dispatch.service";
 import { FreeTierId } from "../strategy/free-tier-usage.service";
-import { AUTOMATIC_STRATEGIES, LLM_STRATEGIES, STRATEGY_SET, isLlmStrategy } from "../../strategies";
+import {
+  AUTOMATIC_STRATEGIES,
+  LLM_STRATEGIES,
+  STRATEGY_SET,
+  isLlmStrategy,
+} from "../../strategies";
 import { DispatchAuthGuard } from "./dispatch-auth.guard";
 import { DispatchAuthDto } from "./dto/dispatch-auth.dto";
 
@@ -46,8 +52,12 @@ export class DispatchController {
     @Inject(StrategyService) private readonly strategyService: StrategyService,
     @Inject(GameService) private readonly gameService: GameService,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
-    @Inject(FreeTierDispatchService) private readonly freeTierDispatchService: FreeTierDispatchService,
-    @Inject(GoogleFreeDispatchService) private readonly googleFreeDispatchService: GoogleFreeDispatchService,
+    @Inject(FreeTierDispatchService)
+    private readonly freeTierDispatchService: FreeTierDispatchService,
+    @Inject(GoogleFreeDispatchService)
+    private readonly googleFreeDispatchService: GoogleFreeDispatchService,
+    @Inject(GroqFreeDispatchService)
+    private readonly groqFreeDispatchService: GroqFreeDispatchService,
     @Inject(ModelMetadataRefreshService)
     private readonly modelMetadataRefreshService: ModelMetadataRefreshService,
   ) {}
@@ -189,7 +199,12 @@ export class DispatchController {
 
     await Promise.all(
       targets.map((target) =>
-        this.strategyService.triggerStrategyRuns(target.puzzleId, strategyName, target.date, modelName),
+        this.strategyService.triggerStrategyRuns(
+          target.puzzleId,
+          strategyName,
+          target.date,
+          modelName,
+        ),
       ),
     );
 
@@ -222,11 +237,15 @@ export class DispatchController {
     name: "threshold",
     type: Number,
     required: false,
-    description: "Stop once usage reaches this percent of the tier's daily token budget (default 90).",
+    description:
+      "Stop once usage reaches this percent of the tier's daily token budget (default 90).",
     example: 90,
   })
   @ApiBody({ type: DispatchAuthDto })
-  async startFreeTierDispatch(@Param("tier") tier: string, @Query("threshold") thresholdRaw?: string) {
+  async startFreeTierDispatch(
+    @Param("tier") tier: string,
+    @Query("threshold") thresholdRaw?: string,
+  ) {
     const thresholdPercent =
       thresholdRaw === undefined
         ? DEFAULT_FREE_TIER_DISPATCH_THRESHOLD_PERCENT
@@ -313,6 +332,23 @@ export class DispatchController {
     return this.googleFreeDispatchService.stop();
   }
 
+  // Read-only Groq free-daily-quota dispatch status — see
+  // GroqFreeDispatchService. No token threshold like the OpenAI tiers:
+  // active/startedAt only. Not password-gated, same as the free-tier status
+  // and Google status routes above — it enqueues nothing.
+  @Get("groq")
+  async getGroqDispatchStatus() {
+    return this.groqFreeDispatchService.getStatus();
+  }
+
+  // Deactivates the Groq free-daily-quota dispatch cycle so it stops
+  // scheduling further ticks — a no-op (not an error) if it wasn't running.
+  // Mirrors the Google cycle (see stopGoogleDispatch above).
+  @Delete("groq")
+  async stopGroqDispatch() {
+    return this.groqFreeDispatchService.stop();
+  }
+
   // How many strategy runs are currently in the 'error' status. Read-only,
   // un-gated — backs the maintenance panel's "delete errored runs" button
   // (the figure the DELETE below would remove).
@@ -371,5 +407,4 @@ export class DispatchController {
     const result = await this.modelMetadataRefreshService.refreshAll();
     return { message: "Model metadata refresh complete", ...result };
   }
-
 }

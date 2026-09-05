@@ -45,6 +45,14 @@ export class SupportedModel {
   @Column({ type: "text", nullable: true })
   openRouterSlug: string | null;
 
+  // When set, the model's ModelPrice rows must be sourced from this
+  // provider's own endpoint pricing on OpenRouter rather than the model's
+  // aggregate list pricing — e.g. "Groq" for models whose negotiated/reported
+  // price differs by provider. null ("any") uses the list-level pricing. See
+  // ModelMetadataRefreshService.maybeInsertNewPrice.
+  @Column({ type: "text", nullable: true })
+  priceScopeProvider: string | null;
+
   // From OpenRouter's context_length. Also used as the real per-model
   // context window for Ollama's num_ctx — see provider.ts.
   @Column({ type: "int", nullable: true })

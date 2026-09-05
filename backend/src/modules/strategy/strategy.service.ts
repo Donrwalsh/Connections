@@ -5,6 +5,7 @@ import {
   LLM_OPENAI_QUEUE,
   LLM_OLLAMA_QUEUE,
   LLM_GOOGLE_QUEUE,
+  LLM_GROQ_QUEUE,
 } from "../queue/queue.module";
 import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/strategy-run.entity";
 import { InjectRepository } from "@nestjs/typeorm";
@@ -197,6 +198,7 @@ export class StrategyService {
     @Inject(LLM_OPENAI_QUEUE) private readonly llmOpenAIQueue: Queue,
     @Inject(LLM_OLLAMA_QUEUE) private readonly llmOllamaQueue: Queue,
     @Inject(LLM_GOOGLE_QUEUE) private readonly llmGoogleQueue: Queue,
+    @Inject(LLM_GROQ_QUEUE) private readonly llmGroqQueue: Queue,
     @InjectRepository(StrategyRun)
     private readonly strategyRunRepo: Repository<StrategyRun>,
     @InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>,
@@ -211,9 +213,9 @@ export class StrategyService {
   ) {}
 
   /**
-   * The queue a strategy's runs are dispatched to: all three LLM strategies
-   * (llm-openai, llm-ollama, llm-google) get their own per-provider queues,
-   * everything else the shared strategy-runs queue.
+   * The queue a strategy's runs are dispatched to: llm-openai, llm-ollama,
+   * llm-google, and llm-groq get their own per-provider queues, everything
+   * else the shared strategy-runs queue.
    */
   private queueFor(strategyName: string): Queue {
     return queueForStrategy(
@@ -221,6 +223,7 @@ export class StrategyService {
       this.llmOpenAIQueue,
       this.llmOllamaQueue,
       this.llmGoogleQueue,
+      this.llmGroqQueue,
       strategyName,
     );
   }
@@ -460,7 +463,8 @@ export class StrategyService {
       );
     }
 
-    const nextTrialNumber = existingRuns.reduce((max, run) => Math.max(max, run.trialNumber), 0) + 1;
+    const nextTrialNumber =
+      existingRuns.reduce((max, run) => Math.max(max, run.trialNumber), 0) + 1;
 
     await this.queueFor(strategyName).add(
       "run-strategy",
@@ -530,10 +534,7 @@ export class StrategyService {
         .select("prompt.strategyRunId", "strategyRunId")
         .addSelect("SUM(prompt.promptTokens)", "promptTokens")
         .addSelect("SUM(prompt.completionTokens)", "completionTokens")
-        .addSelect(
-          `COUNT(*) FILTER (WHERE array_length(prompt."issueTags", 1) > 0)`,
-          "issueCount",
-        )
+        .addSelect(`COUNT(*) FILTER (WHERE array_length(prompt."issueTags", 1) > 0)`, "issueCount")
         .groupBy("prompt.strategyRunId")
         .getRawMany<{
           strategyRunId: number;
@@ -646,7 +647,7 @@ export class StrategyService {
         run.status === StrategyRunStatus.RATE_LIMITED_DAILY
       ) {
         // RATE_LIMITED_DAILY is non-terminal: the run is parked waiting for
-        // Google's daily quota to reset and the google-rpd-resume sweep to
+        // Google's daily quota to reset and the rpd-resume sweep to
         // re-dispatch it. It is in-progress, not an outcome — counting it as
         // a failure would let one exhausted model tank its own success rate
         // (the runner's top gate can mint a parked row per already-queued
@@ -680,7 +681,9 @@ export class StrategyService {
         const history = priceHistoryByModel.get(leaderboardKey(run.strategyName, run.modelName));
         const rate = priceAsOf(history, run.startedAt);
         if (tokens && rate) {
-          acc.costsUsd.push(computeTokenCostUsd(tokens.promptTokens, tokens.completionTokens, rate));
+          acc.costsUsd.push(
+            computeTokenCostUsd(tokens.promptTokens, tokens.completionTokens, rate),
+          );
         }
         // A run parked by an RPD hold is excluded: it is still in progress,
         // and one parked by the top gate never made a call at all, so its
@@ -781,11 +784,21 @@ export class StrategyService {
    */
   private async queuedCountsByKey(): Promise<Map<string, number>> {
     const counts = new Map<string, number>();
-    const queues = [this.queue, this.llmOpenAIQueue, this.llmOllamaQueue, this.llmGoogleQueue];
+    const queues = [
+      this.queue,
+      this.llmOpenAIQueue,
+      this.llmOllamaQueue,
+      this.llmGoogleQueue,
+      this.llmGroqQueue,
+    ];
 
     for (const queue of queues) {
       for (let start = 0; ; start += QUEUE_PAGE_SIZE) {
-        const jobs = await queue.getJobs(["waiting", "delayed"], start, start + QUEUE_PAGE_SIZE - 1);
+        const jobs = await queue.getJobs(
+          ["waiting", "delayed"],
+          start,
+          start + QUEUE_PAGE_SIZE - 1,
+        );
 
         for (const job of jobs) {
           const data = job.data as { strategyName?: string; model?: string | null };
@@ -897,7 +910,9 @@ export class StrategyService {
 
     // Proposals/prompts only ever exist for LLM strategies — skip the extra
     // queries entirely for everything else.
-    const solvePrompts = isLlmStrategy(run.strategyName) ? await this.buildSolvePromptDtos(run) : [];
+    const solvePrompts = isLlmStrategy(run.strategyName)
+      ? await this.buildSolvePromptDtos(run)
+      : [];
 
     return {
       ...this.mapRunDetail(run, guesses),

@@ -12,20 +12,23 @@ import {
 } from "./modules/strategy/llm-job-handler";
 import { FreeTierDispatchService } from "./modules/free-tier-dispatch/free-tier-dispatch.service";
 import { GoogleFreeDispatchService } from "./modules/google-free-dispatch/google-free-dispatch.service";
+import { GroqFreeDispatchService } from "./modules/groq-free-dispatch/groq-free-dispatch.service";
 import type { FreeTierId } from "./modules/strategy/free-tier-usage.service";
 import { redisConnection } from "./modules/queue/redis.config";
 import { PuzzleIngestionService } from "./modules/game/puzzle-ingestion.service";
 import { ModelMetadataRefreshService } from "./modules/supported-model/model-metadata-refresh.service";
-import { GoogleRpdResumeService } from "./modules/strategy/google-rpd-resume.service";
+import { RpdResumeService } from "./modules/strategy/rpd-resume.service";
 import { DailyAutomationService } from "./modules/automation/daily-automation.service";
 import {
   isLlmStrategy,
   LLM_OPENAI,
   LLM_OLLAMA,
   LLM_GOOGLE,
+  LLM_GROQ,
   llmOllamaConcurrency,
   llmOpenAIConcurrency,
   llmGoogleConcurrency,
+  llmGroqConcurrency,
   STRATEGY_SET,
   workerRole,
 } from "./strategies";
@@ -46,8 +49,9 @@ async function bootstrap() {
   const puzzleIngestionService = appContext.get(PuzzleIngestionService);
   const freeTierDispatchService = appContext.get(FreeTierDispatchService);
   const googleFreeDispatchService = appContext.get(GoogleFreeDispatchService);
+  const groqFreeDispatchService = appContext.get(GroqFreeDispatchService);
   const modelMetadataRefreshService = appContext.get(ModelMetadataRefreshService);
-  const googleRpdResumeService = appContext.get(GoogleRpdResumeService);
+  const rpdResumeService = appContext.get(RpdResumeService);
   const dailyAutomationService = appContext.get(DailyAutomationService);
 
   const activeWorkers: Worker[] = [];
@@ -110,13 +114,13 @@ async function bootstrap() {
 
   /**
    * A worker for one provider's LLM runs. Each provider gets its own queue and
-   * its own concurrency, so llm-openai, llm-ollama, and llm-google runs never
-   * block each other and each provider only overlaps with itself up to the
-   * configured limit (default 1 = fully serialized). Concurrency is read once
-   * at boot.
+   * its own concurrency, so llm-openai, llm-ollama, llm-google, and llm-groq
+   * runs never block each other and each provider only overlaps with itself
+   * up to the configured limit (default 1 = fully serialized). Concurrency is
+   * read once at boot.
    */
   const createLlmWorker = (
-    queueName: "llm-openai-runs" | "llm-ollama-runs" | "llm-google-runs",
+    queueName: "llm-openai-runs" | "llm-ollama-runs" | "llm-google-runs" | "llm-groq-runs",
     expectedStrategy: string,
     concurrency: number,
   ) => {
@@ -129,8 +133,7 @@ async function bootstrap() {
 
     const llmWorker = new Worker(
       queueName,
-      (job: Job<RunStrategyJobData | { llmProposalId: number }>) =>
-        handleLlmJob(job, llmJobDeps),
+      (job: Job<RunStrategyJobData | { llmProposalId: number }>) => handleLlmJob(job, llmJobDeps),
       {
         connection: redisConnection,
         concurrency,
@@ -149,11 +152,7 @@ async function bootstrap() {
   // an outbound connection to the deployed Redis/Postgres, so Ollama itself
   // never has to be reachable from outside the local network.
   if (role !== "cloud") {
-    const llmOllamaWorker = createLlmWorker(
-      "llm-ollama-runs",
-      LLM_OLLAMA,
-      llmOllamaConcurrency(),
-    );
+    const llmOllamaWorker = createLlmWorker("llm-ollama-runs", LLM_OLLAMA, llmOllamaConcurrency());
     activeWorkers.push(llmOllamaWorker);
     activeQueueNames.push("llm-ollama-runs");
   }
@@ -161,21 +160,17 @@ async function bootstrap() {
   // role 'ollama' skips everything below — no OpenAI runs, puzzle ingestion,
   // or free-tier dispatch on a worker that's only there to reach Ollama.
   if (role !== "ollama") {
-    const llmOpenAIWorker = createLlmWorker(
-      "llm-openai-runs",
-      LLM_OPENAI,
-      llmOpenAIConcurrency(),
-    );
+    const llmOpenAIWorker = createLlmWorker("llm-openai-runs", LLM_OPENAI, llmOpenAIConcurrency());
     activeWorkers.push(llmOpenAIWorker);
     activeQueueNames.push("llm-openai-runs");
 
-    const llmGoogleWorker = createLlmWorker(
-      "llm-google-runs",
-      LLM_GOOGLE,
-      llmGoogleConcurrency(),
-    );
+    const llmGoogleWorker = createLlmWorker("llm-google-runs", LLM_GOOGLE, llmGoogleConcurrency());
     activeWorkers.push(llmGoogleWorker);
     activeQueueNames.push("llm-google-runs");
+
+    const llmGroqWorker = createLlmWorker("llm-groq-runs", LLM_GROQ, llmGroqConcurrency());
+    activeWorkers.push(llmGroqWorker);
+    activeQueueNames.push("llm-groq-runs");
 
     const puzzleWorker = new Worker(
       "puzzle-population",
@@ -269,12 +264,35 @@ async function bootstrap() {
     activeWorkers.push(googleFreeDispatchWorker);
     activeQueueNames.push("google-free-dispatch");
 
-    const googleRpdResumeWorker = new Worker(
-      "google-rpd-resume",
+    // Each job is one tick of the Groq free-daily-quota dispatch cycle
+    // (see GroqFreeDispatchService) — same self-chaining shape as the
+    // google-free-dispatch worker above.
+    const groqFreeDispatchWorker = new Worker(
+      "groq-free-dispatch",
+      async (job: Job) => {
+        logger.log(`starting groq free-tier dispatch tick ${job.id}`);
+        await groqFreeDispatchService.runTick();
+        logger.log(`finished groq free-tier dispatch tick ${job.id}`);
+      },
+      {
+        connection: redisConnection,
+        concurrency: 1,
+      },
+    );
+
+    groqFreeDispatchWorker.on("failed", (job, err) => {
+      logger.error(`groq free-tier dispatch tick ${job?.id} failed`, err?.stack || err);
+    });
+
+    activeWorkers.push(groqFreeDispatchWorker);
+    activeQueueNames.push("groq-free-dispatch");
+
+    const rpdResumeWorker = new Worker(
+      "rpd-resume",
       async (job) => {
-        logger.log(`starting google-rpd resume sweep ${job.id}`);
-        const result = await googleRpdResumeService.runResume();
-        logger.log(`finished google-rpd resume sweep ${job.id}: ${JSON.stringify(result)}`);
+        logger.log(`starting rpd-resume sweep ${job.id}`);
+        const result = await rpdResumeService.runResume();
+        logger.log(`finished rpd-resume sweep ${job.id}: ${JSON.stringify(result)}`);
         return result;
       },
       {
@@ -283,12 +301,12 @@ async function bootstrap() {
       },
     );
 
-    googleRpdResumeWorker.on("failed", (job, err) => {
-      logger.error(`google-rpd resume sweep ${job?.id} failed`, err?.stack || err);
+    rpdResumeWorker.on("failed", (job, err) => {
+      logger.error(`rpd-resume sweep ${job?.id} failed`, err?.stack || err);
     });
 
-    activeWorkers.push(googleRpdResumeWorker);
-    activeQueueNames.push("google-rpd-resume");
+    activeWorkers.push(rpdResumeWorker);
+    activeQueueNames.push("rpd-resume");
 
     const dailyAutomationWorker = new Worker(
       "daily-automation",

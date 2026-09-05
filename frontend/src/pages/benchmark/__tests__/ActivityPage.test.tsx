@@ -113,6 +113,7 @@ const defaultAutomation: AutomationStatus = {
   judge: { enqueued: null, error: null },
   miniBurn: { outcome: null, message: null },
   googleBurn: { outcome: null, message: null },
+  groqBurn: { outcome: null, message: null },
 };
 
 function stubFetch({
@@ -121,12 +122,14 @@ function stubFetch({
   coverage = { eligible: 0, judged: 0, pending: 0 },
   automation = defaultAutomation,
   googleDispatch = { active: false, startedAt: null },
+  groqDispatch = { active: false, startedAt: null },
 }: {
   leaderboard?: Leaderboard;
   recentActivity?: RecentActivityEvent[];
   coverage?: { eligible: number; judged: number; pending: number };
   automation?: AutomationStatus;
   googleDispatch?: { active: boolean; startedAt: string | null };
+  groqDispatch?: { active: boolean; startedAt: string | null };
 } = {}) {
   vi.stubGlobal(
     "fetch",
@@ -149,6 +152,9 @@ function stubFetch({
       }
       if (href.includes("/dispatch/google")) {
         return Promise.resolve({ ok: true, json: async () => googleDispatch });
+      }
+      if (href.includes("/dispatch/groq")) {
+        return Promise.resolve({ ok: true, json: async () => groqDispatch });
       }
       return Promise.resolve({ ok: true, json: async () => leaderboard });
     }),
@@ -381,7 +387,7 @@ describe("ActivityPage", () => {
     vi.useRealTimers();
   });
 
-  it("shows each widget's auto-run line and the Google dispatch widget", async () => {
+  it("shows each widget's auto-run line and the Google/Groq dispatch widgets", async () => {
     stubFetch({
       coverage: { eligible: 10, judged: 6, pending: 4 },
       automation: {
@@ -390,20 +396,25 @@ describe("ActivityPage", () => {
         judge: { enqueued: 4, error: null },
         miniBurn: { outcome: "started", message: "started at 80%" },
         googleBurn: { outcome: "started", message: "started" },
+        groqBurn: { outcome: "started", message: "started" },
       },
     });
     renderActivity();
 
     expect(screen.getByText("Google daily quota")).toBeInTheDocument();
+    expect(screen.getByText("Groq daily quota")).toBeInTheDocument();
     expect(
       await screen.findByText("Auto-run: enqueued 4 (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM"),
     ).toBeInTheDocument();
     expect(
       screen.getByText("Auto-run: started at 80% (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM"),
     ).toBeInTheDocument();
+    // The Google and Groq burn legs both produce the same non-leg-specific
+    // "started" line, so this appears once per widget — assert the count
+    // rather than tree presence.
     expect(
-      screen.getByText("Auto-run: started (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM"),
-    ).toBeInTheDocument();
+      screen.getAllByText("Auto-run: started (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM"),
+    ).toHaveLength(2);
   });
 
   it("shows the judge leg's auto-run line as a failure when it errored", async () => {

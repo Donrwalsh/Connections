@@ -8,6 +8,7 @@ export const SUPPORTED_STRATEGIES = [
   "llm-openai",
   "llm-ollama",
   "llm-google",
+  "llm-groq",
 ] as const;
 
 export type SupportedStrategy = (typeof SUPPORTED_STRATEGIES)[number];
@@ -19,8 +20,9 @@ export const SHUFFLE_FOOLISH = "shuffle-foolish" as const;
 export const LLM_OPENAI = "llm-openai" as const;
 export const LLM_OLLAMA = "llm-ollama" as const;
 export const LLM_GOOGLE = "llm-google" as const;
+export const LLM_GROQ = "llm-groq" as const;
 
-export const LLM_STRATEGIES = [LLM_OPENAI, LLM_OLLAMA, LLM_GOOGLE] as const;
+export const LLM_STRATEGIES = [LLM_OPENAI, LLM_OLLAMA, LLM_GOOGLE, LLM_GROQ] as const;
 
 export function isLlmStrategy(strategyName: string): boolean {
   return (LLM_STRATEGIES as readonly string[]).includes(strategyName);
@@ -53,17 +55,20 @@ export const MAX_LLM_NUM_RESPONSES = 10;
 
 // How many LLM strategy runs of each provider the worker may process at once.
 // Each provider has its own BullMQ queue (llm-openai-runs / llm-ollama-runs /
-// llm-google-runs), so the three providers never block each other; within a
-// provider the worker starts at most this many jobs concurrently (default 1
-// = fully serialized).
+// llm-google-runs / llm-groq-runs), so the providers never block each other;
+// within a provider the worker starts at most this many jobs concurrently
+// (default 1 = fully serialized).
 export const DEFAULT_LLM_OPENAI_CONCURRENCY = 1;
 export const DEFAULT_LLM_OLLAMA_CONCURRENCY = 1;
 export const DEFAULT_LLM_GOOGLE_CONCURRENCY = 1;
+export const DEFAULT_LLM_GROQ_CONCURRENCY = 1;
 
-// Fallback wait (seconds) before retrying after a Google per-minute
-// rate-limit hit, used only when Google's own RetryInfo.retryDelay is
-// absent from the error — see llm-strategy-runner.service.ts.
+// Fallback wait (seconds) before retrying after a per-minute rate-limit hit,
+// used only when the provider's own retry signal (Google's
+// RetryInfo.retryDelay, Groq's retry-after header) is absent from the error —
+// see llm-strategy-runner.service.ts.
 export const DEFAULT_LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS = 60;
+export const DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS = 60;
 
 // How many prompts a single solve step may make before the orchestrator
 // gives up on a fresh candidate and reports a duplicate/invalid failure.
@@ -154,6 +159,15 @@ export function llmGoogleConcurrency(env: NodeJS.ProcessEnv = process.env): numb
 }
 
 /**
+ * How many llm-groq runs the worker may process at once, from
+ * LLM_GROQ_CONCURRENCY. Falls back to DEFAULT_LLM_GROQ_CONCURRENCY for
+ * missing/invalid values.
+ */
+export function llmGroqConcurrency(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.LLM_GROQ_CONCURRENCY, DEFAULT_LLM_GROQ_CONCURRENCY);
+}
+
+/**
  * Fallback wait (seconds) before retrying a Google per-minute rate-limit
  * hit, from LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS. Only used when Google's
  * own RetryInfo.retryDelay wasn't present on the error. Falls back to
@@ -163,6 +177,19 @@ export function llmGoogleRateLimitFallbackSeconds(env: NodeJS.ProcessEnv = proce
   return positiveTrialCount(
     env.LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS,
     DEFAULT_LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS,
+  );
+}
+
+/**
+ * Fallback wait (seconds) before retrying a Groq per-minute rate-limit hit,
+ * from LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS. Only used when Groq's own
+ * retry-after header wasn't present on the error. Falls back to
+ * DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS for missing/invalid values.
+ */
+export function llmGroqRateLimitFallbackSeconds(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(
+    env.LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS,
+    DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS,
   );
 }
 

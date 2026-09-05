@@ -30,7 +30,8 @@ describe("loadEnv", () => {
 
     it("should boot fine in production once DISPATCH_PASSWORD is set", () => {
       expect(
-        loadEnv({ ...baseEnv, NODE_ENV: "production", DISPATCH_PASSWORD: "secret" }).DISPATCH_PASSWORD,
+        loadEnv({ ...baseEnv, NODE_ENV: "production", DISPATCH_PASSWORD: "secret" })
+          .DISPATCH_PASSWORD,
       ).toBe("secret");
     });
   });

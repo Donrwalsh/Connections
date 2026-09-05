@@ -6,11 +6,13 @@ import { GameService } from "../game/game.service";
 import {
   LLM_OLLAMA,
   LLM_GOOGLE,
+  LLM_GROQ,
   llmMaxDuplicateGuesses,
   llmMaxFailedGuesses,
   llmMaxMalformedResponses,
   llmMaxModelErrors,
   llmGoogleRateLimitFallbackSeconds,
+  llmGroqRateLimitFallbackSeconds,
   llmTemperature,
 } from "../../strategies";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
@@ -25,7 +27,7 @@ import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/st
 import { OrchestratorService, type ChatMessage, type SolveErrorCode } from "./orchestrator.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
-import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
+import { RateLimitHoldService } from "./rate-limit-hold.service";
 import { firstCombination } from "./combinatorics";
 import { GROUP_SIZE, parseGroupsSection } from "./parse-groups-section";
 
@@ -163,7 +165,7 @@ export class LlmStrategyRunner {
     private readonly solvePromptRepo: Repository<SolvePrompt>,
     @Inject(OrchestratorService) private readonly orchestratorService: OrchestratorService,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
-    @Inject(GoogleRateLimitHoldService) private readonly rpdHold: GoogleRateLimitHoldService,
+    @Inject(RateLimitHoldService) private readonly rpdHold: RateLimitHoldService,
   ) {}
 
   async runLlmStrategy(puzzleId: number, strategyName: string, trialNumber = 0, model?: string) {
@@ -171,7 +173,13 @@ export class LlmStrategyRunner {
     // choice of provider today, only of model within it) — resolved once so
     // every orchestrator call for this run tells it which client to use.
     const provider =
-      strategyName === LLM_OLLAMA ? "ollama" : strategyName === LLM_GOOGLE ? "google" : "openai";
+      strategyName === LLM_OLLAMA
+        ? "ollama"
+        : strategyName === LLM_GOOGLE
+          ? "google"
+          : strategyName === LLM_GROQ
+            ? "groq"
+            : "openai";
 
     const contextWindow = model
       ? await this.supportedModelService.getContextWindow(strategyName, model)
@@ -192,11 +200,11 @@ export class LlmStrategyRunner {
       };
     }
 
-    // Top-gate: an llm-google run whose model is currently out of daily
-    // quota parks immediately — cheap DB work instead of a doomed Google
-    // call. The google-rpd-resume sweep re-dispatches it after the reset.
+    // Top-gate: a Google/Groq run whose model is currently out of daily
+    // quota parks immediately — cheap DB work instead of a doomed call. The
+    // rpd-resume sweep re-dispatches it after the reset.
     if (
-      strategyName === LLM_GOOGLE &&
+      (strategyName === LLM_GOOGLE || strategyName === LLM_GROQ) &&
       model &&
       (await this.rpdHold.isHeld(strategyName, model))
     ) {
@@ -387,6 +395,7 @@ export class LlmStrategyRunner {
           outcome.error.code,
           run,
           state,
+          strategyName,
           maxModelErrors,
           maxDuplicates,
           maxMalformed,
@@ -395,7 +404,7 @@ export class LlmStrategyRunner {
 
         if (
           outcome.error.code === "rate_limited_daily" &&
-          strategyName === LLM_GOOGLE &&
+          (strategyName === LLM_GOOGLE || strategyName === LLM_GROQ) &&
           model
         ) {
           await this.rpdHold.hold(strategyName, model);
@@ -636,7 +645,7 @@ export class LlmStrategyRunner {
 
   /**
    * Classifies a failed orchestrator call (no assistant reply at all).
-   * "rate_limited" (Google per-minute hit only) is never a failure — it
+   * "rate_limited" (Google/Groq per-minute hit only) is never a failure — it
    * touches no counter and never changes run.status, only sets
    * state.rateLimitWaitMs so the run loop waits the server-specified
    * duration and retries the identical request. Every other code bumps
@@ -648,6 +657,7 @@ export class LlmStrategyRunner {
     code: SolveErrorCode,
     run: StrategyRun,
     state: LlmRunLoopState,
+    strategyName: string,
     maxModelErrors: number,
     maxDuplicates: number,
     maxMalformed: number,
@@ -661,7 +671,11 @@ export class LlmStrategyRunner {
       run.status = StrategyRunStatus.RATE_LIMITED_DAILY;
       run.finishedAt = new Date();
     } else if (code === "rate_limited") {
-      state.rateLimitWaitMs = (retryAfterSeconds ?? llmGoogleRateLimitFallbackSeconds()) * 1000;
+      const fallbackSeconds =
+        strategyName === LLM_GROQ
+          ? llmGroqRateLimitFallbackSeconds()
+          : llmGoogleRateLimitFallbackSeconds();
+      state.rateLimitWaitMs = (retryAfterSeconds ?? fallbackSeconds) * 1000;
     } else if (code === "model_error") {
       state.consecutiveModelErrors++;
       if (state.consecutiveModelErrors >= maxModelErrors) {

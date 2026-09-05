@@ -68,7 +68,7 @@ Frontend strategy panel (llm-openai / llm-ollama buttons)
 cp .env.sample .env
 ```
 
-You must set at least `INTERNAL_API_KEY` (any shared secret) and `OPENAI_API_KEY` (for AI Assist). `GOOGLE_API_KEY` is only required if you plan to dispatch `llm-google` runs. All variables are documented in `.env.sample`.
+You must set at least `INTERNAL_API_KEY` (any shared secret) and `OPENAI_API_KEY` (for AI Assist). `GOOGLE_API_KEY` is only required if you plan to dispatch `llm-google` runs, and `GROQ_API_KEY` only for `llm-groq` runs. All variables are documented in `.env.sample`.
 
 2. Start all services:
 
@@ -95,9 +95,11 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `INTERNAL_API_KEY` | — | Shared secret for backend↔orchestrator communication (`x-internal-api-key` header) — **required** |
 | `OPENAI_API_KEY` | — | OpenAI API key (orchestrator only) |
 | `GOOGLE_API_KEY` | — | Google AI Studio API key (orchestrator only) |
-| `MODEL_PROVIDER` | `openai` | Default provider for provider-less requests (e.g. in-game AI Assist): `openai`, `ollama`, or `google`. Strategy runs pick their provider via strategy name (`llm-openai` / `llm-ollama` / `llm-google`), so all three are always active |
+| `GROQ_API_KEY` | — | Groq API key (orchestrator only) |
+| `MODEL_PROVIDER` | `openai` | Default provider for provider-less requests (e.g. in-game AI Assist): `openai`, `ollama`, `google`, or `groq`. Strategy runs pick their provider via strategy name (`llm-openai` / `llm-ollama` / `llm-google` / `llm-groq`), so all four are always active |
 | `OPENAI_MODEL` | `gpt-4.1-nano` | OpenAI model id (used by the `llm-openai` strategy and provider-less requests) |
 | `GOOGLE_MODEL` | `gemini-3.6-flash` | Google AI Studio model id (used by the `llm-google` strategy and provider-less requests) |
+| `GROQ_MODEL` | `llama-3.1-8b-instant` | Groq model id (used by the `llm-groq` strategy and provider-less requests) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server base URL (used by the `llm-ollama` strategy) |
 | `OLLAMA_MODEL` | `llama3.2` | Ollama model id (used by the `llm-ollama` strategy) |
 | `MODEL_CONTEXT_WINDOW` | `8192` | Hard ceiling (in tokens) on Ollama's `num_ctx`, never exceeded regardless of a model's real `contextWindow` (see `SupportedModel`) — llama.cpp reserves `num_ctx`'s full KV-cache footprint at model-load time rather than scaling it to actual usage, so requesting a model's true context in full (e.g. 131K) can OOM-kill Ollama on memory-constrained hardware even though real prompts never come close to using it. Also the fallback when no per-model `contextWindow` is known at all (e.g. the provider-less AI Assist path) |
@@ -121,7 +123,9 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `LLM_OPENAI_CONCURRENCY` | `1` | Maximum `llm-openai` runs the worker processes at once (own queue, so it never blocks Ollama, Google, or the deterministic strategies) |
 | `LLM_OLLAMA_CONCURRENCY` | `1` | Maximum `llm-ollama` runs the worker processes at once (own queue, so it never blocks OpenAI, Google, or the deterministic strategies) |
 | `LLM_GOOGLE_CONCURRENCY` | `1` | Maximum `llm-google` runs the worker processes at once (own queue, so it never blocks OpenAI, Ollama, or the deterministic strategies) |
+| `LLM_GROQ_CONCURRENCY` | `1` | Maximum `llm-groq` runs the worker processes at once (own queue, so it never blocks OpenAI, Ollama, Google, or the deterministic strategies) |
 | `LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS` | `60` | Fallback wait before retrying a Google per-minute rate-limit hit, used only when Google's own `RetryInfo` doesn't specify one. A per-minute hit (RPM or TPM) is never a run failure — it waits and retries indefinitely; only a daily-quota hit counts toward `LLM_MAX_MODEL_ERRORS` |
+| `LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS` | `60` | Fallback wait before retrying a Groq rate-limit hit, used only when Groq's own `x-ratelimit-*` headers don't specify one. A per-minute hit waits and retries indefinitely; a daily-quota hit (the per-day request cap) parks the model until UTC midnight |
 | `PORT` | `3001` | Orchestrator listen port |
 | `POSTGRES_USER` | `postgres` | Postgres user (compose-level; the backend reads it as `DB_USER`) |
 | `POSTGRES_PASSWORD` | `postgres` | Postgres password (compose-level; the backend reads it as `DB_PASSWORD`) |

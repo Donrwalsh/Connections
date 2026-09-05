@@ -6,7 +6,7 @@ import { GoogleDispatchState } from "./entities/google-dispatch-state.entity";
 import { GOOGLE_FREE_DISPATCH_QUEUE } from "../queue/queue.module";
 import { StrategyService } from "../strategy/strategy.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
-import { GoogleRateLimitHoldService } from "../strategy/google-rate-limit-hold.service";
+import { RateLimitHoldService } from "../strategy/rate-limit-hold.service";
 
 const GOOGLE_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"];
 
@@ -35,7 +35,9 @@ describe("GoogleFreeDispatchService", () => {
     mockStrategyService = {
       countInFlightByModel: jest.fn().mockResolvedValue(zeroCounts()),
       countTodayDispatchByModel: jest.fn().mockResolvedValue(zeroCounts()),
-      findUnrunPuzzleDatesForModel: jest.fn().mockResolvedValue([{ puzzleId: 1, date: "2024-01-01" }]),
+      findUnrunPuzzleDatesForModel: jest
+        .fn()
+        .mockResolvedValue([{ puzzleId: 1, date: "2024-01-01" }]),
       triggerStrategyRuns: jest.fn().mockResolvedValue(undefined),
     };
     mockSupportedModelService = {
@@ -50,7 +52,7 @@ describe("GoogleFreeDispatchService", () => {
         { provide: GOOGLE_FREE_DISPATCH_QUEUE, useValue: mockQueue },
         { provide: StrategyService, useValue: mockStrategyService },
         { provide: SupportedModelService, useValue: mockSupportedModelService },
-        { provide: GoogleRateLimitHoldService, useValue: mockHoldService },
+        { provide: RateLimitHoldService, useValue: mockHoldService },
       ],
     }).compile();
 
@@ -105,7 +107,10 @@ describe("GoogleFreeDispatchService", () => {
       expect(mockQueue.add).toHaveBeenCalledWith(
         "tick",
         {},
-        expect.objectContaining({ delay: 0, jobId: expect.stringContaining("google-free-dispatch-") }),
+        expect.objectContaining({
+          delay: 0,
+          jobId: expect.stringContaining("google-free-dispatch-"),
+        }),
       );
     });
   });
@@ -171,7 +176,11 @@ describe("GoogleFreeDispatchService", () => {
 
       expect(mockStrategyService.triggerStrategyRuns).not.toHaveBeenCalled();
       expect(mockStateRepo.update).not.toHaveBeenCalled();
-      expect(mockQueue.add).toHaveBeenCalledWith("tick", {}, expect.objectContaining({ delay: expect.any(Number) }));
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        "tick",
+        {},
+        expect.objectContaining({ delay: expect.any(Number) }),
+      );
     });
 
     it("should dispatch only to eligible (non-held) models, least-allocated first", async () => {
@@ -227,7 +236,11 @@ describe("GoogleFreeDispatchService", () => {
 
       expect(mockStrategyService.triggerStrategyRuns).toHaveBeenCalledTimes(1);
       expect(mockStateRepo.update).not.toHaveBeenCalled();
-      expect(mockQueue.add).toHaveBeenCalledWith("tick", {}, expect.objectContaining({ delay: expect.any(Number) }));
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        "tick",
+        {},
+        expect.objectContaining({ delay: expect.any(Number) }),
+      );
     });
   });
 });

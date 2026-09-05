@@ -428,9 +428,24 @@ describe("PuzzleIngestionService", () => {
         is_image_puzzle: true,
       });
       expect(mockRepo.save).toHaveBeenNthCalledWith(2, [
-        { group: { id: 1 }, word: "APPLE", position: 0, image_url: "https://example.com/apple.svg" },
-        { group: { id: 1 }, word: "BANANA", position: 1, image_url: "https://example.com/banana.svg" },
-        { group: { id: 1 }, word: "CHERRY", position: 2, image_url: "https://example.com/cherry.svg" },
+        {
+          group: { id: 1 },
+          word: "APPLE",
+          position: 0,
+          image_url: "https://example.com/apple.svg",
+        },
+        {
+          group: { id: 1 },
+          word: "BANANA",
+          position: 1,
+          image_url: "https://example.com/banana.svg",
+        },
+        {
+          group: { id: 1 },
+          word: "CHERRY",
+          position: 2,
+          image_url: "https://example.com/cherry.svg",
+        },
         { group: { id: 1 }, word: "DATE", position: 3, image_url: "https://example.com/date.svg" },
       ]);
     });
@@ -560,9 +575,7 @@ describe("PuzzleIngestionService", () => {
         .mockResolvedValueOnce(fetchResponse(200, UNKNOWN_SHAPE_PUZZLE_DATA))
         .mockResolvedValueOnce(fetchResponse(200, PUZZLE_DATA));
 
-      await expect(
-        service.ingestSpecificDates(["2024-12-14", "2024-01-02"]),
-      ).rejects.toThrow(
+      await expect(service.ingestSpecificDates(["2024-12-14", "2024-01-02"])).rejects.toThrow(
         "Unrecognized card shape for 2024-12-14: card has neither 'content' nor " +
           "'image_url'/'image_alt_text'",
       );

@@ -45,7 +45,9 @@ export class SplitModelPrice1756000000000 implements MigrationInterface {
     await queryRunner.query(
       `ALTER TABLE "SupportedModel" DROP COLUMN "cachedInputCostPerMillionTokens"`,
     );
-    await queryRunner.query(`ALTER TABLE "SupportedModel" DROP COLUMN "outputCostPerMillionTokens"`);
+    await queryRunner.query(
+      `ALTER TABLE "SupportedModel" DROP COLUMN "outputCostPerMillionTokens"`,
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {

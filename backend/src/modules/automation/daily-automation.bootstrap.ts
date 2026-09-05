@@ -9,7 +9,7 @@ import { DAILY_AUTOMATION_CRON } from "../../strategies";
  * resets, so DailyAutomationService.run() always sees a fresh day's budget.
  * Also enqueues a startup catch-up run (fixed per-UTC-day jobId) so a
  * backend/worker that was down at 00:15 still gets the day's automation,
- * the same pattern GoogleRpdResumeBootstrap uses for its own daily sweep.
+ * the same pattern RpdResumeBootstrap uses for its own daily sweep.
  */
 @Injectable()
 export class DailyAutomationBootstrap implements OnApplicationBootstrap {

@@ -133,7 +133,9 @@ export function describeLeaderboardRow(row: LeaderboardRow): { name: string; des
         ? "Ollama"
         : row.strategyName === "llm-google"
           ? "Google"
-          : "OpenAI";
+          : row.strategyName === "llm-groq"
+            ? "Groq"
+            : "OpenAI";
     return {
       name: meta?.name ?? `LLM · ${row.modelName}`,
       description: formatModelStatsDescription(

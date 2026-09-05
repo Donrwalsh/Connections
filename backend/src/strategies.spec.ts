@@ -139,20 +139,24 @@ describe("strategies", () => {
 
   describe("llmGoogleRateLimitFallbackSeconds", () => {
     it("should default when the env var is missing", () => {
-      expect(llmGoogleRateLimitFallbackSeconds({})).toBe(DEFAULT_LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS);
+      expect(llmGoogleRateLimitFallbackSeconds({})).toBe(
+        DEFAULT_LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS,
+      );
     });
 
     it("should default when the env var is invalid", () => {
-      expect(llmGoogleRateLimitFallbackSeconds({ LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS: "abc" })).toBe(
-        DEFAULT_LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS,
-      );
-      expect(llmGoogleRateLimitFallbackSeconds({ LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS: "0" })).toBe(
-        DEFAULT_LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS,
-      );
+      expect(
+        llmGoogleRateLimitFallbackSeconds({ LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS: "abc" }),
+      ).toBe(DEFAULT_LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS);
+      expect(
+        llmGoogleRateLimitFallbackSeconds({ LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS: "0" }),
+      ).toBe(DEFAULT_LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS);
     });
 
     it("should read a valid positive integer", () => {
-      expect(llmGoogleRateLimitFallbackSeconds({ LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS: "90" })).toBe(90);
+      expect(
+        llmGoogleRateLimitFallbackSeconds({ LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS: "90" }),
+      ).toBe(90);
     });
   });
 

@@ -6,8 +6,13 @@ import { GOOGLE_FREE_DISPATCH_QUEUE } from "../queue/queue.module";
 import { GoogleDispatchState } from "./entities/google-dispatch-state.entity";
 import { StrategyService } from "../strategy/strategy.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
-import { GoogleRateLimitHoldService } from "../strategy/google-rate-limit-hold.service";
-import { LLM_GOOGLE, freeTierDispatchMaxBatch, freeTierDispatchMaxInFlight, freeTierDispatchTickMs } from "../../strategies";
+import { RateLimitHoldService } from "../strategy/rate-limit-hold.service";
+import {
+  LLM_GOOGLE,
+  freeTierDispatchMaxBatch,
+  freeTierDispatchMaxInFlight,
+  freeTierDispatchTickMs,
+} from "../../strategies";
 
 const TICK_JOB_NAME = "tick";
 const GOOGLE_DISPATCH_STATE_ID = "google";
@@ -20,7 +25,7 @@ export interface GoogleDispatchStatusDto {
 /**
  * The Google counterpart to FreeTierDispatchService: a self-rescheduling
  * tick chain that dispatches llm-google trials against unrun puzzles until
- * every configured Google model is RPD-held (see GoogleRateLimitHoldService)
+ * every configured Google model is RPD-held (see RateLimitHoldService)
  * or out of unrun puzzles. Unlike the OpenAI tiers, there is no per-token
  * free budget to burn toward a threshold — Google enforces a per-day request
  * cap of its own, so "keep dispatching until held" is the whole stop
@@ -38,7 +43,7 @@ export class GoogleFreeDispatchService {
     @Inject(GOOGLE_FREE_DISPATCH_QUEUE) private readonly queue: Queue,
     @Inject(StrategyService) private readonly strategyService: StrategyService,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
-    @Inject(GoogleRateLimitHoldService) private readonly holdService: GoogleRateLimitHoldService,
+    @Inject(RateLimitHoldService) private readonly holdService: RateLimitHoldService,
   ) {}
 
   /**
@@ -48,7 +53,10 @@ export class GoogleFreeDispatchService {
    * nothing to do — the caller learns this via the returned `outcome`
    * rather than a thrown error, since it isn't a failure.
    */
-  async start(): Promise<{ status: GoogleDispatchStatusDto; outcome: "started" | "alreadyExhausted" }> {
+  async start(): Promise<{
+    status: GoogleDispatchStatusDto;
+    outcome: "started" | "alreadyExhausted";
+  }> {
     const existing = await this.stateRepo.findOne({ where: { id: GOOGLE_DISPATCH_STATE_ID } });
     if (existing?.active) {
       throw new BadRequestException(
@@ -62,7 +70,9 @@ export class GoogleFreeDispatchService {
 
     if (allExhausted) {
       await this.stateRepo.save({ id: GOOGLE_DISPATCH_STATE_ID, active: false, startedAt: null });
-      this.logger.log("google free-tier dispatch: every model is already RPD-held — not starting a cycle");
+      this.logger.log(
+        "google free-tier dispatch: every model is already RPD-held — not starting a cycle",
+      );
       return { status: await this.getStatus(), outcome: "alreadyExhausted" };
     }
 
@@ -128,7 +138,10 @@ export class GoogleFreeDispatchService {
     }
 
     const maxNewTrials = Math.min(freeTierDispatchMaxBatch(), maxInFlight - inFlightTotal);
-    const allocation = await this.strategyService.countTodayDispatchByModel(LLM_GOOGLE, eligibleModels);
+    const allocation = await this.strategyService.countTodayDispatchByModel(
+      LLM_GOOGLE,
+      eligibleModels,
+    );
     const exhausted = new Set<string>();
     let dispatched = 0;
 
@@ -152,7 +165,12 @@ export class GoogleFreeDispatchService {
       }
 
       try {
-        await this.strategyService.triggerStrategyRuns(target.puzzleId, LLM_GOOGLE, target.date, model);
+        await this.strategyService.triggerStrategyRuns(
+          target.puzzleId,
+          LLM_GOOGLE,
+          target.date,
+          model,
+        );
         allocation.set(model, (allocation.get(model) ?? 0) + 1);
         dispatched++;
       } catch (err) {
@@ -167,7 +185,9 @@ export class GoogleFreeDispatchService {
 
     if (exhausted.size === eligibleModels.length) {
       await this.stateRepo.update({ id: GOOGLE_DISPATCH_STATE_ID }, { active: false });
-      this.logger.log("google free-tier dispatch: ran out of unrun puzzles for every eligible model — stopping");
+      this.logger.log(
+        "google free-tier dispatch: ran out of unrun puzzles for every eligible model — stopping",
+      );
       return;
     }
 
@@ -175,7 +195,11 @@ export class GoogleFreeDispatchService {
   }
 
   private async scheduleNextTick(): Promise<void> {
-    await this.queue.add(TICK_JOB_NAME, {}, { delay: freeTierDispatchTickMs(), jobId: this.freshTickJobId() });
+    await this.queue.add(
+      TICK_JOB_NAME,
+      {},
+      { delay: freeTierDispatchTickMs(), jobId: this.freshTickJobId() },
+    );
   }
 
   // See FreeTierDispatchService.freshTickJobId's comment — same reasoning:
@@ -185,7 +209,10 @@ export class GoogleFreeDispatchService {
     return `google-free-dispatch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
-  private static leastAllocatedModel(allocation: Map<string, number>, exhausted: Set<string>): string {
+  private static leastAllocatedModel(
+    allocation: Map<string, number>,
+    exhausted: Set<string>,
+  ): string {
     let best: string | null = null;
     let bestCount = Infinity;
 

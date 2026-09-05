@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException, OnModuleDestroy } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  OnModuleDestroy,
+} from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { Puzzle } from "./entities/puzzle.entity";

@@ -10,10 +10,7 @@ import { AnswerGroup } from "../src/modules/game/entities/answer-group.entity";
 import { GroupMember } from "../src/modules/game/entities/group-member.entity";
 import { Puzzle } from "../src/modules/game/entities/puzzle.entity";
 import { Guess, GuessResult, GuessSource } from "../src/modules/strategy/entities/guess.entity";
-import {
-  SolvePrompt,
-  SolvePromptType,
-} from "../src/modules/strategy/entities/solve-prompt.entity";
+import { SolvePrompt, SolvePromptType } from "../src/modules/strategy/entities/solve-prompt.entity";
 import {
   LlmProposal,
   LlmProposalStatus,
@@ -60,8 +57,7 @@ describe("App (e2e)", () => {
             .find((m) => m.role === "user");
           const promptText = lastUserMessage?.content ?? "";
           const nextGroup =
-            TEST_GROUPS.find((g) => g.words.every((w) => promptText.includes(w))) ??
-            TEST_GROUPS[0];
+            TEST_GROUPS.find((g) => g.words.every((w) => promptText.includes(w))) ?? TEST_GROUPS[0];
           const words = nextGroup.words;
 
           res.writeHead(200, { "Content-Type": "application/json" });
@@ -384,7 +380,13 @@ describe("App (e2e)", () => {
       usedTokens: expect.any(Number),
       dailyLimitTokens: 2_500_000,
       remainingTokens: expect.any(Number),
-      models: expect.arrayContaining(["gpt-4.1-mini", "gpt-4o-mini", "o3-mini", "o4-mini", "gpt-5-nano"]),
+      models: expect.arrayContaining([
+        "gpt-4.1-mini",
+        "gpt-4o-mini",
+        "o3-mini",
+        "o4-mini",
+        "gpt-5-nano",
+      ]),
     });
     expect(res.body.remainingTokens).toBe(
       Math.max(0, res.body.dailyLimitTokens - res.body.usedTokens),
@@ -472,9 +474,7 @@ describe("App (e2e)", () => {
   });
 
   it("POST /dispatch/model/:modelName/runs/:n rejects when fewer than n unrun dates exist", async () => {
-    const res = await request(app.getHttpServer()).post(
-      "/dispatch/model/gpt-5-nano/runs/1000000",
-    );
+    const res = await request(app.getHttpServer()).post("/dispatch/model/gpt-5-nano/runs/1000000");
 
     expect(res.status).toBe(400);
     expect(res.body.message).toContain("puzzle date(s) exist");
@@ -640,14 +640,18 @@ describe("App (e2e)", () => {
     });
 
     it("POST /dispatch/free-tier/mini rejects a non-integer threshold", async () => {
-      const res = await request(app.getHttpServer()).post("/dispatch/free-tier/mini?threshold=87.5");
+      const res = await request(app.getHttpServer()).post(
+        "/dispatch/free-tier/mini?threshold=87.5",
+      );
 
       expect(res.status).toBe(400);
       expect(res.body.message).toContain("whole number");
     });
 
     it("POST /dispatch/free-tier/mini rejects a threshold outside (0, 100]", async () => {
-      const tooLow = await request(app.getHttpServer()).post("/dispatch/free-tier/mini?threshold=0");
+      const tooLow = await request(app.getHttpServer()).post(
+        "/dispatch/free-tier/mini?threshold=0",
+      );
       const tooHigh = await request(app.getHttpServer()).post(
         "/dispatch/free-tier/mini?threshold=101",
       );
@@ -657,7 +661,9 @@ describe("App (e2e)", () => {
     });
 
     it("POST /dispatch/free-tier/flagship starts its own cycle, independent of mini", async () => {
-      const res = await request(app.getHttpServer()).post("/dispatch/free-tier/flagship?threshold=60");
+      const res = await request(app.getHttpServer()).post(
+        "/dispatch/free-tier/flagship?threshold=60",
+      );
 
       expect(res.status).toBe(201);
       expect(res.body).toMatchObject({ tier: "flagship", active: true, thresholdPercent: 60 });
@@ -949,9 +955,7 @@ describe("App (e2e)", () => {
     const cookie = login.headers["set-cookie"]?.[0];
     expect(cookie).toContain("HttpOnly");
 
-    const authorized = await request(app.getHttpServer())
-      .get("/bull/queues")
-      .set("Cookie", cookie);
+    const authorized = await request(app.getHttpServer()).get("/bull/queues").set("Cookie", cookie);
     expect(authorized.status).toBe(200);
   });
 });

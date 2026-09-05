@@ -237,7 +237,9 @@ describe("StrategyRunStore", () => {
       const result = await store.lastPromptNumber(7);
 
       expect(result).toBe(5);
-      expect(where).toHaveBeenCalledWith("prompt.strategyRunId = :strategyRunId", { strategyRunId: 7 });
+      expect(where).toHaveBeenCalledWith("prompt.strategyRunId = :strategyRunId", {
+        strategyRunId: 7,
+      });
     });
 
     it("should return 0 when the strategy run has no prompts yet", async () => {
@@ -330,14 +332,18 @@ describe("StrategyRunStore", () => {
     });
 
     it("should throw ConflictException when the run is still running", async () => {
-      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ status: StrategyRunStatus.RUNNING }));
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ status: StrategyRunStatus.RUNNING }),
+      );
 
       await expect(store.deleteRun(7)).rejects.toThrow(ConflictException);
       expect(mockDataSource.transaction).not.toHaveBeenCalled();
     });
 
     it("should delete the run's guesses and judging data before the run itself, and return each table's deleted count", async () => {
-      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ status: StrategyRunStatus.ERROR }));
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ status: StrategyRunStatus.ERROR }),
+      );
       mockManager.count
         .mockResolvedValueOnce(3) // Guess
         .mockResolvedValueOnce(5) // SolvePrompt
@@ -353,8 +359,12 @@ describe("StrategyRunStore", () => {
         deletedCategoryEvaluations: 4,
       });
       expect(mockManager.count).toHaveBeenNthCalledWith(1, Guess, { where: { strategyRunId: 7 } });
-      expect(mockManager.count).toHaveBeenNthCalledWith(2, SolvePrompt, { where: { strategyRunId: 7 } });
-      expect(mockManager.count).toHaveBeenNthCalledWith(3, LlmProposal, { where: { strategyRunId: 7 } });
+      expect(mockManager.count).toHaveBeenNthCalledWith(2, SolvePrompt, {
+        where: { strategyRunId: 7 },
+      });
+      expect(mockManager.count).toHaveBeenNthCalledWith(3, LlmProposal, {
+        where: { strategyRunId: 7 },
+      });
       expect(mockManager.count).toHaveBeenNthCalledWith(4, CategoryEvaluation, {
         where: { strategyRunId: 7 },
       });
@@ -363,7 +373,9 @@ describe("StrategyRunStore", () => {
       // would orphan them, not remove them), and CategoryEvaluation is
       // deleted explicitly — rather than left to its ON DELETE CASCADE — so
       // the teardown is auditable via the returned count.
-      expect(mockManager.delete).toHaveBeenNthCalledWith(1, CategoryEvaluation, { strategyRunId: 7 });
+      expect(mockManager.delete).toHaveBeenNthCalledWith(1, CategoryEvaluation, {
+        strategyRunId: 7,
+      });
       expect(mockManager.delete).toHaveBeenNthCalledWith(2, Guess, { strategyRunId: 7 });
       expect(mockManager.delete).toHaveBeenNthCalledWith(3, StrategyRun, { id: 7 });
     });

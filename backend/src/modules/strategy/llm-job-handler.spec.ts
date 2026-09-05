@@ -42,7 +42,13 @@ describe("handleLlmJob", () => {
     const job = {
       id: "j2",
       name: "run-strategy",
-      data: { puzzleId: 1, strategyName: "llm-openai", date: "2024-01-01", trialNumber: 1, model: "gpt-4.1-nano" },
+      data: {
+        puzzleId: 1,
+        strategyName: "llm-openai",
+        date: "2024-01-01",
+        trialNumber: 1,
+        model: "gpt-4.1-nano",
+      },
     };
 
     await handleLlmJob(job as never, {
@@ -57,7 +63,11 @@ describe("handleLlmJob", () => {
   });
 
   it("throws when a run-strategy job's strategy doesn't match the queue", async () => {
-    const job = { id: "j3", name: "run-strategy", data: { puzzleId: 1, strategyName: "llm-google", trialNumber: 1 } };
+    const job = {
+      id: "j3",
+      name: "run-strategy",
+      data: { puzzleId: 1, strategyName: "llm-google", trialNumber: 1 },
+    };
     await expect(
       handleLlmJob(job as never, {
         llmStrategyRunner: { runLlmStrategy: jest.fn() } as never,

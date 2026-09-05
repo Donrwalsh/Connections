@@ -66,7 +66,9 @@ describe("FreeTierDispatchService", () => {
     mockStrategyService = {
       countInFlightByModel: jest.fn().mockResolvedValue(zeroCounts()),
       countTodayDispatchByModel: jest.fn().mockResolvedValue(zeroCounts()),
-      findUnrunPuzzleDatesForModel: jest.fn().mockResolvedValue([{ puzzleId: 1, date: "2024-01-01" }]),
+      findUnrunPuzzleDatesForModel: jest
+        .fn()
+        .mockResolvedValue([{ puzzleId: 1, date: "2024-01-01" }]),
       triggerStrategyRuns: jest.fn().mockResolvedValue(undefined),
     };
     mockFreeTierUsageService = {
@@ -148,7 +150,10 @@ describe("FreeTierDispatchService", () => {
       expect(mockQueue.add).toHaveBeenCalledWith(
         "tick",
         { tier: "mini" },
-        expect.objectContaining({ delay: 0, jobId: expect.stringContaining("free-tier-dispatch-mini-") }),
+        expect.objectContaining({
+          delay: 0,
+          jobId: expect.stringContaining("free-tier-dispatch-mini-"),
+        }),
       );
       expect(result.active).toBe(true);
       expect(result.thresholdPercent).toBe(90);
@@ -221,7 +226,12 @@ describe("FreeTierDispatchService", () => {
 
       const result = await service.getStatus("mini");
 
-      expect(result).toEqual({ tier: "mini", active: false, thresholdPercent: null, startedAt: null });
+      expect(result).toEqual({
+        tier: "mini",
+        active: false,
+        thresholdPercent: null,
+        startedAt: null,
+      });
     });
 
     it("should report the stored state when a row exists", async () => {
@@ -250,7 +260,11 @@ describe("FreeTierDispatchService", () => {
     });
 
     it("should do nothing when the tier's state row is present but inactive", async () => {
-      mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: false, thresholdPercent: 90 });
+      mockStateRepo.findOne.mockResolvedValueOnce({
+        tier: "mini",
+        active: false,
+        thresholdPercent: 90,
+      });
 
       await service.runTick("mini");
 
@@ -258,7 +272,11 @@ describe("FreeTierDispatchService", () => {
     });
 
     it("should stop the cycle once usage reaches the threshold", async () => {
-      mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 10 });
+      mockStateRepo.findOne.mockResolvedValueOnce({
+        tier: "mini",
+        active: true,
+        thresholdPercent: 10,
+      });
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(
         usageStub("mini", { usedTokens: 250_001 }), // 10% of 2.5M is 250,000
       );
@@ -276,7 +294,11 @@ describe("FreeTierDispatchService", () => {
       // own, regardless of token budget.
       const inFlight = zeroCounts();
       inFlight.set("gpt-4.1-nano", 3);
-      mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
+      mockStateRepo.findOne.mockResolvedValueOnce({
+        tier: "mini",
+        active: true,
+        thresholdPercent: 90,
+      });
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
       mockStrategyService.countInFlightByModel.mockResolvedValueOnce(inFlight);
 
@@ -298,7 +320,11 @@ describe("FreeTierDispatchService", () => {
       process.env.FREE_TIER_DISPATCH_TOKEN_ESTIMATE = "1"; // budget is never the limiting factor here
       const inFlight = zeroCounts();
       inFlight.set("gpt-4.1-nano", 2); // cap is 3, so only 1 more trial has headroom
-      mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
+      mockStateRepo.findOne.mockResolvedValueOnce({
+        tier: "mini",
+        active: true,
+        thresholdPercent: 90,
+      });
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
       mockStrategyService.countInFlightByModel.mockResolvedValueOnce(inFlight);
 
@@ -312,7 +338,11 @@ describe("FreeTierDispatchService", () => {
       // Raise the in-flight cap so this test exercises the token-budget
       // check specifically, not the (lower-priority) in-flight cap above.
       process.env.FREE_TIER_DISPATCH_MAX_IN_FLIGHT = "1000";
-      mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
+      mockStateRepo.findOne.mockResolvedValueOnce({
+        tier: "mini",
+        active: true,
+        thresholdPercent: 90,
+      });
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
       // thresholdTokens = 2,250,000; remainingBudget = 2,250,000. With 900
       // trials in flight (100 per model) at the 4000-token estimate, that's
@@ -334,7 +364,11 @@ describe("FreeTierDispatchService", () => {
     it("should dispatch to the least-allocated models first, up to the batch cap", async () => {
       process.env.FREE_TIER_DISPATCH_MAX_BATCH = "2";
       process.env.FREE_TIER_DISPATCH_TOKEN_ESTIMATE = "1"; // budget is never the limiting factor here
-      mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
+      mockStateRepo.findOne.mockResolvedValueOnce({
+        tier: "mini",
+        active: true,
+        thresholdPercent: 90,
+      });
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
 
       // Every model starts well-represented except two, which are the only
@@ -350,14 +384,20 @@ describe("FreeTierDispatchService", () => {
       await service.runTick("mini");
 
       expect(mockStrategyService.triggerStrategyRuns).toHaveBeenCalledTimes(2);
-      const dispatchedModels = mockStrategyService.triggerStrategyRuns.mock.calls.map((call) => call[3]);
+      const dispatchedModels = mockStrategyService.triggerStrategyRuns.mock.calls.map(
+        (call) => call[3],
+      );
       expect(new Set(dispatchedModels)).toEqual(new Set(["o4-mini", "o3-mini"]));
     });
 
     it("should schedule a further tick after a successful partial dispatch", async () => {
       process.env.FREE_TIER_DISPATCH_MAX_BATCH = "1";
       process.env.FREE_TIER_DISPATCH_TOKEN_ESTIMATE = "1";
-      mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
+      mockStateRepo.findOne.mockResolvedValueOnce({
+        tier: "mini",
+        active: true,
+        thresholdPercent: 90,
+      });
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
 
       await service.runTick("mini");
@@ -374,7 +414,11 @@ describe("FreeTierDispatchService", () => {
     it("should skip a model with no unrun puzzles left and try the next one", async () => {
       process.env.FREE_TIER_DISPATCH_MAX_BATCH = "1";
       process.env.FREE_TIER_DISPATCH_TOKEN_ESTIMATE = "1";
-      mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
+      mockStateRepo.findOne.mockResolvedValueOnce({
+        tier: "mini",
+        active: true,
+        thresholdPercent: 90,
+      });
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
 
       const allocation = zeroCounts();
@@ -383,8 +427,9 @@ describe("FreeTierDispatchService", () => {
       // first — exhaust all of them except the last so the loop is forced
       // to fall through to a model that actually has a puzzle.
       mockStrategyService.findUnrunPuzzleDatesForModel.mockResolvedValue([]);
-      mockStrategyService.findUnrunPuzzleDatesForModel.mockImplementation(async (_s, model: string) =>
-        model === "gpt-5-nano" ? [{ puzzleId: 1, date: "2024-01-01" }] : [],
+      mockStrategyService.findUnrunPuzzleDatesForModel.mockImplementation(
+        async (_s, model: string) =>
+          model === "gpt-5-nano" ? [{ puzzleId: 1, date: "2024-01-01" }] : [],
       );
 
       await service.runTick("mini");
@@ -399,7 +444,11 @@ describe("FreeTierDispatchService", () => {
     });
 
     it("should stop the cycle when every model has run out of unrun puzzles", async () => {
-      mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
+      mockStateRepo.findOne.mockResolvedValueOnce({
+        tier: "mini",
+        active: true,
+        thresholdPercent: 90,
+      });
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
       mockStrategyService.findUnrunPuzzleDatesForModel.mockResolvedValue([]);
 
@@ -413,7 +462,11 @@ describe("FreeTierDispatchService", () => {
     it("should treat a triggerStrategyRuns failure as that model being unavailable this tick, not a hard failure", async () => {
       process.env.FREE_TIER_DISPATCH_MAX_BATCH = "1";
       process.env.FREE_TIER_DISPATCH_TOKEN_ESTIMATE = "1";
-      mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
+      mockStateRepo.findOne.mockResolvedValueOnce({
+        tier: "mini",
+        active: true,
+        thresholdPercent: 90,
+      });
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
       mockStrategyService.triggerStrategyRuns.mockRejectedValue(new Error("model rejected"));
 

@@ -84,6 +84,20 @@ describe("describeLeaderboardRow", () => {
     expect(description).toBe("Google gemini-3.6-flash · 1049K context");
   });
 
+  it("labels the provider correctly for a Groq row", () => {
+    const row = makeLlmRow({
+      id: "llama-3.1-8b-instant",
+      strategyName: "llm-groq",
+      modelName: "llama-3.1-8b-instant",
+      contextWindow: 131072,
+      paramCount: null,
+    });
+
+    const { description } = describeLeaderboardRow(row);
+
+    expect(description).toBe("Groq llama-3.1-8b-instant · 131K context");
+  });
+
   it("leaves deterministic rows unaffected", () => {
     const row: LeaderboardRow = {
       id: "alphabetical",

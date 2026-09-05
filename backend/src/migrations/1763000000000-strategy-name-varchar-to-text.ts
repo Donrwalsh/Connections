@@ -24,7 +24,9 @@ export class StrategyNameVarcharToText1763000000000 implements MigrationInterfac
     await queryRunner.query(
       `ALTER TABLE "SupportedModel" ALTER COLUMN "strategyName" TYPE character varying`,
     );
-    await queryRunner.query(`ALTER TABLE "StrategyRun" ALTER COLUMN "modelName" TYPE character varying`);
+    await queryRunner.query(
+      `ALTER TABLE "StrategyRun" ALTER COLUMN "modelName" TYPE character varying`,
+    );
     await queryRunner.query(
       `ALTER TABLE "StrategyRun" ALTER COLUMN "strategyName" TYPE character varying`,
     );

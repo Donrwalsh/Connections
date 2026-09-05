@@ -1,7 +1,8 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { loadEnv, orchestratorTimeoutMs } from "../../config/env";
 
-export type SolveErrorCode = "duplicate_group" | "invalid_group" | "model_error" | "rate_limited" | "rate_limited_daily";
+export type SolveErrorCode =
+  "duplicate_group" | "invalid_group" | "model_error" | "rate_limited" | "rate_limited_daily";
 
 export interface SolveUsage {
   promptTokens: number;
@@ -46,8 +47,7 @@ export interface SolveAssistFailure {
 }
 
 export type SolveAssistOutcome =
-  | { ok: true; data: SolveAssistSuccess }
-  | { ok: false; error: SolveAssistFailure };
+  { ok: true; data: SolveAssistSuccess } | { ok: false; error: SolveAssistFailure };
 
 export interface JudgeCategorySuccess {
   verdict: "correct" | "partial" | "lucky";
@@ -63,8 +63,7 @@ export interface JudgeCategorySuccess {
 }
 
 export type JudgeCategoryOutcome =
-  | { ok: true; data: JudgeCategorySuccess }
-  | { ok: false; error: SolveAssistFailure };
+  { ok: true; data: JudgeCategorySuccess } | { ok: false; error: SolveAssistFailure };
 
 const TIMEOUT_MS = orchestratorTimeoutMs();
 
@@ -99,7 +98,7 @@ export class OrchestratorService {
   async solveAssist(
     messages: ChatMessage[],
     model?: string,
-    provider?: "openai" | "ollama" | "google",
+    provider?: "openai" | "ollama" | "google" | "groq",
     contextWindow?: number | null,
   ): Promise<SolveAssistOutcome> {
     return this.executeCall<SolveAssistSuccess>(
@@ -173,8 +172,7 @@ export class OrchestratorService {
       }
 
       const failureBody = (await response.json().catch(() => null)) as
-        | (Partial<SolveAssistFailure> & { code?: string; details?: Record<string, unknown> })
-        | null;
+        (Partial<SolveAssistFailure> & { code?: string; details?: Record<string, unknown> }) | null;
       const callDetail = this.extractCallDetail(failureBody?.details);
 
       return {

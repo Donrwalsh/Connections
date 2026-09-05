@@ -389,7 +389,12 @@ describe("OrchestratorService", () => {
         ),
       );
 
-      const outcome = await service.judgeCategory("Fruits", "___ COBBLER", "gpt-4.1-nano", "openai");
+      const outcome = await service.judgeCategory(
+        "Fruits",
+        "___ COBBLER",
+        "gpt-4.1-nano",
+        "openai",
+      );
 
       expect(fetchMock).toHaveBeenCalledWith(
         expect.stringContaining("/judge-category"),
@@ -404,14 +409,19 @@ describe("OrchestratorService", () => {
       });
       expect(outcome).toEqual({
         ok: true,
-        data: expect.objectContaining({ verdict: "lucky", rationale: "Right words, wrong reason." }),
+        data: expect.objectContaining({
+          verdict: "lucky",
+          rationale: "Right words, wrong reason.",
+        }),
       });
     });
 
     it("returns { ok: false } with the failure detail on a non-2xx response", async () => {
-      jest.spyOn(global, "fetch").mockResolvedValue(
-        new Response(JSON.stringify({ error: "boom", code: "model_error" }), { status: 502 }),
-      );
+      jest
+        .spyOn(global, "fetch")
+        .mockResolvedValue(
+          new Response(JSON.stringify({ error: "boom", code: "model_error" }), { status: 502 }),
+        );
       const outcome = await service.judgeCategory("A", "B", "gpt-4.1-nano", "openai");
       expect(outcome.ok).toBe(false);
     });

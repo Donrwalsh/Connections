@@ -295,9 +295,7 @@ export interface RecentActivityJudgmentEventDto extends RecentActivityEventBaseD
   actualCategory: string;
 }
 
-export type RecentActivityEventDto =
-  | RecentActivityRunEventDto
-  | RecentActivityJudgmentEventDto;
+export type RecentActivityEventDto = RecentActivityRunEventDto | RecentActivityJudgmentEventDto;
 
 // The full allowlist entry for one model — lets a caller (e.g. the
 // leaderboard's per-model run page) recognize a real model it doesn't

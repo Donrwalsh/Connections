@@ -10,6 +10,7 @@ import {
 const createOllamaMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 const openaiMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 const createGoogleGenerativeAIMock = vi.hoisted(() => vi.fn(() => vi.fn()));
+const groqMock = vi.hoisted(() => vi.fn(() => ({})));
 
 vi.mock("ai-sdk-ollama", () => ({
   createOllama: createOllamaMock,
@@ -23,12 +24,17 @@ vi.mock("@ai-sdk/google", () => ({
   createGoogleGenerativeAI: createGoogleGenerativeAIMock,
 }));
 
+vi.mock("@ai-sdk/groq", () => ({
+  groq: groqMock,
+}));
+
 describe("getModel", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     createOllamaMock.mockClear();
     openaiMock.mockClear();
     createGoogleGenerativeAIMock.mockClear();
+    groqMock.mockClear();
   });
 
   it("passes num_ctx from MODEL_CONTEXT_WINDOW to the Ollama model", () => {
@@ -146,6 +152,29 @@ describe("getModel", () => {
     const modelFactory = createGoogleGenerativeAIMock.mock.results[0].value;
     expect(modelFactory).toHaveBeenCalledWith("gemini-3.6-flash");
   });
+
+  it("resolves the Groq model without num_ctx", () => {
+    getModel("groq");
+
+    expect(groqMock).toHaveBeenCalledTimes(1);
+    expect(groqMock).toHaveBeenCalledWith("llama-3.1-8b-instant");
+    expect(openaiMock).not.toHaveBeenCalled();
+    expect(createOllamaMock).not.toHaveBeenCalled();
+  });
+
+  it("uses the model override instead of GROQ_MODEL when given", () => {
+    vi.stubEnv("GROQ_MODEL", "llama-3.1-8b-instant");
+
+    getModel("groq", "openai/gpt-oss-120b");
+
+    expect(groqMock).toHaveBeenCalledWith("openai/gpt-oss-120b");
+  });
+
+  it("accepts a contextWindow for groq without using it", () => {
+    getModel("groq", undefined, 131072);
+
+    expect(groqMock).toHaveBeenCalledWith("llama-3.1-8b-instant");
+  });
 });
 
 describe("getModelName", () => {
@@ -186,6 +215,20 @@ describe("getModelName", () => {
     vi.stubEnv("GOOGLE_MODEL", "gemini-3.5-flash-lite");
     expect(getModelName("google", "gemini-2.5-pro")).toBe("gemini-2.5-pro");
   });
+
+  it("returns the configured Groq model for the groq provider", () => {
+    vi.stubEnv("GROQ_MODEL", "openai/gpt-oss-20b");
+    expect(getModelName("groq")).toBe("openai/gpt-oss-20b");
+  });
+
+  it("falls back to the Groq default when unset", () => {
+    expect(getModelName("groq")).toBe("llama-3.1-8b-instant");
+  });
+
+  it("prefers the model override over GROQ_MODEL", () => {
+    vi.stubEnv("GROQ_MODEL", "llama-3.1-8b-instant");
+    expect(getModelName("groq", "meta-llama/llama-3.3-70b-instruct")).toBe("meta-llama/llama-3.3-70b-instruct");
+  });
 });
 
 describe("defaultProvider", () => {
@@ -207,6 +250,11 @@ describe("defaultProvider", () => {
   it("returns google when MODEL_PROVIDER is set to google", () => {
     vi.stubEnv("MODEL_PROVIDER", "google");
     expect(defaultProvider()).toBe("google");
+  });
+
+  it("returns groq when MODEL_PROVIDER is set to groq", () => {
+    vi.stubEnv("MODEL_PROVIDER", "groq");
+    expect(defaultProvider()).toBe("groq");
   });
 });
 
