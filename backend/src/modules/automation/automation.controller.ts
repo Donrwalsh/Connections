@@ -45,6 +45,10 @@ export class AutomationController {
         outcome: log?.openRouterBurnOutcome ?? null,
         message: log?.openRouterBurnMessage ?? null,
       },
+      mistralBurn: {
+        outcome: log?.mistralBurnOutcome ?? null,
+        message: log?.mistralBurnMessage ?? null,
+      },
     };
   }
 }

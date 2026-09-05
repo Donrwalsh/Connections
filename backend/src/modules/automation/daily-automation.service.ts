@@ -7,6 +7,7 @@ import { FreeTierDispatchService } from "../free-tier-dispatch/free-tier-dispatc
 import { GoogleFreeDispatchService } from "../google-free-dispatch/google-free-dispatch.service";
 import { GroqFreeDispatchService } from "../groq-free-dispatch/groq-free-dispatch.service";
 import { OpenRouterFreeDispatchService } from "../openrouter-free-dispatch/openrouter-free-dispatch.service";
+import { MistralFreeDispatchService } from "../mistral-free-dispatch/mistral-free-dispatch.service";
 import { ModelMetadataRefreshService } from "../supported-model/model-metadata-refresh.service";
 
 // The same MAX_LIMIT CategoryEvaluatorService.enqueuePending already
@@ -23,7 +24,7 @@ function todayUtcDateStamp(): string {
 }
 
 /**
- * Runs on a daily UTC cron (see DailyAutomationBootstrap). Runs six legs
+ * Runs on a daily UTC cron (see DailyAutomationBootstrap). Runs seven legs
  * in turn — each leg is awaited before the next starts, but one leg's
  * failure never prevents the next from running (see each leg's own
  * try/catch) — and records each one's outcome into today's AutomationRunLog
@@ -58,6 +59,8 @@ function todayUtcDateStamp(): string {
  *  - openRouterBurn: starts OpenRouterFreeDispatchService's cycle, which
  *    runs until the account-wide daily-call budget is spent or the account
  *    is held.
+ *  - mistralBurn: starts MistralFreeDispatchService's cycle, which runs
+ *    until every Mistral model is held.
  *
  * Each leg checks the relevant service's live status first rather than
  * relying on a thrown exception's message text to distinguish "already
@@ -81,6 +84,8 @@ export class DailyAutomationService {
     private readonly groqFreeDispatchService: GroqFreeDispatchService,
     @Inject(OpenRouterFreeDispatchService)
     private readonly openRouterFreeDispatchService: OpenRouterFreeDispatchService,
+    @Inject(MistralFreeDispatchService)
+    private readonly mistralFreeDispatchService: MistralFreeDispatchService,
     @Inject(ModelMetadataRefreshService)
     private readonly modelMetadataRefreshService: ModelMetadataRefreshService,
   ) {}
@@ -103,6 +108,7 @@ export class DailyAutomationService {
     await this.runGoogleBurnLeg(date);
     await this.runGroqBurnLeg(date);
     await this.runOpenRouterBurnLeg(date);
+    await this.runMistralBurnLeg(date);
   }
 
   async getTodayStatus(): Promise<AutomationRunLog | null> {
@@ -233,6 +239,36 @@ export class DailyAutomationService {
       await this.runLogRepo.update(
         { date },
         { openRouterBurnOutcome: "error", openRouterBurnMessage: message },
+      );
+    }
+  }
+
+  private async runMistralBurnLeg(date: string): Promise<void> {
+    try {
+      const current = await this.mistralFreeDispatchService.getStatus();
+      if (current.active) {
+        await this.runLogRepo.update(
+          { date },
+          { mistralBurnOutcome: "alreadyActive", mistralBurnMessage: "already running" },
+        );
+        return;
+      }
+
+      const result = await this.mistralFreeDispatchService.start();
+      const message =
+        result.outcome === "alreadyExhausted"
+          ? "every Mistral model is currently held"
+          : "started";
+      await this.runLogRepo.update(
+        { date },
+        { mistralBurnOutcome: result.outcome, mistralBurnMessage: message },
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to start Mistral burn";
+      this.logger.error(`daily automation mistral-burn leg failed: ${message}`);
+      await this.runLogRepo.update(
+        { date },
+        { mistralBurnOutcome: "error", mistralBurnMessage: message },
       );
     }
   }

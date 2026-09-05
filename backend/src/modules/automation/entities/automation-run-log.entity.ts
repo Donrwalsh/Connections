@@ -61,6 +61,12 @@ export class AutomationRunLog {
   @Column({ type: "text", nullable: true })
   openRouterBurnMessage: string | null;
 
+  @Column({ type: "varchar", nullable: true })
+  mistralBurnOutcome: AutomationLegOutcome | null;
+
+  @Column({ type: "text", nullable: true })
+  mistralBurnMessage: string | null;
+
   @UpdateDateColumn({
     type: "timestamptz",
     default: () => "CURRENT_TIMESTAMP",
