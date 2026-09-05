@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
+import { useAdminAuth } from "../../auth/AdminAuthContext";
 import { CategoryJudgingWidget } from "../../components/benchmark/CategoryJudgingWidget";
 import { FreeTierBudgetWidget } from "../../components/benchmark/FreeTierBudgetWidget";
 import { FreeTierDispatchModal } from "../../components/benchmark/FreeTierDispatchModal";
@@ -22,6 +23,7 @@ const RECENT_ACTIVITY_POLL_MS = 10_000;
  * performance) since both of these are operational concerns, not
  * leaderboard metrics. */
 export function ActivityPage() {
+  const { isAdmin } = useAdminAuth();
   const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
   // Bumped after FreeTierDispatchModal starts a cycle, so both widgets
   // refetch their dispatch status immediately instead of waiting out their
@@ -31,6 +33,7 @@ export function ActivityPage() {
   const { data: leaderboard } = useQuery({
     queryKey: ["leaderboard"],
     queryFn: ({ signal }) => fetchLeaderboard(signal),
+    enabled: isAdmin,
   });
 
   // Best-effort: which models belong to which free tier is only used for
@@ -40,6 +43,7 @@ export function ActivityPage() {
     queries: (["flagship", "mini"] as const).map((tier) => ({
       queryKey: ["free-tier-usage", tier],
       queryFn: ({ signal }: { signal: AbortSignal }) => fetchFreeTierUsage(tier, signal),
+      enabled: isAdmin,
     })),
     combine: (results): FreeTierModelSets => ({
       flagship: new Set(results[0].data?.models ?? []),
@@ -55,6 +59,7 @@ export function ActivityPage() {
     queryKey: ["automation-status"],
     queryFn: ({ signal }) => fetchAutomationStatus(signal),
     refetchInterval: 30_000,
+    enabled: isAdmin,
   });
 
   const judgeAutomation: AutomationLegDisplay | null = automationStatus
@@ -115,27 +120,35 @@ export function ActivityPage() {
               Daily free-token usage and the latest runs across every strategy.
             </p>
           </div>
-          <button type="button" className="bench-btn-primary" onClick={() => setIsDispatchModalOpen(true)}>
-            Enable Auto-Dispatch
-          </button>
+          {isAdmin ? (
+            <button
+              type="button"
+              className="bench-btn-primary"
+              onClick={() => setIsDispatchModalOpen(true)}
+            >
+              Enable Auto-Dispatch
+            </button>
+          ) : null}
         </div>
       </header>
 
-      <div className="bench-free-tiers" aria-label="Daily free-token budgets">
-        <FreeTierBudgetWidget
-          tier="flagship"
-          spentUsd={flagshipSpentUsd}
-          refreshSignal={dispatchRefreshSignal}
-        />
-        <FreeTierBudgetWidget
-          tier="mini"
-          spentUsd={miniSpentUsd}
-          refreshSignal={dispatchRefreshSignal}
-          automation={miniBurnAutomation}
-        />
-        <CategoryJudgingWidget automation={judgeAutomation} />
-        <GoogleDispatchWidget automation={googleBurnAutomation} />
-      </div>
+      {isAdmin ? (
+        <div className="bench-free-tiers" aria-label="Daily free-token budgets">
+          <FreeTierBudgetWidget
+            tier="flagship"
+            spentUsd={flagshipSpentUsd}
+            refreshSignal={dispatchRefreshSignal}
+          />
+          <FreeTierBudgetWidget
+            tier="mini"
+            spentUsd={miniSpentUsd}
+            refreshSignal={dispatchRefreshSignal}
+            automation={miniBurnAutomation}
+          />
+          <CategoryJudgingWidget automation={judgeAutomation} />
+          <GoogleDispatchWidget automation={googleBurnAutomation} />
+        </div>
+      ) : null}
 
       {isDispatchModalOpen ? (
         <FreeTierDispatchModal

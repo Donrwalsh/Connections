@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
+import { AdminAuthProvider } from "../auth/AdminAuthContext";
 import type { Category } from "../data/types";
 
 function renderApp(initialEntries: string[]) {
@@ -14,9 +15,11 @@ function renderApp(initialEntries: string[]) {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={initialEntries}>
-        <App />
-      </MemoryRouter>
+      <AdminAuthProvider>
+        <MemoryRouter initialEntries={initialEntries}>
+          <App />
+        </MemoryRouter>
+      </AdminAuthProvider>
     </QueryClientProvider>,
   );
 }
@@ -246,11 +249,14 @@ describe("App leaderboard routes", () => {
     expect(screen.getByRole("button", { name: /delete failed judge calls/i })).toBeInTheDocument();
   });
 
-  it("renders the free-tier budget widgets at /activity", async () => {
+  it("renders the free-tier budget widgets at /activity for an admin session", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((url: unknown) => {
         const href = String(url);
+        if (href.includes("/auth/me")) {
+          return Promise.resolve({ ok: true, json: async () => ({ isAdmin: true }) });
+        }
         if (href.includes("/strategy/free-tier-usage/flagship")) {
           return Promise.resolve({
             ok: true,
@@ -277,6 +283,30 @@ describe("App leaderboard routes", () => {
             }),
           });
         }
+        if (href.includes("/strategy/activity/recent")) {
+          return Promise.resolve({ ok: true, json: async () => [] });
+        }
+        if (href.includes("/category-evaluation/coverage")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ eligible: 0, judged: 0, pending: 0 }),
+          });
+        }
+        if (href.includes("/automation/status")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              lastRunAt: null,
+              nextRunAt: "2024-06-02T00:15:00.000Z",
+              judge: { enqueued: null, error: null },
+              miniBurn: { outcome: null, message: null },
+              googleBurn: { outcome: null, message: null },
+            }),
+          });
+        }
+        if (href.includes("/dispatch/google")) {
+          return Promise.resolve({ ok: true, json: async () => ({ active: false, startedAt: null }) });
+        }
         return Promise.resolve({ ok: true, json: async () => ({ deterministic: [], llm: [] }) });
       }),
     );
@@ -284,7 +314,33 @@ describe("App leaderboard routes", () => {
     renderApp(["/activity"]);
 
     expect(await screen.findByRole("heading", { name: "Activity" })).toBeInTheDocument();
-    expect(screen.getByText("Flagship daily tokens")).toBeInTheDocument();
+    // Waits on the admin-only widgets, which only render once AdminAuthProvider's
+    // /auth/me check resolves — plain vi.waitFor (rather than
+    // screen.findByText's own timeout option) polls reliably here.
+    await vi.waitFor(() => {
+      expect(screen.getByText("Flagship daily tokens")).toBeInTheDocument();
+    });
     expect(screen.getByText("Mini & nano daily tokens")).toBeInTheDocument();
+  });
+
+  it("hides the operational widgets at /activity for a non-admin visitor", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        const href = String(url);
+        if (href.includes("/auth/me")) {
+          return Promise.resolve({ ok: true, json: async () => ({ isAdmin: false }) });
+        }
+        if (href.includes("/strategy/activity/recent")) {
+          return Promise.resolve({ ok: true, json: async () => [] });
+        }
+        return Promise.resolve({ ok: true, json: async () => ({ deterministic: [], llm: [] }) });
+      }),
+    );
+
+    renderApp(["/activity"]);
+
+    expect(await screen.findByRole("heading", { name: "Activity" })).toBeInTheDocument();
+    expect(screen.queryByText("Flagship daily tokens")).not.toBeInTheDocument();
   });
 });

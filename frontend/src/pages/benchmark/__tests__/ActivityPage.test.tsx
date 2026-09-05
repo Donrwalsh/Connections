@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AdminAuthContext } from "../../../auth/AdminAuthContext";
 import type {
   AutomationStatus,
   FreeTierUsage,
@@ -161,14 +162,18 @@ function renderActivity() {
   });
 
   render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/activity"]}>
-        <Routes>
-          <Route path="/activity" element={<ActivityPage />} />
-          <Route path="/leaderboard/:strategyId/:puzzleId" element={<div>run-page</div>} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <AdminAuthContext.Provider
+      value={{ isAdmin: true, isLoading: false, login: vi.fn(), logout: vi.fn() }}
+    >
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/activity"]}>
+          <Routes>
+            <Route path="/activity" element={<ActivityPage />} />
+            <Route path="/leaderboard/:strategyId/:puzzleId" element={<div>run-page</div>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    </AdminAuthContext.Provider>,
   );
 }
 
@@ -436,5 +441,34 @@ describe("ActivityPage", () => {
       "Auto-run: failed: threshold exceeded (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM",
     );
     expect(line).toHaveClass("bench-error");
+  });
+});
+
+describe("ActivityPage as a non-admin visitor", () => {
+  function renderActivityAsViewer() {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/activity"]}>
+          <ActivityPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("hides the operational widget row and the Enable Auto-Dispatch button", async () => {
+    stubFetch();
+    renderActivityAsViewer();
+
+    expect(await screen.findByRole("heading", { name: "Activity" })).toBeInTheDocument();
+    expect(screen.queryByText("Flagship daily tokens")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Enable Auto-Dispatch" })).not.toBeInTheDocument();
+  });
+
+  it("still shows Recent Activity", async () => {
+    stubFetch({ recentActivity: [] });
+    renderActivityAsViewer();
+
+    expect(await screen.findByText("No activity yet.")).toBeInTheDocument();
   });
 });
