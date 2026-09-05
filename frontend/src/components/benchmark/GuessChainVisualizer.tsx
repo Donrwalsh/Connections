@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useAdminAuth } from "../../auth/AdminAuthContext";
 import { fetchRunDetail } from "../../data/benchmark/api";
 import { formatDuration } from "../../data/benchmark/metrics";
 import {
@@ -33,6 +34,7 @@ export interface GuessChainVisualizerProps {
  * own detail per runId so a multi-run picker can swap the visualized run
  * without the parent page owning the fetch/loading state. */
 export function GuessChainVisualizer({ runId, onDeleted }: GuessChainVisualizerProps) {
+  const { isAdmin } = useAdminAuth();
   const [detail, setDetail] = useState<StrategyRunDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +67,7 @@ export function GuessChainVisualizer({ runId, onDeleted }: GuessChainVisualizerP
           <h2 className="bench-visualizer__title">Guess chain</h2>
           <p className="bench-mono bench-visualizer__runid">#{runId}</p>
         </div>
-        {detail?.status === "error" ? (
+        {isAdmin && detail?.status === "error" ? (
           <button
             type="button"
             className="bench-sort-btn bench-sort-btn--danger"
