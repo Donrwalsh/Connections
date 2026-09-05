@@ -20,10 +20,13 @@ import {
  * reaching this guard in production with no configured password can only
  * mean misconfiguration — fail closed rather than let the request through.
  *
- * The cookie path also requires the X-Admin-Request header (defense in
- * depth alongside the cookie's own SameSite=Strict); the body.password
- * fallback path does not, so scripted/curl requests keep working exactly as
- * before.
+ * The body.password check runs first and is authoritative on its own: a
+ * correct password authorizes the request whatever session cookie the
+ * browser happens to send along, so it works from Swagger / curl / scripts
+ * with no other setup. Only when no password (or a wrong one) is supplied
+ * does the cookie path apply, and that path additionally requires the
+ * X-Admin-Request header (defense in depth alongside the cookie's own
+ * SameSite=Strict).
  */
 @Injectable()
 export class DispatchAuthGuard implements CanActivate {
@@ -41,16 +44,16 @@ export class DispatchAuthGuard implements CanActivate {
       throw new ForbiddenException("Invalid or missing dispatch password.");
     }
 
+    const provided: unknown = request.body?.password;
+    if (typeof provided === "string" && passwordsMatch(provided, expected)) {
+      return true;
+    }
+
     const cookieValue = parseCookieHeader(request.headers?.cookie, ADMIN_SESSION_COOKIE);
     if (cookieValue && verifySession(cookieValue, sessionSecret(expected))) {
       if (request.headers?.[ADMIN_REQUEST_HEADER] !== "1") {
         throw new ForbiddenException("Missing X-Admin-Request header.");
       }
-      return true;
-    }
-
-    const provided: unknown = request.body?.password;
-    if (typeof provided === "string" && passwordsMatch(provided, expected)) {
       return true;
     }
 

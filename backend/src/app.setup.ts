@@ -220,7 +220,22 @@ export async function configureApp(app: INestApplication): Promise<INestApplicat
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup("api/docs", app, document);
+  // Make "Try it out" usable against the DispatchAuthGuard-protected
+  // dispatch/category-evaluation routes without any manual setup:
+  //  - withCredentials sends the admin_session cookie on same-origin calls,
+  //  - the requestInterceptor attaches the X-Admin-Request marker header the
+  //    guard's cookie path requires (a plain "1", not a secret — see
+  //    session.ts). A logged-in operator therefore just hits Execute. Anyone
+  //    else supplies `password` in the request body instead.
+  SwaggerModule.setup("api/docs", app, document, {
+    swaggerOptions: {
+      withCredentials: true,
+      requestInterceptor: (req: { headers: Record<string, string> }) => {
+        req.headers["X-Admin-Request"] = "1";
+        return req;
+      },
+    },
+  });
 
   return app;
 }

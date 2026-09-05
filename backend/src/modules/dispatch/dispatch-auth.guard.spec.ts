@@ -112,4 +112,34 @@ describe("DispatchAuthGuard", () => {
       guard.canActivate(makeContext({ password: "secret" }, { cookie: "admin_session=garbage" })),
     ).toBe(true);
   });
+
+  it("accepts a correct body password even alongside a valid cookie with no CSRF header", () => {
+    // The body.password check runs first, so a caller (e.g. Swagger "Try it
+    // out") that supplies the password is authorized regardless of whatever
+    // admin_session cookie the browser sends along.
+    process.env.NODE_ENV = "production";
+    const guard = makeGuard("secret");
+    const token = signSession(sessionSecret("secret"));
+
+    expect(
+      guard.canActivate(
+        makeContext({ password: "secret" }, { cookie: `${ADMIN_SESSION_COOKIE}=${token}` }),
+      ),
+    ).toBe(true);
+  });
+
+  it("still authorizes via the cookie path when the body password is wrong", () => {
+    process.env.NODE_ENV = "production";
+    const guard = makeGuard("secret");
+    const token = signSession(sessionSecret("secret"));
+
+    expect(
+      guard.canActivate(
+        makeContext(
+          { password: "wrong" },
+          { cookie: `${ADMIN_SESSION_COOKIE}=${token}`, [ADMIN_REQUEST_HEADER]: "1" },
+        ),
+      ),
+    ).toBe(true);
+  });
 });
