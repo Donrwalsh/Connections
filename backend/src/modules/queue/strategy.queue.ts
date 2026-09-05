@@ -1,6 +1,13 @@
 import { Queue } from "bullmq";
 import { redisConnection } from "./redis.config";
-import { LLM_OPENAI, LLM_OLLAMA, LLM_GOOGLE, LLM_GROQ, LLM_OPENROUTER } from "../../strategies";
+import {
+  LLM_OPENAI,
+  LLM_OLLAMA,
+  LLM_GOOGLE,
+  LLM_GROQ,
+  LLM_OPENROUTER,
+  LLM_MISTRAL,
+} from "../../strategies";
 
 export const strategyQueue = new Queue("strategy-runs", {
   connection: redisConnection,
@@ -69,6 +76,16 @@ export const llmOpenRouterQueue = new Queue("llm-openrouter-runs", {
   },
 });
 
+export const llmMistralQueue = new Queue("llm-mistral-runs", {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 1000 },
+    removeOnComplete: { count: 1000 },
+    removeOnFail: { count: 5000 },
+  },
+});
+
 /**
  * Routes a strategy run to the queue that processes it: the LLM strategies
  * get their per-provider queues, everything else stays on the shared
@@ -82,6 +99,7 @@ export function queueForStrategy(
   googleQueue: Queue,
   groqQueue: Queue,
   openRouterQueue: Queue,
+  mistralQueue: Queue,
   strategyName: string,
 ): Queue {
   if (strategyName === LLM_OPENAI) return openAIQueue;
@@ -89,6 +107,7 @@ export function queueForStrategy(
   if (strategyName === LLM_GOOGLE) return googleQueue;
   if (strategyName === LLM_GROQ) return groqQueue;
   if (strategyName === LLM_OPENROUTER) return openRouterQueue;
+  if (strategyName === LLM_MISTRAL) return mistralQueue;
   return defaultQueue;
 }
 

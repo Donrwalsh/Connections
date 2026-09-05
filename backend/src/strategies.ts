@@ -10,6 +10,7 @@ export const SUPPORTED_STRATEGIES = [
   "llm-google",
   "llm-groq",
   "llm-openrouter",
+  "llm-mistral",
 ] as const;
 
 export type SupportedStrategy = (typeof SUPPORTED_STRATEGIES)[number];
@@ -23,6 +24,7 @@ export const LLM_OLLAMA = "llm-ollama" as const;
 export const LLM_GOOGLE = "llm-google" as const;
 export const LLM_GROQ = "llm-groq" as const;
 export const LLM_OPENROUTER = "llm-openrouter" as const;
+export const LLM_MISTRAL = "llm-mistral" as const;
 
 export const LLM_STRATEGIES = [
   LLM_OPENAI,
@@ -30,6 +32,7 @@ export const LLM_STRATEGIES = [
   LLM_GOOGLE,
   LLM_GROQ,
   LLM_OPENROUTER,
+  LLM_MISTRAL,
 ] as const;
 
 export function isLlmStrategy(strategyName: string): boolean {
@@ -116,6 +119,30 @@ export const DEFAULT_OPENROUTER_DISPATCH_MAX_IN_FLIGHT = 3;
 // How long the whole dispatch tick chain backs off after a per-minute 429
 // is observed (the runner writes a 'per-minute-cooldown' hold this long).
 export const DEFAULT_OPENROUTER_DISPATCH_RPM_COOLDOWN_MS = 60_000;
+
+export const DEFAULT_LLM_MISTRAL_CONCURRENCY = 1;
+
+// Fallback wait (seconds) before retrying a Mistral per-minute (1 RPS / TPM)
+// rate-limit hit — used only when the 429 carried no parseable retry-after
+// header. A per-minute hit is never a run failure; it waits and retries.
+export const DEFAULT_LLM_MISTRAL_RATE_LIMIT_FALLBACK_SECONDS = 60;
+
+// Mistral's free tier sends no X-RateLimit-* headers, so a monthly-cap 429
+// and a transient per-minute 429 are indistinguishable when the 429 body
+// carries no monthly wording. The runner escalates a *persistent* streak of
+// per-minute 'rate_limited' outcomes on one run into a per-model park: after
+// this many consecutive hits...
+export const DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS = 4;
+// ...or once the streak has spanned this many wall-clock seconds, whichever
+// trips first.
+export const DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ELAPSED_SECONDS = 300;
+
+// How long a Mistral model stays parked once the heuristic (or an
+// orchestrator body-classified monthly 429) trips. Short and fixed: the
+// resume sweep re-checks after it expires, so a real monthly wall just
+// re-parks each cycle until the calendar month rolls, while a misclassified
+// multi-minute TPM starvation episode recovers within 6h. (default: 6h)
+export const DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS = 21600;
 
 // How many prompts a single solve step may make before the orchestrator
 // gives up on a fresh candidate and reports a duplicate/invalid failure.
@@ -335,6 +362,71 @@ export function openRouterDispatchRpmCooldownSeconds(
     DEFAULT_OPENROUTER_DISPATCH_RPM_COOLDOWN_MS,
   );
   return Math.ceil(ms / 1000);
+}
+
+/**
+ * How many llm-mistral runs the worker may process at once, from
+ * LLM_MISTRAL_CONCURRENCY. Keep at 1 — this is the guard for Mistral's
+ * global 1-request-per-second ceiling. Falls back to
+ * DEFAULT_LLM_MISTRAL_CONCURRENCY for missing/invalid values.
+ */
+export function llmMistralConcurrency(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.LLM_MISTRAL_CONCURRENCY, DEFAULT_LLM_MISTRAL_CONCURRENCY);
+}
+
+/**
+ * Fallback wait (seconds) before retrying a Mistral per-minute rate-limit
+ * hit, from LLM_MISTRAL_RATE_LIMIT_FALLBACK_SECONDS. Only used when the 429
+ * carried no parseable retry-after header. Falls back to
+ * DEFAULT_LLM_MISTRAL_RATE_LIMIT_FALLBACK_SECONDS for missing/invalid values.
+ */
+export function llmMistralRateLimitFallbackSeconds(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(
+    env.LLM_MISTRAL_RATE_LIMIT_FALLBACK_SECONDS,
+    DEFAULT_LLM_MISTRAL_RATE_LIMIT_FALLBACK_SECONDS,
+  );
+}
+
+/**
+ * Consecutive per-minute 'rate_limited' outcomes on one llm-mistral run
+ * before the runner heuristic parks the model, from
+ * MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS. Falls back to
+ * DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS for missing/invalid values.
+ */
+export function mistralPersistentRateLimitAttempts(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(
+    env.MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS,
+    DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS,
+  );
+}
+
+/**
+ * Wall-clock span (milliseconds) of a per-minute 'rate_limited' streak on
+ * one llm-mistral run before the runner heuristic parks the model,
+ * whichever trips first alongside the attempt count. Reads
+ * MISTRAL_PERSISTENT_RATE_LIMIT_ELAPSED_SECONDS (a *seconds* knob) and
+ * returns it in milliseconds. Falls back to
+ * DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ELAPSED_SECONDS * 1000.
+ */
+export function mistralPersistentRateLimitElapsedMs(env: NodeJS.ProcessEnv = process.env): number {
+  return (
+    positiveTrialCount(
+      env.MISTRAL_PERSISTENT_RATE_LIMIT_ELAPSED_SECONDS,
+      DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ELAPSED_SECONDS,
+    ) * 1000
+  );
+}
+
+/**
+ * How long (seconds) a parked Mistral model stays held before the resume
+ * sweep re-checks it, from MISTRAL_MODEL_HOLD_FALLBACK_SECONDS. Falls back
+ * to DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS for missing/invalid values.
+ */
+export function mistralModelHoldFallbackSeconds(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(
+    env.MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
+    DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
+  );
 }
 
 /**

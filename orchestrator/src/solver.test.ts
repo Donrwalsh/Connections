@@ -646,3 +646,78 @@ describe("classifyModelCallError — openrouter", () => {
     expect(result.details.dailyResetSeconds).toBeGreaterThan(4 * 3600);
   });
 });
+
+describe("classifyModelCallError — mistral", () => {
+  // Mistral's free tier sends no X-RateLimit-* headers, so the classifier
+  // reads the 429 body for a monthly/quota signal (mirroring the Groq
+  // body-message read), and otherwise returns rate_limited — the runner's
+  // consecutive-429 heuristic is the fallback for a monthly wall the body
+  // did not announce. Synthesized bodies (a real monthly-cap 429 is not
+  // practical to reproduce in a test).
+  const MISTRAL_MONTHLY_BODY = JSON.stringify({
+    error: { message: "Monthly token quota reached for this workspace", type: "quota_exceeded" },
+  });
+  const MISTRAL_RPM_BODY = JSON.stringify({
+    error: { message: "Requests rate limit exceeded", type: "rate_limit_exceeded" },
+  });
+
+  it("classifies a monthly/quota body as rate_limited_daily with no dailyResetSeconds", () => {
+    const err = makeAPICallError({ statusCode: 429, responseBody: MISTRAL_MONTHLY_BODY });
+
+    const result = classifyModelCallError(err, "mistral", { model: "mistral-small-latest" });
+
+    expect(result.code).toBe("rate_limited_daily");
+    expect(result.details.dailyResetSeconds).toBeUndefined();
+  });
+
+  it("classifies a plain rate-limit body with Retry-After as rate_limited", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseBody: MISTRAL_RPM_BODY,
+      responseHeaders: { "retry-after": "30" },
+    });
+
+    const result = classifyModelCallError(err, "mistral", { model: "mistral-small-latest" });
+
+    expect(result.code).toBe("rate_limited");
+    expect(result.details.retryAfterSeconds).toBe(30);
+  });
+
+  it("classifies an unreadable 429 body with no Retry-After as rate_limited with undefined wait", () => {
+    const err = makeAPICallError({ statusCode: 429, responseBody: "<html>502 bad gateway</html>" });
+
+    const result = classifyModelCallError(err, "mistral", { model: "mistral-small-latest" });
+
+    expect(result.code).toBe("rate_limited");
+    expect(result.details.retryAfterSeconds).toBeUndefined();
+  });
+
+  it("still classifies a non-429 mistral error as model_error", () => {
+    const err = new Error("network blip");
+
+    const result = classifyModelCallError(err, "mistral", { model: "mistral-small-latest" });
+
+    expect(result.code).toBe("model_error");
+  });
+
+  it("does not classify a non-mistral provider's monthly-quota 429 as rate_limited_daily via the mistral branch", () => {
+    const err = makeAPICallError({ statusCode: 429, responseBody: MISTRAL_MONTHLY_BODY });
+
+    const result = classifyModelCallError(err, "openai", { model: "gpt-4.1-nano" });
+
+    expect(result.code).toBe("model_error");
+  });
+
+  it("unwraps a RetryError around a Mistral monthly-quota APICallError as rate_limited_daily", () => {
+    const inner = makeAPICallError({ statusCode: 429, responseBody: MISTRAL_MONTHLY_BODY });
+    const err = new RetryError({
+      message: "Failed after 3 attempts",
+      reason: "maxRetriesExceeded",
+      errors: [inner],
+    });
+
+    const result = classifyModelCallError(err, "mistral", { model: "mistral-small-latest" });
+
+    expect(result.code).toBe("rate_limited_daily");
+  });
+});

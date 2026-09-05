@@ -116,6 +116,7 @@ const defaultAutomation: AutomationStatus = {
   googleBurn: { outcome: null, message: null },
   groqBurn: { outcome: null, message: null },
   openRouterBurn: { outcome: null, message: null },
+  mistralBurn: { outcome: null, message: null },
 };
 
 function stubFetch({
@@ -401,6 +402,10 @@ describe("ActivityPage", () => {
         openRouterBurn: {
           outcome: "alreadyExhausted",
           message: "OpenRouter daily budget spent or account held",
+        },
+        mistralBurn: {
+          outcome: "alreadyExhausted",
+          message: "every Mistral model is currently held",
         },
       },
     });

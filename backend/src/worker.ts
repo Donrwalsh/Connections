@@ -14,6 +14,7 @@ import { FreeTierDispatchService } from "./modules/free-tier-dispatch/free-tier-
 import { GoogleFreeDispatchService } from "./modules/google-free-dispatch/google-free-dispatch.service";
 import { GroqFreeDispatchService } from "./modules/groq-free-dispatch/groq-free-dispatch.service";
 import { OpenRouterFreeDispatchService } from "./modules/openrouter-free-dispatch/openrouter-free-dispatch.service";
+import { MistralFreeDispatchService } from "./modules/mistral-free-dispatch/mistral-free-dispatch.service";
 import type { FreeTierId } from "./modules/strategy/free-tier-usage.service";
 import { redisConnection } from "./modules/queue/redis.config";
 import { PuzzleIngestionService } from "./modules/game/puzzle-ingestion.service";
@@ -21,6 +22,7 @@ import { ModelMetadataRefreshService } from "./modules/supported-model/model-met
 import { GoogleRpdResumeService } from "./modules/strategy/google-rpd-resume.service";
 import { GroqRpdResumeService } from "./modules/strategy/groq-rpd-resume.service";
 import { OpenRouterRpdResumeService } from "./modules/strategy/openrouter-rpd-resume.service";
+import { MistralRpdResumeService } from "./modules/strategy/mistral-rpd-resume.service";
 import { DailyAutomationService } from "./modules/automation/daily-automation.service";
 import {
   isLlmStrategy,
@@ -29,11 +31,13 @@ import {
   LLM_GOOGLE,
   LLM_GROQ,
   LLM_OPENROUTER,
+  LLM_MISTRAL,
   llmOllamaConcurrency,
   llmOpenAIConcurrency,
   llmGoogleConcurrency,
   llmGroqConcurrency,
   llmOpenRouterConcurrency,
+  llmMistralConcurrency,
   STRATEGY_SET,
   workerRole,
 } from "./strategies";
@@ -56,10 +60,12 @@ async function bootstrap() {
   const googleFreeDispatchService = appContext.get(GoogleFreeDispatchService);
   const groqFreeDispatchService = appContext.get(GroqFreeDispatchService);
   const openRouterFreeDispatchService = appContext.get(OpenRouterFreeDispatchService);
+  const mistralFreeDispatchService = appContext.get(MistralFreeDispatchService);
   const modelMetadataRefreshService = appContext.get(ModelMetadataRefreshService);
   const googleRpdResumeService = appContext.get(GoogleRpdResumeService);
   const groqRpdResumeService = appContext.get(GroqRpdResumeService);
   const openRouterRpdResumeService = appContext.get(OpenRouterRpdResumeService);
+  const mistralRpdResumeService = appContext.get(MistralRpdResumeService);
   const dailyAutomationService = appContext.get(DailyAutomationService);
 
   const activeWorkers: Worker[] = [];
@@ -133,7 +139,8 @@ async function bootstrap() {
       | "llm-ollama-runs"
       | "llm-google-runs"
       | "llm-groq-runs"
-      | "llm-openrouter-runs",
+      | "llm-openrouter-runs"
+      | "llm-mistral-runs",
     expectedStrategy: string,
     concurrency: number,
   ) => {
@@ -209,6 +216,14 @@ async function bootstrap() {
     );
     activeWorkers.push(llmOpenRouterWorker);
     activeQueueNames.push("llm-openrouter-runs");
+
+    const llmMistralWorker = createLlmWorker(
+      "llm-mistral-runs",
+      LLM_MISTRAL,
+      llmMistralConcurrency(),
+    );
+    activeWorkers.push(llmMistralWorker);
+    activeQueueNames.push("llm-mistral-runs");
 
     const puzzleWorker = new Worker(
       "puzzle-population",
@@ -348,6 +363,29 @@ async function bootstrap() {
     activeWorkers.push(openRouterFreeDispatchWorker);
     activeQueueNames.push("openrouter-free-dispatch");
 
+    // Each job is one tick of the Mistral free-dispatch cycle (see
+    // MistralFreeDispatchService) — same self-chaining shape as the
+    // Groq/Google/OpenRouter dispatch workers above.
+    const mistralFreeDispatchWorker = new Worker(
+      "mistral-free-dispatch",
+      async (job: Job) => {
+        logger.log(`starting mistral free-tier dispatch tick ${job.id}`);
+        await mistralFreeDispatchService.runTick();
+        logger.log(`finished mistral free-tier dispatch tick ${job.id}`);
+      },
+      {
+        connection: redisConnection,
+        concurrency: 1,
+      },
+    );
+
+    mistralFreeDispatchWorker.on("failed", (job, err) => {
+      logger.error(`mistral free-tier dispatch tick ${job?.id} failed`, err?.stack || err);
+    });
+
+    activeWorkers.push(mistralFreeDispatchWorker);
+    activeQueueNames.push("mistral-free-dispatch");
+
     const googleRpdResumeWorker = new Worker(
       "google-rpd-resume",
       async (job) => {
@@ -410,6 +448,27 @@ async function bootstrap() {
 
     activeWorkers.push(openRouterRpdResumeWorker);
     activeQueueNames.push("openrouter-rpd-resume");
+
+    const mistralRpdResumeWorker = new Worker(
+      "mistral-rpd-resume",
+      async (job) => {
+        logger.log(`starting mistral-rpd resume sweep ${job.id}`);
+        const result = await mistralRpdResumeService.runResume(job.id ?? String(job.timestamp));
+        logger.log(`finished mistral-rpd resume sweep ${job.id}: ${JSON.stringify(result)}`);
+        return result;
+      },
+      {
+        connection: redisConnection,
+        concurrency: 1,
+      },
+    );
+
+    mistralRpdResumeWorker.on("failed", (job, err) => {
+      logger.error(`mistral-rpd resume sweep ${job?.id} failed`, err?.stack || err);
+    });
+
+    activeWorkers.push(mistralRpdResumeWorker);
+    activeQueueNames.push("mistral-rpd-resume");
 
     const dailyAutomationWorker = new Worker(
       "daily-automation",

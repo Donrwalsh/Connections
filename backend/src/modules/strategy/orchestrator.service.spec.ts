@@ -152,6 +152,23 @@ describe("OrchestratorService", () => {
     );
   });
 
+  it("should include the mistral provider in the request body when given", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
+
+    await service.solveAssist(messages, "mistral-small-latest", "mistral");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://orchestrator.test/solve-assist",
+      expect.objectContaining({
+        body: JSON.stringify({
+          messages,
+          model: "mistral-small-latest",
+          provider: "mistral",
+        }),
+      }),
+    );
+  });
+
   it("should extract dailyResetSeconds from an OpenRouter rate_limited_daily failure", async () => {
     mockFetch.mockResolvedValueOnce(
       mockResponse({

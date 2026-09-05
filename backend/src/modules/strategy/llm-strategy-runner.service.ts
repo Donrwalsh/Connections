@@ -8,6 +8,7 @@ import {
   LLM_GOOGLE,
   LLM_GROQ,
   LLM_OPENROUTER,
+  LLM_MISTRAL,
   llmMaxDuplicateGuesses,
   llmMaxFailedGuesses,
   llmMaxMalformedResponses,
@@ -16,6 +17,10 @@ import {
   llmGroqRateLimitFallbackSeconds,
   llmGroqDailyHoldFallbackSeconds,
   llmOpenRouterRateLimitFallbackSeconds,
+  llmMistralRateLimitFallbackSeconds,
+  mistralPersistentRateLimitAttempts,
+  mistralPersistentRateLimitElapsedMs,
+  mistralModelHoldFallbackSeconds,
   openRouterDispatchRpmCooldownSeconds,
   llmTemperature,
 } from "../../strategies";
@@ -37,6 +42,7 @@ import {
   OpenRouterRateLimitHoldService,
   secondsUntilNextUtcMidnight,
 } from "./openrouter-rate-limit-hold.service";
+import { MistralRateLimitHoldService } from "./mistral-rate-limit-hold.service";
 import { firstCombination } from "./combinatorics";
 import { GROUP_SIZE, parseGroupsSection } from "./parse-groups-section";
 
@@ -61,6 +67,13 @@ interface LlmRunLoopState {
   // resets it to null after waiting. Never counts toward any failure
   // threshold; a rate_limited hit is never treated as a failure at all.
   rateLimitWaitMs: number | null;
+  // Mistral only: consecutive "rate_limited" outcomes for this run and the
+  // wall-clock instant the streak began. classifyFailedCall escalates a
+  // persistent streak into a per-model park (Mistral sends no rate-limit
+  // headers, so a monthly-cap 429 and a per-minute blip are otherwise
+  // indistinguishable). Reset to 0 / null on any successful call.
+  rateLimitStreak: number;
+  rateLimitStreakStartedAt: number | null;
   // Groups confirmed correct — used to build RETRY prompts.
   lockedInGroups: string[][];
   // The last failed guess — used to build RETRY prompts.
@@ -178,6 +191,8 @@ export class LlmStrategyRunner {
     @Inject(GroqRateLimitHoldService) private readonly groqRpdHold: GroqRateLimitHoldService,
     @Inject(OpenRouterRateLimitHoldService)
     private readonly openRouterHold: OpenRouterRateLimitHoldService,
+    @Inject(MistralRateLimitHoldService)
+    private readonly mistralRpdHold: MistralRateLimitHoldService,
   ) {}
 
   async runLlmStrategy(puzzleId: number, strategyName: string, trialNumber = 0, model?: string) {
@@ -193,7 +208,9 @@ export class LlmStrategyRunner {
             ? "groq"
             : strategyName === LLM_OPENROUTER
               ? "openrouter"
-              : "openai";
+              : strategyName === LLM_MISTRAL
+                ? "mistral"
+                : "openai";
 
     const contextWindow = model
       ? await this.supportedModelService.getContextWindow(strategyName, model)
@@ -219,7 +236,13 @@ export class LlmStrategyRunner {
     // provider call. The matching *-rpd-resume sweep re-dispatches it after
     // the reset.
     const rpdHoldService =
-      strategyName === LLM_GOOGLE ? this.rpdHold : strategyName === LLM_GROQ ? this.groqRpdHold : null;
+      strategyName === LLM_GOOGLE
+        ? this.rpdHold
+        : strategyName === LLM_GROQ
+          ? this.groqRpdHold
+          : strategyName === LLM_MISTRAL
+            ? this.mistralRpdHold
+            : null;
 
     if (rpdHoldService && model && (await rpdHoldService.isHeld(strategyName, model))) {
       run.status = StrategyRunStatus.RATE_LIMITED_DAILY;
@@ -277,6 +300,8 @@ export class LlmStrategyRunner {
       malformedCount: 0,
       consecutiveModelErrors: 0,
       rateLimitWaitMs: null,
+      rateLimitStreak: 0,
+      rateLimitStreakStartedAt: null,
       lockedInGroups: [],
       lastFailedGuess: null,
       priorGuesses,
@@ -292,7 +317,9 @@ export class LlmStrategyRunner {
         ? llmGroqRateLimitFallbackSeconds()
         : strategyName === LLM_OPENROUTER
           ? llmOpenRouterRateLimitFallbackSeconds()
-          : llmGoogleRateLimitFallbackSeconds();
+          : strategyName === LLM_MISTRAL
+            ? llmMistralRateLimitFallbackSeconds()
+            : llmGoogleRateLimitFallbackSeconds();
 
     // Conversation history for the AI Assist prompt flow.
     const messages: ChatMessage[] = [];
@@ -333,6 +360,10 @@ export class LlmStrategyRunner {
       if (outcome.ok) {
         const data = outcome.data;
         state.consecutiveModelErrors = 0;
+        // A good reply clears any Mistral rate-limit streak so a later lone
+        // 429 does not inherit an old count and trip the park early.
+        state.rateLimitStreak = 0;
+        state.rateLimitStreakStartedAt = null;
 
         // Set run-level model metadata from the first successful call.
         if (run.modelName === null) {
@@ -430,8 +461,9 @@ export class LlmStrategyRunner {
           }),
         );
 
-        this.classifyFailedCall(
+        const effectiveErrorCode = this.classifyFailedCall(
           outcome.error.code,
+          provider,
           run,
           state,
           maxModelErrors,
@@ -469,6 +501,19 @@ export class LlmStrategyRunner {
             "per-minute-cooldown",
             openRouterDispatchRpmCooldownSeconds(),
           );
+        }
+
+        // Mistral: the park may come from the orchestrator (body said
+        // monthly) *or* from classifyFailedCall's streak heuristic
+        // converting a rate_limited — classifyFailedCall returns the
+        // effective code so one check covers both. A short fixed fallback
+        // hold; the resume sweep re-checks it.
+        if (
+          strategyName === LLM_MISTRAL &&
+          effectiveErrorCode === "rate_limited_daily" &&
+          model
+        ) {
+          await this.mistralRpdHold.hold(strategyName, model, mistralModelHoldFallbackSeconds());
         }
       }
 
@@ -716,6 +761,7 @@ export class LlmStrategyRunner {
    */
   private classifyFailedCall(
     code: SolveErrorCode,
+    provider: "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral",
     run: StrategyRun,
     state: LlmRunLoopState,
     maxModelErrors: number,
@@ -723,7 +769,7 @@ export class LlmStrategyRunner {
     maxMalformed: number,
     rateLimitFallbackSeconds: number,
     retryAfterSeconds?: number,
-  ): void {
+  ): SolveErrorCode {
     if (code === "rate_limited_daily") {
       // A per-day quota hit. Park the run — no counter touched, so it never
       // rolls into ERROR — and let the run loop's status check break out.
@@ -732,6 +778,25 @@ export class LlmStrategyRunner {
       run.status = StrategyRunStatus.RATE_LIMITED_DAILY;
       run.finishedAt = new Date();
     } else if (code === "rate_limited") {
+      if (provider === "mistral") {
+        // Mistral sends no rate-limit headers: escalate a *persistent*
+        // streak of per-minute 429s into a park (it is very likely the
+        // monthly wall, which retrying in place cannot clear). Below the
+        // threshold, it stays the ordinary wait-and-retry below.
+        state.rateLimitStreak += 1;
+        if (state.rateLimitStreakStartedAt === null) {
+          state.rateLimitStreakStartedAt = Date.now();
+        }
+        const spanMs = Date.now() - state.rateLimitStreakStartedAt;
+        if (
+          state.rateLimitStreak >= mistralPersistentRateLimitAttempts() ||
+          spanMs >= mistralPersistentRateLimitElapsedMs()
+        ) {
+          run.status = StrategyRunStatus.RATE_LIMITED_DAILY;
+          run.finishedAt = new Date();
+          return "rate_limited_daily";
+        }
+      }
       state.rateLimitWaitMs = (retryAfterSeconds ?? rateLimitFallbackSeconds) * 1000;
     } else if (code === "model_error") {
       state.consecutiveModelErrors++;
@@ -752,6 +817,7 @@ export class LlmStrategyRunner {
         run.finishedAt = new Date();
       }
     }
+    return code;
   }
 
   private modelErrorBackoff(consecutiveErrors: number): number {

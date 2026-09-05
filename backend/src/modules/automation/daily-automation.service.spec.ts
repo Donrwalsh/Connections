@@ -8,6 +8,7 @@ import { FreeTierDispatchService } from "../free-tier-dispatch/free-tier-dispatc
 import { GoogleFreeDispatchService } from "../google-free-dispatch/google-free-dispatch.service";
 import { GroqFreeDispatchService } from "../groq-free-dispatch/groq-free-dispatch.service";
 import { OpenRouterFreeDispatchService } from "../openrouter-free-dispatch/openrouter-free-dispatch.service";
+import { MistralFreeDispatchService } from "../mistral-free-dispatch/mistral-free-dispatch.service";
 import { ModelMetadataRefreshService } from "../supported-model/model-metadata-refresh.service";
 
 describe("DailyAutomationService", () => {
@@ -18,6 +19,7 @@ describe("DailyAutomationService", () => {
   let mockGoogleFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
   let mockGroqFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
   let mockOpenRouterFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
+  let mockMistralFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
   let mockModelMetadataRefreshService: { refreshAll: jest.Mock };
 
   const todayStamp = () => new Date().toISOString().slice(0, 10);
@@ -52,6 +54,12 @@ describe("DailyAutomationService", () => {
         outcome: "started",
       }),
     };
+    mockMistralFreeDispatchService = {
+      getStatus: jest.fn().mockResolvedValue({ active: false, startedAt: null }),
+      start: jest
+        .fn()
+        .mockResolvedValue({ status: { active: true, startedAt: new Date() }, outcome: "started" }),
+    };
     mockModelMetadataRefreshService = {
       refreshAll: jest.fn().mockResolvedValue({ updated: 3, skipped: 1, errored: 0 }),
     };
@@ -65,6 +73,7 @@ describe("DailyAutomationService", () => {
         { provide: GoogleFreeDispatchService, useValue: mockGoogleFreeDispatchService },
         { provide: GroqFreeDispatchService, useValue: mockGroqFreeDispatchService },
         { provide: OpenRouterFreeDispatchService, useValue: mockOpenRouterFreeDispatchService },
+        { provide: MistralFreeDispatchService, useValue: mockMistralFreeDispatchService },
         { provide: ModelMetadataRefreshService, useValue: mockModelMetadataRefreshService },
       ],
     }).compile();
@@ -113,6 +122,10 @@ describe("DailyAutomationService", () => {
           outcome: "started",
         };
       });
+      mockMistralFreeDispatchService.start.mockImplementation(async () => {
+        order.push("mistralBurn");
+        return { status: { active: true, startedAt: new Date() }, outcome: "started" };
+      });
 
       await service.run();
 
@@ -123,6 +136,7 @@ describe("DailyAutomationService", () => {
         "googleBurn",
         "groqBurn",
         "openRouterBurn",
+        "mistralBurn",
       ]);
     });
 
@@ -370,6 +384,59 @@ describe("DailyAutomationService", () => {
       expect(mockRunLogRepo.update).toHaveBeenCalledWith(
         { date: todayStamp() },
         { openRouterBurnOutcome: "error", openRouterBurnMessage: "openrouter down" },
+      );
+    });
+
+    it("starts the Mistral burn when no cycle is already running", async () => {
+      await service.run();
+
+      expect(mockMistralFreeDispatchService.start).toHaveBeenCalled();
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        { mistralBurnOutcome: "started", mistralBurnMessage: "started" },
+      );
+    });
+
+    it("records alreadyExhausted for the Mistral leg from start()'s own outcome", async () => {
+      mockMistralFreeDispatchService.start.mockResolvedValueOnce({
+        status: { active: false, startedAt: null },
+        outcome: "alreadyExhausted",
+      });
+
+      await service.run();
+
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        {
+          mistralBurnOutcome: "alreadyExhausted",
+          mistralBurnMessage: "every Mistral model is currently held",
+        },
+      );
+    });
+
+    it("records alreadyActive for the Mistral leg without calling start", async () => {
+      mockMistralFreeDispatchService.getStatus.mockResolvedValueOnce({
+        active: true,
+        startedAt: new Date(),
+      });
+
+      await service.run();
+
+      expect(mockMistralFreeDispatchService.start).not.toHaveBeenCalled();
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        { mistralBurnOutcome: "alreadyActive", mistralBurnMessage: "already running" },
+      );
+    });
+
+    it("records a Mistral leg failure without throwing, and still lets the other legs run", async () => {
+      mockMistralFreeDispatchService.start.mockRejectedValueOnce(new Error("mistral down"));
+
+      await expect(service.run()).resolves.toBeUndefined();
+
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        { mistralBurnOutcome: "error", mistralBurnMessage: "mistral down" },
       );
     });
   });

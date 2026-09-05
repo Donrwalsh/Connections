@@ -251,6 +251,57 @@ function groqPerDayRateLimitDimension(
 }
 
 /**
+ * Mistral's La Plateforme free tier attaches no X-RateLimit-* headers, so a
+ * transient per-minute (1 RPS / TPM) 429 and the month-long monthly-token-cap
+ * wall look identical on the wire. Where the 429 body names a monthly / quota
+ * exhaustion we can still tell them apart — mirroring
+ * groqPerDayRateLimitDimension's body-message read (added in 0f37cc6). Returns
+ * true only when the body clearly indicates the monthly/quota wall (which must
+ * park the model, not be retried in place); false for a plain rate-limit
+ * message or an absent/unreadable body — the runner's consecutive-429
+ * heuristic is the fallback for a monthly wall the body failed to announce.
+ * Never throws. The wording list is a best guess to be tuned against a real
+ * captured Mistral monthly-cap 429.
+ */
+function mistralMonthlyRateLimitFromBody(
+  responseBody: unknown,
+  fallbackMessage: string,
+): boolean {
+  const texts = [fallbackMessage];
+  if (typeof responseBody === "string") {
+    texts.push(responseBody);
+    try {
+      const parsed = JSON.parse(responseBody) as {
+        error?: { message?: unknown; type?: unknown; code?: unknown };
+        message?: unknown;
+        type?: unknown;
+      };
+      for (const v of [
+        parsed?.error?.message,
+        parsed?.error?.type,
+        parsed?.error?.code,
+        parsed?.message,
+        parsed?.type,
+      ]) {
+        if (typeof v === "string") texts.push(v);
+      }
+    } catch {
+      // Not JSON — the raw string is already in `texts`.
+    }
+  }
+  const text = texts.join("\n");
+  // Monthly / quota wording. Deliberately does NOT match a bare "rate limit"
+  // (that is the per-minute case).
+  return (
+    /\bmonthly\b/i.test(text) ||
+    /\bquota\b/i.test(text) ||
+    /\bcapacity exceeded\b/i.test(text) ||
+    /\bper month\b/i.test(text) ||
+    /\bmonth(ly)?\s+(token|request)/i.test(text)
+  );
+}
+
+/**
  * Classifies an AI SDK failure from generateObject/generateText into a typed
  * SolveError. Malformed-but-present output (no/undecodable object) is
  * recoverable — callers may re-prompt. Provider/network failures are not,
@@ -386,6 +437,31 @@ export function classifyModelCallError(
     }
     // No usable rate-limit signal — fall through to model_error, same as the
     // Groq branch does when its headers are absent.
+  }
+
+  if (provider === "mistral" && APICallError.isInstance(err) && err.statusCode === 429) {
+    if (mistralMonthlyRateLimitFromBody(err.responseBody, message)) {
+      // Monthly / quota wall — park the model. dailyResetSeconds is left
+      // unset (Mistral gives no reset countdown); the backend falls back to
+      // MISTRAL_MODEL_HOLD_FALLBACK_SECONDS.
+      return new SolveError("rate_limited_daily", `Mistral monthly quota exhausted: ${message}`, {
+        ...details,
+        ...apiDetails,
+        errorName: err.name,
+      });
+    }
+    const headers = err.responseHeaders ?? {};
+    const retryAfterSeconds = parseSecondsHeader(headers["retry-after"]);
+    // A bare 429 is unambiguously a rate limit even when nothing else about
+    // it is legible — return rate_limited (not model_error). The runner's
+    // consecutive-429 heuristic is the safety net for a monthly wall the
+    // body did not announce.
+    return new SolveError("rate_limited", `Mistral rate limit hit: ${message}`, {
+      ...details,
+      ...apiDetails,
+      errorName: err.name,
+      retryAfterSeconds,
+    });
   }
 
   return new SolveError("model_error", `Model call failed: ${message}`, {

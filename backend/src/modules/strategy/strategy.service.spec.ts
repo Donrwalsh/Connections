@@ -9,6 +9,7 @@ import {
   LLM_GOOGLE_QUEUE,
   LLM_GROQ_QUEUE,
   LLM_OPENROUTER_QUEUE,
+  LLM_MISTRAL_QUEUE,
 } from "../queue/queue.module";
 import { StrategyService } from "./strategy.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
@@ -34,6 +35,7 @@ describe("StrategyService", () => {
   let mockGoogleQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockGroqQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockOpenRouterQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
+  let mockMistralQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockStrategyRunRepo: {
     findOne: jest.Mock;
     find: jest.Mock;
@@ -145,6 +147,11 @@ describe("StrategyService", () => {
       addBulk: jest.fn().mockResolvedValue(undefined),
       getJobs: jest.fn().mockResolvedValue([]),
     };
+    mockMistralQueue = {
+      add: jest.fn().mockResolvedValue(undefined),
+      addBulk: jest.fn().mockResolvedValue(undefined),
+      getJobs: jest.fn().mockResolvedValue([]),
+    };
     mockStrategyRunRepo = {
       findOne: jest.fn(),
       find: jest.fn(),
@@ -227,6 +234,7 @@ describe("StrategyService", () => {
         { provide: LLM_GOOGLE_QUEUE, useValue: mockGoogleQueue },
         { provide: LLM_GROQ_QUEUE, useValue: mockGroqQueue },
         { provide: LLM_OPENROUTER_QUEUE, useValue: mockOpenRouterQueue },
+        { provide: LLM_MISTRAL_QUEUE, useValue: mockMistralQueue },
         { provide: getRepositoryToken(StrategyRun), useValue: mockStrategyRunRepo },
         { provide: getRepositoryToken(Puzzle), useValue: mockPuzzleRepo },
         { provide: getRepositoryToken(Guess), useValue: mockGuessRepo },
@@ -391,6 +399,29 @@ describe("StrategyService", () => {
       );
       expect(mockQueue.add).not.toHaveBeenCalled();
       expect(mockGroqQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("should route llm-mistral runs to the Mistral queue after validating the model", async () => {
+      await service.triggerRun(100, "llm-mistral", "2024-01-02", 0, "mistral-small-latest");
+
+      expect(mockSupportedModelService.assertSupported).toHaveBeenCalledWith(
+        "llm-mistral",
+        "mistral-small-latest",
+      );
+      expect(mockMistralQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
+        {
+          puzzleId: 100,
+          strategyName: "llm-mistral",
+          date: "2024-01-02",
+          trialNumber: 0,
+          model: "mistral-small-latest",
+        },
+        { jobId: "run-100-llm-mistral-0" },
+      );
+      expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(mockGroqQueue.add).not.toHaveBeenCalled();
+      expect(mockOpenRouterQueue.add).not.toHaveBeenCalled();
     });
 
     it("should not enqueue anything when the model is rejected", async () => {

@@ -13,10 +13,14 @@ import { SupportedModelService } from "../supported-model/supported-model.servic
 import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
 import { GroqRateLimitHoldService } from "./groq-rate-limit-hold.service";
 import { OpenRouterRateLimitHoldService } from "./openrouter-rate-limit-hold.service";
+import { MistralRateLimitHoldService } from "./mistral-rate-limit-hold.service";
 import {
   DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
   DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS,
   DEFAULT_OPENROUTER_DISPATCH_RPM_COOLDOWN_MS,
+  DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
+  DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS,
+  DEFAULT_LLM_MISTRAL_RATE_LIMIT_FALLBACK_SECONDS,
 } from "../../strategies";
 
 describe("LlmStrategyRunner", () => {
@@ -38,6 +42,7 @@ describe("LlmStrategyRunner", () => {
   let mockSupportedModelService: { getContextWindow: jest.Mock };
   let mockRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
   let mockGroqRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
+  let mockMistralRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
   let mockOpenRouterHold: {
     isHeld: jest.Mock;
     hold: jest.Mock;
@@ -110,6 +115,10 @@ describe("LlmStrategyRunner", () => {
       isHeld: jest.fn().mockResolvedValue(false),
       hold: jest.fn().mockResolvedValue(undefined),
     };
+    mockMistralRpdHold = {
+      isHeld: jest.fn().mockResolvedValue(false),
+      hold: jest.fn().mockResolvedValue(undefined),
+    };
     mockOpenRouterHold = {
       isHeld: jest.fn().mockResolvedValue(false),
       hold: jest.fn().mockResolvedValue(undefined),
@@ -145,6 +154,7 @@ describe("LlmStrategyRunner", () => {
         { provide: GoogleRateLimitHoldService, useValue: mockRpdHold },
         { provide: GroqRateLimitHoldService, useValue: mockGroqRpdHold },
         { provide: OpenRouterRateLimitHoldService, useValue: mockOpenRouterHold },
+        { provide: MistralRateLimitHoldService, useValue: mockMistralRpdHold },
       ],
     }).compile();
 
@@ -1476,6 +1486,153 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-openrouter", 0, "z-ai/glm-5.2:free");
 
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+    });
+
+    // --- Mistral: no rate-limit headers, so a persistent per-minute 429
+    // streak (or an orchestrator body-classified monthly 429) parks the
+    // model on a short fixed fallback hold. -------------------------------
+
+    const mistralRun = () =>
+      makeRun({ strategyName: "llm-mistral", modelName: "mistral-small-latest" });
+
+    it("parks a held mistral run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {
+      mockMistralRpdHold.isHeld.mockResolvedValue(true);
+      mockStrategyRunRepo.findOne.mockResolvedValue(mistralRun());
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+
+      const result = await runner.runLlmStrategy(100, "llm-mistral", 0, "mistral-small-latest");
+
+      expect(mockOrchestratorService.solveAssist).not.toHaveBeenCalled();
+      expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+      expect(mockMistralRpdHold.hold).not.toHaveBeenCalled();
+    });
+
+    it("below the attempt threshold: waits and retries a mistral rate_limited hit, no failure, no hold", async () => {
+      jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      mockStrategyRunRepo.findOne.mockResolvedValue(mistralRun());
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      // 2 hits stay under DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS (4),
+      // then the run solves normally.
+      mockOrchestratorService.solveAssist
+        .mockResolvedValueOnce({ ok: false, error: { error: "rate limited", code: "rate_limited" } })
+        .mockResolvedValueOnce({ ok: false, error: { error: "rate limited", code: "rate_limited" } })
+        .mockResolvedValueOnce(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]))
+        .mockResolvedValueOnce(makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]));
+
+      const result = await runner.runLlmStrategy(100, "llm-mistral", 0, "mistral-small-latest");
+
+      expect(mockMistralRpdHold.hold).not.toHaveBeenCalled();
+      expect(result.status).not.toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+    });
+
+    it("reaching the mistral attempt threshold parks the model and writes a fixed fallback hold", async () => {
+      jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      mockStrategyRunRepo.findOne.mockResolvedValue(mistralRun());
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist.mockResolvedValue({
+        ok: false,
+        error: { error: "rate limited", code: "rate_limited" },
+      });
+
+      const result = await runner.runLlmStrategy(100, "llm-mistral", 0, "mistral-small-latest");
+
+      expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+      expect(mockMistralRpdHold.hold).toHaveBeenCalledWith(
+        "llm-mistral",
+        "mistral-small-latest",
+        DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
+      );
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(
+        DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS,
+      );
+    });
+
+    it("parks a mistral run on the first hit when the orchestrator body-classifies a monthly 429", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValue(mistralRun());
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist.mockResolvedValue({
+        ok: false,
+        error: { error: "Mistral monthly quota exhausted", code: "rate_limited_daily" },
+      });
+
+      const result = await runner.runLlmStrategy(100, "llm-mistral", 0, "mistral-small-latest");
+
+      expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+      expect(mockMistralRpdHold.hold).toHaveBeenCalledTimes(1);
+      expect(mockMistralRpdHold.hold).toHaveBeenCalledWith(
+        "llm-mistral",
+        "mistral-small-latest",
+        DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
+      );
+      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
+    });
+
+    it("a successful mistral call resets the 429 streak so a later lone hit does not park", async () => {
+      jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      mockStrategyRunRepo.findOne.mockResolvedValue(mistralRun());
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist
+        .mockResolvedValueOnce({ ok: false, error: { error: "rate limited", code: "rate_limited" } })
+        .mockResolvedValueOnce({ ok: false, error: { error: "rate limited", code: "rate_limited" } })
+        .mockResolvedValueOnce({ ok: false, error: { error: "rate limited", code: "rate_limited" } })
+        .mockResolvedValueOnce(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]))
+        .mockResolvedValueOnce({ ok: false, error: { error: "rate limited", code: "rate_limited" } })
+        .mockResolvedValueOnce(makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]));
+
+      const result = await runner.runLlmStrategy(100, "llm-mistral", 0, "mistral-small-latest");
+
+      expect(mockMistralRpdHold.hold).not.toHaveBeenCalled();
+      expect(result.status).not.toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+    });
+
+    it("never ends a mistral run in ERROR no matter how many 429s occur", async () => {
+      jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      mockStrategyRunRepo.findOne.mockResolvedValue(mistralRun());
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist.mockResolvedValue({
+        ok: false,
+        error: { error: "rate limited", code: "rate_limited" },
+      });
+
+      const result = await runner.runLlmStrategy(100, "llm-mistral", 0, "mistral-small-latest");
+
+      expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+      expect(result.status).not.toBe(StrategyRunStatus.ERROR);
+    });
+
+    it("waits the Mistral-specific fallback on a per-minute rate_limited hit with no retryAfterSeconds", async () => {
+      const delaySpy = jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      mockStrategyRunRepo.findOne.mockResolvedValue(mistralRun());
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist
+        .mockResolvedValueOnce({ ok: false, error: { error: "rate limited", code: "rate_limited" } })
+        .mockResolvedValueOnce(
+          makeAssistResponse([
+            ["APPLE", "BANANA", "CHERRY", "DATE"],
+            ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+          ]),
+        );
+
+      await runner.runLlmStrategy(100, "llm-mistral", 0, "mistral-small-latest");
+
+      expect(delaySpy).toHaveBeenCalledWith(DEFAULT_LLM_MISTRAL_RATE_LIMIT_FALLBACK_SECONDS * 1000);
     });
 
     it("parks mid-solve keeping the progress already made, then resumes from the flushed guesses", async () => {
