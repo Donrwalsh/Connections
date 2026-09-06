@@ -169,6 +169,45 @@ describe("OrchestratorService", () => {
     );
   });
 
+  it("should include the sambanova provider in the request body when given", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
+
+    await service.solveAssist(messages, "DeepSeek-V3.1", "sambanova");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://orchestrator.test/solve-assist",
+      expect.objectContaining({
+        body: JSON.stringify({
+          messages,
+          model: "DeepSeek-V3.1",
+          provider: "sambanova",
+        }),
+      }),
+    );
+  });
+
+  it("should extract dailyResetSeconds from a SambaNova rate_limited_daily failure", async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockResponse({
+        ok: false,
+        status: 429,
+        body: {
+          error: "SambaNova daily quota exhausted",
+          code: "rate_limited_daily",
+          details: { dailyResetSeconds: 7200 },
+        },
+      }),
+    );
+
+    const outcome = await service.solveAssist(messages, "DeepSeek-V3.1", "sambanova");
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.error.code).toBe("rate_limited_daily");
+      expect(outcome.error.dailyResetSeconds).toBe(7200);
+    }
+  });
+
   it("should extract dailyResetSeconds from an OpenRouter rate_limited_daily failure", async () => {
     mockFetch.mockResolvedValueOnce(
       mockResponse({
