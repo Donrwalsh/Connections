@@ -7,6 +7,7 @@ import {
   llmGroqQueue,
   llmOpenRouterQueue,
   llmMistralQueue,
+  llmSambaNovaQueue,
 } from "./strategy.queue";
 import { puzzleQueue } from "./puzzle.queue";
 import { freeTierDispatchQueue } from "./free-tier-dispatch.queue";
@@ -28,6 +29,7 @@ export const LLM_GOOGLE_QUEUE = "LLM_GOOGLE_QUEUE";
 export const LLM_GROQ_QUEUE = "LLM_GROQ_QUEUE";
 export const LLM_OPENROUTER_QUEUE = "LLM_OPENROUTER_QUEUE";
 export const LLM_MISTRAL_QUEUE = "LLM_MISTRAL_QUEUE";
+export const LLM_SAMBANOVA_QUEUE = "LLM_SAMBANOVA_QUEUE";
 export const PUZZLE_QUEUE = "PUZZLE_QUEUE";
 export const FREE_TIER_DISPATCH_QUEUE = "FREE_TIER_DISPATCH_QUEUE";
 export const MODEL_METADATA_QUEUE = "MODEL_METADATA_QUEUE";
@@ -50,6 +52,7 @@ export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
     { provide: LLM_GROQ_QUEUE, useValue: llmGroqQueue },
     { provide: LLM_OPENROUTER_QUEUE, useValue: llmOpenRouterQueue },
     { provide: LLM_MISTRAL_QUEUE, useValue: llmMistralQueue },
+    { provide: LLM_SAMBANOVA_QUEUE, useValue: llmSambaNovaQueue },
     { provide: PUZZLE_QUEUE, useValue: puzzleQueue },
     { provide: FREE_TIER_DISPATCH_QUEUE, useValue: freeTierDispatchQueue },
     { provide: MODEL_METADATA_QUEUE, useValue: modelMetadataQueue },
@@ -71,6 +74,7 @@ export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
     LLM_GROQ_QUEUE,
     LLM_OPENROUTER_QUEUE,
     LLM_MISTRAL_QUEUE,
+    LLM_SAMBANOVA_QUEUE,
     PUZZLE_QUEUE,
     FREE_TIER_DISPATCH_QUEUE,
     MODEL_METADATA_QUEUE,
