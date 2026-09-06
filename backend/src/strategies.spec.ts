@@ -28,6 +28,12 @@ import {
   DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS,
   DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ELAPSED_SECONDS,
   DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
+  DEFAULT_LLM_SAMBANOVA_CONCURRENCY,
+  DEFAULT_LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS,
+  DEFAULT_LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS,
+  DEFAULT_SAMBANOVA_DISPATCH_TICK_MS,
+  DEFAULT_SAMBANOVA_DISPATCH_MAX_BATCH,
+  DEFAULT_SAMBANOVA_DISPATCH_MAX_IN_FLIGHT,
   DEFAULT_SHUFFLE_TRIALS,
   isLlmStrategy,
   LLM_OPENAI,
@@ -36,6 +42,7 @@ import {
   LLM_GROQ,
   LLM_OPENROUTER,
   LLM_MISTRAL,
+  LLM_SAMBANOVA,
   LLM_STRATEGIES,
   llmMaxDuplicateGuesses,
   llmMaxFailedGuesses,
@@ -63,6 +70,12 @@ import {
   mistralPersistentRateLimitAttempts,
   mistralPersistentRateLimitElapsedMs,
   mistralModelHoldFallbackSeconds,
+  llmSambaNovaConcurrency,
+  llmSambaNovaRateLimitFallbackSeconds,
+  llmSambaNovaDailyHoldFallbackSeconds,
+  sambaNovaDispatchTickMs,
+  sambaNovaDispatchMaxBatch,
+  sambaNovaDispatchMaxInFlight,
   llmTemperature,
   llmMaxTrialsPerModel,
   nextDailyAutomationRunAt,
@@ -408,6 +421,80 @@ describe("strategies", () => {
     });
   });
 
+  describe("llmSambaNovaConcurrency", () => {
+    it("should default when the env var is missing", () => {
+      expect(llmSambaNovaConcurrency({})).toBe(DEFAULT_LLM_SAMBANOVA_CONCURRENCY);
+    });
+    it("should default when the env var is invalid", () => {
+      expect(llmSambaNovaConcurrency({ LLM_SAMBANOVA_CONCURRENCY: "abc" })).toBe(
+        DEFAULT_LLM_SAMBANOVA_CONCURRENCY,
+      );
+      expect(llmSambaNovaConcurrency({ LLM_SAMBANOVA_CONCURRENCY: "0" })).toBe(
+        DEFAULT_LLM_SAMBANOVA_CONCURRENCY,
+      );
+    });
+    it("should read a valid positive integer", () => {
+      expect(llmSambaNovaConcurrency({ LLM_SAMBANOVA_CONCURRENCY: "3" })).toBe(3);
+    });
+  });
+
+  describe("llmSambaNovaRateLimitFallbackSeconds", () => {
+    it("should default to 60 when missing", () => {
+      expect(llmSambaNovaRateLimitFallbackSeconds({})).toBe(
+        DEFAULT_LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS,
+      );
+      expect(DEFAULT_LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS).toBe(60);
+    });
+    it("should default when invalid", () => {
+      expect(
+        llmSambaNovaRateLimitFallbackSeconds({ LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS: "abc" }),
+      ).toBe(DEFAULT_LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS);
+    });
+    it("should read a valid positive integer", () => {
+      expect(
+        llmSambaNovaRateLimitFallbackSeconds({ LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS: "90" }),
+      ).toBe(90);
+    });
+  });
+
+  describe("llmSambaNovaDailyHoldFallbackSeconds", () => {
+    it("should default to 3600 when missing", () => {
+      expect(llmSambaNovaDailyHoldFallbackSeconds({})).toBe(
+        DEFAULT_LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS,
+      );
+      expect(DEFAULT_LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS).toBe(3600);
+    });
+    it("should read a valid positive integer", () => {
+      expect(
+        llmSambaNovaDailyHoldFallbackSeconds({ LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS: "7200" }),
+      ).toBe(7200);
+    });
+  });
+
+  describe("sambaNovaDispatch pacing knobs", () => {
+    it("should default correctly", () => {
+      expect(sambaNovaDispatchTickMs({})).toBe(DEFAULT_SAMBANOVA_DISPATCH_TICK_MS);
+      expect(sambaNovaDispatchMaxBatch({})).toBe(DEFAULT_SAMBANOVA_DISPATCH_MAX_BATCH);
+      expect(sambaNovaDispatchMaxInFlight({})).toBe(DEFAULT_SAMBANOVA_DISPATCH_MAX_IN_FLIGHT);
+      expect(DEFAULT_SAMBANOVA_DISPATCH_TICK_MS).toBe(15000);
+      expect(DEFAULT_SAMBANOVA_DISPATCH_MAX_BATCH).toBe(2);
+      expect(DEFAULT_SAMBANOVA_DISPATCH_MAX_IN_FLIGHT).toBe(2);
+    });
+    it("should read valid overrides", () => {
+      expect(sambaNovaDispatchTickMs({ SAMBANOVA_DISPATCH_TICK_MS: "20000" })).toBe(20000);
+      expect(sambaNovaDispatchMaxBatch({ SAMBANOVA_DISPATCH_MAX_BATCH: "5" })).toBe(5);
+      expect(sambaNovaDispatchMaxInFlight({ SAMBANOVA_DISPATCH_MAX_IN_FLIGHT: "5" })).toBe(5);
+    });
+  });
+
+  describe("LLM_SAMBANOVA membership", () => {
+    it("is a supported LLM strategy", () => {
+      expect(SUPPORTED_STRATEGIES).toContain("llm-sambanova");
+      expect(isLlmStrategy("llm-sambanova")).toBe(true);
+      expect(LLM_STRATEGIES).toContain(LLM_SAMBANOVA);
+    });
+  });
+
   describe("workerRole", () => {
     it("should default to 'all' when the env var is missing or invalid", () => {
       expect(workerRole({})).toBe("all");
@@ -551,6 +638,7 @@ describe("strategies", () => {
       expect(isLlmStrategy(LLM_GOOGLE)).toBe(true);
       expect(isLlmStrategy(LLM_GROQ)).toBe(true);
       expect(isLlmStrategy(LLM_OPENROUTER)).toBe(true);
+      expect(isLlmStrategy(LLM_SAMBANOVA)).toBe(true);
     });
 
     it("should reject non-LLM strategies", () => {

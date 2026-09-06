@@ -146,6 +146,12 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS` | `4` | Mistral sends no rate-limit headers, so a monthly-cap 429 and a transient per-minute 429 look identical when the 429 body has no monthly wording. The runner parks a model after this many consecutive per-minute 429s on one run |
 | `MISTRAL_PERSISTENT_RATE_LIMIT_ELAPSED_SECONDS` | `300` | …or once that 429 streak has spanned this many wall-clock seconds, whichever trips first |
 | `MISTRAL_MODEL_HOLD_FALLBACK_SECONDS` | `21600` | How long a parked Mistral model stays held before the resume sweep re-checks it. Short and fixed (6h): a real monthly wall just re-parks each cycle until the calendar month rolls; a misclassified TPM blip recovers within the window |
+| `LLM_SAMBANOVA_CONCURRENCY` | `1` | Maximum `llm-sambanova` runs the worker processes at once (own queue) |
+| `LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS` | `60` | Fallback wait before retrying a SambaNova per-minute (20 RPM) rate-limit hit, used only when the 429's headers yield no wait. Never a run failure — waits and retries |
+| `LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS` | `3600` | How long a SambaNova model is held after a daily (req/day or tokens/day) 429 that carried no parseable reset duration; the resume sweep re-checks after |
+| `SAMBANOVA_DISPATCH_TICK_MS` | `15000` | Interval between SambaNova free-tier dispatch ticks |
+| `SAMBANOVA_DISPATCH_MAX_BATCH` | `2` | Max `llm-sambanova` trials queued per dispatch tick. Raise for SambaNova's Developer tier |
+| `SAMBANOVA_DISPATCH_MAX_IN_FLIGHT` | `2` | Max `llm-sambanova` trials queued/running at once before a tick dispatches nothing new. Raise for SambaNova's Developer tier |
 | `PORT` | `3001` | Orchestrator listen port |
 | `POSTGRES_USER` | `postgres` | Postgres user (compose-level; the backend reads it as `DB_USER`) |
 | `POSTGRES_PASSWORD` | `postgres` | Postgres password (compose-level; the backend reads it as `DB_PASSWORD`) |

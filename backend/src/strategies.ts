@@ -11,6 +11,7 @@ export const SUPPORTED_STRATEGIES = [
   "llm-groq",
   "llm-openrouter",
   "llm-mistral",
+  "llm-sambanova",
 ] as const;
 
 export type SupportedStrategy = (typeof SUPPORTED_STRATEGIES)[number];
@@ -25,6 +26,7 @@ export const LLM_GOOGLE = "llm-google" as const;
 export const LLM_GROQ = "llm-groq" as const;
 export const LLM_OPENROUTER = "llm-openrouter" as const;
 export const LLM_MISTRAL = "llm-mistral" as const;
+export const LLM_SAMBANOVA = "llm-sambanova" as const;
 
 export const LLM_STRATEGIES = [
   LLM_OPENAI,
@@ -33,6 +35,7 @@ export const LLM_STRATEGIES = [
   LLM_GROQ,
   LLM_OPENROUTER,
   LLM_MISTRAL,
+  LLM_SAMBANOVA,
 ] as const;
 
 export function isLlmStrategy(strategyName: string): boolean {
@@ -143,6 +146,28 @@ export const DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ELAPSED_SECONDS = 300;
 // re-parks each cycle until the calendar month rolls, while a misclassified
 // multi-minute TPM starvation episode recovers within 6h. (default: 6h)
 export const DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS = 21600;
+
+export const DEFAULT_LLM_SAMBANOVA_CONCURRENCY = 1;
+
+// Fallback wait (seconds) before retrying a SambaNova per-minute (20 RPM)
+// rate-limit hit, used only when neither retry-after nor a short reset
+// duration parsed — see orchestrator/src/solver.ts. A per-minute hit is
+// never a run failure; it waits and retries.
+export const DEFAULT_LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS = 60;
+
+// How long a SambaNova model is held after a daily (requests-per-day or
+// tokens-per-day) 429 that carried no parseable reset duration. The resume
+// sweep re-checks after this elapses. See
+// docs/superpowers/specs/2026-09-05-sambanova-cloud-provider-design.md §4.
+export const DEFAULT_LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS = 3600;
+
+// Dedicated conservative pacing for the fixed 20 req/min + 20 req/day
+// per-model free-tier ceiling — NOT the FREE_TIER_DISPATCH_* knobs. Raise
+// MAX_BATCH / MAX_IN_FLIGHT (and lower TICK_MS) after linking a payment
+// method to unlock SambaNova's Developer tier; no code change.
+export const DEFAULT_SAMBANOVA_DISPATCH_TICK_MS = 15_000;
+export const DEFAULT_SAMBANOVA_DISPATCH_MAX_BATCH = 2;
+export const DEFAULT_SAMBANOVA_DISPATCH_MAX_IN_FLIGHT = 2;
 
 // How many prompts a single solve step may make before the orchestrator
 // gives up on a fresh candidate and reports a duplicate/invalid failure.
@@ -426,6 +451,71 @@ export function mistralModelHoldFallbackSeconds(env: NodeJS.ProcessEnv = process
   return positiveTrialCount(
     env.MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
     DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
+  );
+}
+
+/**
+ * Worker concurrency for the llm-sambanova-runs queue, from
+ * LLM_SAMBANOVA_CONCURRENCY. Falls back to DEFAULT_LLM_SAMBANOVA_CONCURRENCY
+ * for missing/invalid values.
+ */
+export function llmSambaNovaConcurrency(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.LLM_SAMBANOVA_CONCURRENCY, DEFAULT_LLM_SAMBANOVA_CONCURRENCY);
+}
+
+/**
+ * Fallback wait (seconds) before retrying a SambaNova per-minute rate-limit
+ * hit, from LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS. Only used when the
+ * 429's own headers don't yield a wait. Falls back to
+ * DEFAULT_LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS for missing/invalid values.
+ */
+export function llmSambaNovaRateLimitFallbackSeconds(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(
+    env.LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS,
+    DEFAULT_LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS,
+  );
+}
+
+/**
+ * How long (seconds) a SambaNova model is held after a daily-quota 429 that
+ * carried no parseable reset duration, from
+ * LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS. Falls back to
+ * DEFAULT_LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS for missing/invalid values.
+ */
+export function llmSambaNovaDailyHoldFallbackSeconds(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(
+    env.LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS,
+    DEFAULT_LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS,
+  );
+}
+
+/**
+ * Tick interval (ms) for the SambaNova free-tier dispatch cycle, from
+ * SAMBANOVA_DISPATCH_TICK_MS. Falls back to
+ * DEFAULT_SAMBANOVA_DISPATCH_TICK_MS for missing/invalid values.
+ */
+export function sambaNovaDispatchTickMs(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.SAMBANOVA_DISPATCH_TICK_MS, DEFAULT_SAMBANOVA_DISPATCH_TICK_MS);
+}
+
+/**
+ * Maximum trials the SambaNova dispatch cycle queues per tick, from
+ * SAMBANOVA_DISPATCH_MAX_BATCH. Falls back to
+ * DEFAULT_SAMBANOVA_DISPATCH_MAX_BATCH for missing/invalid values.
+ */
+export function sambaNovaDispatchMaxBatch(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(env.SAMBANOVA_DISPATCH_MAX_BATCH, DEFAULT_SAMBANOVA_DISPATCH_MAX_BATCH);
+}
+
+/**
+ * Maximum SambaNova trials in flight before the dispatch cycle waits, from
+ * SAMBANOVA_DISPATCH_MAX_IN_FLIGHT. Falls back to
+ * DEFAULT_SAMBANOVA_DISPATCH_MAX_IN_FLIGHT for missing/invalid values.
+ */
+export function sambaNovaDispatchMaxInFlight(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveTrialCount(
+    env.SAMBANOVA_DISPATCH_MAX_IN_FLIGHT,
+    DEFAULT_SAMBANOVA_DISPATCH_MAX_IN_FLIGHT,
   );
 }
 
