@@ -98,12 +98,14 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `GROQ_API_KEY` | — | Groq API key (orchestrator only) |
 | `OPENROUTER_API_KEY` | — | OpenRouter API key (orchestrator only) |
 | `MISTRAL_API_KEY` | — | Mistral La Plateforme API key (orchestrator only) |
-| `MODEL_PROVIDER` | `openai` | Default provider for provider-less requests (e.g. in-game AI Assist): `openai`, `ollama`, `google`, `groq`, `openrouter`, or `mistral`. Strategy runs pick their provider via strategy name (`llm-openai` / `llm-ollama` / `llm-google` / `llm-groq` / `llm-openrouter` / `llm-mistral`), so all six are always active |
+| `SAMBANOVA_API_KEY` | — | SambaNova Cloud API key (orchestrator only) |
+| `MODEL_PROVIDER` | `openai` | Default provider for provider-less requests (e.g. in-game AI Assist): `openai`, `ollama`, `google`, `groq`, `openrouter`, `mistral`, or `sambanova`. Strategy runs pick their provider via strategy name (`llm-openai` / `llm-ollama` / `llm-google` / `llm-groq` / `llm-openrouter` / `llm-mistral` / `llm-sambanova`), so all seven are always active |
 | `OPENAI_MODEL` | `gpt-4.1-nano` | OpenAI model id (used by the `llm-openai` strategy and provider-less requests) |
 | `GOOGLE_MODEL` | `gemini-3.6-flash` | Google AI Studio model id (used by the `llm-google` strategy and provider-less requests) |
 | `GROQ_MODEL` | `openai/gpt-oss-20b` | Groq model id (used by the `llm-groq` strategy and provider-less requests) |
 | `OPENROUTER_MODEL` | `google/gemma-4-31b-it:free` | OpenRouter model id (used by the `llm-openrouter` strategy and provider-less requests) |
 | `MISTRAL_MODEL` | `mistral-small-latest` | Mistral model id (used by the `llm-mistral` strategy and provider-less requests). Mistral's free ("Experiment") tier enforces a global 1 req/sec cap plus per-pool tokens-per-minute and tokens-per-month limits, and sends no `X-RateLimit-*` headers — see `LLM_MISTRAL_*` / `MISTRAL_*` below |
+| `SAMBANOVA_MODEL` | `Meta-Llama-3.3-70B-Instruct` | SambaNova model id (used by the `llm-sambanova` strategy and provider-less requests). SambaNova's free tier caps each model at 20 req/min, 20 req/day, and 200K tokens/day, delivered via `x-ratelimit-*` headers whose reset is a duration — see `LLM_SAMBANOVA_*` / `SAMBANOVA_*` below |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server base URL (used by the `llm-ollama` strategy) |
 | `OLLAMA_MODEL` | `llama3.2` | Ollama model id (used by the `llm-ollama` strategy) |
 | `MODEL_CONTEXT_WINDOW` | `8192` | Hard ceiling (in tokens) on Ollama's `num_ctx`, never exceeded regardless of a model's real `contextWindow` (see `SupportedModel`) — llama.cpp reserves `num_ctx`'s full KV-cache footprint at model-load time rather than scaling it to actual usage, so requesting a model's true context in full (e.g. 131K) can OOM-kill Ollama on memory-constrained hardware even though real prompts never come close to using it. Also the fallback when no per-model `contextWindow` is known at all (e.g. the provider-less AI Assist path) |

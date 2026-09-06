@@ -4,6 +4,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createGroq } from "@ai-sdk/groq";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createMistral } from "@ai-sdk/mistral";
+import { createSambaNova } from "sambanova-ai-provider";
 import type { LanguageModel } from "ai";
 
 export const DEFAULT_OPENAI_MODEL = "gpt-4.1-nano";
@@ -12,11 +13,19 @@ export const DEFAULT_GOOGLE_MODEL = "gemini-3.6-flash";
 export const DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b";
 export const DEFAULT_OPENROUTER_MODEL = "google/gemma-4-31b-it:free";
 export const DEFAULT_MISTRAL_MODEL = "mistral-small-latest";
+export const DEFAULT_SAMBANOVA_MODEL = "Meta-Llama-3.3-70B-Instruct";
 export const DEFAULT_JUDGE_MODEL = "gpt-4.1-nano";
 export const DEFAULT_JUDGE_PROVIDER: ModelProvider = "openai";
 export const DEFAULT_CONTEXT_WINDOW = 8192;
 
-export type ModelProvider = "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral";
+export type ModelProvider =
+  | "openai"
+  | "ollama"
+  | "google"
+  | "groq"
+  | "openrouter"
+  | "mistral"
+  | "sambanova";
 
 /**
  * Resolves the default model provider from the MODEL_PROVIDER env var.
@@ -36,6 +45,7 @@ export function defaultProvider(): ModelProvider {
   if (provider === "groq") return "groq";
   if (provider === "openrouter") return "openrouter";
   if (provider === "mistral") return "mistral";
+  if (provider === "sambanova") return "sambanova";
   return "openai";
 }
 
@@ -98,6 +108,11 @@ export function getModel(
     return mistral(modelOverride ?? process.env.MISTRAL_MODEL ?? DEFAULT_MISTRAL_MODEL);
   }
 
+  if (provider === "sambanova") {
+    const sambanova = createSambaNova({ apiKey: process.env.SAMBANOVA_API_KEY });
+    return sambanova(modelOverride ?? process.env.SAMBANOVA_MODEL ?? DEFAULT_SAMBANOVA_MODEL);
+  }
+
   return openai(modelOverride ?? process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL);
 }
 
@@ -138,6 +153,9 @@ export function getModelName(provider: ModelProvider, modelOverride?: string): s
   }
   if (provider === "mistral") {
     return modelOverride ?? process.env.MISTRAL_MODEL ?? DEFAULT_MISTRAL_MODEL;
+  }
+  if (provider === "sambanova") {
+    return modelOverride ?? process.env.SAMBANOVA_MODEL ?? DEFAULT_SAMBANOVA_MODEL;
   }
   return modelOverride ?? process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL;
 }

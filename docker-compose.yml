@@ -35,12 +35,14 @@ services:
       GROQ_API_KEY: ${GROQ_API_KEY}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       MISTRAL_API_KEY: ${MISTRAL_API_KEY}
+      SAMBANOVA_API_KEY: ${SAMBANOVA_API_KEY}
       MODEL_PROVIDER: ${MODEL_PROVIDER:-openai}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-nano}
       GOOGLE_MODEL: ${GOOGLE_MODEL:-gemini-3.6-flash}
       GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-20b}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-google/gemma-4-31b-it:free}
       MISTRAL_MODEL: ${MISTRAL_MODEL:-mistral-small-latest}
+      SAMBANOVA_MODEL: ${SAMBANOVA_MODEL:-Meta-Llama-3.3-70B-Instruct}
       MODEL_CONTEXT_WINDOW: ${MODEL_CONTEXT_WINDOW:-8192}
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
