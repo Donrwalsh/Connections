@@ -14,6 +14,7 @@ import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
 import { GroqRateLimitHoldService } from "./groq-rate-limit-hold.service";
 import { OpenRouterRateLimitHoldService } from "./openrouter-rate-limit-hold.service";
 import { MistralRateLimitHoldService } from "./mistral-rate-limit-hold.service";
+import { SambaNovaRateLimitHoldService } from "./sambanova-rate-limit-hold.service";
 import {
   DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
   DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS,
@@ -21,6 +22,8 @@ import {
   DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
   DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS,
   DEFAULT_LLM_MISTRAL_RATE_LIMIT_FALLBACK_SECONDS,
+  DEFAULT_LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS,
+  DEFAULT_LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS,
 } from "../../strategies";
 
 describe("LlmStrategyRunner", () => {
@@ -43,6 +46,7 @@ describe("LlmStrategyRunner", () => {
   let mockRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
   let mockGroqRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
   let mockMistralRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
+  let mockSambaNovaRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
   let mockOpenRouterHold: {
     isHeld: jest.Mock;
     hold: jest.Mock;
@@ -119,6 +123,10 @@ describe("LlmStrategyRunner", () => {
       isHeld: jest.fn().mockResolvedValue(false),
       hold: jest.fn().mockResolvedValue(undefined),
     };
+    mockSambaNovaRpdHold = {
+      isHeld: jest.fn().mockResolvedValue(false),
+      hold: jest.fn().mockResolvedValue(undefined),
+    };
     mockOpenRouterHold = {
       isHeld: jest.fn().mockResolvedValue(false),
       hold: jest.fn().mockResolvedValue(undefined),
@@ -155,6 +163,7 @@ describe("LlmStrategyRunner", () => {
         { provide: GroqRateLimitHoldService, useValue: mockGroqRpdHold },
         { provide: OpenRouterRateLimitHoldService, useValue: mockOpenRouterHold },
         { provide: MistralRateLimitHoldService, useValue: mockMistralRpdHold },
+        { provide: SambaNovaRateLimitHoldService, useValue: mockSambaNovaRpdHold },
       ],
     }).compile();
 
@@ -1372,6 +1381,103 @@ describe("LlmStrategyRunner", () => {
       await runner.runLlmStrategy(100, "llm-groq", 0, "openai/gpt-oss-20b");
 
       expect(delaySpy).toHaveBeenCalledWith(DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS * 1000);
+    });
+
+    it("parks a held sambanova run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {
+      mockSambaNovaRpdHold.isHeld.mockResolvedValue(true);
+      mockStrategyRunRepo.findOne.mockResolvedValue(
+        makeRun({ strategyName: "llm-sambanova", modelName: "DeepSeek-V3.1" }),
+      );
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+
+      const result = await runner.runLlmStrategy(100, "llm-sambanova", 0, "DeepSeek-V3.1");
+
+      expect(mockOrchestratorService.solveAssist).not.toHaveBeenCalled();
+      expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+      expect(mockSambaNovaRpdHold.hold).not.toHaveBeenCalled();
+    });
+
+    it("records a per-model SambaNova hold using dailyResetSeconds and parks the run", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValue(
+        makeRun({ strategyName: "llm-sambanova", modelName: "DeepSeek-V3.1" }),
+      );
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist.mockResolvedValue({
+        ok: false,
+        error: {
+          error: "SambaNova daily quota exhausted",
+          code: "rate_limited_daily",
+          dailyResetSeconds: 7200,
+        },
+      });
+
+      const result = await runner.runLlmStrategy(100, "llm-sambanova", 0, "DeepSeek-V3.1");
+
+      expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+      expect(mockSambaNovaRpdHold.hold).toHaveBeenCalledWith("llm-sambanova", "DeepSeek-V3.1", 7200);
+    });
+
+    it("falls back to the configured constant when a SambaNova daily hit carries no dailyResetSeconds", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValue(
+        makeRun({ strategyName: "llm-sambanova", modelName: "DeepSeek-V3.1" }),
+      );
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist.mockResolvedValue({
+        ok: false,
+        error: { error: "quota", code: "rate_limited_daily" },
+      });
+
+      await runner.runLlmStrategy(100, "llm-sambanova", 0, "DeepSeek-V3.1");
+
+      expect(mockSambaNovaRpdHold.hold).toHaveBeenCalledWith(
+        "llm-sambanova",
+        "DeepSeek-V3.1",
+        DEFAULT_LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS,
+      );
+    });
+
+    it("does not write a hold on a sambanova per-minute rate_limited hit, and keeps retrying", async () => {
+      const delaySpy = jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      mockStrategyRunRepo.findOne.mockResolvedValue(
+        makeRun({ strategyName: "llm-sambanova", modelName: "DeepSeek-V3.1" }),
+      );
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist
+        .mockResolvedValueOnce({ ok: false, error: { error: "rate limited", code: "rate_limited" } })
+        .mockResolvedValueOnce(
+          makeAssistResponse([
+            ["APPLE", "BANANA", "CHERRY", "DATE"],
+            ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+          ]),
+        );
+
+      const result = await runner.runLlmStrategy(100, "llm-sambanova", 0, "DeepSeek-V3.1");
+
+      expect(mockSambaNovaRpdHold.hold).not.toHaveBeenCalled();
+      expect(result.status).not.toBe(StrategyRunStatus.ERROR);
+      expect(delaySpy).toHaveBeenCalledWith(DEFAULT_LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS * 1000);
+    });
+
+    it("never ends a sambanova run in ERROR on a rate_limited_daily hit", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValue(
+        makeRun({ strategyName: "llm-sambanova", modelName: "DeepSeek-V3.1" }),
+      );
+      mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+      mockGuessRepo.find.mockResolvedValue([]);
+      mockOrchestratorService.solveAssist.mockResolvedValue({
+        ok: false,
+        error: { error: "quota", code: "rate_limited_daily" },
+      });
+
+      const result = await runner.runLlmStrategy(100, "llm-sambanova", 0, "DeepSeek-V3.1");
+
+      expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
     });
 
     it("parks a daily-held openrouter run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {

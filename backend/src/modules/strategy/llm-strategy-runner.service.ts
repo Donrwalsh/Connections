@@ -9,6 +9,7 @@ import {
   LLM_GROQ,
   LLM_OPENROUTER,
   LLM_MISTRAL,
+  LLM_SAMBANOVA,
   llmMaxDuplicateGuesses,
   llmMaxFailedGuesses,
   llmMaxMalformedResponses,
@@ -21,6 +22,8 @@ import {
   mistralPersistentRateLimitAttempts,
   mistralPersistentRateLimitElapsedMs,
   mistralModelHoldFallbackSeconds,
+  llmSambaNovaRateLimitFallbackSeconds,
+  llmSambaNovaDailyHoldFallbackSeconds,
   openRouterDispatchRpmCooldownSeconds,
   llmTemperature,
 } from "../../strategies";
@@ -43,6 +46,7 @@ import {
   secondsUntilNextUtcMidnight,
 } from "./openrouter-rate-limit-hold.service";
 import { MistralRateLimitHoldService } from "./mistral-rate-limit-hold.service";
+import { SambaNovaRateLimitHoldService } from "./sambanova-rate-limit-hold.service";
 import { firstCombination } from "./combinatorics";
 import { GROUP_SIZE, parseGroupsSection } from "./parse-groups-section";
 
@@ -193,6 +197,8 @@ export class LlmStrategyRunner {
     private readonly openRouterHold: OpenRouterRateLimitHoldService,
     @Inject(MistralRateLimitHoldService)
     private readonly mistralRpdHold: MistralRateLimitHoldService,
+    @Inject(SambaNovaRateLimitHoldService)
+    private readonly sambaNovaRpdHold: SambaNovaRateLimitHoldService,
   ) {}
 
   async runLlmStrategy(puzzleId: number, strategyName: string, trialNumber = 0, model?: string) {
@@ -210,7 +216,9 @@ export class LlmStrategyRunner {
               ? "openrouter"
               : strategyName === LLM_MISTRAL
                 ? "mistral"
-                : "openai";
+                : strategyName === LLM_SAMBANOVA
+                  ? "sambanova"
+                  : "openai";
 
     const contextWindow = model
       ? await this.supportedModelService.getContextWindow(strategyName, model)
@@ -242,7 +250,9 @@ export class LlmStrategyRunner {
           ? this.groqRpdHold
           : strategyName === LLM_MISTRAL
             ? this.mistralRpdHold
-            : null;
+            : strategyName === LLM_SAMBANOVA
+              ? this.sambaNovaRpdHold
+              : null;
 
     if (rpdHoldService && model && (await rpdHoldService.isHeld(strategyName, model))) {
       run.status = StrategyRunStatus.RATE_LIMITED_DAILY;
@@ -319,7 +329,9 @@ export class LlmStrategyRunner {
           ? llmOpenRouterRateLimitFallbackSeconds()
           : strategyName === LLM_MISTRAL
             ? llmMistralRateLimitFallbackSeconds()
-            : llmGoogleRateLimitFallbackSeconds();
+            : strategyName === LLM_SAMBANOVA
+              ? llmSambaNovaRateLimitFallbackSeconds()
+              : llmGoogleRateLimitFallbackSeconds();
 
     // Conversation history for the AI Assist prompt flow.
     const messages: ChatMessage[] = [];
@@ -481,6 +493,12 @@ export class LlmStrategyRunner {
               strategyName,
               model,
               outcome.error.dailyResetSeconds ?? llmGroqDailyHoldFallbackSeconds(),
+            );
+          } else if (strategyName === LLM_SAMBANOVA) {
+            await this.sambaNovaRpdHold.hold(
+              strategyName,
+              model,
+              outcome.error.dailyResetSeconds ?? llmSambaNovaDailyHoldFallbackSeconds(),
             );
           }
         }
@@ -761,7 +779,7 @@ export class LlmStrategyRunner {
    */
   private classifyFailedCall(
     code: SolveErrorCode,
-    provider: "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral",
+    provider: "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral" | "sambanova",
     run: StrategyRun,
     state: LlmRunLoopState,
     maxModelErrors: number,
