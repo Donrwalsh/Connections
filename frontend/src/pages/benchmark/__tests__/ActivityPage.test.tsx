@@ -117,6 +117,7 @@ const defaultAutomation: AutomationStatus = {
   groqBurn: { outcome: null, message: null },
   openRouterBurn: { outcome: null, message: null },
   mistralBurn: { outcome: null, message: null },
+  sambaNovaBurn: { outcome: null, message: null },
 };
 
 function stubFetch({
@@ -406,6 +407,10 @@ describe("ActivityPage", () => {
         mistralBurn: {
           outcome: "alreadyExhausted",
           message: "every Mistral model is currently held",
+        },
+        sambaNovaBurn: {
+          outcome: "alreadyExhausted",
+          message: "every SambaNova model is currently held",
         },
       },
     });

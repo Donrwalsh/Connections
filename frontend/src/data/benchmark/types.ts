@@ -328,6 +328,7 @@ export interface AutomationStatus {
   groqBurn: AutomationBurnLeg;
   openRouterBurn: AutomationBurnLeg;
   mistralBurn: AutomationBurnLeg;
+  sambaNovaBurn: AutomationBurnLeg;
 }
 
 /** GET /dispatch/google — whether the Google free-daily-quota dispatch cycle
@@ -365,6 +366,16 @@ export interface OpenRouterDispatchStatus {
  * GroqDispatchStatus — no token threshold; Mistral's constraints (1 req/sec,
  * per-pool TPM, per-pool monthly tokens) are enforced by Mistral itself. */
 export interface MistralDispatchStatus {
+  active: boolean;
+  startedAt: string | null;
+}
+
+/** GET /dispatch/sambanova — whether the SambaNova free-tier dispatch cycle
+ * (see the backend's SambaNovaFreeDispatchService) is currently running.
+ * Same shape as GroqDispatchStatus — no token threshold; SambaNova's
+ * per-model 20 rpm / 20 rpd / 200K tpd caps are enforced by SambaNova
+ * itself. */
+export interface SambaNovaDispatchStatus {
   active: boolean;
   startedAt: string | null;
 }
