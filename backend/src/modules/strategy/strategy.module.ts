@@ -11,6 +11,7 @@ import { GoogleRateLimitHold } from "./entities/google-rate-limit-hold.entity";
 import { GroqRateLimitHold } from "./entities/groq-rate-limit-hold.entity";
 import { OpenRouterRateLimitHold } from "./entities/openrouter-rate-limit-hold.entity";
 import { MistralRateLimitHold } from "./entities/mistral-rate-limit-hold.entity";
+import { SambaNovaRateLimitHold } from "./entities/sambanova-rate-limit-hold.entity";
 import { StrategyController } from "./strategy.controller";
 import { StrategyService } from "./strategy.service";
 import { LlmStrategyRunner } from "./llm-strategy-runner.service";
@@ -24,6 +25,7 @@ import { OpenRouterRateLimitHoldService } from "./openrouter-rate-limit-hold.ser
 import { MistralRateLimitHoldService } from "./mistral-rate-limit-hold.service";
 import { MistralRpdResumeService } from "./mistral-rpd-resume.service";
 import { MistralRpdResumeBootstrap } from "./mistral-rpd-resume.bootstrap";
+import { SambaNovaRateLimitHoldService } from "./sambanova-rate-limit-hold.service";
 import { OpenRouterRpdResumeService } from "./openrouter-rpd-resume.service";
 import { OpenRouterRpdResumeBootstrap } from "./openrouter-rpd-resume.bootstrap";
 import { GoogleRpdResumeService } from "./google-rpd-resume.service";
@@ -46,6 +48,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
       GroqRateLimitHold,
       OpenRouterRateLimitHold,
       MistralRateLimitHold,
+      SambaNovaRateLimitHold,
     ]),
     QueueModule,
     GameModule,
@@ -71,6 +74,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     MistralRateLimitHoldService,
     MistralRpdResumeService,
     MistralRpdResumeBootstrap,
+    SambaNovaRateLimitHoldService,
   ],
   exports: [
     StrategyService,
@@ -85,6 +89,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     OpenRouterRpdResumeService,
     MistralRateLimitHoldService,
     MistralRpdResumeService,
+    SambaNovaRateLimitHoldService,
   ],
 })
 export class StrategyModule {}

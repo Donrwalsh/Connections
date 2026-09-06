@@ -10,6 +10,7 @@ import {
   LLM_GROQ_QUEUE,
   LLM_OPENROUTER_QUEUE,
   LLM_MISTRAL_QUEUE,
+  LLM_SAMBANOVA_QUEUE,
 } from "../queue/queue.module";
 import { StrategyService } from "./strategy.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
@@ -36,6 +37,7 @@ describe("StrategyService", () => {
   let mockGroqQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockOpenRouterQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockMistralQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
+  let mockSambaNovaQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockStrategyRunRepo: {
     findOne: jest.Mock;
     find: jest.Mock;
@@ -152,6 +154,11 @@ describe("StrategyService", () => {
       addBulk: jest.fn().mockResolvedValue(undefined),
       getJobs: jest.fn().mockResolvedValue([]),
     };
+    mockSambaNovaQueue = {
+      add: jest.fn().mockResolvedValue(undefined),
+      addBulk: jest.fn().mockResolvedValue(undefined),
+      getJobs: jest.fn().mockResolvedValue([]),
+    };
     mockStrategyRunRepo = {
       findOne: jest.fn(),
       find: jest.fn(),
@@ -235,6 +242,7 @@ describe("StrategyService", () => {
         { provide: LLM_GROQ_QUEUE, useValue: mockGroqQueue },
         { provide: LLM_OPENROUTER_QUEUE, useValue: mockOpenRouterQueue },
         { provide: LLM_MISTRAL_QUEUE, useValue: mockMistralQueue },
+        { provide: LLM_SAMBANOVA_QUEUE, useValue: mockSambaNovaQueue },
         { provide: getRepositoryToken(StrategyRun), useValue: mockStrategyRunRepo },
         { provide: getRepositoryToken(Puzzle), useValue: mockPuzzleRepo },
         { provide: getRepositoryToken(Guess), useValue: mockGuessRepo },
@@ -422,6 +430,28 @@ describe("StrategyService", () => {
       expect(mockQueue.add).not.toHaveBeenCalled();
       expect(mockGroqQueue.add).not.toHaveBeenCalled();
       expect(mockOpenRouterQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("should route llm-sambanova runs to the SambaNova queue after validating the model", async () => {
+      await service.triggerRun(100, "llm-sambanova", "2024-01-02", 0, "DeepSeek-V3.1");
+
+      expect(mockSupportedModelService.assertSupported).toHaveBeenCalledWith(
+        "llm-sambanova",
+        "DeepSeek-V3.1",
+      );
+      expect(mockSambaNovaQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
+        {
+          puzzleId: 100,
+          strategyName: "llm-sambanova",
+          date: "2024-01-02",
+          trialNumber: 0,
+          model: "DeepSeek-V3.1",
+        },
+        { jobId: "run-100-llm-sambanova-0" },
+      );
+      expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(mockMistralQueue.add).not.toHaveBeenCalled();
     });
 
     it("should not enqueue anything when the model is rejected", async () => {
