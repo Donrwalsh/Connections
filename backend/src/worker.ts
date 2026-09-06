@@ -15,6 +15,7 @@ import { GoogleFreeDispatchService } from "./modules/google-free-dispatch/google
 import { GroqFreeDispatchService } from "./modules/groq-free-dispatch/groq-free-dispatch.service";
 import { OpenRouterFreeDispatchService } from "./modules/openrouter-free-dispatch/openrouter-free-dispatch.service";
 import { MistralFreeDispatchService } from "./modules/mistral-free-dispatch/mistral-free-dispatch.service";
+import { SambaNovaFreeDispatchService } from "./modules/sambanova-free-dispatch/sambanova-free-dispatch.service";
 import type { FreeTierId } from "./modules/strategy/free-tier-usage.service";
 import { redisConnection } from "./modules/queue/redis.config";
 import { PuzzleIngestionService } from "./modules/game/puzzle-ingestion.service";
@@ -23,6 +24,7 @@ import { GoogleRpdResumeService } from "./modules/strategy/google-rpd-resume.ser
 import { GroqRpdResumeService } from "./modules/strategy/groq-rpd-resume.service";
 import { OpenRouterRpdResumeService } from "./modules/strategy/openrouter-rpd-resume.service";
 import { MistralRpdResumeService } from "./modules/strategy/mistral-rpd-resume.service";
+import { SambaNovaRpdResumeService } from "./modules/strategy/sambanova-rpd-resume.service";
 import { DailyAutomationService } from "./modules/automation/daily-automation.service";
 import {
   isLlmStrategy,
@@ -32,12 +34,14 @@ import {
   LLM_GROQ,
   LLM_OPENROUTER,
   LLM_MISTRAL,
+  LLM_SAMBANOVA,
   llmOllamaConcurrency,
   llmOpenAIConcurrency,
   llmGoogleConcurrency,
   llmGroqConcurrency,
   llmOpenRouterConcurrency,
   llmMistralConcurrency,
+  llmSambaNovaConcurrency,
   STRATEGY_SET,
   workerRole,
 } from "./strategies";
@@ -61,11 +65,13 @@ async function bootstrap() {
   const groqFreeDispatchService = appContext.get(GroqFreeDispatchService);
   const openRouterFreeDispatchService = appContext.get(OpenRouterFreeDispatchService);
   const mistralFreeDispatchService = appContext.get(MistralFreeDispatchService);
+  const sambaNovaFreeDispatchService = appContext.get(SambaNovaFreeDispatchService);
   const modelMetadataRefreshService = appContext.get(ModelMetadataRefreshService);
   const googleRpdResumeService = appContext.get(GoogleRpdResumeService);
   const groqRpdResumeService = appContext.get(GroqRpdResumeService);
   const openRouterRpdResumeService = appContext.get(OpenRouterRpdResumeService);
   const mistralRpdResumeService = appContext.get(MistralRpdResumeService);
+  const sambaNovaRpdResumeService = appContext.get(SambaNovaRpdResumeService);
   const dailyAutomationService = appContext.get(DailyAutomationService);
 
   const activeWorkers: Worker[] = [];
@@ -140,7 +146,8 @@ async function bootstrap() {
       | "llm-google-runs"
       | "llm-groq-runs"
       | "llm-openrouter-runs"
-      | "llm-mistral-runs",
+      | "llm-mistral-runs"
+      | "llm-sambanova-runs",
     expectedStrategy: string,
     concurrency: number,
   ) => {
@@ -224,6 +231,14 @@ async function bootstrap() {
     );
     activeWorkers.push(llmMistralWorker);
     activeQueueNames.push("llm-mistral-runs");
+
+    const llmSambaNovaWorker = createLlmWorker(
+      "llm-sambanova-runs",
+      LLM_SAMBANOVA,
+      llmSambaNovaConcurrency(),
+    );
+    activeWorkers.push(llmSambaNovaWorker);
+    activeQueueNames.push("llm-sambanova-runs");
 
     const puzzleWorker = new Worker(
       "puzzle-population",
@@ -386,6 +401,29 @@ async function bootstrap() {
     activeWorkers.push(mistralFreeDispatchWorker);
     activeQueueNames.push("mistral-free-dispatch");
 
+    // Each job is one tick of the SambaNova free-tier dispatch cycle (see
+    // SambaNovaFreeDispatchService) — same self-chaining shape as the
+    // Groq/OpenRouter/Mistral dispatch workers above.
+    const sambaNovaFreeDispatchWorker = new Worker(
+      "sambanova-free-dispatch",
+      async (job: Job) => {
+        logger.log(`starting sambanova free-tier dispatch tick ${job.id}`);
+        await sambaNovaFreeDispatchService.runTick();
+        logger.log(`finished sambanova free-tier dispatch tick ${job.id}`);
+      },
+      {
+        connection: redisConnection,
+        concurrency: 1,
+      },
+    );
+
+    sambaNovaFreeDispatchWorker.on("failed", (job, err) => {
+      logger.error(`sambanova free-tier dispatch tick ${job?.id} failed`, err?.stack || err);
+    });
+
+    activeWorkers.push(sambaNovaFreeDispatchWorker);
+    activeQueueNames.push("sambanova-free-dispatch");
+
     const googleRpdResumeWorker = new Worker(
       "google-rpd-resume",
       async (job) => {
@@ -469,6 +507,27 @@ async function bootstrap() {
 
     activeWorkers.push(mistralRpdResumeWorker);
     activeQueueNames.push("mistral-rpd-resume");
+
+    const sambaNovaRpdResumeWorker = new Worker(
+      "sambanova-rpd-resume",
+      async (job) => {
+        logger.log(`starting sambanova-rpd resume sweep ${job.id}`);
+        const result = await sambaNovaRpdResumeService.runResume(job.id ?? String(job.timestamp));
+        logger.log(`finished sambanova-rpd resume sweep ${job.id}: ${JSON.stringify(result)}`);
+        return result;
+      },
+      {
+        connection: redisConnection,
+        concurrency: 1,
+      },
+    );
+
+    sambaNovaRpdResumeWorker.on("failed", (job, err) => {
+      logger.error(`sambanova-rpd resume sweep ${job?.id} failed`, err?.stack || err);
+    });
+
+    activeWorkers.push(sambaNovaRpdResumeWorker);
+    activeQueueNames.push("sambanova-rpd-resume");
 
     const dailyAutomationWorker = new Worker(
       "daily-automation",
