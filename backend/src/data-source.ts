@@ -11,6 +11,7 @@ import { GoogleRateLimitHold } from "./modules/strategy/entities/google-rate-lim
 import { GroqRateLimitHold } from "./modules/strategy/entities/groq-rate-limit-hold.entity";
 import { OpenRouterRateLimitHold } from "./modules/strategy/entities/openrouter-rate-limit-hold.entity";
 import { MistralRateLimitHold } from "./modules/strategy/entities/mistral-rate-limit-hold.entity";
+import { SambaNovaRateLimitHold } from "./modules/strategy/entities/sambanova-rate-limit-hold.entity";
 import { StrategyRun } from "./modules/strategy/entities/strategy-run.entity";
 import { SupportedModel } from "./modules/supported-model/entities/supported-model.entity";
 import { ModelPrice } from "./modules/supported-model/entities/model-price.entity";
@@ -46,6 +47,7 @@ export const AppDataSource = new DataSource({
     GroqRateLimitHold,
     OpenRouterRateLimitHold,
     MistralRateLimitHold,
+    SambaNovaRateLimitHold,
     SupportedModel,
     ModelPrice,
     FreeTierDispatchState,
