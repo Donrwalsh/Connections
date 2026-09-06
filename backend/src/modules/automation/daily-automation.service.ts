@@ -8,6 +8,7 @@ import { GoogleFreeDispatchService } from "../google-free-dispatch/google-free-d
 import { GroqFreeDispatchService } from "../groq-free-dispatch/groq-free-dispatch.service";
 import { OpenRouterFreeDispatchService } from "../openrouter-free-dispatch/openrouter-free-dispatch.service";
 import { MistralFreeDispatchService } from "../mistral-free-dispatch/mistral-free-dispatch.service";
+import { SambaNovaFreeDispatchService } from "../sambanova-free-dispatch/sambanova-free-dispatch.service";
 import { ModelMetadataRefreshService } from "../supported-model/model-metadata-refresh.service";
 
 // The same MAX_LIMIT CategoryEvaluatorService.enqueuePending already
@@ -24,7 +25,7 @@ function todayUtcDateStamp(): string {
 }
 
 /**
- * Runs on a daily UTC cron (see DailyAutomationBootstrap). Runs seven legs
+ * Runs on a daily UTC cron (see DailyAutomationBootstrap). Runs eight legs
  * in turn — each leg is awaited before the next starts, but one leg's
  * failure never prevents the next from running (see each leg's own
  * try/catch) — and records each one's outcome into today's AutomationRunLog
@@ -61,6 +62,8 @@ function todayUtcDateStamp(): string {
  *    is held.
  *  - mistralBurn: starts MistralFreeDispatchService's cycle, which runs
  *    until every Mistral model is held.
+ *  - sambaNovaBurn: starts SambaNovaFreeDispatchService's cycle, which runs
+ *    until every SambaNova model is held.
  *
  * Each leg checks the relevant service's live status first rather than
  * relying on a thrown exception's message text to distinguish "already
@@ -86,6 +89,8 @@ export class DailyAutomationService {
     private readonly openRouterFreeDispatchService: OpenRouterFreeDispatchService,
     @Inject(MistralFreeDispatchService)
     private readonly mistralFreeDispatchService: MistralFreeDispatchService,
+    @Inject(SambaNovaFreeDispatchService)
+    private readonly sambaNovaFreeDispatchService: SambaNovaFreeDispatchService,
     @Inject(ModelMetadataRefreshService)
     private readonly modelMetadataRefreshService: ModelMetadataRefreshService,
   ) {}
@@ -109,6 +114,7 @@ export class DailyAutomationService {
     await this.runGroqBurnLeg(date);
     await this.runOpenRouterBurnLeg(date);
     await this.runMistralBurnLeg(date);
+    await this.runSambaNovaBurnLeg(date);
   }
 
   async getTodayStatus(): Promise<AutomationRunLog | null> {
@@ -269,6 +275,36 @@ export class DailyAutomationService {
       await this.runLogRepo.update(
         { date },
         { mistralBurnOutcome: "error", mistralBurnMessage: message },
+      );
+    }
+  }
+
+  private async runSambaNovaBurnLeg(date: string): Promise<void> {
+    try {
+      const current = await this.sambaNovaFreeDispatchService.getStatus();
+      if (current.active) {
+        await this.runLogRepo.update(
+          { date },
+          { sambaNovaBurnOutcome: "alreadyActive", sambaNovaBurnMessage: "already running" },
+        );
+        return;
+      }
+
+      const result = await this.sambaNovaFreeDispatchService.start();
+      const message =
+        result.outcome === "alreadyExhausted"
+          ? "every SambaNova model is currently held"
+          : "started";
+      await this.runLogRepo.update(
+        { date },
+        { sambaNovaBurnOutcome: result.outcome, sambaNovaBurnMessage: message },
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to start SambaNova burn";
+      this.logger.error(`daily automation sambanova-burn leg failed: ${message}`);
+      await this.runLogRepo.update(
+        { date },
+        { sambaNovaBurnOutcome: "error", sambaNovaBurnMessage: message },
       );
     }
   }

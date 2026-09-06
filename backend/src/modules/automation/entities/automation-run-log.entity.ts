@@ -67,6 +67,12 @@ export class AutomationRunLog {
   @Column({ type: "text", nullable: true })
   mistralBurnMessage: string | null;
 
+  @Column({ type: "varchar", nullable: true })
+  sambaNovaBurnOutcome: AutomationLegOutcome | null;
+
+  @Column({ type: "text", nullable: true })
+  sambaNovaBurnMessage: string | null;
+
   @UpdateDateColumn({
     type: "timestamptz",
     default: () => "CURRENT_TIMESTAMP",

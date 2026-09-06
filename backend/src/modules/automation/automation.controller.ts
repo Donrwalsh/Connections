@@ -49,6 +49,10 @@ export class AutomationController {
         outcome: log?.mistralBurnOutcome ?? null,
         message: log?.mistralBurnMessage ?? null,
       },
+      sambaNovaBurn: {
+        outcome: log?.sambaNovaBurnOutcome ?? null,
+        message: log?.sambaNovaBurnMessage ?? null,
+      },
     };
   }
 }
