@@ -26,6 +26,8 @@ import { MistralRateLimitHoldService } from "./mistral-rate-limit-hold.service";
 import { MistralRpdResumeService } from "./mistral-rpd-resume.service";
 import { MistralRpdResumeBootstrap } from "./mistral-rpd-resume.bootstrap";
 import { SambaNovaRateLimitHoldService } from "./sambanova-rate-limit-hold.service";
+import { SambaNovaRpdResumeService } from "./sambanova-rpd-resume.service";
+import { SambaNovaRpdResumeBootstrap } from "./sambanova-rpd-resume.bootstrap";
 import { OpenRouterRpdResumeService } from "./openrouter-rpd-resume.service";
 import { OpenRouterRpdResumeBootstrap } from "./openrouter-rpd-resume.bootstrap";
 import { GoogleRpdResumeService } from "./google-rpd-resume.service";
@@ -75,6 +77,8 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     MistralRpdResumeService,
     MistralRpdResumeBootstrap,
     SambaNovaRateLimitHoldService,
+    SambaNovaRpdResumeService,
+    SambaNovaRpdResumeBootstrap,
   ],
   exports: [
     StrategyService,
@@ -90,6 +94,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     MistralRateLimitHoldService,
     MistralRpdResumeService,
     SambaNovaRateLimitHoldService,
+    SambaNovaRpdResumeService,
   ],
 })
 export class StrategyModule {}
