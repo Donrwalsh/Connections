@@ -35,6 +35,7 @@ import { GoogleDispatchState } from "./modules/google-free-dispatch/entities/goo
 import { GroqDispatchState } from "./modules/groq-free-dispatch/entities/groq-dispatch-state.entity";
 import { OpenRouterDispatchState } from "./modules/openrouter-free-dispatch/entities/openrouter-dispatch-state.entity";
 import { MistralDispatchState } from "./modules/mistral-free-dispatch/entities/mistral-dispatch-state.entity";
+import { SambaNovaDispatchState } from "./modules/sambanova-free-dispatch/entities/sambanova-dispatch-state.entity";
 
 @Module({
   imports: [
@@ -80,6 +81,7 @@ import { MistralDispatchState } from "./modules/mistral-free-dispatch/entities/m
           GroqDispatchState,
           OpenRouterDispatchState,
           MistralDispatchState,
+          SambaNovaDispatchState,
         ],
         synchronize: false,
         migrations: [__dirname + "/migrations/*{.ts,.js}"],

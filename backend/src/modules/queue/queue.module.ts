@@ -20,6 +20,7 @@ import { googleFreeDispatchQueue } from "./google-free-dispatch.queue";
 import { groqFreeDispatchQueue } from "./groq-free-dispatch.queue";
 import { openRouterFreeDispatchQueue } from "./openrouter-free-dispatch.queue";
 import { mistralFreeDispatchQueue } from "./mistral-free-dispatch.queue";
+import { sambaNovaFreeDispatchQueue } from "./sambanova-free-dispatch.queue";
 import { dailyAutomationQueue } from "./daily-automation.queue";
 
 export const STRATEGY_QUEUE = "STRATEGY_QUEUE";
@@ -41,6 +42,7 @@ export const GOOGLE_FREE_DISPATCH_QUEUE = "GOOGLE_FREE_DISPATCH_QUEUE";
 export const GROQ_FREE_DISPATCH_QUEUE = "GROQ_FREE_DISPATCH_QUEUE";
 export const OPENROUTER_FREE_DISPATCH_QUEUE = "OPENROUTER_FREE_DISPATCH_QUEUE";
 export const MISTRAL_FREE_DISPATCH_QUEUE = "MISTRAL_FREE_DISPATCH_QUEUE";
+export const SAMBANOVA_FREE_DISPATCH_QUEUE = "SAMBANOVA_FREE_DISPATCH_QUEUE";
 export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
 
 @Module({
@@ -64,6 +66,7 @@ export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
     { provide: GROQ_FREE_DISPATCH_QUEUE, useValue: groqFreeDispatchQueue },
     { provide: OPENROUTER_FREE_DISPATCH_QUEUE, useValue: openRouterFreeDispatchQueue },
     { provide: MISTRAL_FREE_DISPATCH_QUEUE, useValue: mistralFreeDispatchQueue },
+    { provide: SAMBANOVA_FREE_DISPATCH_QUEUE, useValue: sambaNovaFreeDispatchQueue },
     { provide: DAILY_AUTOMATION_QUEUE, useValue: dailyAutomationQueue },
   ],
   exports: [
@@ -86,6 +89,7 @@ export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
     GROQ_FREE_DISPATCH_QUEUE,
     OPENROUTER_FREE_DISPATCH_QUEUE,
     MISTRAL_FREE_DISPATCH_QUEUE,
+    SAMBANOVA_FREE_DISPATCH_QUEUE,
     DAILY_AUTOMATION_QUEUE,
   ],
 })
