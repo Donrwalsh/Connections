@@ -1,4 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { Agent } from "undici";
 import { loadEnv, orchestratorTimeoutMs } from "../../config/env";
 
 export type SolveErrorCode = "duplicate_group" | "invalid_group" | "model_error" | "rate_limited" | "rate_limited_daily";
@@ -71,6 +72,20 @@ export type JudgeCategoryOutcome =
   | { ok: false; error: SolveAssistFailure };
 
 const TIMEOUT_MS = orchestratorTimeoutMs();
+
+// undici (Node's fetch engine) enforces its own `headersTimeout` and
+// `bodyTimeout` — both default 300s — independently of, and below, our
+// AbortController deadline. A model that keeps the orchestrator's HTTP
+// response open past 300s (reasoning models especially) therefore fails as
+// `fetch failed (UND_ERR_HEADERS_TIMEOUT)` at 5 minutes even when
+// ORCHESTRATOR_TIMEOUT_MS says 10. Raise both just past TIMEOUT_MS so the
+// AbortController stays the real deadline, landing on the clean
+// "Request timed out" AbortError path (see executeCall / describeError)
+// rather than an opaque undici error.
+const ORCHESTRATOR_DISPATCHER = new Agent({
+  headersTimeout: TIMEOUT_MS + 5_000,
+  bodyTimeout: TIMEOUT_MS + 5_000,
+});
 
 /**
  * Thin client for the orchestrator's POST /solve-assist endpoint. The LLM
@@ -252,7 +267,10 @@ export class OrchestratorService {
         },
         body: JSON.stringify(body),
         signal: controller.signal,
-      });
+        // Node's fetch accepts an undici dispatcher here; the DOM lib's
+        // RequestInit type omits it, hence the cast.
+        dispatcher: ORCHESTRATOR_DISPATCHER,
+      } as RequestInit & { dispatcher: Agent });
     } finally {
       clearTimeout(timer);
     }

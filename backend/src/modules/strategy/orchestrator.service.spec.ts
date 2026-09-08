@@ -1,3 +1,4 @@
+import { Agent } from "undici";
 import { OrchestratorService, type ChatMessage } from "./orchestrator.service";
 
 describe("OrchestratorService", () => {
@@ -184,6 +185,15 @@ describe("OrchestratorService", () => {
         }),
       }),
     );
+  });
+
+  it("passes an undici dispatcher so undici's own header/body timeouts don't preempt ORCHESTRATOR_TIMEOUT_MS", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
+
+    await service.solveAssist(messages);
+
+    const init = mockFetch.mock.calls[0][1] as { dispatcher?: unknown };
+    expect(init.dispatcher).toBeInstanceOf(Agent);
   });
 
   it("should extract dailyResetSeconds from a SambaNova rate_limited_daily failure", async () => {
