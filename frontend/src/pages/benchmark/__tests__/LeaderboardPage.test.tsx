@@ -114,7 +114,7 @@ function stubFetch(data: Leaderboard, ok = true) {
   );
 }
 
-function renderLeaderboard() {
+function renderLeaderboard(initialEntry = "/leaderboard") {
   // A fresh, retry-disabled client per test: react-query's default retry
   // behavior would otherwise keep the "fetch fails" test's error hidden
   // behind several rounds of exponential-backoff retries.
@@ -124,7 +124,7 @@ function renderLeaderboard() {
 
   render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/leaderboard"]}>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
           <Route path="/leaderboard" element={<LeaderboardPage />} />
           <Route path="/leaderboard/:strategyId" element={<div>strategy-details</div>} />
@@ -277,35 +277,56 @@ describe("LeaderboardPage", () => {
     expect(firstRowIn(tableAfter).textContent).toContain("Shuffle-Foolish");
   });
 
-  it("badges an LLM row whose model belongs to the flagship free tier", async () => {
+  it("shows each LLM row's serving provider pool as a badge", async () => {
     stubFetch({
       deterministic: leaderboard.deterministic,
-      llm: [makeRow({ id: "gpt-5", strategyName: "llm-openai", modelName: "gpt-5", kind: "llm" })],
+      llm: [
+        makeRow({ id: "gpt-5", strategyName: "llm-openai", modelName: "gpt-5", kind: "llm" }),
+        makeRow({
+          id: "openai/gpt-oss-20b",
+          strategyName: "llm-groq",
+          modelName: "openai/gpt-oss-20b",
+          kind: "llm",
+        }),
+      ],
     });
     renderLeaderboard();
 
-    expect(await screen.findByText("Flagship")).toBeInTheDocument();
-    expect(screen.queryByText("Mini")).not.toBeInTheDocument();
+    const tables = await screen.findAllByRole("table");
+    expect(within(tables[0]!).getByText("OpenAI")).toBeInTheDocument();
+    expect(within(tables[0]!).getByText("Groq")).toBeInTheDocument();
   });
 
-  it("badges an LLM row whose model belongs to the mini free tier", async () => {
+  it("narrows the LLM table to the pools named in ?provider= and hides the deterministic table", async () => {
     stubFetch({
       deterministic: leaderboard.deterministic,
-      llm: [makeRow({ id: "o4-mini", strategyName: "llm-openai", modelName: "o4-mini", kind: "llm" })],
+      llm: [
+        makeRow({ id: "gpt-5", strategyName: "llm-openai", modelName: "gpt-5", kind: "llm" }),
+        makeRow({
+          id: "openai/gpt-oss-20b",
+          strategyName: "llm-groq",
+          modelName: "openai/gpt-oss-20b",
+          kind: "llm",
+        }),
+      ],
     });
-    renderLeaderboard();
+    renderLeaderboard("/leaderboard?provider=groq");
 
-    expect(await screen.findByText("Mini")).toBeInTheDocument();
-    expect(screen.queryByText("Flagship")).not.toBeInTheDocument();
+    const table = await screen.findByRole("table");
+    expect(within(table).getAllByRole("link")).toHaveLength(1);
+    expect(within(table).getByRole("link", { name: /gpt-oss-20b/ })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Deterministic & Shuffle" })).not.toBeInTheDocument();
   });
 
-  it("shows no free-tier badge for a model in neither program", async () => {
-    stubFetch(leaderboard); // gpt-4.1-nano-2025-04-14, a dated snapshot name in neither list
+  it("toggling a provider chip writes the filter to the URL", async () => {
+    const user = userEvent.setup();
+    stubFetch(leaderboard);
     renderLeaderboard();
 
     await screen.findAllByRole("table");
-    expect(screen.queryByText("Flagship")).not.toBeInTheDocument();
-    expect(screen.queryByText("Mini")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "OpenAI" }));
+
+    expect(screen.getByRole("button", { name: "OpenAI" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("navigates to the row detail page on click", async () => {

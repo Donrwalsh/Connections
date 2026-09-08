@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { GuessChainVisualizer } from "../../components/benchmark/GuessChainVisualizer";
+import { ProviderPill } from "../../components/benchmark/ProviderPill";
 import { RunsTable } from "../../components/benchmark/RunsTable";
 import { StatusPill } from "../../components/benchmark/StatusPill";
 import { fetchPuzzleDate, fetchRunsForPuzzle, toRunRecord } from "../../data/benchmark/api";
@@ -187,12 +188,15 @@ export function PuzzleRunsPage() {
         <p className="bench-strategy-desc">{meta.description}</p>
         {runs && runs.length > 0 ? (
           <div className="bench-badges">
+            <ProviderPill strategyName={meta.strategyName} />
             <StatusPill
               label={puzzleStatusLabel(derivePuzzleStatus(runs))}
               tone={puzzleStatusTone(derivePuzzleStatus(runs))}
             />
           </div>
-        ) : null}
+        ) : (
+          <ProviderPill strategyName={meta.strategyName} />
+        )}
       </header>
 
       {isLoading ? <p className="bench-muted">Loading runs…</p> : null}

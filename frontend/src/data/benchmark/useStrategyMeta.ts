@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { fetchSupportedModels } from "./api";
 import { formatModelStatsDescription } from "./formatModelStats";
 import { getStrategyMeta } from "./mockData";
+import { poolFromStrategyName, providerPoolLabel } from "./providerPools";
 import type { StrategyMeta, SupportedModelRecord } from "./types";
 
 /** Synthesizes StrategyMeta for a model the static mock catalog doesn't know
@@ -10,12 +11,8 @@ import type { StrategyMeta, SupportedModelRecord } from "./types";
  * mock catalog already. `runsPerPuzzle` is a placeholder: nothing derives
  * layout from it, so it isn't load-bearing here. */
 function buildDynamicMeta(model: SupportedModelRecord): StrategyMeta {
-  const providerLabel =
-    model.strategyName === "llm-ollama"
-      ? "Ollama"
-      : model.strategyName === "llm-google"
-        ? "Google"
-        : "OpenAI";
+  const pool = poolFromStrategyName(model.strategyName);
+  const providerLabel = pool ? providerPoolLabel(pool) : "LLM";
   return {
     id: model.modelName,
     name: `LLM · ${model.modelName}`,

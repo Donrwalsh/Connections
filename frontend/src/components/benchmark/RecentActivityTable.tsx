@@ -8,6 +8,7 @@ import {
   runStatusTone,
 } from "../../data/benchmark/runStatus";
 import type { RecentActivityEvent } from "../../data/benchmark/types";
+import { ProviderPill } from "./ProviderPill";
 import { StatusPill } from "./StatusPill";
 
 export interface RecentActivityTableProps {
@@ -66,7 +67,12 @@ export function RecentActivityTable({ events }: RecentActivityTableProps) {
               <td className="bench-muted">
                 {event.kind === "run" ? "Run" : "Category judge"}
               </td>
-              <td className="bench-mono">{modelLabel}</td>
+              <td className="bench-mono">
+                <span className="bench-strategy-name-row">
+                  {modelLabel}
+                  <ProviderPill strategyName={event.strategyName} />
+                </span>
+              </td>
               <td className="bench-mono">{formatDateLabel(event.puzzleDate)}</td>
               <td className="bench-mono">{formatTimestamp(event.occurredAt)}</td>
               <td>

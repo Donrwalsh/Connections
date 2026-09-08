@@ -289,6 +289,38 @@ describe("PuzzleRunsPage", () => {
     expect(await screen.findByRole("heading", { name: `LLM · ${LLM_MODEL_ID}` })).toBeInTheDocument();
   });
 
+  it("shows the serving provider pool in the header for an LLM run", async () => {
+    stubFetch(multiRun, { date: "2023-06-12" });
+
+    const { container } = render(
+      <MemoryRouter initialEntries={[`/leaderboard/${LLM_MODEL_ID}/1`]}>
+        <Routes>
+          <Route path="/leaderboard/:strategyId/:puzzleId" element={<PuzzleRunsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole("table");
+    const header = container.querySelector(".bench-page-header") as HTMLElement;
+    expect(within(header).getByText("OpenAI")).toBeInTheDocument();
+  });
+
+  it("shows no provider pool badge in the header for a deterministic strategy", async () => {
+    stubFetch(singleRun, { date: "2023-06-12" });
+
+    const { container } = render(
+      <MemoryRouter initialEntries={["/leaderboard/alphabetical/1"]}>
+        <Routes>
+          <Route path="/leaderboard/:strategyId/:puzzleId" element={<PuzzleRunsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole("heading", { name: "Guess chain" });
+    const header = container.querySelector(".bench-page-header") as HTMLElement;
+    expect(within(header).queryByText("OpenAI")).not.toBeInTheDocument();
+  });
+
   it("shows the puzzle's date once it loads, and links to the puzzle page for it", async () => {
     stubFetch(singleRun, { date: "2023-06-12" });
 

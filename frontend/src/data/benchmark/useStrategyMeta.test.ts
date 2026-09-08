@@ -71,6 +71,31 @@ describe("useStrategyMeta", () => {
     expect(result.current.meta?.strategyName).toBe("llm-google");
   });
 
+  it("labels a Groq-served model Groq for an id the static catalog doesn't know", async () => {
+    stubModelsFetch([
+      {
+        id: 3,
+        strategyName: "llm-groq",
+        modelName: "openai/gpt-oss-20b",
+        inputCostPerMillionTokens: null,
+        outputCostPerMillionTokens: null,
+        supported: true,
+        contextWindow: 131072,
+        paramCount: null,
+        providerDescription: null,
+        releaseDate: null,
+      },
+    ]);
+
+    const { result } = renderHook(() => useStrategyMeta("openai/gpt-oss-20b"));
+
+    await waitFor(() => {
+      expect(result.current.meta?.description).toBe("Groq openai/gpt-oss-20b · 131K context");
+    });
+
+    expect(result.current.meta?.strategyName).toBe("llm-groq");
+  });
+
   it("does not fetch live model data for a non-LLM strategyId", async () => {
     stubModelsFetch([]);
 

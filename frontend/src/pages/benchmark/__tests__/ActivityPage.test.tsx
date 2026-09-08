@@ -160,7 +160,7 @@ function stubFetch({
   );
 }
 
-function renderActivity() {
+function renderActivity(initialEntry = "/activity") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -170,7 +170,7 @@ function renderActivity() {
       value={{ isAdmin: true, isLoading: false, login: vi.fn(), logout: vi.fn() }}
     >
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={["/activity"]}>
+        <MemoryRouter initialEntries={[initialEntry]}>
           <Routes>
             <Route path="/activity" element={<ActivityPage />} />
             <Route path="/leaderboard/:strategyId/:puzzleId" element={<div>run-page</div>} />
@@ -345,6 +345,42 @@ describe("ActivityPage", () => {
     renderActivity();
 
     expect(await screen.findByText("No activity yet.")).toBeInTheDocument();
+  });
+
+  it("filters the recent-activity feed to the pools named in ?provider=", async () => {
+    stubFetch({
+      recentActivity: [
+        makeRunEvent({
+          id: 1,
+          strategyName: "llm-groq",
+          modelName: "openai/gpt-oss-20b",
+          occurredAt: "2024-01-01T08:15:00Z",
+        }),
+        makeRunEvent({
+          id: 2,
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          occurredAt: "2024-01-01T09:15:00Z",
+        }),
+      ],
+    });
+    renderActivity("/activity?provider=groq");
+
+    const table = await screen.findByRole("table", { name: /recent activity/i });
+    const rows = within(table).getAllByRole("link");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.textContent).toContain("openai/gpt-oss-20b");
+  });
+
+  it("toggling a provider chip records the selection in the URL", async () => {
+    const user = userEvent.setup();
+    stubFetch({ recentActivity: [] });
+    renderActivity();
+
+    await screen.findByText("No activity yet.");
+    await user.click(screen.getByRole("button", { name: "Groq" }));
+
+    expect(screen.getByRole("button", { name: "Groq" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("polls the recent-activity endpoint on an interval", async () => {
