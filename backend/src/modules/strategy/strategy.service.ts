@@ -8,6 +8,7 @@ import {
   LLM_GROQ_QUEUE,
   LLM_OPENROUTER_QUEUE,
   LLM_MISTRAL_QUEUE,
+  LLM_SAMBANOVA_QUEUE,
 } from "../queue/queue.module";
 import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/strategy-run.entity";
 import { InjectRepository } from "@nestjs/typeorm";
@@ -204,6 +205,7 @@ export class StrategyService {
     @Inject(LLM_GROQ_QUEUE) private readonly llmGroqQueue: Queue,
     @Inject(LLM_OPENROUTER_QUEUE) private readonly llmOpenRouterQueue: Queue,
     @Inject(LLM_MISTRAL_QUEUE) private readonly llmMistralQueue: Queue,
+    @Inject(LLM_SAMBANOVA_QUEUE) private readonly llmSambaNovaQueue: Queue,
     @InjectRepository(StrategyRun)
     private readonly strategyRunRepo: Repository<StrategyRun>,
     @InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>,
@@ -231,6 +233,7 @@ export class StrategyService {
       this.llmGroqQueue,
       this.llmOpenRouterQueue,
       this.llmMistralQueue,
+      this.llmSambaNovaQueue,
       strategyName,
     );
   }
@@ -837,6 +840,7 @@ export class StrategyService {
       this.llmGroqQueue,
       this.llmOpenRouterQueue,
       this.llmMistralQueue,
+      this.llmSambaNovaQueue,
     ];
 
     for (const queue of queues) {

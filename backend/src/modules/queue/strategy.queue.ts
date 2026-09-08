@@ -7,6 +7,7 @@ import {
   LLM_GROQ,
   LLM_OPENROUTER,
   LLM_MISTRAL,
+  LLM_SAMBANOVA,
 } from "../../strategies";
 
 export const strategyQueue = new Queue("strategy-runs", {
@@ -86,6 +87,16 @@ export const llmMistralQueue = new Queue("llm-mistral-runs", {
   },
 });
 
+export const llmSambaNovaQueue = new Queue("llm-sambanova-runs", {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 1000 },
+    removeOnComplete: { count: 1000 },
+    removeOnFail: { count: 5000 },
+  },
+});
+
 /**
  * Routes a strategy run to the queue that processes it: the LLM strategies
  * get their per-provider queues, everything else stays on the shared
@@ -100,6 +111,7 @@ export function queueForStrategy(
   groqQueue: Queue,
   openRouterQueue: Queue,
   mistralQueue: Queue,
+  sambaNovaQueue: Queue,
   strategyName: string,
 ): Queue {
   if (strategyName === LLM_OPENAI) return openAIQueue;
@@ -108,6 +120,7 @@ export function queueForStrategy(
   if (strategyName === LLM_GROQ) return groqQueue;
   if (strategyName === LLM_OPENROUTER) return openRouterQueue;
   if (strategyName === LLM_MISTRAL) return mistralQueue;
+  if (strategyName === LLM_SAMBANOVA) return sambaNovaQueue;
   return defaultQueue;
 }
 

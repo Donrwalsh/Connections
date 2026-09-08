@@ -14,6 +14,7 @@ const createGroqMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 const openRouterChatMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 const createOpenRouterMock = vi.hoisted(() => vi.fn(() => ({ chat: openRouterChatMock })));
 const createMistralMock = vi.hoisted(() => vi.fn(() => vi.fn()));
+const createSambaNovaMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 
 vi.mock("ai-sdk-ollama", () => ({
   createOllama: createOllamaMock,
@@ -39,6 +40,10 @@ vi.mock("@ai-sdk/mistral", () => ({
   createMistral: createMistralMock,
 }));
 
+vi.mock("sambanova-ai-provider", () => ({
+  createSambaNova: createSambaNovaMock,
+}));
+
 describe("getModel", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -49,6 +54,7 @@ describe("getModel", () => {
     createOpenRouterMock.mockClear();
     openRouterChatMock.mockClear();
     createMistralMock.mockClear();
+    createSambaNovaMock.mockClear();
   });
 
   it("passes num_ctx from MODEL_CONTEXT_WINDOW to the Ollama model", () => {
@@ -265,6 +271,40 @@ describe("getModel", () => {
     const modelFactory = createMistralMock.mock.results[0].value;
     expect(modelFactory).toHaveBeenCalledWith("mistral-small-latest");
   });
+
+  it("resolves the SambaNova model without num_ctx", () => {
+    getModel("sambanova");
+
+    expect(createSambaNovaMock).toHaveBeenCalledTimes(1);
+    const modelFactory = createSambaNovaMock.mock.results[0].value;
+    expect(modelFactory).toHaveBeenCalledWith("Meta-Llama-3.3-70B-Instruct");
+    expect(openaiMock).not.toHaveBeenCalled();
+    expect(createOllamaMock).not.toHaveBeenCalled();
+  });
+
+  it("passes SAMBANOVA_API_KEY to createSambaNova", () => {
+    vi.stubEnv("SAMBANOVA_API_KEY", "test-sambanova-key");
+
+    getModel("sambanova");
+
+    expect(createSambaNovaMock).toHaveBeenCalledWith({ apiKey: "test-sambanova-key" });
+  });
+
+  it("uses the model override instead of SAMBANOVA_MODEL when given", () => {
+    vi.stubEnv("SAMBANOVA_MODEL", "DeepSeek-V3.1");
+
+    getModel("sambanova", "gpt-oss-120b");
+
+    const modelFactory = createSambaNovaMock.mock.results[0].value;
+    expect(modelFactory).toHaveBeenCalledWith("gpt-oss-120b");
+  });
+
+  it("accepts a contextWindow for sambanova without using it", () => {
+    getModel("sambanova", undefined, 262144);
+
+    const modelFactory = createSambaNovaMock.mock.results[0].value;
+    expect(modelFactory).toHaveBeenCalledWith("Meta-Llama-3.3-70B-Instruct");
+  });
 });
 
 describe("getModelName", () => {
@@ -347,6 +387,20 @@ describe("getModelName", () => {
     vi.stubEnv("MISTRAL_MODEL", "mistral-medium-latest");
     expect(getModelName("mistral", "ministral-8b-latest")).toBe("ministral-8b-latest");
   });
+
+  it("returns the configured SambaNova model for the sambanova provider", () => {
+    vi.stubEnv("SAMBANOVA_MODEL", "DeepSeek-V3.1");
+    expect(getModelName("sambanova")).toBe("DeepSeek-V3.1");
+  });
+
+  it("falls back to the SambaNova default when unset", () => {
+    expect(getModelName("sambanova")).toBe("Meta-Llama-3.3-70B-Instruct");
+  });
+
+  it("prefers the model override over SAMBANOVA_MODEL", () => {
+    vi.stubEnv("SAMBANOVA_MODEL", "DeepSeek-V3.1");
+    expect(getModelName("sambanova", "gpt-oss-120b")).toBe("gpt-oss-120b");
+  });
 });
 
 describe("defaultProvider", () => {
@@ -378,6 +432,11 @@ describe("defaultProvider", () => {
   it("returns mistral when MODEL_PROVIDER is set to mistral", () => {
     vi.stubEnv("MODEL_PROVIDER", "mistral");
     expect(defaultProvider()).toBe("mistral");
+  });
+
+  it("returns sambanova when MODEL_PROVIDER is set to sambanova", () => {
+    vi.stubEnv("MODEL_PROVIDER", "sambanova");
+    expect(defaultProvider()).toBe("sambanova");
   });
 });
 

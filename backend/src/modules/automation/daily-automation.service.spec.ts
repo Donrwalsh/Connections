@@ -9,6 +9,7 @@ import { GoogleFreeDispatchService } from "../google-free-dispatch/google-free-d
 import { GroqFreeDispatchService } from "../groq-free-dispatch/groq-free-dispatch.service";
 import { OpenRouterFreeDispatchService } from "../openrouter-free-dispatch/openrouter-free-dispatch.service";
 import { MistralFreeDispatchService } from "../mistral-free-dispatch/mistral-free-dispatch.service";
+import { SambaNovaFreeDispatchService } from "../sambanova-free-dispatch/sambanova-free-dispatch.service";
 import { ModelMetadataRefreshService } from "../supported-model/model-metadata-refresh.service";
 
 describe("DailyAutomationService", () => {
@@ -20,6 +21,7 @@ describe("DailyAutomationService", () => {
   let mockGroqFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
   let mockOpenRouterFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
   let mockMistralFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
+  let mockSambaNovaFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
   let mockModelMetadataRefreshService: { refreshAll: jest.Mock };
 
   const todayStamp = () => new Date().toISOString().slice(0, 10);
@@ -60,6 +62,12 @@ describe("DailyAutomationService", () => {
         .fn()
         .mockResolvedValue({ status: { active: true, startedAt: new Date() }, outcome: "started" }),
     };
+    mockSambaNovaFreeDispatchService = {
+      getStatus: jest.fn().mockResolvedValue({ active: false, startedAt: null }),
+      start: jest
+        .fn()
+        .mockResolvedValue({ status: { active: true, startedAt: new Date() }, outcome: "started" }),
+    };
     mockModelMetadataRefreshService = {
       refreshAll: jest.fn().mockResolvedValue({ updated: 3, skipped: 1, errored: 0 }),
     };
@@ -74,6 +82,7 @@ describe("DailyAutomationService", () => {
         { provide: GroqFreeDispatchService, useValue: mockGroqFreeDispatchService },
         { provide: OpenRouterFreeDispatchService, useValue: mockOpenRouterFreeDispatchService },
         { provide: MistralFreeDispatchService, useValue: mockMistralFreeDispatchService },
+        { provide: SambaNovaFreeDispatchService, useValue: mockSambaNovaFreeDispatchService },
         { provide: ModelMetadataRefreshService, useValue: mockModelMetadataRefreshService },
       ],
     }).compile();
@@ -126,6 +135,10 @@ describe("DailyAutomationService", () => {
         order.push("mistralBurn");
         return { status: { active: true, startedAt: new Date() }, outcome: "started" };
       });
+      mockSambaNovaFreeDispatchService.start.mockImplementation(async () => {
+        order.push("sambaNovaBurn");
+        return { status: { active: true, startedAt: new Date() }, outcome: "started" };
+      });
 
       await service.run();
 
@@ -137,6 +150,7 @@ describe("DailyAutomationService", () => {
         "groqBurn",
         "openRouterBurn",
         "mistralBurn",
+        "sambaNovaBurn",
       ]);
     });
 
@@ -437,6 +451,59 @@ describe("DailyAutomationService", () => {
       expect(mockRunLogRepo.update).toHaveBeenCalledWith(
         { date: todayStamp() },
         { mistralBurnOutcome: "error", mistralBurnMessage: "mistral down" },
+      );
+    });
+
+    it("starts the SambaNova burn when no cycle is already running", async () => {
+      await service.run();
+
+      expect(mockSambaNovaFreeDispatchService.start).toHaveBeenCalled();
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        { sambaNovaBurnOutcome: "started", sambaNovaBurnMessage: "started" },
+      );
+    });
+
+    it("records alreadyExhausted for the SambaNova leg from start()'s own outcome", async () => {
+      mockSambaNovaFreeDispatchService.start.mockResolvedValueOnce({
+        status: { active: false, startedAt: null },
+        outcome: "alreadyExhausted",
+      });
+
+      await service.run();
+
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        {
+          sambaNovaBurnOutcome: "alreadyExhausted",
+          sambaNovaBurnMessage: "every SambaNova model is currently held",
+        },
+      );
+    });
+
+    it("records alreadyActive for the SambaNova leg without calling start", async () => {
+      mockSambaNovaFreeDispatchService.getStatus.mockResolvedValueOnce({
+        active: true,
+        startedAt: new Date(),
+      });
+
+      await service.run();
+
+      expect(mockSambaNovaFreeDispatchService.start).not.toHaveBeenCalled();
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        { sambaNovaBurnOutcome: "alreadyActive", sambaNovaBurnMessage: "already running" },
+      );
+    });
+
+    it("records a SambaNova leg failure without throwing, and still lets the other legs run", async () => {
+      mockSambaNovaFreeDispatchService.start.mockRejectedValueOnce(new Error("sambanova down"));
+
+      await expect(service.run()).resolves.toBeUndefined();
+
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        { sambaNovaBurnOutcome: "error", sambaNovaBurnMessage: "sambanova down" },
       );
     });
   });

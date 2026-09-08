@@ -5,6 +5,7 @@ import {
   LLM_OLLAMA,
   LLM_OPENAI,
   LLM_OPENROUTER,
+  LLM_SAMBANOVA,
 } from "../../strategies";
 import {
   categoryEvalJobId,
@@ -18,30 +19,34 @@ const google = { name: "google" } as never;
 const groq = { name: "groq" } as never;
 const openrouter = { name: "openrouter" } as never;
 const mistral = { name: "mistral" } as never;
+const sambanova = { name: "sambanova" } as never;
 const shared = { name: "shared" } as never;
 
 describe("queueForStrategy", () => {
   it("routes each LLM strategy to its own queue and everything else to the shared queue", () => {
     expect(
-      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, LLM_OPENAI),
+      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, sambanova, LLM_OPENAI),
     ).toBe(openai);
     expect(
-      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, LLM_OLLAMA),
+      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, sambanova, LLM_OLLAMA),
     ).toBe(ollama);
     expect(
-      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, LLM_GOOGLE),
+      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, sambanova, LLM_GOOGLE),
     ).toBe(google);
     expect(
-      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, LLM_GROQ),
+      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, sambanova, LLM_GROQ),
     ).toBe(groq);
     expect(
-      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, LLM_OPENROUTER),
+      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, sambanova, LLM_OPENROUTER),
     ).toBe(openrouter);
     expect(
-      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, LLM_MISTRAL),
+      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, sambanova, LLM_MISTRAL),
     ).toBe(mistral);
     expect(
-      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, "alphabetical"),
+      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, sambanova, LLM_SAMBANOVA),
+    ).toBe(sambanova);
+    expect(
+      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, sambanova, "alphabetical"),
     ).toBe(shared);
   });
 });

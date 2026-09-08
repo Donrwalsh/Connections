@@ -7,6 +7,7 @@ import {
   llmGroqQueue,
   llmOpenRouterQueue,
   llmMistralQueue,
+  llmSambaNovaQueue,
 } from "./strategy.queue";
 import { puzzleQueue } from "./puzzle.queue";
 import { freeTierDispatchQueue } from "./free-tier-dispatch.queue";
@@ -15,10 +16,12 @@ import { googleRpdResumeQueue } from "./google-rpd-resume.queue";
 import { groqRpdResumeQueue } from "./groq-rpd-resume.queue";
 import { openRouterRpdResumeQueue } from "./openrouter-rpd-resume.queue";
 import { mistralRpdResumeQueue } from "./mistral-rpd-resume.queue";
+import { sambaNovaRpdResumeQueue } from "./sambanova-rpd-resume.queue";
 import { googleFreeDispatchQueue } from "./google-free-dispatch.queue";
 import { groqFreeDispatchQueue } from "./groq-free-dispatch.queue";
 import { openRouterFreeDispatchQueue } from "./openrouter-free-dispatch.queue";
 import { mistralFreeDispatchQueue } from "./mistral-free-dispatch.queue";
+import { sambaNovaFreeDispatchQueue } from "./sambanova-free-dispatch.queue";
 import { dailyAutomationQueue } from "./daily-automation.queue";
 
 export const STRATEGY_QUEUE = "STRATEGY_QUEUE";
@@ -28,6 +31,7 @@ export const LLM_GOOGLE_QUEUE = "LLM_GOOGLE_QUEUE";
 export const LLM_GROQ_QUEUE = "LLM_GROQ_QUEUE";
 export const LLM_OPENROUTER_QUEUE = "LLM_OPENROUTER_QUEUE";
 export const LLM_MISTRAL_QUEUE = "LLM_MISTRAL_QUEUE";
+export const LLM_SAMBANOVA_QUEUE = "LLM_SAMBANOVA_QUEUE";
 export const PUZZLE_QUEUE = "PUZZLE_QUEUE";
 export const FREE_TIER_DISPATCH_QUEUE = "FREE_TIER_DISPATCH_QUEUE";
 export const MODEL_METADATA_QUEUE = "MODEL_METADATA_QUEUE";
@@ -35,10 +39,12 @@ export const GOOGLE_RPD_RESUME_QUEUE = "GOOGLE_RPD_RESUME_QUEUE";
 export const GROQ_RPD_RESUME_QUEUE = "GROQ_RPD_RESUME_QUEUE";
 export const OPENROUTER_RPD_RESUME_QUEUE = "OPENROUTER_RPD_RESUME_QUEUE";
 export const MISTRAL_RPD_RESUME_QUEUE = "MISTRAL_RPD_RESUME_QUEUE";
+export const SAMBANOVA_RPD_RESUME_QUEUE = "SAMBANOVA_RPD_RESUME_QUEUE";
 export const GOOGLE_FREE_DISPATCH_QUEUE = "GOOGLE_FREE_DISPATCH_QUEUE";
 export const GROQ_FREE_DISPATCH_QUEUE = "GROQ_FREE_DISPATCH_QUEUE";
 export const OPENROUTER_FREE_DISPATCH_QUEUE = "OPENROUTER_FREE_DISPATCH_QUEUE";
 export const MISTRAL_FREE_DISPATCH_QUEUE = "MISTRAL_FREE_DISPATCH_QUEUE";
+export const SAMBANOVA_FREE_DISPATCH_QUEUE = "SAMBANOVA_FREE_DISPATCH_QUEUE";
 export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
 
 @Module({
@@ -50,6 +56,7 @@ export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
     { provide: LLM_GROQ_QUEUE, useValue: llmGroqQueue },
     { provide: LLM_OPENROUTER_QUEUE, useValue: llmOpenRouterQueue },
     { provide: LLM_MISTRAL_QUEUE, useValue: llmMistralQueue },
+    { provide: LLM_SAMBANOVA_QUEUE, useValue: llmSambaNovaQueue },
     { provide: PUZZLE_QUEUE, useValue: puzzleQueue },
     { provide: FREE_TIER_DISPATCH_QUEUE, useValue: freeTierDispatchQueue },
     { provide: MODEL_METADATA_QUEUE, useValue: modelMetadataQueue },
@@ -57,10 +64,12 @@ export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
     { provide: GROQ_RPD_RESUME_QUEUE, useValue: groqRpdResumeQueue },
     { provide: OPENROUTER_RPD_RESUME_QUEUE, useValue: openRouterRpdResumeQueue },
     { provide: MISTRAL_RPD_RESUME_QUEUE, useValue: mistralRpdResumeQueue },
+    { provide: SAMBANOVA_RPD_RESUME_QUEUE, useValue: sambaNovaRpdResumeQueue },
     { provide: GOOGLE_FREE_DISPATCH_QUEUE, useValue: googleFreeDispatchQueue },
     { provide: GROQ_FREE_DISPATCH_QUEUE, useValue: groqFreeDispatchQueue },
     { provide: OPENROUTER_FREE_DISPATCH_QUEUE, useValue: openRouterFreeDispatchQueue },
     { provide: MISTRAL_FREE_DISPATCH_QUEUE, useValue: mistralFreeDispatchQueue },
+    { provide: SAMBANOVA_FREE_DISPATCH_QUEUE, useValue: sambaNovaFreeDispatchQueue },
     { provide: DAILY_AUTOMATION_QUEUE, useValue: dailyAutomationQueue },
   ],
   exports: [
@@ -71,6 +80,7 @@ export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
     LLM_GROQ_QUEUE,
     LLM_OPENROUTER_QUEUE,
     LLM_MISTRAL_QUEUE,
+    LLM_SAMBANOVA_QUEUE,
     PUZZLE_QUEUE,
     FREE_TIER_DISPATCH_QUEUE,
     MODEL_METADATA_QUEUE,
@@ -78,10 +88,12 @@ export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
     GROQ_RPD_RESUME_QUEUE,
     OPENROUTER_RPD_RESUME_QUEUE,
     MISTRAL_RPD_RESUME_QUEUE,
+    SAMBANOVA_RPD_RESUME_QUEUE,
     GOOGLE_FREE_DISPATCH_QUEUE,
     GROQ_FREE_DISPATCH_QUEUE,
     OPENROUTER_FREE_DISPATCH_QUEUE,
     MISTRAL_FREE_DISPATCH_QUEUE,
+    SAMBANOVA_FREE_DISPATCH_QUEUE,
     DAILY_AUTOMATION_QUEUE,
   ],
 })

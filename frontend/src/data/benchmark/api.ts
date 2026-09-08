@@ -20,6 +20,7 @@ import type {
   GroqDispatchStatus,
   OpenRouterDispatchStatus,
   MistralDispatchStatus,
+  SambaNovaDispatchStatus,
   Leaderboard,
   RecentActivityEvent,
   RunHistory,
@@ -328,6 +329,21 @@ export function fetchMistralDispatchStatus(signal?: AbortSignal): Promise<Mistra
  * running. */
 export function stopMistralDispatch(signal?: AbortSignal): Promise<MistralDispatchStatus> {
   return fetchJson("/dispatch/mistral", signal, { method: "DELETE" });
+}
+
+/** Whether the SambaNova free-tier dispatch cycle is currently running —
+ * see SambaNovaDispatchStatus. Polled the same way fetchGroqDispatchStatus
+ * is. */
+export function fetchSambaNovaDispatchStatus(
+  signal?: AbortSignal,
+): Promise<SambaNovaDispatchStatus> {
+  return fetchJson("/dispatch/sambanova", signal);
+}
+
+/** Stops the SambaNova dispatch cycle — a no-op (not an error) if it wasn't
+ * running. */
+export function stopSambaNovaDispatch(signal?: AbortSignal): Promise<SambaNovaDispatchStatus> {
+  return fetchJson("/dispatch/sambanova", signal, { method: "DELETE" });
 }
 
 const DETAIL_PAGE_SIZE = 200;

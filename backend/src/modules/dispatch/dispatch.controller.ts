@@ -23,6 +23,7 @@ import { GoogleFreeDispatchService } from "../google-free-dispatch/google-free-d
 import { GroqFreeDispatchService } from "../groq-free-dispatch/groq-free-dispatch.service";
 import { OpenRouterFreeDispatchService } from "../openrouter-free-dispatch/openrouter-free-dispatch.service";
 import { MistralFreeDispatchService } from "../mistral-free-dispatch/mistral-free-dispatch.service";
+import { SambaNovaFreeDispatchService } from "../sambanova-free-dispatch/sambanova-free-dispatch.service";
 import { FreeTierId } from "../strategy/free-tier-usage.service";
 import { AUTOMATIC_STRATEGIES, LLM_STRATEGIES, STRATEGY_SET, isLlmStrategy } from "../../strategies";
 import { DispatchAuthGuard } from "./dispatch-auth.guard";
@@ -56,6 +57,8 @@ export class DispatchController {
     private readonly openRouterFreeDispatchService: OpenRouterFreeDispatchService,
     @Inject(MistralFreeDispatchService)
     private readonly mistralFreeDispatchService: MistralFreeDispatchService,
+    @Inject(SambaNovaFreeDispatchService)
+    private readonly sambaNovaFreeDispatchService: SambaNovaFreeDispatchService,
     @Inject(ModelMetadataRefreshService)
     private readonly modelMetadataRefreshService: ModelMetadataRefreshService,
   ) {}
@@ -365,6 +368,22 @@ export class DispatchController {
   @Delete("mistral")
   async stopMistralDispatch() {
     return this.mistralFreeDispatchService.stop();
+  }
+
+  // Read-only SambaNova free-tier dispatch status — see
+  // SambaNovaFreeDispatchService. Same shape as the Groq/Mistral routes
+  // (active/startedAt only); SambaNova's per-model 20 rpm / 20 rpd / 200K
+  // tpd caps are enforced by SambaNova and surface only as 429s.
+  @Get("sambanova")
+  async getSambaNovaDispatchStatus() {
+    return this.sambaNovaFreeDispatchService.getStatus();
+  }
+
+  // Deactivates the SambaNova free-tier dispatch cycle — a no-op (not an
+  // error) if it wasn't running.
+  @Delete("sambanova")
+  async stopSambaNovaDispatch() {
+    return this.sambaNovaFreeDispatchService.stop();
   }
 
   // How many strategy runs are currently in the 'error' status. Read-only,

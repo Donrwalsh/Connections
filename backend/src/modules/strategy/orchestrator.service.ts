@@ -103,7 +103,7 @@ export class OrchestratorService {
   async solveAssist(
     messages: ChatMessage[],
     model?: string,
-    provider?: "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral",
+    provider?: "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral" | "sambanova",
     contextWindow?: number | null,
   ): Promise<SolveAssistOutcome> {
     return this.executeCall<SolveAssistSuccess>(
@@ -135,7 +135,7 @@ export class OrchestratorService {
     proposedCategory: string,
     actualCategory: string,
     model?: string,
-    provider?: "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral",
+    provider?: "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral" | "sambanova",
   ): Promise<JudgeCategoryOutcome> {
     return this.executeCall<JudgeCategorySuccess>(
       "/judge-category",

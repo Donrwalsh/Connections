@@ -464,6 +464,39 @@ export function classifyModelCallError(
     });
   }
 
+  if (provider === "sambanova" && APICallError.isInstance(err) && err.statusCode === 429) {
+    // SambaNova's free-tier caps are per-model (20 req/min, 20 req/day, 200K
+    // tokens/day). Its 429 carries duration-style reset headers. Classify by
+    // reset distance, like the OpenRouter branch: a long reset is the
+    // per-model daily (requests or tokens) hit, a short one is the 20 RPM
+    // hit. Header names/format confirmed against a real 429.
+    const headers = err.responseHeaders ?? {};
+    const dayResetSeconds = parseGroqResetDuration(headers["x-ratelimit-reset-requests-day"]);
+    const minuteResetSeconds =
+      parseGroqResetDuration(headers["x-ratelimit-reset-requests"]) ??
+      parseSecondsHeader(headers["retry-after"]);
+    const resetSeconds = dayResetSeconds ?? minuteResetSeconds;
+
+    if (resetSeconds !== undefined) {
+      if (resetSeconds > DAILY_RESET_THRESHOLD_SECONDS) {
+        return new SolveError("rate_limited_daily", `SambaNova daily quota exhausted: ${message}`, {
+          ...details,
+          ...apiDetails,
+          errorName: err.name,
+          dailyResetSeconds: resetSeconds,
+        });
+      }
+      return new SolveError("rate_limited", `SambaNova rate limit hit: ${message}`, {
+        ...details,
+        ...apiDetails,
+        errorName: err.name,
+        retryAfterSeconds: minuteResetSeconds ?? resetSeconds,
+      });
+    }
+    // No usable rate-limit signal — fall through to model_error, same as the
+    // Groq and OpenRouter branches do when their headers are absent.
+  }
+
   return new SolveError("model_error", `Model call failed: ${message}`, {
     ...details,
     ...apiDetails,

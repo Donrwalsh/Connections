@@ -721,3 +721,85 @@ describe("classifyModelCallError — mistral", () => {
     expect(result.code).toBe("rate_limited_daily");
   });
 });
+
+describe("classifyModelCallError — sambanova", () => {
+  it("classifies a 429 whose reset-requests-day is hours out as rate_limited_daily", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseHeaders: {
+        "x-ratelimit-remaining-requests-day": "0",
+        "x-ratelimit-reset-requests-day": "23h10m",
+      },
+    });
+
+    const result = classifyModelCallError(err, "sambanova", { model: "DeepSeek-V3.1" });
+
+    expect(result).toBeInstanceOf(SolveError);
+    expect(result.code).toBe("rate_limited_daily");
+    expect(result.details.dailyResetSeconds).toBeGreaterThan(80_000);
+    expect(result.details.dailyResetSeconds).toBeLessThanOrEqual(83_401);
+  });
+
+  it("classifies a 429 whose per-minute reset is seconds away as rate_limited", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseHeaders: { "x-ratelimit-reset-requests": "8s" },
+    });
+
+    const result = classifyModelCallError(err, "sambanova", { model: "DeepSeek-V3.1" });
+
+    expect(result.code).toBe("rate_limited");
+    expect(result.details.retryAfterSeconds).toBe(8);
+  });
+
+  it("prefers retry-after seconds for a per-minute hit when present", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseHeaders: { "retry-after": "5" },
+    });
+
+    const result = classifyModelCallError(err, "sambanova", { model: "DeepSeek-V3.1" });
+
+    expect(result.code).toBe("rate_limited");
+    expect(result.details.retryAfterSeconds).toBe(5);
+  });
+
+  it("classifies a 429 with no parseable rate-limit headers as model_error", () => {
+    const err = makeAPICallError({ statusCode: 429, responseHeaders: {} });
+
+    const result = classifyModelCallError(err, "sambanova", { model: "DeepSeek-V3.1" });
+
+    expect(result.code).toBe("model_error");
+  });
+
+  it("does not classify a non-sambanova provider's 429 using SambaNova headers", () => {
+    const err = makeAPICallError({
+      statusCode: 429,
+      responseHeaders: { "x-ratelimit-reset-requests-day": "23h" },
+    });
+
+    const result = classifyModelCallError(err, "openai", { model: "gpt-4.1-nano" });
+
+    expect(result.code).toBe("model_error");
+  });
+
+  it("unwraps a RetryError around a SambaNova daily-limit APICallError", () => {
+    const inner = makeAPICallError({
+      statusCode: 429,
+      responseHeaders: {
+        "x-ratelimit-remaining-requests-day": "0",
+        "x-ratelimit-reset-requests-day": "20h",
+      },
+    });
+    const err = new RetryError({
+      message: "Failed after 3 attempts",
+      reason: "maxRetriesExceeded",
+      errors: [inner],
+    });
+
+    const result = classifyModelCallError(err, "sambanova", { model: "DeepSeek-V3.1" });
+
+    expect(result.code).toBe("rate_limited_daily");
+    expect(result.details.dailyResetSeconds).toBeGreaterThan(60_000);
+  });
+});

@@ -7,6 +7,7 @@ import { GoogleFreeDispatchModule } from "../google-free-dispatch/google-free-di
 import { GroqFreeDispatchModule } from "../groq-free-dispatch/groq-free-dispatch.module";
 import { OpenRouterFreeDispatchModule } from "../openrouter-free-dispatch/openrouter-free-dispatch.module";
 import { MistralFreeDispatchModule } from "../mistral-free-dispatch/mistral-free-dispatch.module";
+import { SambaNovaFreeDispatchModule } from "../sambanova-free-dispatch/sambanova-free-dispatch.module";
 import { DispatchController } from "./dispatch.controller";
 
 @Module({
@@ -19,6 +20,7 @@ import { DispatchController } from "./dispatch.controller";
     GroqFreeDispatchModule,
     OpenRouterFreeDispatchModule,
     MistralFreeDispatchModule,
+    SambaNovaFreeDispatchModule,
   ],
   controllers: [DispatchController],
 })

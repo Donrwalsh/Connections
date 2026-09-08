@@ -8,6 +8,7 @@ import { GoogleDispatchWidget } from "../../components/benchmark/GoogleDispatchW
 import { GroqDispatchWidget } from "../../components/benchmark/GroqDispatchWidget";
 import { OpenRouterDispatchWidget } from "../../components/benchmark/OpenRouterDispatchWidget";
 import { MistralDispatchWidget } from "../../components/benchmark/MistralDispatchWidget";
+import { SambaNovaDispatchWidget } from "../../components/benchmark/SambaNovaDispatchWidget";
 import { RecentActivityTable } from "../../components/benchmark/RecentActivityTable";
 import type { FreeTierModelSets } from "../../components/benchmark/StrategyTable";
 import { fetchAutomationStatus, fetchFreeTierUsage, fetchLeaderboard, fetchRecentActivity } from "../../data/benchmark/api";
@@ -139,6 +140,18 @@ export function ActivityPage() {
       }
     : null;
 
+  const sambaNovaBurnAutomation: AutomationLegDisplay | null = automationStatus
+    ? {
+        message:
+          automationStatus.sambaNovaBurn.outcome === "error"
+            ? `failed: ${automationStatus.sambaNovaBurn.message}`
+            : automationStatus.sambaNovaBurn.message,
+        lastRunAt: automationStatus.lastRunAt,
+        nextRunAt: automationStatus.nextRunAt,
+        isError: automationStatus.sambaNovaBurn.outcome === "error",
+      }
+    : null;
+
   const {
     data: recentActivity,
     isLoading: isLoadingActivity,
@@ -189,6 +202,7 @@ export function ActivityPage() {
           <GroqDispatchWidget automation={groqBurnAutomation} />
           <OpenRouterDispatchWidget automation={openRouterBurnAutomation} />
           <MistralDispatchWidget automation={mistralBurnAutomation} />
+          <SambaNovaDispatchWidget automation={sambaNovaBurnAutomation} />
         </div>
       ) : null}
 
