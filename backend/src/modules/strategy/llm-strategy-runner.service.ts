@@ -45,6 +45,7 @@ import {
 import { MistralRateLimitHoldService } from "./mistral-rate-limit-hold.service";
 import { firstCombination } from "./combinatorics";
 import { GROUP_SIZE, parseGroupsSection } from "./parse-groups-section";
+import { applyOneOffWordFixups } from "./normalize-puzzle-word";
 
 const MODEL_ERROR_RETRY_BASE_DELAY_MS = 1000;
 const MODEL_ERROR_RETRY_MAX_DELAY_MS = 300000;
@@ -223,6 +224,12 @@ export class LlmStrategyRunner {
       model,
       contextWindow,
     );
+
+    // One-off: rewrite words whose literal text (e.g. an embedded comma)
+    // can't survive the comma-joined prompt / comma-split response round
+    // trip. Done here so the prompt, the availability checks, the
+    // hallucination check and evaluateGuessOnPuzzle all see the same form.
+    applyOneOffWordFixups(run, puzzle);
 
     if (TERMINAL_STATUSES.has(run.status)) {
       return {

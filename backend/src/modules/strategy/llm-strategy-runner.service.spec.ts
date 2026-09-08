@@ -1727,5 +1727,56 @@ describe("LlmStrategyRunner", () => {
       expect(result.status).toBe(StrategyRunStatus.COMPLETED);
       expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(2);
     });
+
+    it("rewrites the one-off comma word so the LLM round trip still matches", async () => {
+      // The 2023-09-11 puzzle's "20,000" card can't survive the
+      // comma-joined prompt / comma-split response round trip. The runner
+      // maps it to "20000" for the whole LLM path.
+      mockStrategyRunRepo.findOne.mockResolvedValue(
+        makeRun({
+          strategyName: "llm-openai",
+          availableWords: [
+            "20,000",
+            "BANANA",
+            "CHERRY",
+            "DATE",
+            "EGGPLANT",
+            "FIG",
+            "GRAPE",
+            "HONEY",
+          ],
+        }),
+      );
+      mockPuzzleRepo.findOne.mockResolvedValue(
+        makePuzzle([
+          ["20,000", "BANANA", "CHERRY", "DATE"],
+          ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        ]),
+      );
+
+      const snapshots = captureMessages([
+        // The model echoes the normalized form, as it would have seen it.
+        makeAssistResponse([["20000", "BANANA", "CHERRY", "DATE"]]),
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      ]);
+
+      const result = await runner.runLlmStrategy(100, "llm-openai");
+
+      // The comma form never reaches the prompt.
+      expect(snapshots[0][0].content).toContain("20000");
+      expect(snapshots[0][0].content).not.toContain("20,000");
+
+      // And the guess the model returns still evaluates as correct.
+      expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
+      const inserted = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "Guess")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(inserted[0]).toEqual(
+        expect.objectContaining({
+          words: ["20000", "BANANA", "CHERRY", "DATE"],
+          result: GuessResult.SUCCESS,
+        }),
+      );
+    });
   });
 });
