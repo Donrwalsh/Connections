@@ -325,7 +325,7 @@ describe("App (e2e)", () => {
     expect(rows.every((row) => row.status === "failed")).toBe(true);
   });
 
-  it("GET /strategy/activity/recent returns the most recent events across every strategy, newest first", async () => {
+  it("GET /strategy/activity/recent returns puzzle solves and category judgments as two newest-first lists", async () => {
     // "reverse-order" again (see the status-filter test above) rather than
     // an LLM strategy/model combo — dispatch elsewhere in this suite counts
     // existing StrategyRun rows per (puzzle, model) against a trial cap, and
@@ -343,11 +343,13 @@ describe("App (e2e)", () => {
     const res = await request(app.getHttpServer()).get("/strategy/activity/recent");
 
     expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-    expect(res.body.length).toBeLessThanOrEqual(100);
+    expect(Array.isArray(res.body.runs)).toBe(true);
+    expect(Array.isArray(res.body.judgments)).toBe(true);
+    expect(res.body.runs.length).toBeLessThanOrEqual(100);
+    expect(res.body.judgments.length).toBeLessThanOrEqual(100);
     // Just inserted, so it has the latest startedAt of everything in the
-    // suite so far — the feed's own DESC ordering puts this run event first.
-    expect(res.body[0]).toMatchObject({
+    // suite so far — the runs list's own DESC ordering puts it first.
+    expect(res.body.runs[0]).toMatchObject({
       kind: "run",
       id: newestRun.id,
       strategyName: "reverse-order",
@@ -357,6 +359,18 @@ describe("App (e2e)", () => {
       puzzleId: puzzle.id,
       puzzleDate: TEST_DATE,
     });
+  });
+
+  it("GET /strategy/activity/recent?provider= narrows both lists to the named provider pools", async () => {
+    // Nothing in this suite runs under llm-groq, so scoping to it yields
+    // empty lists rather than the whole feed — proof the filter is applied.
+    const res = await request(app.getHttpServer()).get(
+      "/strategy/activity/recent?provider=groq",
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.runs).toEqual([]);
+    expect(res.body.judgments).toEqual([]);
   });
 
   it("GET /strategy/free-tier-usage/flagship reports today's usage against the 250k flagship budget", async () => {

@@ -13,6 +13,11 @@ import { StatusPill } from "./StatusPill";
 
 export interface RecentActivityTableProps {
   events: RecentActivityEvent[];
+  /** Caption prefix — the " · N" count is always appended. Defaults to
+   * "Recent activity" for backwards compatibility. */
+  caption?: string;
+  /** Shown in place of the table body when there are no events. */
+  emptyLabel?: string;
 }
 
 /** Live feed of the most recent activity across every strategy/model (see
@@ -24,12 +29,18 @@ export interface RecentActivityTableProps {
  * keyed by model for LLM rows (the leaderboard's :strategyId is the model
  * there, not the strategy — see useStrategyMeta), the strategy name
  * otherwise. */
-export function RecentActivityTable({ events }: RecentActivityTableProps) {
+export function RecentActivityTable({
+  events,
+  caption = "Recent activity",
+  emptyLabel = "No activity yet.",
+}: RecentActivityTableProps) {
   const navigate = useNavigate();
 
   return (
     <table className="bench-table">
-      <caption className="bench-table__caption">Recent activity · {events.length}</caption>
+      <caption className="bench-table__caption">
+        {caption} · {events.length}
+      </caption>
       <thead>
         <tr>
           <th scope="col">Activity</th>
@@ -91,7 +102,7 @@ export function RecentActivityTable({ events }: RecentActivityTableProps) {
         {events.length === 0 ? (
           <tr>
             <td colSpan={5} className="bench-muted">
-              No activity yet.
+              {emptyLabel}
             </td>
           </tr>
         ) : null}

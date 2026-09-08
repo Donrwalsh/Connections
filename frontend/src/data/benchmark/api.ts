@@ -22,7 +22,7 @@ import type {
   MistralDispatchStatus,
   SambaNovaDispatchStatus,
   Leaderboard,
-  RecentActivityEvent,
+  RecentActivityFeed,
   RunHistory,
   RunHistorySortBy,
   RunHistorySortDir,
@@ -153,12 +153,21 @@ export function fetchRunHistory(
   return fetchJson(`/strategy/${strategyName}/runs${query ? `?${query}` : ""}`, signal);
 }
 
-/** The most recent activity across every strategy/model, newest first —
- * runs starting and category-judge verdicts landing, interleaved. Backs the
- * Activity page's live feed. Fixed at 100 events server-side, no pagination
- * (a rolling window, not a list to page through). */
-export function fetchRecentActivity(signal?: AbortSignal): Promise<RecentActivityEvent[]> {
-  return fetchJson("/strategy/activity/recent", signal);
+/** The most recent activity across every strategy/model, as two
+ * newest-first lists — puzzle solves (`runs`) and category-judge verdicts
+ * (`judgments`). Backs the Activity page's two feed sections. Each list is
+ * fixed at 100 events server-side, no pagination (a rolling window). When
+ * `providerIds` is non-empty, both lists are scoped server-side to those
+ * provider pools — the newest 100 *within* the pools, not the newest 100
+ * overall filtered down. */
+export function fetchRecentActivity(
+  signal?: AbortSignal,
+  providerIds?: string[],
+): Promise<RecentActivityFeed> {
+  const query = providerIds && providerIds.length > 0
+    ? `?${new URLSearchParams({ provider: providerIds.join(",") }).toString()}`
+    : "";
+  return fetchJson(`/strategy/activity/recent${query}`, signal);
 }
 
 /** The real model allowlist (every configured model, any strategy). Used to

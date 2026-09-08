@@ -14,7 +14,7 @@ import { ProviderFilter } from "../../components/benchmark/ProviderFilter";
 import { RecentActivityTable } from "../../components/benchmark/RecentActivityTable";
 import { fetchAutomationStatus, fetchFreeTierUsage, fetchLeaderboard, fetchRecentActivity } from "../../data/benchmark/api";
 import type { AutomationLegDisplay, FreeTierModelSets } from "../../data/benchmark/types";
-import { poolFromStrategyName, selectedProviderPools } from "../../data/benchmark/providerPools";
+import { selectedProviderPools, serializeProviderParam } from "../../data/benchmark/providerPools";
 import { sumSpendUsd } from "../../data/benchmark/metrics";
 
 // How often the recent-activity table refetches. Frequent enough to feel
@@ -154,25 +154,28 @@ export function ActivityPage() {
       }
     : null;
 
+  const [searchParams] = useSearchParams();
+  const selectedPools = selectedProviderPools(searchParams);
+  // The pool filter is applied server-side now — each list comes back as
+  // the newest 100 *within* the selected pools, not the newest 100 overall
+  // then filtered. The serialized param is part of the query key so a
+  // selection change refetches rather than reusing a differently-scoped
+  // cache entry.
+  const providerKey = serializeProviderParam(selectedPools) ?? "";
+  const providerIds = [...selectedPools];
+
   const {
     data: recentActivity,
     isLoading: isLoadingActivity,
     error: recentActivityError,
   } = useQuery({
-    queryKey: ["recent-activity"],
-    queryFn: ({ signal }) => fetchRecentActivity(signal),
+    queryKey: ["recent-activity", providerKey],
+    queryFn: ({ signal }) => fetchRecentActivity(signal, providerIds),
     refetchInterval: RECENT_ACTIVITY_POLL_MS,
   });
 
-  const [searchParams] = useSearchParams();
-  const selectedPools = selectedProviderPools(searchParams);
-  const visibleActivity =
-    selectedPools.size === 0
-      ? (recentActivity ?? [])
-      : (recentActivity ?? []).filter((event) => {
-          const pool = poolFromStrategyName(event.strategyName);
-          return pool !== null && selectedPools.has(pool);
-        });
+  const solveEvents = recentActivity?.runs ?? [];
+  const judgmentEvents = recentActivity?.judgments ?? [];
 
   return (
     <div className="bench-page">
@@ -225,20 +228,41 @@ export function ActivityPage() {
         />
       ) : null}
 
-      <section className="bench-page__section" aria-label="Recent activity">
-        <div className="bench-page__section-head">
-          <h2 className="bench-page__section-title">Recent Activity</h2>
-        </div>
-        <ProviderFilter />
+      <div className="bench-page__section-head">
+        <h2 className="bench-page__section-title">Recent Activity</h2>
+      </div>
+      <ProviderFilter />
 
-        {isLoadingActivity ? <p className="bench-muted">Loading activity…</p> : null}
-        {recentActivityError ? (
-          <p className="bench-error">Couldn&apos;t load recent activity.</p>
-        ) : null}
-        {!isLoadingActivity && !recentActivityError ? (
-          <RecentActivityTable events={visibleActivity} />
-        ) : null}
-      </section>
+      {isLoadingActivity ? <p className="bench-muted">Loading activity…</p> : null}
+      {recentActivityError ? (
+        <p className="bench-error">Couldn&apos;t load recent activity.</p>
+      ) : null}
+
+      {!isLoadingActivity && !recentActivityError ? (
+        <>
+          <section className="bench-page__section" aria-label="Puzzle solves">
+            <div className="bench-page__section-head">
+              <h3 className="bench-page__section-title">Puzzle Solves</h3>
+            </div>
+            <RecentActivityTable
+              events={solveEvents}
+              caption="Puzzle solves"
+              emptyLabel="No puzzle solves yet."
+            />
+          </section>
+
+          <section className="bench-page__section" aria-label="Category judgments">
+            <div className="bench-page__section-head">
+              <h3 className="bench-page__section-title">Category Judgments</h3>
+            </div>
+            <RecentActivityTable
+              events={judgmentEvents}
+              caption="Category judgments"
+              emptyLabel="No category judgments yet."
+            />
+          </section>
+        </>
+      ) : null}
     </div>
   );
 }

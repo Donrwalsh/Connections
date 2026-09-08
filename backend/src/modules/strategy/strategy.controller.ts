@@ -52,12 +52,34 @@ export class StrategyController {
   }
 
   // Same reasoning as "models"/"leaderboard" above. Backs the Activity
-  // page's live feed — the most recent events across every strategy/model
-  // (runs starting and category-judge verdicts landing), interleaved
-  // newest-first, not scoped to one strategyName like the routes below.
+  // page's live feed — the most recent puzzle solves and category-judge
+  // verdicts across every strategy/model, returned as two separate
+  // newest-first lists, not scoped to one strategyName like the routes
+  // below. `provider` optionally narrows both lists to one or more
+  // provider pools: a comma-separated list of pool ids ("groq,openrouter")
+  // that map to the "llm-<id>" dispatching strategies. Unknown ids are
+  // dropped; a `provider` value that resolves to nothing usable is ignored
+  // (the feed comes back unfiltered) rather than erroring.
   @Get("activity/recent")
-  async getRecentActivity() {
-    return this.strategyService.getRecentActivity();
+  @ApiQuery({
+    name: "provider",
+    required: false,
+    type: String,
+    description:
+      "Comma-separated provider-pool ids (e.g. 'groq,openrouter') to narrow both lists to those pools' runs.",
+    example: "groq,openrouter",
+  })
+  async getRecentActivity(@Query("provider") provider?: string) {
+    const strategyNames = (provider ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter((id) => id.length > 0)
+      .map((id) => `llm-${id}`)
+      .filter((name) => STRATEGY_SET.has(name));
+
+    return this.strategyService.getRecentActivity(
+      strategyNames.length > 0 ? strategyNames : undefined,
+    );
   }
 
   @Get(":strategyName/puzzle/:date")
