@@ -84,6 +84,34 @@ describe("describeLeaderboardRow", () => {
     expect(description).toBe("Google gemini-3.6-flash · 1049K context");
   });
 
+  it("labels a Groq-served row Groq, not by the model's vendor prefix", () => {
+    const row = makeLlmRow({
+      id: "openai/gpt-oss-20b",
+      strategyName: "llm-groq",
+      modelName: "openai/gpt-oss-20b",
+      contextWindow: 131072,
+      paramCount: null,
+    });
+
+    const { description } = describeLeaderboardRow(row);
+
+    expect(description).toBe("Groq openai/gpt-oss-20b · 131K context");
+  });
+
+  it("labels a SambaNova-served row SambaNova", () => {
+    const row = makeLlmRow({
+      id: "gpt-oss-120b",
+      strategyName: "llm-sambanova",
+      modelName: "gpt-oss-120b",
+      contextWindow: null,
+      paramCount: null,
+    });
+
+    const { description } = describeLeaderboardRow(row);
+
+    expect(description).toBe("SambaNova gpt-oss-120b proposes candidate groups");
+  });
+
   it("leaves deterministic rows unaffected", () => {
     const row: LeaderboardRow = {
       id: "alphabetical",

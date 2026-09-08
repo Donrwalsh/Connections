@@ -65,16 +65,75 @@
   border-color: #d9bcb7;
 }
 
-/* Free-tier membership badges on the LLM leaderboard table — see
- * StrategyTable's freeTierModels prop. */
-.bench-pill--flagship {
+/* Provider-pool badges — which API actually served a model/run (see
+ * providerPools.ts and ProviderPill). One mid-tone hue per pool, chosen to
+ * stay legible on both the light and dark benchmark palettes. Also used by
+ * the ProviderFilter chips (as .bench-pill.bench-provider-filter__chip). */
+.bench-pill--openai {
+  color: #0a8f6f;
+  border-color: #b6e0d3;
+}
+
+.bench-pill--google {
+  color: #3a71d8;
+  border-color: #c3d5f4;
+}
+
+.bench-pill--groq {
+  color: #d1622a;
+  border-color: #eccbb8;
+}
+
+.bench-pill--openrouter {
   color: #7c5cbf;
   border-color: #d5c8ea;
 }
 
-.bench-pill--mini {
-  color: #2f9e6f;
-  border-color: #bfe3d2;
+.bench-pill--mistral {
+  color: #d14a63;
+  border-color: #eec2ca;
+}
+
+.bench-pill--sambanova {
+  color: #b8489e;
+  border-color: #e7c2df;
+}
+
+.bench-pill--ollama {
+  color: #5f6b7a;
+  border-color: #cdd3da;
+}
+
+/* Provider-pool filter — a row of toggle chips on the leaderboard and
+ * activity pages; selection lives in the ?provider= query param. */
+.bench-provider-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.5rem 0 0.9rem;
+}
+
+.bench-provider-filter__chip {
+  background: none;
+  cursor: pointer;
+  font: inherit;
+}
+
+.bench-provider-filter__chip[aria-pressed="false"] {
+  color: var(--text);
+  border-color: var(--border);
+  opacity: 0.72;
+}
+
+.bench-provider-filter__chip.is-active {
+  border-width: 1px;
+  border-style: solid;
+  font-weight: 600;
+}
+
+.bench-provider-filter__chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* Daily free-token budget widgets (leaderboard page) — one per program

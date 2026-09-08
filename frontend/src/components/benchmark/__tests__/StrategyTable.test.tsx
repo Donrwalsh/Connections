@@ -101,6 +101,36 @@ describe("StrategyTable — Category IQ column", () => {
   });
 });
 
+describe("StrategyTable — provider pool badge", () => {
+  it("shows the serving pool on an LLM row, from its strategyName not its vendor prefix", () => {
+    renderTable(
+      <StrategyTable
+        rows={[
+          makeRow({
+            id: "openai/gpt-oss-20b",
+            strategyName: "llm-groq",
+            modelName: "openai/gpt-oss-20b",
+            kind: "llm",
+          }),
+        ]}
+        metricKey="successRate"
+        variant="llm"
+      />,
+    );
+
+    const row = screen.getByRole("link");
+    expect(within(row).getByText("Groq")).toBeInTheDocument();
+  });
+
+  it("shows no pool badge on a deterministic row", () => {
+    renderTable(<StrategyTable rows={[makeRow()]} metricKey="successRate" variant="deterministic" />);
+
+    const row = screen.getByRole("link");
+    expect(within(row).queryByText("Groq")).not.toBeInTheDocument();
+    expect(within(row).queryByText("OpenAI")).not.toBeInTheDocument();
+  });
+});
+
 describe("StrategyTable — routing a model id containing a slash", () => {
   // Regression: Groq model ids ("qwen/qwen3.6-27b", "openai/gpt-oss-120b")
   // contain a literal "/", unlike every prior model id this route was built

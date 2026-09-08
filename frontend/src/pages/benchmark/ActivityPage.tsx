@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useAdminAuth } from "../../auth/useAdminAuth";
 import { CategoryJudgingWidget } from "../../components/benchmark/CategoryJudgingWidget";
@@ -9,10 +10,11 @@ import { GroqDispatchWidget } from "../../components/benchmark/GroqDispatchWidge
 import { OpenRouterDispatchWidget } from "../../components/benchmark/OpenRouterDispatchWidget";
 import { MistralDispatchWidget } from "../../components/benchmark/MistralDispatchWidget";
 import { SambaNovaDispatchWidget } from "../../components/benchmark/SambaNovaDispatchWidget";
+import { ProviderFilter } from "../../components/benchmark/ProviderFilter";
 import { RecentActivityTable } from "../../components/benchmark/RecentActivityTable";
-import type { FreeTierModelSets } from "../../components/benchmark/StrategyTable";
 import { fetchAutomationStatus, fetchFreeTierUsage, fetchLeaderboard, fetchRecentActivity } from "../../data/benchmark/api";
-import type { AutomationLegDisplay } from "../../data/benchmark/types";
+import type { AutomationLegDisplay, FreeTierModelSets } from "../../data/benchmark/types";
+import { poolFromStrategyName, selectedProviderPools } from "../../data/benchmark/providerPools";
 import { sumSpendUsd } from "../../data/benchmark/metrics";
 
 // How often the recent-activity table refetches. Frequent enough to feel
@@ -162,6 +164,16 @@ export function ActivityPage() {
     refetchInterval: RECENT_ACTIVITY_POLL_MS,
   });
 
+  const [searchParams] = useSearchParams();
+  const selectedPools = selectedProviderPools(searchParams);
+  const visibleActivity =
+    selectedPools.size === 0
+      ? (recentActivity ?? [])
+      : (recentActivity ?? []).filter((event) => {
+          const pool = poolFromStrategyName(event.strategyName);
+          return pool !== null && selectedPools.has(pool);
+        });
+
   return (
     <div className="bench-page">
       <header className="bench-page-header">
@@ -217,13 +229,14 @@ export function ActivityPage() {
         <div className="bench-page__section-head">
           <h2 className="bench-page__section-title">Recent Activity</h2>
         </div>
+        <ProviderFilter />
 
         {isLoadingActivity ? <p className="bench-muted">Loading activity…</p> : null}
         {recentActivityError ? (
           <p className="bench-error">Couldn&apos;t load recent activity.</p>
         ) : null}
         {!isLoadingActivity && !recentActivityError ? (
-          <RecentActivityTable events={recentActivity ?? []} />
+          <RecentActivityTable events={visibleActivity} />
         ) : null}
       </section>
     </div>

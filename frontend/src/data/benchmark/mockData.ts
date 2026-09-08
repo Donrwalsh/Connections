@@ -8,6 +8,7 @@
 // describeLeaderboardRow and useStrategyMeta's buildDynamicMeta.
 
 import { formatModelStatsDescription } from "./formatModelStats";
+import { poolFromStrategyName, providerPoolLabel } from "./providerPools";
 import type { LeaderboardRow, StrategyMeta } from "./types";
 
 const STRATEGY_DEFS: StrategyMeta[] = [
@@ -128,12 +129,8 @@ export function describeLeaderboardRow(row: LeaderboardRow): { name: string; des
   const meta = getStrategyMeta(row.id);
 
   if (row.kind === "llm") {
-    const providerLabel =
-      row.strategyName === "llm-ollama"
-        ? "Ollama"
-        : row.strategyName === "llm-google"
-          ? "Google"
-          : "OpenAI";
+    const pool = poolFromStrategyName(row.strategyName);
+    const providerLabel = pool ? providerPoolLabel(pool) : "LLM";
     return {
       name: meta?.name ?? `LLM · ${row.modelName}`,
       description: formatModelStatsDescription(

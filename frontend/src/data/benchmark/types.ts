@@ -249,6 +249,16 @@ export interface FreeTierUsage {
   models: string[];
 }
 
+/** Which model names belong to each free-token program (see FreeTierId) —
+ * assembled client-side from the two GET /strategy/free-tier-usage/:tier
+ * responses. Used by the Activity page to attribute per-model spend to a
+ * program; a model in neither set (or a still-in-flight fetch) just
+ * contributes to no program's total rather than erroring. */
+export interface FreeTierModelSets {
+  flagship: Set<string>;
+  mini: Set<string>;
+}
+
 /** GET /category-evaluation/coverage — how much of the LLM
  * category-judge backlog is done. `eligible` is every successful used
  * proposal; `judged` is how many already have a verdict row; `pending`

@@ -3,7 +3,22 @@
 
 import type { CategoryVerdictValue, GuessResultValue, PuzzleRunStatus, RunStatus } from "./types";
 
-export type PillTone = "queued" | "active" | "completed" | "failed" | "neutral" | "flagship" | "mini";
+export type PillTone =
+  | "queued"
+  | "active"
+  | "completed"
+  | "failed"
+  | "neutral"
+  // Provider-pool badge tones — one per pool in PROVIDER_POOLS (see
+  // providerPools.ts). Kept in this shared union so ProviderPill can hand
+  // them straight to StatusPill.
+  | "openai"
+  | "google"
+  | "groq"
+  | "openrouter"
+  | "mistral"
+  | "sambanova"
+  | "ollama";
 
 const FAILED_STATUSES: RunStatus[] = ["failed", "duplicate", "malformedResponse", "error"];
 
