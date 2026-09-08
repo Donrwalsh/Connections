@@ -196,11 +196,17 @@ export class OrchestratorService {
       };
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
-        return { ok: false, error: { error: "Request timed out", code: "model_error" } };
+        return {
+          ok: false,
+          error: { error: "Request timed out", code: "model_error", errorName: "AbortError" },
+        };
       }
       const message = this.describeError(err);
       this.logger.warn(`Orchestrator ${path} call failed: ${message}`);
-      return { ok: false, error: { error: message, code: "model_error" } };
+      return {
+        ok: false,
+        error: { error: message, code: "model_error", errorName: this.causeName(err) },
+      };
     }
   }
 
@@ -264,8 +270,50 @@ export class OrchestratorService {
 
   private describeError(err: unknown): string {
     if (err instanceof Error) {
-      return err.name === "AbortError" ? "Request timed out" : err.message;
+      if (err.name === "AbortError") return "Request timed out";
+      const cause = this.describeCause((err as { cause?: unknown }).cause);
+      return cause ? `${err.message} (${cause})` : err.message;
     }
     return String(err);
+  }
+
+  /**
+   * Unwraps the system-level error that `fetch()` hides behind a bare
+   * "fetch failed" TypeError. undici attaches the real failure — an
+   * ECONNRESET / ECONNREFUSED / UND_ERR_HEADERS_TIMEOUT system error, or an
+   * AggregateError bundling several connect attempts — to `error.cause`, and
+   * that is the only actionable detail. Without it, a failed
+   * backend→orchestrator hop persists as a SolvePrompt row whose
+   * errorMessage is the uninformative "fetch failed" and nothing else.
+   */
+  private describeCause(cause: unknown): string | undefined {
+    if (cause == null) return undefined;
+    if (cause instanceof AggregateError) {
+      const parts = cause.errors
+        .map((inner) => this.describeCause(inner))
+        .filter((part): part is string => Boolean(part));
+      return parts.length > 0 ? parts.join(", ") : undefined;
+    }
+    if (cause instanceof Error) {
+      const code = (cause as NodeJS.ErrnoException).code;
+      return code ? `${code}: ${cause.message}` : cause.message;
+    }
+    return String(cause);
+  }
+
+  /**
+   * The short, queryable label for SolvePrompt.errorName on a failed hop —
+   * the underlying system error code (ECONNRESET, …) when `fetch()` wrapped
+   * one, else the cause's error name, else the thrown error's own name. Keeps
+   * the "fetch failed" rows greppable by actual failure mode.
+   */
+  private causeName(err: unknown): string | undefined {
+    if (!(err instanceof Error)) return undefined;
+    const cause = (err as { cause?: unknown }).cause;
+    const inner = cause instanceof AggregateError ? cause.errors[0] : cause;
+    const code = (inner as NodeJS.ErrnoException | undefined)?.code;
+    if (code) return code;
+    if (inner instanceof Error) return inner.name;
+    return err.name;
   }
 }

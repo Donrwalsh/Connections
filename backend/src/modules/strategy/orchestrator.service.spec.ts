@@ -354,6 +354,45 @@ describe("OrchestratorService", () => {
     }
   });
 
+  it("should unwrap the undici cause behind a bare 'fetch failed'", async () => {
+    // What Node's global fetch actually throws when the connection drops:
+    // a TypeError whose message is only "fetch failed", with the real
+    // failure on .cause.
+    const fetchFailed = new TypeError("fetch failed");
+    (fetchFailed as { cause?: unknown }).cause = Object.assign(new Error("read ECONNRESET"), {
+      code: "ECONNRESET",
+    });
+    mockFetch.mockRejectedValueOnce(fetchFailed);
+
+    const outcome = await service.solveAssist(messages);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(outcome).toEqual({
+      ok: false,
+      error: {
+        error: "fetch failed (ECONNRESET: read ECONNRESET)",
+        code: "model_error",
+        errorName: "ECONNRESET",
+      },
+    });
+  });
+
+  it("should unwrap an AggregateError cause (multiple failed connect attempts)", async () => {
+    const fetchFailed = new TypeError("fetch failed");
+    (fetchFailed as { cause?: unknown }).cause = new AggregateError([
+      Object.assign(new Error("connect ECONNREFUSED ::1:3001"), { code: "ECONNREFUSED" }),
+      Object.assign(new Error("connect ETIMEDOUT 10.0.0.1:3001"), { code: "ETIMEDOUT" }),
+    ]);
+    mockFetch.mockRejectedValueOnce(fetchFailed);
+
+    const outcome = await service.solveAssist(messages);
+
+    if (outcome.ok) throw new Error("expected failure");
+    expect(outcome.error.error).toContain("ECONNREFUSED");
+    expect(outcome.error.error).toContain("ETIMEDOUT");
+    expect(outcome.error.errorName).toBe("ECONNREFUSED");
+  });
+
   it("should classify a timeout as model_error with no retry", async () => {
     const abortError = new Error("The operation was aborted.");
     abortError.name = "AbortError";
@@ -364,7 +403,7 @@ describe("OrchestratorService", () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(outcome).toEqual({
       ok: false,
-      error: { error: "Request timed out", code: "model_error" },
+      error: { error: "Request timed out", code: "model_error", errorName: "AbortError" },
     });
   });
 
