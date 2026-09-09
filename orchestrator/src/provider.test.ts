@@ -5,6 +5,7 @@ import {
   getContextWindow,
   getModel,
   getModelName,
+  getOllamaNumPredict,
 } from "./provider.js";
 
 const createOllamaMock = vi.hoisted(() => vi.fn(() => vi.fn()));
@@ -65,7 +66,7 @@ describe("getModel", () => {
     expect(createOllamaMock).toHaveBeenCalledTimes(1);
     const modelFactory = createOllamaMock.mock.results[0].value;
     expect(modelFactory).toHaveBeenCalledWith("llama3.2", {
-      options: { num_ctx: 2048 },
+      options: { num_ctx: 2048, num_predict: 8192 },
     });
     expect(openaiMock).not.toHaveBeenCalled();
   });
@@ -77,7 +78,7 @@ describe("getModel", () => {
 
     const modelFactory = createOllamaMock.mock.results[0].value;
     expect(modelFactory).toHaveBeenCalledWith("llama3.2", {
-      options: { num_ctx: 8192 },
+      options: { num_ctx: 8192, num_predict: 8192 },
     });
   });
 
@@ -95,7 +96,7 @@ describe("getModel", () => {
 
     const modelFactory = createOllamaMock.mock.results[0].value;
     expect(modelFactory).toHaveBeenCalledWith("llama3.2", {
-      options: { num_ctx: 2048 },
+      options: { num_ctx: 2048, num_predict: 8192 },
     });
   });
 
@@ -106,7 +107,7 @@ describe("getModel", () => {
 
     const modelFactory = createOllamaMock.mock.results[0].value;
     expect(modelFactory).toHaveBeenCalledWith("llama3.2", {
-      options: { num_ctx: 4096 },
+      options: { num_ctx: 4096, num_predict: 8192 },
     });
   });
 
@@ -135,7 +136,7 @@ describe("getModel", () => {
 
     const modelFactory = createOllamaMock.mock.results[0].value;
     expect(modelFactory).toHaveBeenCalledWith("mistral", {
-      options: { num_ctx: 8192 },
+      options: { num_ctx: 8192, num_predict: 8192 },
     });
   });
 
@@ -495,5 +496,28 @@ describe("getContextWindow", () => {
     expect(getContextWindow()).toBe(8192);
     vi.stubEnv("MODEL_CONTEXT_WINDOW", "not-a-number");
     expect(getContextWindow()).toBe(8192);
+  });
+});
+
+describe("getOllamaNumPredict", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("parses a positive OLLAMA_NUM_PREDICT", () => {
+    vi.stubEnv("OLLAMA_NUM_PREDICT", "2048");
+    expect(getOllamaNumPredict()).toBe(2048);
+  });
+
+  it("defaults to 8192 for missing or non-numeric values", () => {
+    vi.stubEnv("OLLAMA_NUM_PREDICT", "");
+    expect(getOllamaNumPredict()).toBe(8192);
+    vi.stubEnv("OLLAMA_NUM_PREDICT", "not-a-number");
+    expect(getOllamaNumPredict()).toBe(8192);
+  });
+
+  it("passes a negative value through so -1 can restore unbounded generation", () => {
+    vi.stubEnv("OLLAMA_NUM_PREDICT", "-1");
+    expect(getOllamaNumPredict()).toBe(-1);
   });
 });

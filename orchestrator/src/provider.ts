@@ -17,6 +17,7 @@ export const DEFAULT_SAMBANOVA_MODEL = "Meta-Llama-3.3-70B-Instruct";
 export const DEFAULT_JUDGE_MODEL = "gpt-4.1-nano";
 export const DEFAULT_JUDGE_PROVIDER: ModelProvider = "openai";
 export const DEFAULT_CONTEXT_WINDOW = 8192;
+export const DEFAULT_OLLAMA_NUM_PREDICT = 8192;
 
 export type ModelProvider =
   | "openai"
@@ -82,7 +83,15 @@ export function getModel(
       baseURL: process.env.OLLAMA_BASE_URL ?? "http://localhost:11434",
     });
     return ollama(modelOverride ?? process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL, {
-      options: { num_ctx: effectiveContextWindow("ollama", contextWindow) },
+      options: {
+        num_ctx: effectiveContextWindow("ollama", contextWindow),
+        // Hard ceiling on generated tokens — without it a looping or
+        // never-stopping model (deepseek-r1 and other reasoning models are
+        // prone to this) runs until llama.cpp's context shift and then the
+        // orchestrator timeout. Ollama-only; hosted providers enforce their
+        // own limits.
+        num_predict: getOllamaNumPredict(),
+      },
     });
   }
 
@@ -171,4 +180,17 @@ export function getModelName(provider: ModelProvider, modelOverride?: string): s
 export function getContextWindow(): number {
   const raw = Number(process.env.MODEL_CONTEXT_WINDOW);
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_CONTEXT_WINDOW;
+}
+
+/**
+ * The hard token ceiling passed as Ollama's `num_predict` (see getModel).
+ * From OLLAMA_NUM_PREDICT, defaulting to 8192 — enough headroom for a
+ * reasoning model's chain-of-thought plus the answer, while still stopping
+ * a runaway generation in seconds rather than minutes. A negative value is
+ * passed through unchanged so `OLLAMA_NUM_PREDICT=-1` restores llama.cpp's
+ * unbounded behavior.
+ */
+export function getOllamaNumPredict(): number {
+  const raw = Number(process.env.OLLAMA_NUM_PREDICT);
+  return Number.isFinite(raw) && raw !== 0 ? raw : DEFAULT_OLLAMA_NUM_PREDICT;
 }
