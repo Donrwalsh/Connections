@@ -323,22 +323,25 @@ behaviour contract:
 - `*-free-dispatch.service.spec.ts` (5, ~233–247 lines each)
 - `*-rpd-resume.service.spec.ts` (5) and `*-rpd-resume.bootstrap.spec.ts` (5)
 
-Keep all of them green against the generic implementation through each swap. Only **after**
-the generic impl is landed and green, in a *following* commit, collapse them to one deep
-tick/resume spec plus the table-driven `provider-pool.config.spec.ts`. The
-`llm-strategy-runner.service.spec.ts` drops its five injected hold-service mocks for one
-`ProviderPool` fake.
+Rather than keep the per-provider specs alive as wrappers, each family was collapsed in the
+same commit as its generic impl — every assertion carried over into one parametrised spec
+(`provider-pool.config.spec.ts`, `rpd-resume.service.spec.ts`,
+`rpd-resume.bootstrap.spec.ts`, `free-dispatch.service.spec.ts`). The
+`llm-strategy-runner.service.spec.ts` and `strategy.service.spec.ts` are unchanged — their
+existing coverage is the behaviour contract that stayed green through steps 3–7.
 
-One e2e added after step 5, `backend/test/provider-pool-dispatch.e2e-spec.ts`: drives a full
-`runTick → hold written → runResume → hold cleared` cycle through the generic services.
-Cases: groq (self-rearm, model-scope) and openrouter (account-scope, account-budget).
-Follows the `app.e2e-spec.ts` pattern — boot `AppModule`, stand up a loopback fake
-orchestrator on `:3999` (`ORCHESTRATOR_URL` already resolves there via
-`backend/test/setup-env.ts`), have `/solve-assist` return `429 rate_limited_daily`. Zero
-real provider spend is structurally guaranteed: `setup-env.ts` forces `REDIS_DB=15` (a
-keyspace no real worker reads), no provider API keys are ever set in the test env, and no
-worker runs under `AppModule` so the re-enqueued resume job just sits. Assertions are on
-`RateLimitHold` rows and `StrategyRun.status` transitions.
+**As built:** `backend/test/provider-pool-dispatch.e2e-spec.ts` (3 tests, green against the
+local dev Postgres + Redis). Boots the real `AppModule` — which by itself validates the DI
+rewiring: new module providers, deleted per-provider services, the five `FreeDispatchService`
+shims, the `*_QUEUE_BY_POOL` maps, and the `DispatchState` entity registration. Then, via a
+loopback fake orchestrator on `:3999` returning `429 rate_limited_daily`: (1)
+`FreeDispatchService.getStatus` reads the unified `DispatchState` table for an until-held
+and an account-budget pool; (2) `LlmStrategyRunner.runLlmStrategy` parks an `llm-groq` run
+and the config-driven path writes the per-model `RateLimitHold`; (3) `RpdResumeService`
+clears an elapsed hold, flips the parked run back to `RUNNING`, and re-enqueues it under the
+resume-stamped job id. Zero real provider spend: `setup-env.ts` forces `REDIS_DB=15`, no
+provider keys are set, and no worker runs under `AppModule`. The full `npm run test:e2e`
+suite (`app` + `rate-limit-hold` + this) is **55 tests green**.
 
 Every new migration ships a tested `down()`.
 
