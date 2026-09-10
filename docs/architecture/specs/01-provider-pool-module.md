@@ -275,17 +275,25 @@ each route's response shape so drift fails loud.
 
 ### Step 6 — loop the wiring
 
-- `backend/src/worker.ts` — replace the ~10 hand-listed worker blocks with a loop over
-  `PROVIDER_POOLS`, registering three workers (runs, free-dispatch, rpd-resume) per pool
-  with `freeTier != null`. `createLlmWorker`'s `queueName` param widens from a hardcoded
-  7-member union to `string`; the queue-name-parity test plus `providerPoolOrThrow` in the
-  loop cover the lost compile-time check.
-- `backend/src/modules/automation/daily-automation.service.ts` — replace the five
-  hand-written `run<P>BurnLeg` calls with a loop in `PROVIDER_POOLS` order, calling the
-  generic `FreeDispatchService` (drops the shim use here). `AutomationRunLog` keeps its
-  per-provider column pairs; only the code loops.
-- `backend/src/modules/queue/queue.module.ts` — generate the three queues per free-tier
-  pool rather than hand-listing them.
+- `backend/src/worker.ts` — the runs workers become a loop over `PROVIDER_POOLS` (ollama
+  stays a separate call — it is the only queue a `role: "ollama"` worker runs, and it runs
+  under `role !== "cloud"` rather than `role !== "ollama"`); `createLlmWorker`'s `queueName`
+  param widens from the hardcoded 7-member union to `string`, with a local
+  `llmConcurrencyByPool` map for the per-provider concurrency knobs (folded into the config
+  by step 7). The free-dispatch and rpd-resume worker loops already landed in steps 5 and 4.
+- `backend/src/modules/automation/daily-automation.service.ts` — the five hand-written
+  `run<P>BurnLeg` methods collapse to one `runPoolBurnLeg(leg, date)` driven by a
+  `burnLegs` array in `PROVIDER_POOLS` order. **Deviation:** it iterates the five injected
+  shim services rather than being rewired to the generic `FreeDispatchService` directly —
+  rewiring would force a full rewrite of `daily-automation.service.spec.ts`'s per-provider
+  mocks for no behaviour gain; doc 10 deletes the shims and rewires this at the same time.
+  `AutomationRunLog` keeps its per-provider column pairs (Q9); the loop writes them by
+  computed key.
+- `backend/src/modules/queue/queue.module.ts` — **not changed** in step 6. The
+  `*_QUEUE_BY_POOL` map providers added in steps 3–5 are the consumable form; the
+  per-provider `<p>-*.queue.ts` one-liners that construct the `Queue` singletons stay as-is
+  (generating them in a loop risks the queue-name identity the whole refactor depends on
+  for no real gain).
 
 ### Step 7 — fold the knob families into the config (candidate 4)
 

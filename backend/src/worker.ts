@@ -17,17 +17,15 @@ import { redisConnection } from "./modules/queue/redis.config";
 import { PuzzleIngestionService } from "./modules/game/puzzle-ingestion.service";
 import { ModelMetadataRefreshService } from "./modules/supported-model/model-metadata-refresh.service";
 import { RpdResumeService } from "./modules/provider-pool/rpd-resume.service";
-import { FREE_TIER_POOLS } from "./modules/provider-pool/provider-pool.config";
+import {
+  FREE_TIER_POOLS,
+  PROVIDER_POOLS,
+  providerPoolById,
+  type ProviderPoolId,
+} from "./modules/provider-pool/provider-pool.config";
 import { DailyAutomationService } from "./modules/automation/daily-automation.service";
 import {
   isLlmStrategy,
-  LLM_OPENAI,
-  LLM_OLLAMA,
-  LLM_GOOGLE,
-  LLM_GROQ,
-  LLM_OPENROUTER,
-  LLM_MISTRAL,
-  LLM_SAMBANOVA,
   llmOllamaConcurrency,
   llmOpenAIConcurrency,
   llmGoogleConcurrency,
@@ -124,15 +122,18 @@ async function bootstrap() {
    * configured limit (default 1 = fully serialized). Concurrency is read once
    * at boot.
    */
+  const llmConcurrencyByPool: Record<ProviderPoolId, () => number> = {
+    openai: llmOpenAIConcurrency,
+    ollama: llmOllamaConcurrency,
+    google: llmGoogleConcurrency,
+    groq: llmGroqConcurrency,
+    openrouter: llmOpenRouterConcurrency,
+    mistral: llmMistralConcurrency,
+    sambanova: llmSambaNovaConcurrency,
+  };
+
   const createLlmWorker = (
-    queueName:
-      | "llm-openai-runs"
-      | "llm-ollama-runs"
-      | "llm-google-runs"
-      | "llm-groq-runs"
-      | "llm-openrouter-runs"
-      | "llm-mistral-runs"
-      | "llm-sambanova-runs",
+    queueName: string,
     expectedStrategy: string,
     concurrency: number,
   ) => {
@@ -165,65 +166,31 @@ async function bootstrap() {
   // an outbound connection to the deployed Redis/Postgres, so Ollama itself
   // never has to be reachable from outside the local network.
   if (role !== "cloud") {
+    const ollamaPool = providerPoolById("ollama");
     const llmOllamaWorker = createLlmWorker(
-      "llm-ollama-runs",
-      LLM_OLLAMA,
-      llmOllamaConcurrency(),
+      ollamaPool.queues.runs,
+      ollamaPool.strategyName,
+      llmConcurrencyByPool.ollama(),
     );
     activeWorkers.push(llmOllamaWorker);
-    activeQueueNames.push("llm-ollama-runs");
+    activeQueueNames.push(ollamaPool.queues.runs);
   }
 
   // role 'ollama' skips everything below — no OpenAI runs, puzzle ingestion,
   // or free-tier dispatch on a worker that's only there to reach Ollama.
   if (role !== "ollama") {
-    const llmOpenAIWorker = createLlmWorker(
-      "llm-openai-runs",
-      LLM_OPENAI,
-      llmOpenAIConcurrency(),
-    );
-    activeWorkers.push(llmOpenAIWorker);
-    activeQueueNames.push("llm-openai-runs");
-
-    const llmGoogleWorker = createLlmWorker(
-      "llm-google-runs",
-      LLM_GOOGLE,
-      llmGoogleConcurrency(),
-    );
-    activeWorkers.push(llmGoogleWorker);
-    activeQueueNames.push("llm-google-runs");
-
-    const llmGroqWorker = createLlmWorker(
-      "llm-groq-runs",
-      LLM_GROQ,
-      llmGroqConcurrency(),
-    );
-    activeWorkers.push(llmGroqWorker);
-    activeQueueNames.push("llm-groq-runs");
-
-    const llmOpenRouterWorker = createLlmWorker(
-      "llm-openrouter-runs",
-      LLM_OPENROUTER,
-      llmOpenRouterConcurrency(),
-    );
-    activeWorkers.push(llmOpenRouterWorker);
-    activeQueueNames.push("llm-openrouter-runs");
-
-    const llmMistralWorker = createLlmWorker(
-      "llm-mistral-runs",
-      LLM_MISTRAL,
-      llmMistralConcurrency(),
-    );
-    activeWorkers.push(llmMistralWorker);
-    activeQueueNames.push("llm-mistral-runs");
-
-    const llmSambaNovaWorker = createLlmWorker(
-      "llm-sambanova-runs",
-      LLM_SAMBANOVA,
-      llmSambaNovaConcurrency(),
-    );
-    activeWorkers.push(llmSambaNovaWorker);
-    activeQueueNames.push("llm-sambanova-runs");
+    // One runs worker per non-ollama pool (openai + the five free-tier
+    // pools), each on its own queue and concurrency.
+    for (const pool of PROVIDER_POOLS) {
+      if (pool.id === "ollama") continue;
+      const runsWorker = createLlmWorker(
+        pool.queues.runs,
+        pool.strategyName,
+        llmConcurrencyByPool[pool.id](),
+      );
+      activeWorkers.push(runsWorker);
+      activeQueueNames.push(pool.queues.runs);
+    }
 
     const puzzleWorker = new Worker(
       "puzzle-population",
