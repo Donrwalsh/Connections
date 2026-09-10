@@ -89,7 +89,7 @@ interface ProviderPool {
     resetSchedule: ResetSchedule;
     dispatch: DispatchSpec;
     rateLimitFallbackSeconds: NumberThunk;
-    dailyHoldFallbackSeconds?: NumberThunk;                 // self-rearm pools only; fixed-cron pools derive it from the cron
+    dailyHoldFallbackSeconds: NumberThunk;                  // used as `error.dailyResetSeconds ?? this()`; for fixed-cron pools it is time-to-midnight (Pacific / UTC)
     persistentRateLimitPark?: { attempts: NumberThunk; elapsedMs: NumberThunk };  // mistral's consecutive-429 streak escalation, as data
   };
 }
@@ -101,15 +101,23 @@ export function providerPoolById(id: ProviderPoolId): ProviderPool;
 export const FREE_TIER_POOLS: readonly (ProviderPool & { freeTier: {} })[];  // the 5 free-tier rows, in burn order
 ```
 
-Two refinements were made against the sketch above while implementing step 2, both to keep
-the config a pure data structure that a table-driven test can assert row by row:
+Refinements made against the sketch above while implementing, all to keep the config a pure
+data structure that a table-driven test can assert row by row:
 
 - The Mistral streak heuristic is modelled as **data** — `persistentRateLimitPark:
   { attempts, elapsedMs }` (the two `strategies.ts` accessors it is parameterised by) —
-  rather than a `classifyExtra` closure. Step 3 reads those two thunks where the heuristic
-  lives in `classifyFailedCall`; there is no `HoldDecision` type to introduce.
+  rather than a `classifyExtra` closure. Step 3 passes `pool.freeTier.persistentRateLimitPark`
+  into `classifyFailedCall`, which drops its `provider` parameter entirely; there is no
+  `HoldDecision` type to introduce.
 - `queues.freeDispatch` / `queues.rpdResume` are optional and present exactly when
   `freeTier` is non-null (openai / ollama have only a `runs` queue).
+- `dailyHoldFallbackSeconds` is **required** on every `freeTier`, always applied as
+  `error.dailyResetSeconds ?? dailyHoldFallbackSeconds()`. Google and OpenRouter never emit
+  a `dailyResetSeconds` hint (confirmed in `solver.ts`), so for them it is simply the time
+  until their clock boundary — `nextPacificMidnight` / `secondsUntilNextUtcMidnight`, which
+  `provider-pool.config.ts` now imports from `strategy/rate-limit-reset-time`. Deriving the
+  hold duration from the `resetSchedule` cron instead would shift Google's hold by the
+  cron's one-minute offset, so the cron stays purely the step-4 resume-bootstrap input.
 
 **Array order** is `google, groq, openrouter, mistral, sambanova` (then `openai`, `ollama`
 with `freeTier: null`). This reproduces today's daily-automation burn sequence exactly when
@@ -167,16 +175,20 @@ Pure addition, no behaviour change. Create `provider-pool.config.ts` with `PROVI
 | ~804–822 | Mistral-only consecutive-429 escalation branch in `classifyFailedCall` | gated on `pool.freeTier.persistentRateLimitPark` and driven by its `attempts` / `elapsedMs` thunks |
 
 `backend/src/modules/queue/strategy.queue.ts` — `queueForStrategy` currently takes 8
-injected `Queue` params and `if`-chains on `strategyName`. `QueueModule` builds a
-`POOL_RUNS_QUEUES: Map<ProviderPoolId, Queue>` provider by mapping `PROVIDER_POOLS` over the
-existing per-pool `new Queue(...)` instances. New signature
-`queueForStrategy(map, defaultQueue, strategyName)` — one lookup, no `if`-chain.
-`queueForJudgeProvider` is untouched.
+injected `Queue` params and `if`-chains on `strategyName`. New signature
+`queueForStrategy(runsQueueByPool: ReadonlyMap<ProviderPoolId, Queue>, defaultQueue,
+strategyName)` — resolve the pool with `providerPool()`, then one `map.get(pool.id)`, no
+`if`-chain. `strategy.service.ts` builds that map once from the seven `LLM_*_QUEUE` queues
+it already injects (the `LLM_*_QUEUE` DI tokens stay — `category-evaluator` and the
+`*-rpd-resume` services still use them; folding them into a single injected map is deferred
+to keep this step's blast radius contained). `queueForJudgeProvider` is untouched.
 
 `orchestrator/src/solver.ts` — `classifyModelCallError` has five
-`if (provider === "<p>" && … statusCode === 429)` blocks (~317–498). Replace with
-`const CLASSIFY_429: Record<ModelProvider, Classify429>` keyed by the orchestrator's own
-`ModelProvider` type, so TS exhaustiveness catches a missing provider. This is
+`if (provider === "<p>" && … statusCode === 429)` blocks. Replace with
+`RATE_LIMIT_429_CLASSIFIERS: Record<ModelProvider, RateLimit429Classifier | null>` keyed by
+the orchestrator's own `ModelProvider` type (`null` for openai/ollama), so TS exhaustiveness
+catches a missing provider; each classifier returns a `SolveError` or `null` to fall
+through to `model_error`. This is
 **orchestrator-local** — no shared config with the backend. Only the result codes
 (`rate_limited` / `rate_limited_daily` + reset seconds) cross the wire, and those are
 unchanged, so backend and orchestrator deploy independently in any order. The PR

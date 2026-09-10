@@ -4,29 +4,14 @@ import { Repository } from "typeorm";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { GameService } from "../game/game.service";
 import {
-  LLM_OLLAMA,
-  LLM_GOOGLE,
-  LLM_GROQ,
-  LLM_OPENROUTER,
-  LLM_MISTRAL,
-  LLM_SAMBANOVA,
   llmMaxDuplicateGuesses,
   llmMaxFailedGuesses,
   llmMaxMalformedResponses,
   llmMaxModelErrors,
   llmGoogleRateLimitFallbackSeconds,
-  llmGroqRateLimitFallbackSeconds,
-  llmGroqDailyHoldFallbackSeconds,
-  llmOpenRouterRateLimitFallbackSeconds,
-  llmMistralRateLimitFallbackSeconds,
-  mistralPersistentRateLimitAttempts,
-  mistralPersistentRateLimitElapsedMs,
-  mistralModelHoldFallbackSeconds,
-  llmSambaNovaRateLimitFallbackSeconds,
-  llmSambaNovaDailyHoldFallbackSeconds,
-  openRouterDispatchRpmCooldownSeconds,
   llmTemperature,
 } from "../../strategies";
+import { providerPool, type FreeTierConfig } from "../provider-pool/provider-pool.config";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { LlmProposal, LlmProposalStatus } from "./entities/llm-proposal.entity";
 import {
@@ -40,7 +25,6 @@ import { OrchestratorService, type ChatMessage, type SolveErrorCode } from "./or
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { RateLimitHoldService } from "./rate-limit-hold.service";
-import { nextPacificMidnight, secondsUntilNextUtcMidnight } from "./rate-limit-reset-time";
 import { firstCombination } from "./combinatorics";
 import { GROUP_SIZE, parseGroupsSection } from "./parse-groups-section";
 import { applyOneOffWordFixups } from "./normalize-puzzle-word";
@@ -190,23 +174,15 @@ export class LlmStrategyRunner {
   ) {}
 
   async runLlmStrategy(puzzleId: number, strategyName: string, trialNumber = 0, model?: string) {
-    // The strategy name alone determines the provider (there's no per-run
+    // The strategy name alone determines the provider pool (there's no per-run
     // choice of provider today, only of model within it) — resolved once so
-    // every orchestrator call for this run tells it which client to use.
-    const provider =
-      strategyName === LLM_OLLAMA
-        ? "ollama"
-        : strategyName === LLM_GOOGLE
-          ? "google"
-          : strategyName === LLM_GROQ
-            ? "groq"
-            : strategyName === LLM_OPENROUTER
-              ? "openrouter"
-              : strategyName === LLM_MISTRAL
-                ? "mistral"
-                : strategyName === LLM_SAMBANOVA
-                  ? "sambanova"
-                  : "openai";
+    // every orchestrator call, hold check and hold write for this run reads
+    // the same PROVIDER_POOLS row. `pool` is null for a non-pool strategy
+    // (deterministic/shuffle) or an unrecognised name; `provider` then
+    // defaults to "openai", matching the old ternary's final branch.
+    const pool = providerPool(strategyName);
+    const provider = pool?.orchestratorProvider ?? "openai";
+    const freeTier: FreeTierConfig | null = pool?.freeTier ?? null;
 
     const contextWindow = model
       ? await this.supportedModelService.getContextWindow(strategyName, model)
@@ -233,18 +209,12 @@ export class LlmStrategyRunner {
       };
     }
 
-    // Top-gate: an llm-google or llm-groq run whose model is currently out
-    // of daily quota parks immediately — cheap DB work instead of a doomed
+    // Top-gate: a per-model-hold pool's run whose model is currently out of
+    // daily quota parks immediately — cheap DB work instead of a doomed
     // provider call. The matching *-rpd-resume sweep re-dispatches it after
     // the reset.
-    const isPerModelHoldProvider =
-      strategyName === LLM_GOOGLE ||
-      strategyName === LLM_GROQ ||
-      strategyName === LLM_MISTRAL ||
-      strategyName === LLM_SAMBANOVA;
-
     if (
-      isPerModelHoldProvider &&
+      freeTier?.holdScope === "model" &&
       model &&
       (await this.rateLimitHold.isHeld(strategyName, model))
     ) {
@@ -264,7 +234,7 @@ export class LlmStrategyRunner {
     // to the *dispatch tick chain*, not a reason to park a run — a run that
     // hits 20 RPM mid-flight just waits and retries.
     if (
-      strategyName === LLM_OPENROUTER &&
+      freeTier?.holdScope === "account" &&
       (await this.rateLimitHold.heldReason(strategyName)) === "daily"
     ) {
       run.status = StrategyRunStatus.RATE_LIMITED_DAILY;
@@ -315,16 +285,10 @@ export class LlmStrategyRunner {
     const maxMalformed = llmMaxMalformedResponses();
     const maxModelErrors = llmMaxModelErrors();
     const temperature = llmTemperature();
+    // A pool uses its own configured fallback; non-pool strategies keep the
+    // historical default (the old ternary's final branch was Google's).
     const rateLimitFallbackSeconds =
-      strategyName === LLM_GROQ
-        ? llmGroqRateLimitFallbackSeconds()
-        : strategyName === LLM_OPENROUTER
-          ? llmOpenRouterRateLimitFallbackSeconds()
-          : strategyName === LLM_MISTRAL
-            ? llmMistralRateLimitFallbackSeconds()
-            : strategyName === LLM_SAMBANOVA
-              ? llmSambaNovaRateLimitFallbackSeconds()
-              : llmGoogleRateLimitFallbackSeconds();
+      freeTier?.rateLimitFallbackSeconds() ?? llmGoogleRateLimitFallbackSeconds();
 
     // Conversation history for the AI Assist prompt flow.
     const messages: ChatMessage[] = [];
@@ -468,7 +432,7 @@ export class LlmStrategyRunner {
 
         const effectiveErrorCode = this.classifyFailedCall(
           outcome.error.code,
-          provider,
+          freeTier?.persistentRateLimitPark ?? null,
           run,
           state,
           maxModelErrors,
@@ -478,64 +442,35 @@ export class LlmStrategyRunner {
           outcome.error.retryAfterSeconds,
         );
 
-        if (outcome.error.code === "rate_limited_daily" && model) {
-          if (strategyName === LLM_GOOGLE) {
-            // Google's free-tier RPD quota resets at Pacific midnight; the
-            // runner derives the seconds-to-reset the unified hold store needs.
-            await this.rateLimitHold.hold(strategyName, {
-              modelName: model,
-              resetInSeconds: Math.max(
-                0,
-                Math.round((nextPacificMidnight().getTime() - Date.now()) / 1000),
-              ),
-            });
-          } else if (strategyName === LLM_GROQ) {
-            await this.rateLimitHold.hold(strategyName, {
-              modelName: model,
-              resetInSeconds:
-                outcome.error.dailyResetSeconds ?? llmGroqDailyHoldFallbackSeconds(),
-            });
-          } else if (strategyName === LLM_SAMBANOVA) {
-            await this.rateLimitHold.hold(strategyName, {
-              modelName: model,
-              resetInSeconds:
-                outcome.error.dailyResetSeconds ?? llmSambaNovaDailyHoldFallbackSeconds(),
-            });
+        // Write the daily hold for a free-tier pool. `effectiveErrorCode`
+        // (not outcome.error.code) is the gate so Mistral's streak heuristic
+        // — which converts a persistent `rate_limited` into a park — lands a
+        // hold too; for every other pool the two codes are identical here.
+        // resetInSeconds: the provider's own hint when it gave one (Groq,
+        // SambaNova, OpenRouter can), else the pool's configured fallback —
+        // time-to-Pacific-midnight for Google, time-to-UTC-midnight for
+        // OpenRouter, a fixed span for the self-rearm pools.
+        if (freeTier && effectiveErrorCode === "rate_limited_daily") {
+          const resetInSeconds =
+            outcome.error.dailyResetSeconds ?? freeTier.dailyHoldFallbackSeconds();
+          if (freeTier.holdScope === "account") {
+            await this.rateLimitHold.hold(strategyName, { reason: "daily", resetInSeconds });
+          } else if (model) {
+            await this.rateLimitHold.hold(strategyName, { modelName: model, resetInSeconds });
           }
         }
 
-        if (outcome.error.code === "rate_limited_daily" && strategyName === LLM_OPENROUTER) {
-          // Account-wide hold — no model. secondsUntilNextUtcMidnight is the
-          // fallback when the orchestrator couldn't parse a reset.
-          await this.rateLimitHold.hold(strategyName, {
-            reason: "daily",
-            resetInSeconds:
-              outcome.error.dailyResetSeconds ?? secondsUntilNextUtcMidnight(),
-          });
-        }
-
-        if (outcome.error.code === "rate_limited" && strategyName === LLM_OPENROUTER) {
-          // A 20 RPM hit — back the whole dispatch tick chain off, not just
-          // this run. hold() no-ops if a 'daily' hold is already live.
-          await this.rateLimitHold.hold(strategyName, {
-            reason: "per-minute-cooldown",
-            resetInSeconds: openRouterDispatchRpmCooldownSeconds(),
-          });
-        }
-
-        // Mistral: the park may come from the orchestrator (body said
-        // monthly) *or* from classifyFailedCall's streak heuristic
-        // converting a rate_limited — classifyFailedCall returns the
-        // effective code so one check covers both. A short fixed fallback
-        // hold; the resume sweep re-checks it.
+        // An account-scoped pool also parks its whole dispatch tick chain on
+        // a per-minute (RPM) hit — not just this run, which merely waits and
+        // retries. hold() no-ops if a 'daily' hold is already live.
         if (
-          strategyName === LLM_MISTRAL &&
-          effectiveErrorCode === "rate_limited_daily" &&
-          model
+          freeTier?.holdScope === "account" &&
+          freeTier.dispatch.stop === "account-budget" &&
+          outcome.error.code === "rate_limited"
         ) {
           await this.rateLimitHold.hold(strategyName, {
-            modelName: model,
-            resetInSeconds: mistralModelHoldFallbackSeconds(),
+            reason: "per-minute-cooldown",
+            resetInSeconds: freeTier.dispatch.rpmCooldownSeconds(),
           });
         }
       }
@@ -784,7 +719,7 @@ export class LlmStrategyRunner {
    */
   private classifyFailedCall(
     code: SolveErrorCode,
-    provider: "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral" | "sambanova",
+    persistentRateLimitPark: FreeTierConfig["persistentRateLimitPark"] | null,
     run: StrategyRun,
     state: LlmRunLoopState,
     maxModelErrors: number,
@@ -801,19 +736,19 @@ export class LlmStrategyRunner {
       run.status = StrategyRunStatus.RATE_LIMITED_DAILY;
       run.finishedAt = new Date();
     } else if (code === "rate_limited") {
-      if (provider === "mistral") {
-        // Mistral sends no rate-limit headers: escalate a *persistent*
-        // streak of per-minute 429s into a park (it is very likely the
-        // monthly wall, which retrying in place cannot clear). Below the
-        // threshold, it stays the ordinary wait-and-retry below.
+      if (persistentRateLimitPark) {
+        // Some providers (Mistral) send no rate-limit headers: escalate a
+        // *persistent* streak of per-minute 429s into a park (it is very
+        // likely the monthly wall, which retrying in place cannot clear).
+        // Below the threshold, it stays the ordinary wait-and-retry below.
         state.rateLimitStreak += 1;
         if (state.rateLimitStreakStartedAt === null) {
           state.rateLimitStreakStartedAt = Date.now();
         }
         const spanMs = Date.now() - state.rateLimitStreakStartedAt;
         if (
-          state.rateLimitStreak >= mistralPersistentRateLimitAttempts() ||
-          spanMs >= mistralPersistentRateLimitElapsedMs()
+          state.rateLimitStreak >= persistentRateLimitPark.attempts() ||
+          spanMs >= persistentRateLimitPark.elapsedMs()
         ) {
           run.status = StrategyRunStatus.RATE_LIMITED_DAILY;
           run.finishedAt = new Date();

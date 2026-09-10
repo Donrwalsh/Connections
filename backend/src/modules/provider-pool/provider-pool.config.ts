@@ -43,6 +43,7 @@ import {
   sambaNovaDispatchMaxInFlight,
   sambaNovaDispatchTickMs,
 } from "../../strategies";
+import { nextPacificMidnight, secondsUntilNextUtcMidnight } from "../strategy/rate-limit-reset-time";
 
 /** Pool ids — identical to the orchestrator's `ModelProvider` union and to the
  * frontend `ProviderPoolId`. Kept in sync by the parity tests. */
@@ -102,10 +103,12 @@ export interface FreeTierConfig {
   /** Seconds to hold on a per-minute `rate_limited` outcome with no usable
    * reset hint from the provider. */
   rateLimitFallbackSeconds: NumberThunk;
-  /** Seconds to hold on a `rate_limited_daily` outcome with no usable reset
-   * hint. Present only for `self-rearm` pools — `fixed-cron` pools derive the
-   * daily reset from their cron instead. */
-  dailyHoldFallbackSeconds?: NumberThunk;
+  /** Seconds to hold on a `rate_limited_daily` outcome, used as
+   * `error.dailyResetSeconds ?? dailyHoldFallbackSeconds()`. For the two
+   * fixed-cron pools this is the time until that clock boundary (Pacific /
+   * UTC midnight), which is also all they ever use — neither provider emits a
+   * `dailyResetSeconds` hint. */
+  dailyHoldFallbackSeconds: NumberThunk;
   /** Mistral only: it sends no rate-limit headers, so a persistent streak of
    * per-minute 429s (>= `attempts` outcomes, or spanning >= `elapsedMs`) is
    * escalated into a daily park. */
@@ -156,6 +159,8 @@ export const PROVIDER_POOLS: ProviderPool[] = [
       resetSchedule: { kind: "fixed-cron", pattern: "1 0 * * *", tz: "America/Los_Angeles" },
       dispatch: { stop: "until-held", pacing: "shared" },
       rateLimitFallbackSeconds: llmGoogleRateLimitFallbackSeconds,
+      dailyHoldFallbackSeconds: () =>
+        Math.max(0, Math.round((nextPacificMidnight().getTime() - Date.now()) / 1000)),
     },
   },
   {
@@ -200,6 +205,8 @@ export const PROVIDER_POOLS: ProviderPool[] = [
         maxInFlight: openRouterDispatchMaxInFlight,
       },
       rateLimitFallbackSeconds: llmOpenRouterRateLimitFallbackSeconds,
+      // OpenRouter emits no dailyResetSeconds hint; its free allowance resets on UTC midnight.
+      dailyHoldFallbackSeconds: secondsUntilNextUtcMidnight,
     },
   },
   {

@@ -98,18 +98,14 @@ describe("FreeTierConfig invariants", () => {
   });
 
   it.each(freeTierRows)(
-    "%s: dailyHoldFallbackSeconds is present iff the pool self-rearms",
+    "%s: rateLimitFallbackSeconds and dailyHoldFallbackSeconds resolve to positive numbers",
     (_id, freeTier) => {
-      const selfRearms = freeTier.resetSchedule.kind === "self-rearm";
-      expect(typeof freeTier.dailyHoldFallbackSeconds === "function").toBe(selfRearms);
+      for (const value of [freeTier.rateLimitFallbackSeconds(), freeTier.dailyHoldFallbackSeconds()]) {
+        expect(Number.isFinite(value)).toBe(true);
+        expect(value).toBeGreaterThan(0);
+      }
     },
   );
-
-  it.each(freeTierRows)("%s: rateLimitFallbackSeconds resolves to a positive number", (_id, freeTier) => {
-    const value = freeTier.rateLimitFallbackSeconds();
-    expect(Number.isFinite(value)).toBe(true);
-    expect(value).toBeGreaterThan(0);
-  });
 
   it.each(freeTierRows)("%s: dispatch spec is well formed and its thunks resolve", (_id, freeTier) => {
     const dispatch = freeTier.dispatch;
