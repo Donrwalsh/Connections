@@ -196,21 +196,33 @@ description states this so no lockstep rollout is assumed.
 
 ### Step 4 — unify `RpdResumeService`
 
-One generic `RpdResumeService` in `provider-pool/` with `runResume(poolId, jobId)`.
-Scheduling driven by `resetSchedule`: `fixed-cron` registers a job scheduler in the
-bootstrap; `self-rearm` enqueues one startup catch-up and re-arms from
-`RateLimitHoldService.nextResetAt()`.
+One generic `RpdResumeService` + `RpdResumeBootstrap` in `provider-pool/`.
+`runResume(poolId, triggerJobId)` branches on `freeTier.holdScope`: per-model pools
+(google, groq, mistral, sambanova) clear expired per-model holds, revive parked runs whose
+model has cleared, and re-arm a short follow-up sweep if any stayed parked; the account
+pool (openrouter) clears the single account hold and, if it lifted, revives every parked
+run. The bootstrap loops `FREE_TIER_POOLS`: one startup catch-up per pool, plus a job
+scheduler for the `fixed-cron` pools on their `pattern`/`tz`.
 
-Delete the five `*-rpd-resume.service.ts` + five `*-rpd-resume.bootstrap.ts` from
-`backend/src/modules/strategy/` → one service + one bootstrap. Keep the five
+Delete the five `*-rpd-resume.service.ts` + five `*-rpd-resume.bootstrap.ts` (and their ten
+spec files) → one service + one bootstrap + one collapsed spec each. Keep the five
 `<p>-rpd-resume` BullMQ queue names as config data (renaming a live queue orphans in-flight
-jobs).
+jobs); `QueueModule` gains `RUNS_QUEUE_BY_POOL` and `RPD_RESUME_QUEUE_BY_POOL` map
+providers.
 
-**Behaviour drift:** normalise cosmetic drift — the resume log wording (Groq logs
-`"RPD hold set"`, Mistral logs `"hold set"`) becomes one string. Preserve functional drift
-as an explicit config axis — Google stamps resume job-ids with `pacificDateStamp()`, the
-others use the trigger job-id; this feeds resume dedup, so it is modelled, not flattened.
-Any functional normalisation is called out in the commit body.
+**Behaviour drift:** the resume job-id stamp is now derived uniformly —
+`dateStampInTz(resetSchedule.tz)` for the fixed-cron pools (which reproduces Google's
+`pacificDateStamp()` and OpenRouter's `toISOString().slice(0,10)` exactly), the trigger
+job-id for the self-rearm pools. No functional change; the only divergence flattened is log
+wording.
+
+**Deviations from the sketch:** the generic service/bootstrap are registered in
+`StrategyModule` (not a new `ProviderPoolModule`) because they depend on
+`RateLimitHoldService`, which lives there — a dedicated module would import `StrategyModule`
+and `StrategyModule` already needs the provider-pool config, so a new module buys a
+circular import for no gain. The `worker.ts` RPD-resume worker loop (five hand-written
+blocks → one loop over `FREE_TIER_POOLS`) is pulled forward from step 6, since deleting the
+five services forces the worker change to keep the build green.
 
 ### Step 5 — unify `FreeDispatchService` + the dispatch-state table
 

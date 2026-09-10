@@ -20,11 +20,8 @@ import type { FreeTierId } from "./modules/strategy/free-tier-usage.service";
 import { redisConnection } from "./modules/queue/redis.config";
 import { PuzzleIngestionService } from "./modules/game/puzzle-ingestion.service";
 import { ModelMetadataRefreshService } from "./modules/supported-model/model-metadata-refresh.service";
-import { GoogleRpdResumeService } from "./modules/strategy/google-rpd-resume.service";
-import { GroqRpdResumeService } from "./modules/strategy/groq-rpd-resume.service";
-import { OpenRouterRpdResumeService } from "./modules/strategy/openrouter-rpd-resume.service";
-import { MistralRpdResumeService } from "./modules/strategy/mistral-rpd-resume.service";
-import { SambaNovaRpdResumeService } from "./modules/strategy/sambanova-rpd-resume.service";
+import { RpdResumeService } from "./modules/provider-pool/rpd-resume.service";
+import { FREE_TIER_POOLS } from "./modules/provider-pool/provider-pool.config";
 import { DailyAutomationService } from "./modules/automation/daily-automation.service";
 import {
   isLlmStrategy,
@@ -67,11 +64,7 @@ async function bootstrap() {
   const mistralFreeDispatchService = appContext.get(MistralFreeDispatchService);
   const sambaNovaFreeDispatchService = appContext.get(SambaNovaFreeDispatchService);
   const modelMetadataRefreshService = appContext.get(ModelMetadataRefreshService);
-  const googleRpdResumeService = appContext.get(GoogleRpdResumeService);
-  const groqRpdResumeService = appContext.get(GroqRpdResumeService);
-  const openRouterRpdResumeService = appContext.get(OpenRouterRpdResumeService);
-  const mistralRpdResumeService = appContext.get(MistralRpdResumeService);
-  const sambaNovaRpdResumeService = appContext.get(SambaNovaRpdResumeService);
+  const rpdResumeService = appContext.get(RpdResumeService);
   const dailyAutomationService = appContext.get(DailyAutomationService);
 
   const activeWorkers: Worker[] = [];
@@ -424,110 +417,36 @@ async function bootstrap() {
     activeWorkers.push(sambaNovaFreeDispatchWorker);
     activeQueueNames.push("sambanova-free-dispatch");
 
-    const googleRpdResumeWorker = new Worker(
-      "google-rpd-resume",
-      async (job) => {
-        logger.log(`starting google-rpd resume sweep ${job.id}`);
-        const result = await googleRpdResumeService.runResume();
-        logger.log(`finished google-rpd resume sweep ${job.id}: ${JSON.stringify(result)}`);
-        return result;
-      },
-      {
-        connection: redisConnection,
-        concurrency: 1,
-      },
-    );
+    // One RPD-resume worker per free-tier pool, all identical bar the queue
+    // name — RpdResumeService.runResume() branches on the pool internally.
+    for (const pool of FREE_TIER_POOLS) {
+      const queueName = pool.queues.rpdResume!;
+      const rpdResumeWorker = new Worker(
+        queueName,
+        async (job) => {
+          logger.log(`starting ${pool.id}-rpd resume sweep ${job.id}`);
+          const result = await rpdResumeService.runResume(
+            pool.id,
+            job.id ?? String(job.timestamp),
+          );
+          logger.log(
+            `finished ${pool.id}-rpd resume sweep ${job.id}: ${JSON.stringify(result)}`,
+          );
+          return result;
+        },
+        {
+          connection: redisConnection,
+          concurrency: 1,
+        },
+      );
 
-    googleRpdResumeWorker.on("failed", (job, err) => {
-      logger.error(`google-rpd resume sweep ${job?.id} failed`, err?.stack || err);
-    });
+      rpdResumeWorker.on("failed", (job, err) => {
+        logger.error(`${pool.id}-rpd resume sweep ${job?.id} failed`, err?.stack || err);
+      });
 
-    activeWorkers.push(googleRpdResumeWorker);
-    activeQueueNames.push("google-rpd-resume");
-
-    const groqRpdResumeWorker = new Worker(
-      "groq-rpd-resume",
-      async (job) => {
-        logger.log(`starting groq-rpd resume sweep ${job.id}`);
-        const result = await groqRpdResumeService.runResume(job.id ?? String(job.timestamp));
-        logger.log(`finished groq-rpd resume sweep ${job.id}: ${JSON.stringify(result)}`);
-        return result;
-      },
-      {
-        connection: redisConnection,
-        concurrency: 1,
-      },
-    );
-
-    groqRpdResumeWorker.on("failed", (job, err) => {
-      logger.error(`groq-rpd resume sweep ${job?.id} failed`, err?.stack || err);
-    });
-
-    activeWorkers.push(groqRpdResumeWorker);
-    activeQueueNames.push("groq-rpd-resume");
-
-    const openRouterRpdResumeWorker = new Worker(
-      "openrouter-rpd-resume",
-      async (job) => {
-        logger.log(`starting openrouter-rpd resume sweep ${job.id}`);
-        const result = await openRouterRpdResumeService.runResume();
-        logger.log(`finished openrouter-rpd resume sweep ${job.id}: ${JSON.stringify(result)}`);
-        return result;
-      },
-      {
-        connection: redisConnection,
-        concurrency: 1,
-      },
-    );
-
-    openRouterRpdResumeWorker.on("failed", (job, err) => {
-      logger.error(`openrouter-rpd resume sweep ${job?.id} failed`, err?.stack || err);
-    });
-
-    activeWorkers.push(openRouterRpdResumeWorker);
-    activeQueueNames.push("openrouter-rpd-resume");
-
-    const mistralRpdResumeWorker = new Worker(
-      "mistral-rpd-resume",
-      async (job) => {
-        logger.log(`starting mistral-rpd resume sweep ${job.id}`);
-        const result = await mistralRpdResumeService.runResume(job.id ?? String(job.timestamp));
-        logger.log(`finished mistral-rpd resume sweep ${job.id}: ${JSON.stringify(result)}`);
-        return result;
-      },
-      {
-        connection: redisConnection,
-        concurrency: 1,
-      },
-    );
-
-    mistralRpdResumeWorker.on("failed", (job, err) => {
-      logger.error(`mistral-rpd resume sweep ${job?.id} failed`, err?.stack || err);
-    });
-
-    activeWorkers.push(mistralRpdResumeWorker);
-    activeQueueNames.push("mistral-rpd-resume");
-
-    const sambaNovaRpdResumeWorker = new Worker(
-      "sambanova-rpd-resume",
-      async (job) => {
-        logger.log(`starting sambanova-rpd resume sweep ${job.id}`);
-        const result = await sambaNovaRpdResumeService.runResume(job.id ?? String(job.timestamp));
-        logger.log(`finished sambanova-rpd resume sweep ${job.id}: ${JSON.stringify(result)}`);
-        return result;
-      },
-      {
-        connection: redisConnection,
-        concurrency: 1,
-      },
-    );
-
-    sambaNovaRpdResumeWorker.on("failed", (job, err) => {
-      logger.error(`sambanova-rpd resume sweep ${job?.id} failed`, err?.stack || err);
-    });
-
-    activeWorkers.push(sambaNovaRpdResumeWorker);
-    activeQueueNames.push("sambanova-rpd-resume");
+      activeWorkers.push(rpdResumeWorker);
+      activeQueueNames.push(queueName);
+    }
 
     const dailyAutomationWorker = new Worker(
       "daily-automation",
