@@ -55,6 +55,9 @@ export const RUNS_QUEUE_BY_POOL = "RUNS_QUEUE_BY_POOL";
 /** The per-provider RPD-resume queues, keyed by provider-pool id (free-tier
  * pools only). */
 export const RPD_RESUME_QUEUE_BY_POOL = "RPD_RESUME_QUEUE_BY_POOL";
+/** The per-provider free-dispatch tick queues, keyed by provider-pool id
+ * (free-tier pools only). */
+export const FREE_DISPATCH_QUEUE_BY_POOL = "FREE_DISPATCH_QUEUE_BY_POOL";
 
 const runsQueueByPool: ReadonlyMap<ProviderPoolId, Queue> = new Map([
   ["openai", llmOpenAIQueue],
@@ -72,6 +75,14 @@ const rpdResumeQueueByPool: ReadonlyMap<ProviderPoolId, Queue> = new Map([
   ["openrouter", openRouterRpdResumeQueue],
   ["mistral", mistralRpdResumeQueue],
   ["sambanova", sambaNovaRpdResumeQueue],
+]);
+
+const freeDispatchQueueByPool: ReadonlyMap<ProviderPoolId, Queue> = new Map([
+  ["google", googleFreeDispatchQueue],
+  ["groq", groqFreeDispatchQueue],
+  ["openrouter", openRouterFreeDispatchQueue],
+  ["mistral", mistralFreeDispatchQueue],
+  ["sambanova", sambaNovaFreeDispatchQueue],
 ]);
 
 @Module({
@@ -100,6 +111,7 @@ const rpdResumeQueueByPool: ReadonlyMap<ProviderPoolId, Queue> = new Map([
     { provide: DAILY_AUTOMATION_QUEUE, useValue: dailyAutomationQueue },
     { provide: RUNS_QUEUE_BY_POOL, useValue: runsQueueByPool },
     { provide: RPD_RESUME_QUEUE_BY_POOL, useValue: rpdResumeQueueByPool },
+    { provide: FREE_DISPATCH_QUEUE_BY_POOL, useValue: freeDispatchQueueByPool },
   ],
   exports: [
     STRATEGY_QUEUE,
@@ -126,6 +138,7 @@ const rpdResumeQueueByPool: ReadonlyMap<ProviderPoolId, Queue> = new Map([
     DAILY_AUTOMATION_QUEUE,
     RUNS_QUEUE_BY_POOL,
     RPD_RESUME_QUEUE_BY_POOL,
+    FREE_DISPATCH_QUEUE_BY_POOL,
   ],
 })
 export class QueueModule {}

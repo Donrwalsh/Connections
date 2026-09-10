@@ -247,6 +247,17 @@ Root TypeORM registration updated: the new `DispatchState` entity added to
 `TypeOrmModule.forFeature([...])`; the five deleted `*DispatchState` entities removed from
 all three. A registration/parity test covers this where practical.
 
+**As built:** the generic `FreeDispatchService` (in `provider-pool/`, via a `FreeDispatchModule`)
+keeps the shared round-robin dispatch loop (`leastAllocatedModel` + `countTodayDispatchByModel`
++ `findUnrunPuzzleDatesForModel` + `triggerStrategyRuns`) and branches `runTick` on
+`dispatch.stop`: `until-held` (google/groq/mistral/sambanova — pacing from `dispatch.pacing`,
+shared or dedicated) and `account-budget` (openrouter — self-counted call budget, per-minute
+cooldown reschedule). The unified table is `DispatchState`, PK column kept as `id` (holding
+the pool id, exactly the old per-table row key) rather than a renamed `pool` column, so the
+per-provider specs' `{ id: "<pool>" }` assertions carry over unchanged. The `worker.ts`
+free-dispatch worker loop is pulled forward from step 6. Ten per-provider spec files collapse
+to one parametrised `free-dispatch.service.spec.ts`.
+
 **Compatibility shims:** the dispatch controller
 (`backend/src/modules/dispatch/dispatch.controller.ts`) has five literal route pairs
 (`@Get("google")` / `@Delete("google")` …) each injecting a per-provider

@@ -13,11 +13,7 @@ import { SupportedModel } from "./modules/supported-model/entities/supported-mod
 import { ModelPrice } from "./modules/supported-model/entities/model-price.entity";
 import { FreeTierDispatchState } from "./modules/free-tier-dispatch/entities/free-tier-dispatch-state.entity";
 import { AutomationRunLog } from "./modules/automation/entities/automation-run-log.entity";
-import { GoogleDispatchState } from "./modules/google-free-dispatch/entities/google-dispatch-state.entity";
-import { GroqDispatchState } from "./modules/groq-free-dispatch/entities/groq-dispatch-state.entity";
-import { OpenRouterDispatchState } from "./modules/openrouter-free-dispatch/entities/openrouter-dispatch-state.entity";
-import { MistralDispatchState } from "./modules/mistral-free-dispatch/entities/mistral-dispatch-state.entity";
-import { SambaNovaDispatchState } from "./modules/sambanova-free-dispatch/entities/sambanova-dispatch-state.entity";
+import { DispatchState } from "./modules/provider-pool/entities/dispatch-state.entity";
 
 /**
  * Standalone DataSource used by the TypeORM CLI (migration:generate/run/
@@ -45,11 +41,7 @@ export const AppDataSource = new DataSource({
     ModelPrice,
     FreeTierDispatchState,
     AutomationRunLog,
-    GoogleDispatchState,
-    GroqDispatchState,
-    OpenRouterDispatchState,
-    MistralDispatchState,
-    SambaNovaDispatchState,
+    DispatchState,
   ],
   migrations: [__dirname + "/migrations/*{.ts,.js}"],
   synchronize: false,

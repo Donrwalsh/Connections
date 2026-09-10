@@ -11,11 +11,7 @@ import {
   type RunStrategyJobData,
 } from "./modules/strategy/llm-job-handler";
 import { FreeTierDispatchService } from "./modules/free-tier-dispatch/free-tier-dispatch.service";
-import { GoogleFreeDispatchService } from "./modules/google-free-dispatch/google-free-dispatch.service";
-import { GroqFreeDispatchService } from "./modules/groq-free-dispatch/groq-free-dispatch.service";
-import { OpenRouterFreeDispatchService } from "./modules/openrouter-free-dispatch/openrouter-free-dispatch.service";
-import { MistralFreeDispatchService } from "./modules/mistral-free-dispatch/mistral-free-dispatch.service";
-import { SambaNovaFreeDispatchService } from "./modules/sambanova-free-dispatch/sambanova-free-dispatch.service";
+import { FreeDispatchService } from "./modules/provider-pool/free-dispatch.service";
 import type { FreeTierId } from "./modules/strategy/free-tier-usage.service";
 import { redisConnection } from "./modules/queue/redis.config";
 import { PuzzleIngestionService } from "./modules/game/puzzle-ingestion.service";
@@ -58,11 +54,7 @@ async function bootstrap() {
   const categoryEvaluatorService = appContext.get(CategoryEvaluatorService);
   const puzzleIngestionService = appContext.get(PuzzleIngestionService);
   const freeTierDispatchService = appContext.get(FreeTierDispatchService);
-  const googleFreeDispatchService = appContext.get(GoogleFreeDispatchService);
-  const groqFreeDispatchService = appContext.get(GroqFreeDispatchService);
-  const openRouterFreeDispatchService = appContext.get(OpenRouterFreeDispatchService);
-  const mistralFreeDispatchService = appContext.get(MistralFreeDispatchService);
-  const sambaNovaFreeDispatchService = appContext.get(SambaNovaFreeDispatchService);
+  const freeDispatchService = appContext.get(FreeDispatchService);
   const modelMetadataRefreshService = appContext.get(ModelMetadataRefreshService);
   const rpdResumeService = appContext.get(RpdResumeService);
   const dailyAutomationService = appContext.get(DailyAutomationService);
@@ -302,120 +294,34 @@ async function bootstrap() {
     activeWorkers.push(freeTierDispatchWorker);
     activeQueueNames.push("free-tier-dispatch");
 
-    // Each job is one tick of the Google free-daily-quota dispatch cycle
-    // (see GoogleFreeDispatchService) — same self-chaining shape as the
-    // free-tier-dispatch worker above, just with no token budget involved.
-    const googleFreeDispatchWorker = new Worker(
-      "google-free-dispatch",
-      async (job: Job) => {
-        logger.log(`starting google free-tier dispatch tick ${job.id}`);
-        await googleFreeDispatchService.runTick();
-        logger.log(`finished google free-tier dispatch tick ${job.id}`);
-      },
-      {
-        connection: redisConnection,
-        concurrency: 1,
-      },
-    );
+    // One free-dispatch tick worker per free-tier pool, all identical bar
+    // the queue name — FreeDispatchService.runTick() branches on the pool's
+    // stop condition internally.
+    for (const pool of FREE_TIER_POOLS) {
+      const queueName = pool.queues.freeDispatch!;
+      const freeDispatchWorker = new Worker(
+        queueName,
+        async (job: Job) => {
+          logger.log(`starting ${pool.id} free-tier dispatch tick ${job.id}`);
+          await freeDispatchService.runTick(pool.id);
+          logger.log(`finished ${pool.id} free-tier dispatch tick ${job.id}`);
+        },
+        {
+          connection: redisConnection,
+          concurrency: 1,
+        },
+      );
 
-    googleFreeDispatchWorker.on("failed", (job, err) => {
-      logger.error(`google free-tier dispatch tick ${job?.id} failed`, err?.stack || err);
-    });
+      freeDispatchWorker.on("failed", (job, err) => {
+        logger.error(
+          `${pool.id} free-tier dispatch tick ${job?.id} failed`,
+          err?.stack || err,
+        );
+      });
 
-    activeWorkers.push(googleFreeDispatchWorker);
-    activeQueueNames.push("google-free-dispatch");
-
-    // Each job is one tick of the Groq free-daily-quota dispatch cycle
-    // (see GroqFreeDispatchService) — same self-chaining shape as the
-    // Google/OpenAI dispatch workers above.
-    const groqFreeDispatchWorker = new Worker(
-      "groq-free-dispatch",
-      async (job: Job) => {
-        logger.log(`starting groq free-tier dispatch tick ${job.id}`);
-        await groqFreeDispatchService.runTick();
-        logger.log(`finished groq free-tier dispatch tick ${job.id}`);
-      },
-      {
-        connection: redisConnection,
-        concurrency: 1,
-      },
-    );
-
-    groqFreeDispatchWorker.on("failed", (job, err) => {
-      logger.error(`groq free-tier dispatch tick ${job?.id} failed`, err?.stack || err);
-    });
-
-    activeWorkers.push(groqFreeDispatchWorker);
-    activeQueueNames.push("groq-free-dispatch");
-
-    // Each job is one tick of the OpenRouter free-daily-budget dispatch
-    // cycle (see OpenRouterFreeDispatchService) — same self-chaining shape
-    // as the Groq/Google dispatch workers above.
-    const openRouterFreeDispatchWorker = new Worker(
-      "openrouter-free-dispatch",
-      async (job: Job) => {
-        logger.log(`starting openrouter free-tier dispatch tick ${job.id}`);
-        await openRouterFreeDispatchService.runTick();
-        logger.log(`finished openrouter free-tier dispatch tick ${job.id}`);
-      },
-      {
-        connection: redisConnection,
-        concurrency: 1,
-      },
-    );
-
-    openRouterFreeDispatchWorker.on("failed", (job, err) => {
-      logger.error(`openrouter free-tier dispatch tick ${job?.id} failed`, err?.stack || err);
-    });
-
-    activeWorkers.push(openRouterFreeDispatchWorker);
-    activeQueueNames.push("openrouter-free-dispatch");
-
-    // Each job is one tick of the Mistral free-dispatch cycle (see
-    // MistralFreeDispatchService) — same self-chaining shape as the
-    // Groq/Google/OpenRouter dispatch workers above.
-    const mistralFreeDispatchWorker = new Worker(
-      "mistral-free-dispatch",
-      async (job: Job) => {
-        logger.log(`starting mistral free-tier dispatch tick ${job.id}`);
-        await mistralFreeDispatchService.runTick();
-        logger.log(`finished mistral free-tier dispatch tick ${job.id}`);
-      },
-      {
-        connection: redisConnection,
-        concurrency: 1,
-      },
-    );
-
-    mistralFreeDispatchWorker.on("failed", (job, err) => {
-      logger.error(`mistral free-tier dispatch tick ${job?.id} failed`, err?.stack || err);
-    });
-
-    activeWorkers.push(mistralFreeDispatchWorker);
-    activeQueueNames.push("mistral-free-dispatch");
-
-    // Each job is one tick of the SambaNova free-tier dispatch cycle (see
-    // SambaNovaFreeDispatchService) — same self-chaining shape as the
-    // Groq/OpenRouter/Mistral dispatch workers above.
-    const sambaNovaFreeDispatchWorker = new Worker(
-      "sambanova-free-dispatch",
-      async (job: Job) => {
-        logger.log(`starting sambanova free-tier dispatch tick ${job.id}`);
-        await sambaNovaFreeDispatchService.runTick();
-        logger.log(`finished sambanova free-tier dispatch tick ${job.id}`);
-      },
-      {
-        connection: redisConnection,
-        concurrency: 1,
-      },
-    );
-
-    sambaNovaFreeDispatchWorker.on("failed", (job, err) => {
-      logger.error(`sambanova free-tier dispatch tick ${job?.id} failed`, err?.stack || err);
-    });
-
-    activeWorkers.push(sambaNovaFreeDispatchWorker);
-    activeQueueNames.push("sambanova-free-dispatch");
+      activeWorkers.push(freeDispatchWorker);
+      activeQueueNames.push(queueName);
+    }
 
     // One RPD-resume worker per free-tier pool, all identical bar the queue
     // name — RpdResumeService.runResume() branches on the pool internally.

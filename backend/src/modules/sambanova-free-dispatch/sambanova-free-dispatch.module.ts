@@ -1,18 +1,10 @@
 import { Module } from "@nestjs/common";
-import { TypeOrmModule } from "@nestjs/typeorm";
-import { QueueModule } from "../queue/queue.module";
-import { StrategyModule } from "../strategy/strategy.module";
-import { SupportedModelModule } from "../supported-model/supported-model.module";
-import { SambaNovaDispatchState } from "./entities/sambanova-dispatch-state.entity";
+
+import { FreeDispatchModule } from "../provider-pool/free-dispatch.module";
 import { SambaNovaFreeDispatchService } from "./sambanova-free-dispatch.service";
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([SambaNovaDispatchState]),
-    QueueModule,
-    StrategyModule,
-    SupportedModelModule,
-  ],
+  imports: [FreeDispatchModule],
   providers: [SambaNovaFreeDispatchService],
   exports: [SambaNovaFreeDispatchService],
 })
