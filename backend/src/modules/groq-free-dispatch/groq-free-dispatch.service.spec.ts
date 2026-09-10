@@ -6,7 +6,7 @@ import { GroqDispatchState } from "./entities/groq-dispatch-state.entity";
 import { GROQ_FREE_DISPATCH_QUEUE } from "../queue/queue.module";
 import { StrategyService } from "../strategy/strategy.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
-import { GroqRateLimitHoldService } from "../strategy/groq-rate-limit-hold.service";
+import { RateLimitHoldService } from "../strategy/rate-limit-hold.service";
 
 const GROQ_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"];
 
@@ -50,7 +50,7 @@ describe("GroqFreeDispatchService", () => {
         { provide: GROQ_FREE_DISPATCH_QUEUE, useValue: mockQueue },
         { provide: StrategyService, useValue: mockStrategyService },
         { provide: SupportedModelService, useValue: mockSupportedModelService },
-        { provide: GroqRateLimitHoldService, useValue: mockHoldService },
+        { provide: RateLimitHoldService, useValue: mockHoldService },
       ],
     }).compile();
 

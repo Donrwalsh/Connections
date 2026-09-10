@@ -1,7 +1,7 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { getRepositoryToken } from "@nestjs/typeorm";
 import { GoogleRpdResumeService } from "./google-rpd-resume.service";
-import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
+import { RateLimitHoldService } from "./rate-limit-hold.service";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { GOOGLE_RPD_RESUME_QUEUE, LLM_GOOGLE_QUEUE } from "../queue/queue.module";
 import { runStrategyJobId } from "../queue/strategy.queue";
@@ -31,7 +31,7 @@ describe("GoogleRpdResumeService", () => {
   beforeEach(async () => {
     strategyRunRepo = { find: jest.fn().mockResolvedValue([]), save: jest.fn().mockResolvedValue(undefined) };
     holdService = {
-      clearExpired: jest.fn().mockResolvedValue([]),
+      clearExpired: jest.fn().mockResolvedValue({ clearedModels: [], clearedAccountWide: false }),
       heldModels: jest.fn().mockResolvedValue([]),
       nextResetAt: jest.fn().mockResolvedValue(null),
     };
@@ -42,7 +42,7 @@ describe("GoogleRpdResumeService", () => {
       providers: [
         GoogleRpdResumeService,
         { provide: getRepositoryToken(StrategyRun), useValue: strategyRunRepo },
-        { provide: GoogleRateLimitHoldService, useValue: holdService },
+        { provide: RateLimitHoldService, useValue: holdService },
         { provide: LLM_GOOGLE_QUEUE, useValue: queue },
         { provide: GOOGLE_RPD_RESUME_QUEUE, useValue: resumeQueue },
       ],
@@ -61,7 +61,7 @@ describe("GoogleRpdResumeService", () => {
   });
 
   it("revives parked runs whose model is no longer held and re-enqueues them", async () => {
-    holdService.clearExpired.mockResolvedValue(["gemini-3.6-flash"]);
+    holdService.clearExpired.mockResolvedValue({ clearedModels: ["gemini-3.6-flash"], clearedAccountWide: false });
     holdService.heldModels.mockResolvedValue(["gemini-3.6-flash-lite"]);
     holdService.nextResetAt.mockResolvedValue(new Date(FROZEN_NOW.getTime() + 5 * 60_000));
     strategyRunRepo.find.mockResolvedValue([
@@ -182,7 +182,7 @@ describe("GoogleRpdResumeService", () => {
   });
 
   it("does nothing when there are no parked runs", async () => {
-    holdService.clearExpired.mockResolvedValue([]);
+    holdService.clearExpired.mockResolvedValue({ clearedModels: [], clearedAccountWide: false });
     strategyRunRepo.find.mockResolvedValue([]);
 
     const result = await service.runResume();

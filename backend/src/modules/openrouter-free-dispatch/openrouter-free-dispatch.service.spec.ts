@@ -6,7 +6,7 @@ import { OpenRouterDispatchState } from "./entities/openrouter-dispatch-state.en
 import { OPENROUTER_FREE_DISPATCH_QUEUE } from "../queue/queue.module";
 import { StrategyService } from "../strategy/strategy.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
-import { OpenRouterRateLimitHoldService } from "../strategy/openrouter-rate-limit-hold.service";
+import { RateLimitHoldService } from "../strategy/rate-limit-hold.service";
 
 const OR_MODELS = ["z-ai/glm-5.2:free", "minimax/minimax-m3:free"];
 
@@ -58,7 +58,7 @@ describe("OpenRouterFreeDispatchService", () => {
         { provide: OPENROUTER_FREE_DISPATCH_QUEUE, useValue: queue },
         { provide: StrategyService, useValue: strategyService },
         { provide: SupportedModelService, useValue: supportedModelService },
-        { provide: OpenRouterRateLimitHoldService, useValue: holdService },
+        { provide: RateLimitHoldService, useValue: holdService },
       ],
     }).compile();
 

@@ -6,7 +6,7 @@ import { GROQ_RPD_RESUME_QUEUE, LLM_GROQ_QUEUE } from "../queue/queue.module";
 import { runStrategyJobId } from "../queue/strategy.queue";
 import { LLM_GROQ } from "../../strategies";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
-import { GroqRateLimitHoldService } from "./groq-rate-limit-hold.service";
+import { RateLimitHoldService } from "./rate-limit-hold.service";
 
 /** Longest a re-armed sweep ever waits before looking again. */
 const REARM_MAX_DELAY_MS = 15 * 60_000;
@@ -29,7 +29,7 @@ export class GroqRpdResumeService {
   constructor(
     @InjectRepository(StrategyRun)
     private readonly strategyRunRepo: Repository<StrategyRun>,
-    @Inject(GroqRateLimitHoldService) private readonly holdService: GroqRateLimitHoldService,
+    @Inject(RateLimitHoldService) private readonly holdService: RateLimitHoldService,
     @Inject(LLM_GROQ_QUEUE) private readonly llmGroqQueue: Queue,
     @Inject(GROQ_RPD_RESUME_QUEUE) private readonly resumeQueue: Queue,
   ) {}
@@ -50,7 +50,7 @@ export class GroqRpdResumeService {
   async runResume(
     triggerJobId: string,
   ): Promise<{ cleared: string[]; redispatched: number; rearmedInMs?: number }> {
-    const cleared = await this.holdService.clearExpired();
+    const { clearedModels: cleared } = await this.holdService.clearExpired(LLM_GROQ);
     const stillHeld = new Set(await this.holdService.heldModels(LLM_GROQ));
 
     const parked = await this.strategyRunRepo.find({

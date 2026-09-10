@@ -7,11 +7,7 @@ import { LlmProposal } from "./entities/llm-proposal.entity";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { CategoryEvaluation } from "./entities/category-evaluation.entity";
 import { StrategyRun } from "./entities/strategy-run.entity";
-import { GoogleRateLimitHold } from "./entities/google-rate-limit-hold.entity";
-import { GroqRateLimitHold } from "./entities/groq-rate-limit-hold.entity";
-import { OpenRouterRateLimitHold } from "./entities/openrouter-rate-limit-hold.entity";
-import { MistralRateLimitHold } from "./entities/mistral-rate-limit-hold.entity";
-import { SambaNovaRateLimitHold } from "./entities/sambanova-rate-limit-hold.entity";
+import { RateLimitHold } from "./entities/rate-limit-hold.entity";
 import { StrategyController } from "./strategy.controller";
 import { StrategyService } from "./strategy.service";
 import { LlmStrategyRunner } from "./llm-strategy-runner.service";
@@ -19,13 +15,9 @@ import { StrategyRunStore } from "./strategy-run-store.service";
 import { OrchestratorService } from "./orchestrator.service";
 import { CategoryEvaluatorService } from "./category-evaluator.service";
 import { FreeTierUsageService } from "./free-tier-usage.service";
-import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
-import { GroqRateLimitHoldService } from "./groq-rate-limit-hold.service";
-import { OpenRouterRateLimitHoldService } from "./openrouter-rate-limit-hold.service";
-import { MistralRateLimitHoldService } from "./mistral-rate-limit-hold.service";
+import { RateLimitHoldService } from "./rate-limit-hold.service";
 import { MistralRpdResumeService } from "./mistral-rpd-resume.service";
 import { MistralRpdResumeBootstrap } from "./mistral-rpd-resume.bootstrap";
-import { SambaNovaRateLimitHoldService } from "./sambanova-rate-limit-hold.service";
 import { SambaNovaRpdResumeService } from "./sambanova-rpd-resume.service";
 import { SambaNovaRpdResumeBootstrap } from "./sambanova-rpd-resume.bootstrap";
 import { OpenRouterRpdResumeService } from "./openrouter-rpd-resume.service";
@@ -46,11 +38,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
       LlmProposal,
       SolvePrompt,
       CategoryEvaluation,
-      GoogleRateLimitHold,
-      GroqRateLimitHold,
-      OpenRouterRateLimitHold,
-      MistralRateLimitHold,
-      SambaNovaRateLimitHold,
+      RateLimitHold,
     ]),
     QueueModule,
     GameModule,
@@ -64,19 +52,15 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     OrchestratorService,
     CategoryEvaluatorService,
     FreeTierUsageService,
-    GoogleRateLimitHoldService,
+    RateLimitHoldService,
     GoogleRpdResumeService,
     GoogleRpdResumeBootstrap,
-    GroqRateLimitHoldService,
     GroqRpdResumeService,
     GroqRpdResumeBootstrap,
-    OpenRouterRateLimitHoldService,
     OpenRouterRpdResumeService,
     OpenRouterRpdResumeBootstrap,
-    MistralRateLimitHoldService,
     MistralRpdResumeService,
     MistralRpdResumeBootstrap,
-    SambaNovaRateLimitHoldService,
     SambaNovaRpdResumeService,
     SambaNovaRpdResumeBootstrap,
   ],
@@ -85,15 +69,11 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     LlmStrategyRunner,
     CategoryEvaluatorService,
     FreeTierUsageService,
-    GoogleRateLimitHoldService,
+    RateLimitHoldService,
     GoogleRpdResumeService,
-    GroqRateLimitHoldService,
     GroqRpdResumeService,
-    OpenRouterRateLimitHoldService,
     OpenRouterRpdResumeService,
-    MistralRateLimitHoldService,
     MistralRpdResumeService,
-    SambaNovaRateLimitHoldService,
     SambaNovaRpdResumeService,
   ],
 })

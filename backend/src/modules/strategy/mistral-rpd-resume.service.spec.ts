@@ -1,7 +1,7 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { getRepositoryToken } from "@nestjs/typeorm";
 import { MistralRpdResumeService } from "./mistral-rpd-resume.service";
-import { MistralRateLimitHoldService } from "./mistral-rate-limit-hold.service";
+import { RateLimitHoldService } from "./rate-limit-hold.service";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { MISTRAL_RPD_RESUME_QUEUE, LLM_MISTRAL_QUEUE } from "../queue/queue.module";
 import { runStrategyJobId } from "../queue/strategy.queue";
@@ -33,7 +33,7 @@ describe("MistralRpdResumeService", () => {
       save: jest.fn().mockResolvedValue(undefined),
     };
     holdService = {
-      clearExpired: jest.fn().mockResolvedValue([]),
+      clearExpired: jest.fn().mockResolvedValue({ clearedModels: [], clearedAccountWide: false }),
       heldModels: jest.fn().mockResolvedValue([]),
       nextResetAt: jest.fn().mockResolvedValue(null),
     };
@@ -44,7 +44,7 @@ describe("MistralRpdResumeService", () => {
       providers: [
         MistralRpdResumeService,
         { provide: getRepositoryToken(StrategyRun), useValue: strategyRunRepo },
-        { provide: MistralRateLimitHoldService, useValue: holdService },
+        { provide: RateLimitHoldService, useValue: holdService },
         { provide: LLM_MISTRAL_QUEUE, useValue: queue },
         { provide: MISTRAL_RPD_RESUME_QUEUE, useValue: resumeQueue },
       ],
@@ -61,7 +61,7 @@ describe("MistralRpdResumeService", () => {
   });
 
   it("revives parked runs whose model is no longer held and re-enqueues them", async () => {
-    holdService.clearExpired.mockResolvedValue(["mistral-small-latest"]);
+    holdService.clearExpired.mockResolvedValue({ clearedModels: ["mistral-small-latest"], clearedAccountWide: false });
     holdService.heldModels.mockResolvedValue(["ministral-8b-latest"]);
     holdService.nextResetAt.mockResolvedValue(new Date(Date.now() + 5 * 60_000));
     strategyRunRepo.find.mockResolvedValue([
@@ -166,7 +166,7 @@ describe("MistralRpdResumeService", () => {
   });
 
   it("does nothing when there are no parked runs", async () => {
-    holdService.clearExpired.mockResolvedValue([]);
+    holdService.clearExpired.mockResolvedValue({ clearedModels: [], clearedAccountWide: false });
     strategyRunRepo.find.mockResolvedValue([]);
 
     const result = await service.runResume("sweep-1");

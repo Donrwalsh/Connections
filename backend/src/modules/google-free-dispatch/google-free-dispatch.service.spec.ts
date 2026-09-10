@@ -6,7 +6,7 @@ import { GoogleDispatchState } from "./entities/google-dispatch-state.entity";
 import { GOOGLE_FREE_DISPATCH_QUEUE } from "../queue/queue.module";
 import { StrategyService } from "../strategy/strategy.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
-import { GoogleRateLimitHoldService } from "../strategy/google-rate-limit-hold.service";
+import { RateLimitHoldService } from "../strategy/rate-limit-hold.service";
 
 const GOOGLE_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"];
 
@@ -50,7 +50,7 @@ describe("GoogleFreeDispatchService", () => {
         { provide: GOOGLE_FREE_DISPATCH_QUEUE, useValue: mockQueue },
         { provide: StrategyService, useValue: mockStrategyService },
         { provide: SupportedModelService, useValue: mockSupportedModelService },
-        { provide: GoogleRateLimitHoldService, useValue: mockHoldService },
+        { provide: RateLimitHoldService, useValue: mockHoldService },
       ],
     }).compile();
 

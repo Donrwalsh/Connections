@@ -7,11 +7,7 @@ import { Guess } from "./modules/strategy/entities/guess.entity";
 import { LlmProposal } from "./modules/strategy/entities/llm-proposal.entity";
 import { SolvePrompt } from "./modules/strategy/entities/solve-prompt.entity";
 import { CategoryEvaluation } from "./modules/strategy/entities/category-evaluation.entity";
-import { GoogleRateLimitHold } from "./modules/strategy/entities/google-rate-limit-hold.entity";
-import { GroqRateLimitHold } from "./modules/strategy/entities/groq-rate-limit-hold.entity";
-import { OpenRouterRateLimitHold } from "./modules/strategy/entities/openrouter-rate-limit-hold.entity";
-import { MistralRateLimitHold } from "./modules/strategy/entities/mistral-rate-limit-hold.entity";
-import { SambaNovaRateLimitHold } from "./modules/strategy/entities/sambanova-rate-limit-hold.entity";
+import { RateLimitHold } from "./modules/strategy/entities/rate-limit-hold.entity";
 import { StrategyRun } from "./modules/strategy/entities/strategy-run.entity";
 import { SupportedModel } from "./modules/supported-model/entities/supported-model.entity";
 import { ModelPrice } from "./modules/supported-model/entities/model-price.entity";
@@ -44,11 +40,7 @@ export const AppDataSource = new DataSource({
     LlmProposal,
     SolvePrompt,
     CategoryEvaluation,
-    GoogleRateLimitHold,
-    GroqRateLimitHold,
-    OpenRouterRateLimitHold,
-    MistralRateLimitHold,
-    SambaNovaRateLimitHold,
+    RateLimitHold,
     SupportedModel,
     ModelPrice,
     FreeTierDispatchState,
