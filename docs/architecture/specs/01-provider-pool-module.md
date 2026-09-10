@@ -65,6 +65,8 @@ the behaviour config. A parity test asserts the backend `id` / `strategyName` li
 the frontend list, so the 14 duplicated strings cannot drift.
 
 ```ts
+type NumberThunk = () => number;   // reads an env-backed strategies.ts knob at call time
+
 type HoldScope = "model" | "account";
 
 type ResetSchedule =
@@ -72,28 +74,42 @@ type ResetSchedule =
   | { kind: "self-rearm"; maxDelayMs: number };            // groq, mistral, sambanova
 
 type DispatchSpec =
-  | { stop: "until-held"; pacing: "shared" | { tickMs: number; maxBatch: number; maxInFlight: number } }
-  | { stop: "account-budget"; budget: () => number; callsPerTrial: number; tickMs: number;
-      maxBatch: number; maxInFlight: number; rpmCooldownMs: () => number };
+  | { stop: "until-held"; pacing: "shared" | { tickMs: NumberThunk; maxBatch: NumberThunk; maxInFlight: NumberThunk } }
+  | { stop: "account-budget"; budget: NumberThunk; callsPerTrial: NumberThunk; rpmCooldownSeconds: NumberThunk;
+      tickMs: NumberThunk; maxBatch: NumberThunk; maxInFlight: NumberThunk };
 
 interface ProviderPool {
-  id: ProviderPoolId;                  // "google" | "groq" | "openrouter" | "mistral" | "sambanova" | "openai" | "ollama"
+  id: ProviderPoolId;                  // "openai" | "google" | "groq" | "openrouter" | "mistral" | "sambanova" | "ollama"
   label: string;
   strategyName: string;                // "llm-google"
-  orchestratorProvider: string;        // "google" — the provider string solver.ts expects
-  queues: { runs: string; freeDispatch: string; rpdResume: string };  // existing BullMQ names, verbatim
+  orchestratorProvider: ProviderPoolId;// "google" — the provider string solver.ts expects (same union as orchestrator ModelProvider)
+  queues: { runs: string; freeDispatch?: string; rpdResume?: string };  // existing BullMQ names, verbatim; latter two present iff freeTier
   freeTier: null | {                   // null for openai / ollama
     holdScope: HoldScope;
     resetSchedule: ResetSchedule;
     dispatch: DispatchSpec;
-    rateLimitFallbackSeconds: () => number;
-    dailyHoldFallbackSeconds?: () => number;
-    classifyExtra?: (state: unknown, outcome: unknown) => HoldDecision | null;  // mistral's consecutive-429 streak escalation
+    rateLimitFallbackSeconds: NumberThunk;
+    dailyHoldFallbackSeconds?: NumberThunk;                 // self-rearm pools only; fixed-cron pools derive it from the cron
+    persistentRateLimitPark?: { attempts: NumberThunk; elapsedMs: NumberThunk };  // mistral's consecutive-429 streak escalation, as data
   };
 }
 
 export const PROVIDER_POOLS: ProviderPool[] = [ /* google, groq, openrouter, mistral, sambanova, openai, ollama */ ];
+export function providerPool(strategyName: string | null | undefined): ProviderPool | null;
+export function providerPoolOrThrow(strategyName: string): ProviderPool;
+export function providerPoolById(id: ProviderPoolId): ProviderPool;
+export const FREE_TIER_POOLS: readonly (ProviderPool & { freeTier: {} })[];  // the 5 free-tier rows, in burn order
 ```
+
+Two refinements were made against the sketch above while implementing step 2, both to keep
+the config a pure data structure that a table-driven test can assert row by row:
+
+- The Mistral streak heuristic is modelled as **data** — `persistentRateLimitPark:
+  { attempts, elapsedMs }` (the two `strategies.ts` accessors it is parameterised by) —
+  rather than a `classifyExtra` closure. Step 3 reads those two thunks where the heuristic
+  lives in `classifyFailedCall`; there is no `HoldDecision` type to introduce.
+- `queues.freeDispatch` / `queues.rpdResume` are optional and present exactly when
+  `freeTier` is non-null (openai / ollama have only a `runs` queue).
 
 **Array order** is `google, groq, openrouter, mistral, sambanova` (then `openai`, `ollama`
 with `freeTier: null`). This reproduces today's daily-automation burn sequence exactly when
@@ -101,7 +117,7 @@ step 6 replaces the hand-written leg calls with a loop. The order is believed in
 but it is preserved rather than proven.
 
 **Knob values** (`rateLimitFallbackSeconds`, `dailyHoldFallbackSeconds`, dispatch pacing
-numbers, `rpmCooldownMs`, `budget`) are held as `() => number` thunks that reference the
+numbers, `rpmCooldownSeconds`, `budget`) are held as `() => number` thunks that reference the
 existing accessor functions in `backend/src/strategies.ts`. Runtime env override must keep
 working (the Groq free-tier retry behaviour depends on reading env at call time). Step 7
 moves those accessor definitions into the config module; it does not inline the numbers.
@@ -147,8 +163,8 @@ Pure addition, no behaviour change. Create `provider-pool.config.ts` with `PROVI
 | ~240–244 | `isPerModelHoldProvider = strategyName === LLM_GOOGLE \|\| …` | `providerPool(strategyName)?.freeTier?.holdScope === "model"` |
 | ~266–277 | `strategyName === LLM_OPENROUTER` account-wide gate | `holdScope === "account"` |
 | ~318–327 | `strategyName === LLM_GROQ ? llmGroqRateLimitFallbackSeconds() : …` | `providerPool(strategyName)?.freeTier?.rateLimitFallbackSeconds() ?? …` |
-| ~481–540 | daily-hold-writing ladder (`if strategyName === LLM_GOOGLE … else if LLM_GROQ …`, plus a separate Mistral `if` gated on `effectiveErrorCode` from the streak heuristic) | one path driven by `holdScope`, `resetSchedule`, `dailyHoldFallbackSeconds`, and `classifyExtra` for the Mistral streak |
-| ~804–822 | Mistral-only consecutive-429 escalation branch in `classifyFailedCall` | driven by `classifyExtra` on the pool row |
+| ~481–540 | daily-hold-writing ladder (`if strategyName === LLM_GOOGLE … else if LLM_GROQ …`, plus a separate Mistral `if` gated on `effectiveErrorCode` from the streak heuristic) | one path driven by `holdScope`, `resetSchedule`, and `dailyHoldFallbackSeconds` |
+| ~804–822 | Mistral-only consecutive-429 escalation branch in `classifyFailedCall` | gated on `pool.freeTier.persistentRateLimitPark` and driven by its `attempts` / `elapsedMs` thunks |
 
 `backend/src/modules/queue/strategy.queue.ts` — `queueForStrategy` currently takes 8
 injected `Queue` params and `if`-chains on `strategyName`. `QueueModule` builds a
