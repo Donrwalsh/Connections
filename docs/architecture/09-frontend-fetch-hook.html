@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deepening 9 — A frontend data-fetching seam</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .font-serif { font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .lbl { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+      .deep-fill { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      pre.code { background:#0f172a; color:#e2e8f0; padding:1rem 1.15rem; border-radius:.6rem; overflow-x:auto; font-size:12.5px; line-height:1.55; }
+      pre.code .c { color:#7dd3fc; } pre.code .k { color:#f0abfc; } pre.code .s { color:#86efac; } pre.code .r { color:#fca5a5; }
+      table.t { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+      table.t th, table.t td { border: 1px solid #e2e8f0; padding: 7px 9px; text-align: left; vertical-align: top; }
+      table.t th { background: #f1f5f9; font-weight: 600; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900">
+    <main class="max-w-4xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="space-y-4">
+        <p class="lbl text-slate-400">Architecture deepening · candidate 9 of 11 (round 3, item 1)</p>
+        <h1 class="font-serif text-4xl">A frontend data-fetching seam (<span class="mono text-3xl">useResource</span>)</h1>
+        <p class="text-slate-600 max-w-2xl">Own analysis, pre-grilling. The only round-3 item that stands on its own; independent of rounds 1–2.</p>
+      </header>
+
+      <!-- FRICTION -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The friction</h2>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">frontend/src/</span> has <strong>18</strong>
+          <span class="mono text-xs">new AbortController()</span> call sites across 13 files, and
+          <span class="mono text-xs">hooks/</span> holds exactly one hook —
+          <span class="mono text-xs">useConnectionsGame</span>, a <span class="mono text-xs">useReducer</span>
+          wrapper for game state, not data. Every component that reads the backend re-writes the same
+          lifecycle by hand:
+        </p>
+        <pre class="code"><span class="c">// GuessChainVisualizer.tsx — one of 18 near-identical blocks</span>
+<span class="k">const</span> [detail, setDetail] = useState&lt;StrategyRunDetail | <span class="k">null</span>&gt;(<span class="k">null</span>);
+<span class="k">const</span> [isLoading, setIsLoading] = useState(<span class="k">true</span>);
+<span class="k">const</span> [error, setError] = useState&lt;string | <span class="k">null</span>&gt;(<span class="k">null</span>);
+useEffect(() =&gt; {
+  setIsLoading(<span class="k">true</span>); setError(<span class="k">null</span>); setDetail(<span class="k">null</span>);
+  <span class="k">const</span> controller = <span class="k">new</span> AbortController();
+  fetchRunDetail(runId, controller.signal)
+    .then((data) =&gt; { setDetail(data); setIsLoading(<span class="k">false</span>); })
+    .catch((err) =&gt; {
+      <span class="k">if</span> (err <span class="k">instanceof</span> Error &amp;&amp; err.name === <span class="s">"AbortError"</span>) <span class="k">return</span>;   <span class="r">// remembered here…</span>
+      setError(...); setIsLoading(<span class="k">false</span>);
+    });
+  <span class="k">return</span> () =&gt; controller.abort();
+}, [runId]);</pre>
+        <p class="text-sm text-slate-700">
+          The interface a component pays for this — three <span class="mono text-xs">useState</span>s, an
+          effect with a dependency array, an abort cleanup, an <span class="mono text-xs">AbortError</span>
+          swallow in the catch — is as large as the payload it wants ("call one endpoint"). That is the
+          definition of a <strong>shallow</strong> pattern. And there is <strong>no locality</strong>: the
+          race that happens when a dependency changes mid-flight, a forgotten
+          <span class="mono text-xs">controller.abort()</span>, a stale-closure dep, a missing
+          "reset state when the key changes" — each is a per-copy bug, invisible from any single place.
+        </p>
+        <table class="t">
+          <thead><tr><th>Variation seen across the 18</th><th>Consequence</th></tr></thead>
+          <tbody>
+            <tr><td>some blocks reset <span class="mono text-xs">data</span> to null on dep change, some don't</td><td>stale data flashes on navigation in some views, not others</td></tr>
+            <tr><td><span class="mono text-xs">GuessSequencePanel</span> hand-rolls <span class="mono text-xs">Record&lt;key, T&gt;</span> maps for <span class="mono text-xs">data / loading / error</span> across many keys</td><td>~60 lines of map-juggling for what is "fetch a list per strategy"</td></tr>
+            <tr><td>post-mutation refetch = a <span class="mono text-xs">refreshSignal</span> integer bumped and threaded through props (<span class="mono text-xs">FreeTierDispatchModal</span> → <span class="mono text-xs">FreeTierBudgetWidget</span>; <span class="mono text-xs">PuzzleRunsPage</span>)</td><td>a convention passed by hand, documented in comments as "same refreshSignal convention X uses"</td></tr>
+            <tr><td>only <span class="mono text-xs">AbortError</span> is filtered; no out-of-order guard beyond abort</td><td>fine today, but nothing structural prevents a stale success landing after a newer one</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- DELETION TEST -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Deletion test</h2>
+        <p class="text-sm text-slate-700">
+          Replace the 18 blocks with <span class="mono text-xs">useResource(key, fetcher)</span>. The
+          abort / reset / race / loading / error handling <strong>concentrates</strong> into one hook;
+          each component drops to a single line. The <span class="mono text-xs">refreshSignal</span>
+          plumbing disappears into <span class="mono text-xs">refetch()</span>. Nothing moves to a call
+          site — it moves <em>out</em> of every call site.
+        </p>
+      </section>
+
+      <!-- SHAPE -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The deepened shape</h2>
+        <pre class="code"><span class="c">// hooks/useResource.ts  (~40 lines)</span>
+<span class="k">interface</span> Resource&lt;T&gt; { data: T | undefined; error: Error | undefined; loading: boolean; refetch: () =&gt; void; }
+
+<span class="k">export function</span> useResource&lt;T&gt;(
+  key: unknown,                              <span class="c">// serialisable; a change aborts the old call + refetches</span>
+  fetcher: (signal: AbortSignal) =&gt; Promise&lt;T&gt;,
+  opts?: { enabled?: boolean; keepPreviousData?: boolean },
+): Resource&lt;T&gt;;
+
+<span class="c">// behind the seam: one AbortController per key, a request-id counter so a</span>
+<span class="c">// stale resolve is ignored, state reset on key change unless keepPreviousData,</span>
+<span class="c">// AbortError swallowed, refetch() re-runs the fetcher with a fresh id.</span></pre>
+        <pre class="code"><span class="c">// GuessChainVisualizer.tsx — after</span>
+<span class="k">const</span> { data: detail, loading, error } = useResource(
+  [<span class="s">"runDetail"</span>, runId],
+  (signal) =&gt; fetchRunDetail(runId, signal),
+);
+
+<span class="c">// GuessSequencePanel.tsx — the Record&lt;key,T&gt; maps become one call per key,</span>
+<span class="c">// or a useResources([...keys]) sibling that returns a keyed map.</span>
+
+<span class="c">// PuzzleRunsPage.tsx — after a delete:</span>
+<span class="k">const</span> { data: runs, refetch } = useResource([<span class="s">"runs"</span>, strategyName, puzzleId], ...);
+<span class="c">// onDeleted={() =&gt; refetch()}  — no refreshSignal integer</span></pre>
+      </section>
+
+      <!-- BUILD VS ADOPT -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Build vs adopt</h2>
+        <p class="text-sm text-slate-700">
+          The app is on React 19 / Vite 8 with <strong>no</strong> data-fetching library (checked
+          <span class="mono text-xs">package.json</span> — no TanStack Query, no SWR). Two routes:
+        </p>
+        <table class="t">
+          <thead><tr><th></th><th>hand-rolled <span class="mono text-xs">useResource</span></th><th>TanStack Query</th></tr></thead>
+          <tbody>
+            <tr><td>new dependency</td><td>none</td><td>one (well-maintained)</td></tr>
+            <tr><td>covers</td><td>abort, race, loading/error, <span class="mono text-xs">refetch</span></td><td>+ caching, dedup, focus-refetch, stale-while-revalidate, devtools</td></tr>
+            <tr><td>migration</td><td>write ~40 lines, swap 18 sites incrementally</td><td>add <span class="mono text-xs">QueryClientProvider</span>, swap 18 sites, learn the model</td></tr>
+            <tr><td>fit</td><td>~13 endpoints, mostly one-shot reads + a few polls — comfortably in scope</td><td>pays off past ~dozens of interdependent queries with shared cache needs</td></tr>
+          </tbody>
+        </table>
+        <p class="text-sm text-slate-700">
+          Recommendation: <strong>hand-roll it</strong> for this app's size. Revisit TanStack only if the
+          benchmark UI grows a real client-side cache requirement (e.g. the leaderboard and the run pages
+          needing to share and invalidate the same data).
+        </p>
+      </section>
+
+      <!-- TESTS -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Tests that improve</h2>
+        <ul class="text-sm space-y-1.5 list-disc pl-5 text-slate-700">
+          <li>One hard hook test — key change aborts the prior call, a stale resolve is ignored, <span class="mono text-xs">refetch</span> re-runs, unmount aborts — replaces the same assertions half-written across 13 component test files.</li>
+          <li>Component tests shrink to "given this data, render this" — no <span class="mono text-xs">AbortController</span> mocking, no fake-timer races.</li>
+          <li>The <span class="mono text-xs">interface is the test surface:</span> the hook's four-field return is the whole contract.</li>
+        </ul>
+      </section>
+
+      <!-- RISKS -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">Risks &amp; open questions</h2>
+        <div class="space-y-3 text-sm text-slate-700">
+          <p><strong class="text-slate-900">Key identity.</strong> A key that is a fresh array/object every render must be compared structurally (stable stringify) or memoised by the caller, or the hook refetches on every render. The hook should stringify internally and document it.</p>
+          <p><strong class="text-slate-900"><span class="mono text-xs">GuessSequencePanel</span>'s many-keys case</strong> is not a plain <span class="mono text-xs">useResource</span> — it fetches a list per strategy in parallel. Either call the hook N times (fine if N is a stable list) or add a <span class="mono text-xs">useResources</span> sibling. Grill which.</p>
+          <p><strong class="text-slate-900"><span class="mono text-xs">Game.tsx</span> is different.</strong> Its AI-solve flow is an imperative action tied to game-reducer dispatches (<span class="mono text-xs">aiSolveSuccess</span> / <span class="mono text-xs">aiSolveError</span>), not a declarative read. Leave it; this candidate is about the read sites.</p>
+          <p><strong class="text-slate-900">Incremental migration only.</strong> Convert one component per PR; the hook and the hand-rolled blocks coexist fine during the transition.</p>
+        </div>
+      </section>
+
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Recommendation</h2>
+        <p class="text-sm text-slate-700">
+          <strong>Strong.</strong> A genuine locality problem — 18 copies of one lifecycle, already
+          subtly divergent — with a small, well-understood deepening. Independent of the provider-pool
+          and <span class="mono text-xs">strategy.service.ts</span> work, so it can run in parallel with
+          them.
+        </p>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-6 border-t border-slate-200">
+        Connections Lab · architecture deepening 9/11 · own analysis, pre-grilling · 2026-09-09
+      </footer>
+
+    </main>
+  </body>
+</html>

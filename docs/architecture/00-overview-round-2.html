@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review — Connections Lab (round 2)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .font-serif { font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .lbl { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+      .deep-fill { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .ghost { opacity: .34; }
+      .mermaid { display: flex; justify-content: center; }
+      .seam { stroke-dasharray: 5 4; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-14">
+
+      <header class="space-y-5">
+        <div>
+          <h1 class="font-serif text-4xl">Architecture review — Connections Lab</h1>
+          <p class="text-slate-500 mt-1">Round 2 · 2026-09-09 · "anything beyond the provider-pool work?"</p>
+        </div>
+        <p class="text-slate-700 max-w-3xl">
+          The provider-pool candidates (docs 01–04) covered the recent hot spot. Looking wider: the
+          friction that remains is not copy-paste breadth, it is <strong>depth</strong> — one module
+          carrying four jobs, and one concept (parsing a model's answer) with no home, so its bugs get
+          fixed twice. Four candidates, ranked.
+        </p>
+        <div class="flex flex-wrap gap-4 text-xs text-slate-600 border-t border-b border-slate-200 py-3">
+          <span class="flex items-center gap-2"><span class="inline-block w-4 h-4 border-2 border-slate-800 bg-white"></span> module</span>
+          <span class="flex items-center gap-2"><svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" class="seam" stroke="#475569" stroke-width="2"/></svg> seam</span>
+          <span class="flex items-center gap-2"><svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="#dc2626" stroke-width="2"/></svg> leakage / double work</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-4 h-4 deep-fill"></span> deep module</span>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-16">
+
+        <!-- ============================ CANDIDATE 5 ============================ -->
+        <article class="space-y-6">
+          <h2 class="font-serif text-2xl">5 · Split <span class="mono text-xl">strategy.service.ts</span> along its four seams</h2>
+          <div class="flex flex-wrap gap-2">
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800">Strong</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">in-process</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">no migration</span>
+          </div>
+
+          <div class="text-sm mono text-slate-600 leading-relaxed">
+            backend/src/modules/strategy/strategy.service.ts <span class="text-slate-400">— 1,696 lines, one class</span><br />
+            consumers: strategy.controller.ts · dispatch.controller.ts · worker.ts · the 5 *-free-dispatch.service.ts
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-xl border border-slate-200 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">Before — one class, four unrelated jobs</p>
+              <svg viewBox="0 0 300 300" class="w-full h-[300px]">
+                <rect x="30" y="20" width="240" height="260" rx="6" fill="#fff" stroke="#334155" stroke-width="2"/>
+                <text x="150" y="38" text-anchor="middle" class="lbl" fill="#334155">StrategyService · 1,696 LOC</text>
+                <g font-size="9.5" fill="#334155">
+                  <rect x="46" y="52" width="208" height="52" fill="#eef2ff" stroke="#6366f1"/>
+                  <text x="54" y="68">run-history read model</text>
+                  <text x="54" y="82" fill="#64748b">getLeaderboard (~340) · getRunHistory (~186)</text>
+                  <text x="54" y="95" fill="#64748b">getRecentActivity · getRunDetail ×2 · getGuessDetail · DTO maps</text>
+
+                  <rect x="46" y="114" width="208" height="44" fill="#ecfdf5" stroke="#059669"/>
+                  <text x="54" y="130">dispatch support</text>
+                  <text x="54" y="144" fill="#64748b">triggerStrategyRuns · queueFor · countInFlightByModel</text>
+                  <text x="54" y="156" fill="#64748b">countToday* · findUnrunPuzzleDatesForModel</text>
+
+                  <rect x="46" y="168" width="208" height="40" fill="#fef3c7" stroke="#d97706"/>
+                  <text x="54" y="184">deterministic solver</text>
+                  <text x="54" y="198" fill="#64748b">runDeterministicStrategy (~140) · pickRandomGroup · combinatorics</text>
+
+                  <rect x="46" y="218" width="208" height="34" fill="#fee2e2" stroke="#ef4444"/>
+                  <text x="54" y="234">maintenance</text>
+                  <text x="54" y="247" fill="#64748b">deleteRun · deleteErroredRuns · countErroredRuns</text>
+                </g>
+                <text x="150" y="270" text-anchor="middle" font-size="9" fill="#b91c1c">"how is the leaderboard built?" = scroll past dispatch + the shuffle solver</text>
+              </svg>
+            </div>
+            <div class="rounded-xl border border-slate-300 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">After — four modules, each deep in one thing</p>
+              <svg viewBox="0 0 300 300" class="w-full h-[300px]">
+                <g font-size="9.5">
+                  <rect x="24" y="30" width="120" height="86" rx="5" class="deep-fill"/>
+                  <text x="84" y="48" text-anchor="middle" class="lbl" fill="#e2e8f0">RunHistory</text>
+                  <text x="84" y="48" text-anchor="middle" class="lbl" fill="#e2e8f0" dy="14">read model</text>
+                  <text x="84" y="82" text-anchor="middle" font-size="8" fill="#cbd5e1">controller-facing</text>
+                  <text x="84" y="94" text-anchor="middle" font-size="8" fill="#cbd5e1">queries + DTOs + cache</text>
+
+                  <rect x="156" y="30" width="120" height="86" rx="5" class="deep-fill"/>
+                  <text x="216" y="48" text-anchor="middle" class="lbl" fill="#e2e8f0">Dispatch</text>
+                  <text x="216" y="82" text-anchor="middle" font-size="8" fill="#cbd5e1">trigger + queue routing</text>
+                  <text x="216" y="94" text-anchor="middle" font-size="8" fill="#cbd5e1">+ in-flight / today counts</text>
+
+                  <rect x="24" y="140" width="120" height="82" rx="5" class="deep-fill"/>
+                  <text x="84" y="158" text-anchor="middle" class="lbl" fill="#e2e8f0">Deterministic</text>
+                  <text x="84" y="158" text-anchor="middle" class="lbl" fill="#e2e8f0" dy="14">solver</text>
+                  <text x="84" y="192" text-anchor="middle" font-size="8" fill="#cbd5e1">alphabetical / order /</text>
+                  <text x="84" y="204" text-anchor="middle" font-size="8" fill="#cbd5e1">shuffle · worker-facing</text>
+
+                  <rect x="156" y="140" width="120" height="82" rx="5" fill="#fff" stroke="#94a3b8"/>
+                  <text x="216" y="158" text-anchor="middle" class="lbl" fill="#475569">Maintenance</text>
+                  <text x="216" y="192" text-anchor="middle" font-size="8" fill="#64748b">delete / count errored</text>
+                  <text x="216" y="204" text-anchor="middle" font-size="8" fill="#64748b">(small — could stay)</text>
+                </g>
+                <text x="150" y="252" text-anchor="middle" font-size="9" fill="#059669">each has one reason to change and one set of callers</text>
+              </svg>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+            <p><span class="lbl text-slate-400">Problem</span><br />One class owns the frontend read model, the dispatch-cycle support surface, the deterministic solve algorithms, and run maintenance. No <strong>locality</strong>: a leaderboard change and a shuffle-solver change touch the same 1,696-line file, and every consumer imports the whole thing.</p>
+            <p><span class="lbl text-slate-400">Solution</span><br />Cut along the four seams that already exist in the method list. The read model (the bulk, ~1,100 LOC, consumed only by <span class="mono text-xs">strategy.controller.ts</span>) becomes its own module; dispatch support (consumed by the dispatch services + worker) another; the deterministic solver (consumed by the worker) a third.</p>
+          </div>
+
+          <ul class="text-sm grid sm:grid-cols-2 gap-x-8 gap-y-1 list-disc pl-5 marker:text-emerald-500">
+            <li>locality: leaderboard logic lives with leaderboard logic</li>
+            <li>the interface is the test surface: the read model can be tested without a queue</li>
+            <li>the deterministic solver stops depending on TypeORM repos it never uses</li>
+            <li>leverage: candidate 1's dispatch work imports a 300-line module, not 1,700</li>
+            <li>pure mechanical extraction — no schema, no behaviour change</li>
+            <li>AI-navigability: four named files instead of one scroll</li>
+          </ul>
+        </article>
+
+        <!-- ============================ CANDIDATE 6 ============================ -->
+        <article class="space-y-6">
+          <h2 class="font-serif text-2xl">6 · Give the model-answer parser one home</h2>
+          <div class="flex flex-wrap gap-2">
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800">Strong</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">ports &amp; adapters</span>
+          </div>
+
+          <div class="text-sm mono text-slate-600 leading-relaxed">
+            orchestrator/src/solve-assist.ts <span class="text-slate-400">— parseGroupProposals, parseAnswerGroups, WORDS_PARENTHETICAL_RE</span><br />
+            orchestrator/src/assist.ts <span class="text-slate-400">— a second, different parseAnswerGroups</span><br />
+            backend/src/modules/strategy/parse-groups-section.ts <span class="text-slate-400">— parseGroupsSection, its own WORDS_PARENTHETICAL_RE</span><br />
+            backend/src/scripts/backfill-issue-tags.ts <span class="text-slate-400">— re-parses stored rawResponseText a third time</span>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-4">
+            <pre class="mermaid">
+sequenceDiagram
+  participant M as Model
+  participant O as orchestrator/solve-assist.ts
+  participant B as backend/llm-strategy-runner
+  M-&gt;&gt;O: raw "### GROUPS / ### ANSWER" text
+  O-&gt;&gt;O: parseGroupProposals + parseAnswerGroups
+  O-&gt;&gt;B: { groups, proposals, response: raw text }
+  Note over B: ignores proposals,<br/>re-parses response with parseGroupsSection
+  B-&gt;&gt;B: parseGroupsSection(data.response)  ⟵ same regex work again
+            </pre>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-xl border border-slate-200 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">Before — one contract, 3+ parsers, fixed twice</p>
+              <svg viewBox="0 0 300 240" class="w-full h-[240px]">
+                <text x="150" y="18" text-anchor="middle" font-size="10" fill="#475569">"### GROUPS / ### ANSWER" response contract</text>
+                <g font-size="8.5" fill="#334155">
+                  <rect x="10" y="34" width="132" height="58" fill="#fee2e2" stroke="#ef4444"/>
+                  <text x="18" y="50" class="mono">solve-assist.ts</text>
+                  <text x="18" y="64" fill="#64748b">parseGroupProposals</text>
+                  <text x="18" y="76" fill="#64748b">parseAnswerGroups</text>
+                  <text x="18" y="88" fill="#b91c1c">PARENTHETICAL_RE (copy A)</text>
+
+                  <rect x="158" y="34" width="132" height="58" fill="#fee2e2" stroke="#ef4444"/>
+                  <text x="166" y="50" class="mono">assist.ts</text>
+                  <text x="166" y="64" fill="#64748b">parseAnswerGroups</text>
+                  <text x="166" y="76" fill="#64748b">(different rules —</text>
+                  <text x="166" y="88" fill="#64748b">bare "ANSWER:" only)</text>
+
+                  <rect x="10" y="104" width="132" height="58" fill="#fee2e2" stroke="#ef4444"/>
+                  <text x="18" y="120" class="mono">parse-groups-section.ts</text>
+                  <text x="18" y="134" fill="#64748b">parseGroupsSection</text>
+                  <text x="18" y="146" fill="#64748b">+ issue tags</text>
+                  <text x="18" y="158" fill="#b91c1c">PARENTHETICAL_RE (copy B)</text>
+
+                  <rect x="158" y="104" width="132" height="58" fill="#fff" stroke="#94a3b8"/>
+                  <text x="166" y="120" class="mono">backfill-issue-tags.ts</text>
+                  <text x="166" y="134" fill="#64748b">re-parses stored text</text>
+                  <text x="166" y="146" fill="#64748b">via parse-groups-section</text>
+                </g>
+                <text x="150" y="185" text-anchor="middle" font-size="8.5" fill="#b91c1c">commit cdd6b22 fixed the parenthetical bug in copy B;</text>
+                <text x="150" y="198" text-anchor="middle" font-size="8.5" fill="#b91c1c">copy A got the same fix later — "but this parser didn't"</text>
+                <text x="150" y="222" text-anchor="middle" font-size="9" fill="#475569">the concept has no owner, so each site drifts on its own</text>
+              </svg>
+            </div>
+            <div class="rounded-xl border border-slate-300 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">After — orchestrator owns it; backend consumes structure</p>
+              <svg viewBox="0 0 300 240" class="w-full h-[240px]">
+                <rect x="40" y="30" width="220" height="96" rx="6" class="deep-fill"/>
+                <text x="150" y="50" text-anchor="middle" class="lbl" fill="#e2e8f0">answer-parser (orchestrator)</text>
+                <text x="150" y="72" text-anchor="middle" font-size="8.5" fill="#cbd5e1">one PARENTHETICAL_RE · one ### GROUPS / ### ANSWER grammar</text>
+                <text x="150" y="88" text-anchor="middle" font-size="8.5" fill="#cbd5e1">returns { groups, proposals, categories, issueTags }</text>
+                <text x="150" y="108" text-anchor="middle" font-size="8" fill="#94a3b8">the /diagnose path is the same call with telemetry off</text>
+
+                <rect x="70" y="158" width="160" height="40" rx="4" fill="#fff" stroke="#059669"/>
+                <text x="150" y="176" text-anchor="middle" font-size="8.5" fill="#065f46">backend runner: reads the fields.</text>
+                <text x="150" y="189" text-anchor="middle" font-size="8.5" fill="#065f46">no re-parse of raw text.</text>
+                <line x1="150" y1="126" x2="150" y2="158" stroke="#059669" stroke-width="1.5" marker-end="url(#a6)"/>
+                <defs><marker id="a6" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#059669"/></marker></defs>
+                <text x="150" y="222" text-anchor="middle" font-size="8" fill="#64748b">backfill script imports the same parser (it already can — it's pure)</text>
+              </svg>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+            <p><span class="lbl text-slate-400">Problem</span><br />Parsing a model's answer into groups is one contract implemented 3–4 times either side of the HTTP <strong>seam</strong>. The orchestrator returns <span class="mono text-xs">proposals</span>, the backend throws them away and re-runs the regexes on <span class="mono text-xs">data.response</span>. A parser bug (the parenthetical strip) had to be found and fixed <strong>twice</strong>.</p>
+            <p><span class="lbl text-slate-400">Solution</span><br />The orchestrator owns the grammar. Its solve response carries the full structure the backend needs — <span class="mono text-xs">groups</span>, <span class="mono text-xs">proposals</span>, <span class="mono text-xs">categoryMap</span>, <span class="mono text-xs">issueTags</span>. The backend runner reads fields instead of re-parsing text. <span class="mono text-xs">assist.ts</span> collapses into the same call path (candidate 7).</p>
+          </div>
+
+          <ul class="text-sm grid sm:grid-cols-2 gap-x-8 gap-y-1 list-disc pl-5 marker:text-emerald-500">
+            <li>locality: one grammar, one place a parser bug can hide</li>
+            <li>two adapters justify the seam: live orchestrator + the backfill re-parse</li>
+            <li>the regexes get one test suite, not three partial ones</li>
+            <li>the work stops being done twice per solve step</li>
+            <li>issue-tagging (<span class="mono text-xs">PARENTHETICAL_STRIPPED</span>, <span class="mono text-xs">GROUP_COUNT_OFF</span>) moves next to the parse that detects it</li>
+          </ul>
+          <div class="text-xs bg-amber-50 border border-amber-300 rounded-lg p-3 text-amber-900">
+            Constraint to grill: <span class="mono">issueTags</span> currently reference <span class="mono">SolvePromptIssueTag</span>, a backend enum. Either the orchestrator returns raw tag strings the backend maps, or the enum moves to a shared contract. The backend re-parse also exists partly so <span class="mono">backfill-issue-tags.ts</span> can retag historical rows — that path stays valid as long as the parser is an importable pure function, wherever it lives.
+          </div>
+        </article>
+
+        <!-- ============================ CANDIDATE 7 ============================ -->
+        <article class="space-y-6">
+          <h2 class="font-serif text-2xl">7 · Fold <span class="mono text-xl">/diagnose</span> into the solve-assist step</h2>
+          <div class="flex flex-wrap gap-2">
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">Worth exploring</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">in-process</span>
+          </div>
+
+          <div class="text-sm mono text-slate-600 leading-relaxed">
+            orchestrator/src/assist.ts (86) · orchestrator/src/solve-assist.ts (213) · orchestrator/src/app.ts (/diagnose, /solve-assist)
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-xl border border-slate-200 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">Before — two step functions, one drifted</p>
+              <svg viewBox="0 0 300 210" class="w-full h-[210px]">
+                <g font-size="9" fill="#334155">
+                  <rect x="16" y="20" width="120" height="150" fill="#fff" stroke="#94a3b8"/>
+                  <text x="24" y="36" class="mono">runAssistStep</text>
+                  <text x="24" y="52" fill="#64748b">generateText</text>
+                  <text x="24" y="65" fill="#64748b">maxRetries: 0</text>
+                  <text x="24" y="78" fill="#64748b">classifyModelCallError</text>
+                  <text x="24" y="91" fill="#64748b">parseAnswerGroups</text>
+                  <text x="24" y="108" fill="#b91c1c">no provider arg</text>
+                  <text x="24" y="121" fill="#b91c1c">no telemetry</text>
+                  <text x="24" y="134" fill="#b91c1c">no abort signal</text>
+                  <text x="24" y="147" fill="#b91c1c">temp 0.7 (hard-coded twice)</text>
+
+                  <rect x="164" y="20" width="120" height="150" fill="#fff" stroke="#334155" stroke-width="2"/>
+                  <text x="172" y="36" class="mono">solveAssist</text>
+                  <text x="172" y="52" fill="#64748b">generateText</text>
+                  <text x="172" y="65" fill="#64748b">maxRetries: 0</text>
+                  <text x="172" y="78" fill="#64748b">classifyModelCallError</text>
+                  <text x="172" y="91" fill="#64748b">parseGroupProposals</text>
+                  <text x="172" y="104" fill="#64748b">+ parseAnswerGroups</text>
+                  <text x="172" y="121" fill="#475569">provider · telemetry</text>
+                  <text x="172" y="134" fill="#475569">abort signal · usage</text>
+                  <text x="172" y="147" fill="#475569">requestBody/responseBody</text>
+                </g>
+                <text x="150" y="192" text-anchor="middle" font-size="9" fill="#b91c1c">same skeleton; the left one is what the right one was 6 months ago</text>
+              </svg>
+            </div>
+            <div class="rounded-xl border border-slate-300 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">After — one step, telemetry optional</p>
+              <svg viewBox="0 0 300 210" class="w-full h-[210px]">
+                <rect x="60" y="40" width="180" height="110" rx="6" class="deep-fill"/>
+                <text x="150" y="60" text-anchor="middle" class="lbl" fill="#e2e8f0">solveAssistStep</text>
+                <text x="150" y="84" text-anchor="middle" font-size="8.5" fill="#cbd5e1">generateText · classify · parse (candidate 6)</text>
+                <text x="150" y="100" text-anchor="middle" font-size="8.5" fill="#cbd5e1">provider ?? defaultProvider()</text>
+                <text x="150" y="116" text-anchor="middle" font-size="8.5" fill="#cbd5e1">{ telemetry: bool }  — /diagnose passes false</text>
+                <text x="150" y="180" text-anchor="middle" font-size="9" fill="#64748b">/diagnose becomes a thin route over the same function</text>
+              </svg>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+            <p><span class="lbl text-slate-400">Problem</span><br /><span class="mono text-xs">assist.ts</span> is a <strong>shallow</strong> stripped copy of <span class="mono text-xs">solve-assist.ts</span> — same <span class="mono text-xs">generateText → classify → parse</span> skeleton, minus provider selection, telemetry, and the abort signal. The two <span class="mono text-xs">parseAnswerGroups</span> have already diverged.</p>
+            <p><span class="lbl text-slate-400">Solution</span><br />One step function with an optional-telemetry flag and <span class="mono text-xs">provider ?? defaultProvider()</span>. <span class="mono text-xs">/diagnose</span> keeps its route and request schema but delegates.</p>
+          </div>
+
+          <ul class="text-sm grid sm:grid-cols-2 gap-x-8 gap-y-1 list-disc pl-5 marker:text-amber-500">
+            <li>deletion test: delete <span class="mono text-xs">assist.ts</span> — behaviour concentrates, nothing new at the route</li>
+            <li>the abort-signal + <span class="mono text-xs">maxRetries: 0</span> fixes stop needing to be made in two places</li>
+            <li>one parser path for both endpoints (pairs with candidate 6)</li>
+            <li>small — ~86 lines deleted, one test file merged</li>
+          </ul>
+        </article>
+
+        <!-- ============================ CANDIDATE 8 ============================ -->
+        <article class="space-y-6">
+          <h2 class="font-serif text-2xl">8 · Persist the prompt text instead of reconstructing it</h2>
+          <div class="flex flex-wrap gap-2">
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">Speculative</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">schema change</span>
+          </div>
+
+          <div class="text-sm mono text-slate-600 leading-relaxed">
+            backend/src/modules/strategy/prompt-reconstruction.ts (177) · llm-strategy-runner.service.ts (buildInitialPrompt / buildRetryPrompt) · entities/solve-prompt.entity.ts
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-xl border border-slate-200 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">Before — replay the run to show the run</p>
+              <svg viewBox="0 0 300 220" class="w-full h-[220px]">
+                <g font-size="9" fill="#334155">
+                  <rect x="20" y="24" width="260" height="20" fill="#fff" stroke="#94a3b8"/>
+                  <text x="28" y="38" fill="#64748b">SolvePrompt row stores: rawResponseText, status, usage — <tspan fill="#b91c1c">not the prompt</tspan></text>
+                  <rect x="20" y="54" width="260" height="128" fill="#fee2e2" stroke="#ef4444"/>
+                  <text x="28" y="70" class="mono">reconstructSolvePrompts()</text>
+                  <text x="28" y="86" fill="#64748b">re-derive computeInitialWordOrder</text>
+                  <text x="28" y="100" fill="#64748b">replay availableWords / lockedInGroups /</text>
+                  <text x="28" y="112" fill="#64748b">lastFailedGuess from stored guesses</text>
+                  <text x="28" y="126" fill="#64748b">re-call buildInitialPrompt / buildRetryPrompt</text>
+                  <text x="28" y="142" fill="#64748b">special-case CALL_ERROR rows (no reply →</text>
+                  <text x="28" y="154" fill="#64748b">must not advance state or "corrupt every later step")</text>
+                  <text x="28" y="170" fill="#b91c1c">40-line docstring of caveats</text>
+                </g>
+                <text x="150" y="204" text-anchor="middle" font-size="8.5" fill="#b91c1c">accuracy depends on the reconstruction staying bug-for-bug identical to the runner</text>
+              </svg>
+            </div>
+            <div class="rounded-xl border border-slate-300 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">After — store what was sent</p>
+              <svg viewBox="0 0 300 220" class="w-full h-[220px]">
+                <rect x="50" y="50" width="200" height="70" rx="6" class="deep-fill"/>
+                <text x="150" y="72" text-anchor="middle" class="lbl" fill="#e2e8f0">SolvePrompt.promptText</text>
+                <text x="150" y="94" text-anchor="middle" font-size="8.5" fill="#cbd5e1">the runner already builds it — just save it</text>
+                <text x="150" y="150" text-anchor="middle" font-size="9" fill="#64748b">the chain view becomes a read; reconstruction.ts deletes</text>
+                <text x="150" y="168" text-anchor="middle" font-size="8" fill="#94a3b8">buildInitialPrompt/buildRetryPrompt stay — as the builders, not a replay target</text>
+              </svg>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+            <p><span class="lbl text-slate-400">Problem</span><br />The runner never stores the prompt it sends, so a 177-line module <strong>replays</strong> the run's state evolution to rebuild it for the UI. Its correctness is defined as "matches what the runner did" — a second implementation of the same logic, kept in sync by hand (the docstring enumerates the traps).</p>
+            <p><span class="lbl text-slate-400">Solution</span><br />Add <span class="mono text-xs">promptText</span> to the <span class="mono text-xs">SolvePrompt</span> row the runner already writes per attempt. The chain view reads it. <span class="mono text-xs">prompt-reconstruction.ts</span> goes away.</p>
+          </div>
+
+          <ul class="text-sm grid sm:grid-cols-2 gap-x-8 gap-y-1 list-disc pl-5 marker:text-slate-400">
+            <li>locality: the transcript is data, not a derivation</li>
+            <li>deletes a module whose spec is "don't drift from the runner"</li>
+            <li><span class="text-amber-700">cost:</span> full history per step is roughly quadratic in run length — measure a worst-case run's byte size first</li>
+            <li><span class="text-amber-700">cost:</span> a backfill for historical runs still needs the reconstruction once, then it can be retired</li>
+          </ul>
+        </article>
+
+      </section>
+
+      <!-- ============================ TOP RECOMMENDATION ============================ -->
+      <section id="top-recommendation" class="rounded-2xl border-2 border-emerald-600 bg-white p-8 space-y-4">
+        <p class="lbl text-emerald-700">Top recommendation</p>
+        <h2 class="font-serif text-2xl">Candidate 5 — split <span class="mono text-xl">strategy.service.ts</span> — first, then candidate 6.</h2>
+        <p class="text-sm text-slate-700 max-w-3xl">
+          Candidate 5 is pure mechanical extraction: no schema, no behaviour change, no external contract.
+          It has the widest payoff — the read model, the dispatch support (which candidate 1 leans on
+          heavily), and the deterministic solver each get one reason to change and one set of callers, and
+          a 1,696-line file stops being the thing every strategy consumer imports. Do it before the
+          provider-pool work so candidate 1's dispatch module is carved out of something small.
+        </p>
+        <p class="text-sm text-slate-700 max-w-3xl">
+          Candidate 6 is the one with a real bug history — the same parser fixed twice — and it pairs
+          naturally with candidate 7. Candidate 8 is worth a measurement (worst-case stored transcript
+          size) before committing; if the number is fine, it deletes a fragile module outright.
+        </p>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-8 border-t border-slate-200">
+        No <span class="mono">CONTEXT.md</span> / <span class="mono">docs/adr/</span> in the repo — domain terms from <span class="mono">AGENTS.md</span>, <span class="mono">DESIGN.md</span>, and the code.
+        Candidates 1–4 are in <span class="mono">docs/architecture/01–04</span>. Round 2 · 2026-09-09.
+      </footer>
+
+    </main>
+  </body>
+</html>

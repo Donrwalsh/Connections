@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deepening 6 — One home for the model-answer parser</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .font-serif { font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .lbl { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+      .deep-fill { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .mermaid { display: flex; justify-content: center; }
+      pre.code { background:#0f172a; color:#e2e8f0; padding:1rem 1.15rem; border-radius:.6rem; overflow-x:auto; font-size:12.5px; line-height:1.55; }
+      pre.code .c { color:#7dd3fc; } pre.code .k { color:#f0abfc; } pre.code .s { color:#86efac; } pre.code .r { color:#fca5a5; }
+      table.t { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+      table.t th, table.t td { border: 1px solid #e2e8f0; padding: 7px 9px; text-align: left; vertical-align: top; }
+      table.t th { background: #f1f5f9; font-weight: 600; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900">
+    <main class="max-w-4xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="space-y-4">
+        <p class="lbl text-slate-400">Architecture deepening · candidate 6 of 8 (round 2, item 2)</p>
+        <h1 class="font-serif text-4xl">Give the model-answer parser one home</h1>
+        <p class="text-slate-600 max-w-2xl">Own analysis, pre-grilling. The candidate with a real bug history: the same parser fixed twice.</p>
+      </header>
+
+      <!-- FRICTION -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The friction</h2>
+        <p class="text-sm text-slate-700">
+          The solve prompts ask the model for a <span class="mono text-xs">### GROUPS</span> section
+          (<span class="mono text-xs">Category:</span> / <span class="mono text-xs">Words:</span> per group)
+          and a <span class="mono text-xs">### ANSWER</span> section (one comma-joined line per group).
+          Turning that text back into word groups is <strong>one contract</strong>. It is implemented
+          four times:
+        </p>
+        <table class="t">
+          <thead><tr><th>File</th><th>Functions</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><span class="mono text-xs">orchestrator/src/solve-assist.ts</span></td><td><span class="mono text-xs">parseGroupProposals</span>, <span class="mono text-xs">parseAnswerGroups</span></td><td>own <span class="mono text-xs">WORDS_PARENTHETICAL_RE</span> (copy A)</td></tr>
+            <tr><td><span class="mono text-xs">orchestrator/src/assist.ts</span></td><td><span class="mono text-xs">parseAnswerGroups</span></td><td>different rules — bare <span class="mono text-xs">^ANSWER:$</span> only, no <span class="mono text-xs">###</span>, no parenthetical strip</td></tr>
+            <tr><td><span class="mono text-xs">backend/…/parse-groups-section.ts</span></td><td><span class="mono text-xs">parseGroupsSection</span></td><td>own <span class="mono text-xs">WORDS_PARENTHETICAL_RE</span> (copy B) + issue-tag detection</td></tr>
+            <tr><td><span class="mono text-xs">backend/…/backfill-issue-tags.ts</span></td><td>imports <span class="mono text-xs">parseGroupsSection</span></td><td>re-parses stored <span class="mono text-xs">rawResponseText</span> to retag history</td></tr>
+          </tbody>
+        </table>
+        <p class="text-sm text-slate-700">
+          The parenthetical-strip fix (models append
+          <span class="mono text-xs">"LOOK, TOUCH, SIGHT, SMELL (all senses)"</span> onto the
+          <span class="mono text-xs">Words:</span> line) landed in copy B first — commit
+          <span class="mono text-xs">cdd6b22</span> — and the <span class="mono text-xs">solve-assist.ts</span>
+          comment now reads, verbatim: <em>"mirrors llm-strategy-runner.service.ts's
+          WORDS_PARENTHETICAL_RE on the backend, which had this same fix … but this parser didn't."</em>
+          Two fixes for one bug, months apart, because the concept has no owner.
+        </p>
+      </section>
+
+      <!-- DOUBLE WORK -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">The work is also done twice per solve step</h2>
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <pre class="mermaid">
+sequenceDiagram
+  participant M as Model
+  participant O as solve-assist.ts
+  participant A as orchestrator.service.ts (backend HTTP client)
+  participant R as llm-strategy-runner.service.ts
+  M-&gt;&gt;O: raw "### GROUPS / ### ANSWER" text
+  O-&gt;&gt;O: parseGroupProposals + parseAnswerGroups  ← parse #1
+  O-&gt;&gt;A: { response, groups, proposals, usage, ... }
+  Note over A: mapper copies response, groups, usage…<br/>DROPS proposals
+  A-&gt;&gt;R: { response, groups }  (no proposals)
+  R-&gt;&gt;R: parseGroupsSection(data.response)  ← parse #2, same regexes
+          </pre>
+        </div>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">orchestrator.service.ts</span>'s <span class="mono text-xs">solveAssist</span>
+          mapper (lines 127–138) forwards <span class="mono text-xs">response, groups, model, contextWindow,
+          latencyMs, usage, requestBody, responseId, responseHeaders, responseBody</span> — but not
+          <span class="mono text-xs">proposals</span>. The runner then re-derives proposals + categories
+          from <span class="mono text-xs">data.response</span> at line 434. And
+          <span class="mono text-xs">SolveAssistResponseSchema</span> in
+          <span class="mono text-xs">types.ts</span> documents neither <span class="mono text-xs">proposals</span>
+          nor the raw-detail fields the code actually returns — the wire contract and the payload have
+          drifted apart.
+        </p>
+      </section>
+
+      <!-- DELETION TEST -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Deletion test</h2>
+        <p class="text-sm text-slate-700">
+          Delete <span class="mono text-xs">parseGroupsSection</span> and
+          <span class="mono text-xs">assist.ts</span>'s parser. Does the parsing concentrate or move? It
+          <strong>concentrates</strong> into the orchestrator's parser, which already does most of the
+          work — the runner just reads the fields it currently recomputes. The one piece that genuinely
+          can't move is described under "constraint" below.
+        </p>
+      </section>
+
+      <!-- SHAPE -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The deepened shape</h2>
+        <p class="text-sm text-slate-700">
+          The orchestrator owns the <span class="mono text-xs">### GROUPS / ### ANSWER</span> grammar. Its
+          solve response carries the full structured parse. The backend runner reads fields; it never
+          re-parses raw text.
+        </p>
+        <pre class="code"><span class="c">// orchestrator/src/answer-parser.ts  — the single grammar</span>
+<span class="k">export interface</span> ParsedAnswer {
+  groups: string[][];                        <span class="c">// ### ANSWER lines, fallback to ### GROUPS words</span>
+  proposals: { category: string; words: string[] }[];
+  categoryByGroup: Record&lt;number, string&gt;;
+  textIssues: (<span class="s">"parentheticalStripped"</span> | <span class="s">"groupCountOff"</span>)[];  <span class="c">// text-only, no board needed</span>
+}
+<span class="k">export function</span> parseAnswer(responseText: string): ParsedAnswer;
+
+<span class="c">// types.ts — SolveAssistResponseSchema gains the structure it already computes</span>
+SolveAssistResponseSchema = AssistResponseSchema.extend({
+  proposals, categoryByGroup, textIssues,    <span class="c">// + the raw-detail fields it already returns</span>
+  latencyMs, contextWindow, usage,
+});</pre>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">orchestrator.service.ts</span>'s mapper forwards the new fields.
+          <span class="mono text-xs">llm-strategy-runner.service.ts</span> line 434 becomes
+          <span class="mono text-xs">const { proposals, categoryByGroup, textIssues } = data;</span>.
+          <span class="mono text-xs">parse-groups-section.ts</span> is deleted;
+          <span class="mono text-xs">backfill-issue-tags.ts</span> imports
+          <span class="mono text-xs">parseAnswer</span> from a small shared module (it is a pure function
+          — the script can import it from either package, or from a tiny
+          <span class="mono text-xs">packages/answer-parser</span>).
+        </p>
+      </section>
+
+      <!-- ADAPTERS -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Two adapters justify the seam</h2>
+        <p class="text-sm text-slate-700">
+          The parser has two real consumers already: the live orchestrator call, and
+          <span class="mono text-xs">backfill-issue-tags.ts</span> re-parsing historical
+          <span class="mono text-xs">rawResponseText</span>. That is a real seam, not a hypothetical one —
+          which is why the parser should be one importable pure function, not a method fused into either
+          service.
+        </p>
+      </section>
+
+      <!-- CONSTRAINT -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Constraint: not all issue tags are text-only</h2>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">SolvePromptIssueTag</span> has four values. Two are pure text and
+          move to the orchestrator: <span class="mono text-xs">parentheticalStripped</span>,
+          <span class="mono text-xs">groupCountOff</span>. Two need the puzzle board and <strong>stay
+          backend-side</strong>: <span class="mono text-xs">wordNotOnList</span> (is this proposed word one
+          of the 16?) and <span class="mono text-xs">unclassified</span> (a failure shape relative to the
+          expected remaining-group count). So the split is: the orchestrator returns the structured parse
+          + <span class="mono text-xs">textIssues</span>; the backend's
+          <span class="mono text-xs">evaluateProposals</span> adds the board-aware tags. The tag values
+          are already a plain <span class="mono text-xs">text[]</span> column (no DB enum) specifically so
+          a new tag needs no migration — moving strings across the wire is cheap.
+        </p>
+      </section>
+
+      <!-- TESTS -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Tests that improve</h2>
+        <ul class="text-sm space-y-1.5 list-disc pl-5 text-slate-700">
+          <li>One parser spec instead of three partial ones (<span class="mono text-xs">solve-assist.test.ts</span>, <span class="mono text-xs">assist.test.ts</span>, and the backend's <span class="mono text-xs">parse-groups-section.spec.ts</span> each cover a slice).</li>
+          <li>A parenthetical-strip regression is a one-line addition to one table-driven spec — and it can't regress on only one side.</li>
+          <li>The runner spec stops needing raw <span class="mono text-xs">### GROUPS</span> fixture strings; it asserts on structured input.</li>
+        </ul>
+      </section>
+
+      <!-- RISKS -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">Risks &amp; open questions</h2>
+        <div class="space-y-3 text-sm text-slate-700">
+          <p><strong class="text-slate-900">Where does the shared pure function live?</strong> Options: (a) orchestrator owns it, backend imports across the repo (the two are separate npm packages — a relative import or a tiny workspace package); (b) a <span class="mono text-xs">packages/answer-grammar</span> both depend on. (a) is less machinery; (b) is cleaner if more shared parsing appears. Grill this.</p>
+          <p><strong class="text-slate-900">Wire-schema change is a real contract change.</strong> <span class="mono text-xs">SolveAssistResponseSchema</span> currently under-describes the payload; widening it is safe (additive) but should be done deliberately, with the orchestrator's <span class="mono text-xs">app.test.ts</span> asserting the new shape.</p>
+          <p><strong class="text-slate-900">Historical <span class="mono text-xs">rawResponseText</span> must still re-parse identically.</strong> <span class="mono text-xs">backfill-issue-tags.ts</span> is documented as idempotent and deterministic against the <em>exact</em> live parser. Keep it pointed at the same function so that guarantee holds — this is the main reason the parser must stay a pure, importable unit.</p>
+          <p><strong class="text-slate-900"><span class="mono text-xs">assist.ts</span>'s parser is genuinely different</strong> (no <span class="mono text-xs">###</span> headings). Unifying it means the <span class="mono text-xs">/diagnose</span> prompts and parser move to the same grammar as <span class="mono text-xs">/solve-assist</span> — which is candidate 7. Do 6 and 7 together.</p>
+        </div>
+      </section>
+
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Recommendation</h2>
+        <p class="text-sm text-slate-700">
+          <strong>Strong.</strong> This is the one item across both rounds with a documented "we fixed it
+          twice" history — the clearest possible signal of a concept with no home. Pair it with candidate
+          7. Sequence after candidate 5 (so the backend runner's re-parse call site is in a focused
+          module) but it is independent of the provider-pool work.
+        </p>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-6 border-t border-slate-200">
+        Connections Lab · architecture deepening 6/8 · own analysis, pre-grilling · 2026-09-09
+      </footer>
+
+    </main>
+  </body>
+</html>

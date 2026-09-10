@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deepening 1 — Provider Pool module</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .font-serif { font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .lbl { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+      .deep-fill { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .ghost { opacity: .34; }
+      .mermaid { display: flex; justify-content: center; }
+      pre.code { background:#0f172a; color:#e2e8f0; padding:1rem 1.15rem; border-radius:.6rem; overflow-x:auto; font-size:12.5px; line-height:1.55; }
+      pre.code .c { color:#7dd3fc; }
+      pre.code .k { color:#f0abfc; }
+      pre.code .s { color:#86efac; }
+      table.axes { border-collapse: collapse; width: 100%; font-size: 13px; }
+      table.axes th, table.axes td { border: 1px solid #e2e8f0; padding: 7px 10px; text-align: left; vertical-align: top; }
+      table.axes th { background: #f1f5f9; font-weight: 600; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900">
+    <main class="max-w-4xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="space-y-4">
+        <p class="lbl text-slate-400">Architecture deepening · candidate 1 of 4</p>
+        <h1 class="font-serif text-4xl">Collapse the per-provider free-tier stack into one Provider Pool module</h1>
+        <p class="text-slate-600 max-w-2xl">
+          Own analysis, not yet grilled. Vocabulary: <span class="mono text-sm">module · interface · depth ·
+          seam · adapter · leverage · locality</span> from the codebase-design glossary; <span class="mono text-sm">provider
+          pool</span> from the frontend's <span class="mono text-sm">providerPools.ts</span>.
+        </p>
+      </header>
+
+      <!-- ============ THE FRICTION ============ -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The friction</h2>
+        <p class="text-sm text-slate-700">
+          Bringing a provider online means hand-copying a stack of ~15 files. The copies are not
+          "similar" — they are the same file with a name substituted. Normalised diffs:
+        </p>
+        <ul class="text-sm space-y-1.5 list-disc pl-5 text-slate-700">
+          <li><span class="mono text-xs">google-free-dispatch.service.ts</span> vs <span class="mono text-xs">groq-free-dispatch.service.ts</span> — differ only in the strategy constant, the queue token, the state-row id string, and one comment.</li>
+          <li><span class="mono text-xs">groq-rate-limit-hold.service.ts</span> vs <span class="mono text-xs">mistral-rate-limit-hold.service.ts</span> — differ only in the entity type and log wording.</li>
+          <li><span class="mono text-xs">1782…-add-groq-rate-limit-hold.ts</span> vs <span class="mono text-xs">1792…-add-mistral-rate-limit-hold.ts</span> — identical DDL; differ only in the class name and comment.</li>
+          <li><span class="mono text-xs">GroqDispatchWidget.tsx</span> vs <span class="mono text-xs">MistralDispatchWidget.tsx</span> — ~4 lines of real difference.</li>
+        </ul>
+        <p class="text-sm text-slate-700">
+          Each of these modules is <strong>shallow</strong>: its interface —
+          <span class="mono text-xs">isHeld() · runTick() · runResume()</span> — is a thin slice of its
+          copied implementation. Five copies have already drifted (Groq's resume logs
+          <span class="mono text-xs">"RPD hold set"</span>, Mistral's logs <span class="mono text-xs">"hold set"</span>;
+          Google stamps resume job-ids with <span class="mono text-xs">pacificDateStamp()</span>, the others
+          with <span class="mono text-xs">triggerJobId</span>). Concrete cost, from git:
+        </p>
+        <div class="grid grid-cols-3 gap-3 text-center">
+          <div class="rounded-lg border border-slate-200 bg-white p-4"><div class="font-serif text-3xl">53</div><div class="text-xs text-slate-500 mt-1">files changed to add SambaNova</div></div>
+          <div class="rounded-lg border border-slate-200 bg-white p-4"><div class="font-serif text-3xl">+2,600</div><div class="text-xs text-slate-500 mt-1">lines for that one provider</div></div>
+          <div class="rounded-lg border border-slate-200 bg-white p-4"><div class="font-serif text-3xl">75</div><div class="text-xs text-slate-500 mt-1">parallel per-provider files today</div></div>
+        </div>
+      </section>
+
+      <!-- ============ DELETION TEST ============ -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Deletion test</h2>
+        <p class="text-sm text-slate-700">
+          Delete <span class="mono text-xs">GroqFreeDispatchService</span>,
+          <span class="mono text-xs">GroqRpdResumeService</span>,
+          <span class="mono text-xs">GroqRateLimitHoldService</span>, their entities, their two queues,
+          their module. Does the complexity concentrate or just move? It <strong>concentrates</strong> —
+          the behaviour merges into the shape the Google copies already have; nothing new appears at a
+          call site. That is the signal to deepen.
+        </p>
+      </section>
+
+      <!-- ============ WHAT VARIES ============ -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">What actually varies between providers</h2>
+        <p class="text-sm text-slate-700">
+          The skeletons (tick chain, resume sweep, hold-table CRUD, worker registration, queue wiring,
+          automation leg) are identical. The real variation is a small, closed set of enumerated axes —
+          each already chosen by <strong>two or more</strong> providers, so each seam is real, not hypothetical:
+        </p>
+        <table class="axes">
+          <thead><tr><th>Axis</th><th>Values (provider)</th><th>Where it bites today</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="mono text-xs">holdScope</span></td>
+              <td><span class="mono text-xs">"model"</span> (google, groq, mistral, sambanova) · <span class="mono text-xs">"account"</span> (openrouter)</td>
+              <td>OpenRouter's hold service has no <span class="mono text-xs">modelName</span>; its <span class="mono text-xs">heldReason()</span> returns <span class="mono text-xs">"daily" | "per-minute-cooldown"</span></td>
+            </tr>
+            <tr>
+              <td><span class="mono text-xs">resetSchedule</span></td>
+              <td><span class="mono text-xs">fixed-cron</span> (google @ 00:01 LA, openrouter @ 00:05 UTC) · <span class="mono text-xs">self-rearm</span> (groq, mistral, sambanova)</td>
+              <td><span class="mono text-xs">*RpdResumeBootstrap</span> either registers a job scheduler or doesn't; <span class="mono text-xs">runResume</span> either calls <span class="mono text-xs">rearm()</span> or doesn't</td>
+            </tr>
+            <tr>
+              <td><span class="mono text-xs">dispatch.stopCondition</span></td>
+              <td><span class="mono text-xs">until-held</span> (google, groq, mistral, sambanova) · <span class="mono text-xs">account-budget</span> (openrouter, self-counted calls vs <span class="mono text-xs">OPENROUTER_FREE_DAILY_BUDGET</span>)</td>
+              <td><span class="mono text-xs">openrouter-free-dispatch.service.ts</span> is the only tick that counts <span class="mono text-xs">countTodayLlmCalls</span> and estimates in-flight call cost</td>
+            </tr>
+            <tr>
+              <td><span class="mono text-xs">dispatch.pacing</span></td>
+              <td><span class="mono text-xs">shared</span> (google, groq — reuse <span class="mono text-xs">FREE_TIER_DISPATCH_*</span>) · <span class="mono text-xs">dedicated</span> (openrouter, sambanova — own <span class="mono text-xs">*_DISPATCH_TICK_MS/MAX_BATCH/MAX_IN_FLIGHT</span>)</td>
+              <td>~24 near-identical env-reader functions in <span class="mono text-xs">strategies.ts</span></td>
+            </tr>
+            <tr>
+              <td><span class="mono text-xs">classify429</span></td>
+              <td>per-provider 429 → <span class="mono text-xs">rate_limited | rate_limited_daily</span> + a <span class="mono text-xs">resetAt</span> computation; Mistral adds a consecutive-429 escalation heuristic</td>
+              <td><span class="mono text-xs">orchestrator/src/solver.ts</span> (5 blocks) + <span class="mono text-xs">llm-strategy-runner.service.ts</span> (4 ternary chains)</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">ollama</span> and <span class="mono text-xs">openai</span> have <em>no</em>
+          free-tier machinery (local / paid), so the config's free-tier sub-record must be optional.
+        </p>
+      </section>
+
+      <!-- ============ THE DEEPENED SHAPE ============ -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The deepened shape</h2>
+        <p class="text-sm text-slate-700">
+          One config list — the backend twin of <span class="mono text-xs">frontend/src/data/benchmark/providerPools.ts</span>,
+          which already established "adding a provider = adding one row" — plus three generic modules that
+          read it. Not one module: three deep ones, each replacing a family of five.
+        </p>
+
+        <pre class="code"><span class="c">// backend/src/modules/provider-pool/provider-pool.config.ts</span>
+<span class="k">type</span> HoldScope = <span class="s">"model"</span> | <span class="s">"account"</span>;
+
+<span class="k">type</span> ResetSchedule =
+  | { kind: <span class="s">"fixed-cron"</span>; pattern: string; tz: string }   <span class="c">// google, openrouter</span>
+  | { kind: <span class="s">"self-rearm"</span>; maxDelayMs: number };            <span class="c">// groq, mistral, sambanova</span>
+
+<span class="k">type</span> DispatchSpec =
+  | { stop: <span class="s">"until-held"</span>; pacing: <span class="s">"shared"</span> | { tickMs; maxBatch; maxInFlight } }
+  | { stop: <span class="s">"account-budget"</span>; budget; callsPerTrial; tickMs; maxBatch; maxInFlight; rpmCooldownMs };
+
+<span class="k">interface</span> ProviderPool {
+  id: ProviderPoolId;                 <span class="c">// "google" | "groq" | ...  (shared with frontend list)</span>
+  strategyName: string;               <span class="c">// "llm-google"</span>
+  orchestratorProvider: ModelProvider;<span class="c">// "google"</span>
+  queues: { runs: string; freeDispatch: string; rpdResume: string };  <span class="c">// keep existing names</span>
+  freeTier: null | {                  <span class="c">// null for ollama / openai</span>
+    holdScope: HoldScope;
+    resetSchedule: ResetSchedule;
+    dispatch: DispatchSpec;
+    rateLimitFallbackSeconds: () =&gt; number;
+    dailyHoldFallbackSeconds?: () =&gt; number;
+    classifyExtra?: (state, outcome) =&gt; HoldDecision | null;  <span class="c">// mistral's streak heuristic</span>
+  };
+}
+
+<span class="k">export const</span> PROVIDER_POOLS: ProviderPool[] = [ <span class="c">/* one row per provider */</span> ];
+<span class="k">export function</span> providerPool(strategyName: string): ProviderPool | null;</pre>
+
+        <div class="rounded-xl border border-slate-200 bg-white p-4">
+          <pre class="mermaid">
+flowchart TB
+  CFG["PROVIDER_POOLS config list"]
+  subgraph DEEP["three generic deep modules"]
+    RLH["RateLimitHoldService<br/>one RateLimitHold table"]
+    FD["FreeDispatchService<br/>runTick(poolId)"]
+    RR["RpdResumeService<br/>runResume(poolId, jobId)"]
+  end
+  CFG --> RLH & FD & RR
+  RUN["LlmStrategyRunner"] --> RLH
+  AUTO["DailyAutomationService<br/>for pool of POOLS: start(pool)"] --> FD
+  WRK["worker.ts<br/>for pool of POOLS: register 3 workers"] --> FD & RR
+  CTL["DispatchController<br/>GET/DELETE /dispatch/pool/:id"] --> FD
+  classDef deep fill:#0f172a,color:#e2e8f0,stroke:#334155;
+  class RLH,FD,RR deep
+          </pre>
+        </div>
+      </section>
+
+      <!-- ============ BEHIND THE SEAM ============ -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">What sits behind the seam</h2>
+        <p class="text-sm text-slate-700">
+          The seam is <span class="mono text-xs">providerPool(strategyName)</span> plus the three service
+          interfaces. Callers name a pool and get behaviour. Hidden behind it: the single hold table and
+          its scope rule, the tick chain and its stop-condition strategy, the resume sweep and its
+          schedule registration, the BullMQ queue handles, the 429 classification. A new provider never
+          touches the runner, the worker, the automation service, the controller, or the queue module —
+          only the config list and (if it needs bespoke 429 parsing) <span class="mono text-xs">solver.ts</span>.
+        </p>
+      </section>
+
+      <!-- ============ MIGRATION PATH ============ -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">Migration path — each step ships on its own</h2>
+        <ol class="text-sm space-y-2 list-decimal pl-5 text-slate-700">
+          <li><strong>Unify the hold table</strong> (candidate 2). Smallest move; one migration; unblocks the rest.</li>
+          <li><strong>Add <span class="mono text-xs">PROVIDER_POOLS</span> + <span class="mono text-xs">providerPool()</span></strong> to the backend. Pure addition, no behaviour change. Mirrors the frontend file.</li>
+          <li><strong>Replace the provider ternaries</strong> in <span class="mono text-xs">llm-strategy-runner.service.ts</span> and <span class="mono text-xs">strategy.queue.ts</span>'s <span class="mono text-xs">queueForStrategy</span> with config lookups (candidate 3).</li>
+          <li><strong>Unify <span class="mono text-xs">RpdResumeService</span></strong> behind <span class="mono text-xs">runResume(poolId, jobId)</span>; drive scheduling from <span class="mono text-xs">resetSchedule</span>. Delete 5 services + 5 bootstraps → 1 + 1. Keep the 5 queue names.</li>
+          <li><strong>Unify <span class="mono text-xs">FreeDispatchService</span></strong> behind <span class="mono text-xs">runTick(poolId)</span>; add a <span class="mono text-xs">pool</span> column to the (also unified) dispatch-state table; select the stop condition from <span class="mono text-xs">dispatch.stop</span>. Delete 5 → 1.</li>
+          <li><strong>Loop the wiring.</strong> <span class="mono text-xs">worker.ts</span> and <span class="mono text-xs">daily-automation.service.ts</span> iterate <span class="mono text-xs">PROVIDER_POOLS</span>. <span class="mono text-xs">queue.module.ts</span> generates 3 queues per pool.</li>
+          <li><strong>Fold the knob families</strong> in <span class="mono text-xs">strategies.ts</span> into the pool config (candidate 4).</li>
+        </ol>
+      </section>
+
+      <!-- ============ TESTS ============ -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Tests that survive, and improve</h2>
+        <ul class="text-sm space-y-1.5 list-disc pl-5 text-slate-700">
+          <li>Five near-identical <span class="mono text-xs">*-free-dispatch.service.spec.ts</span> collapse to one that exercises the tick chain thoroughly, plus a table-driven <span class="mono text-xs">provider-pool.config.spec.ts</span> asserting each row's shape. The tick logic gets tested <em>once, deeply</em> instead of five times shallowly.</li>
+          <li>Same for the five <span class="mono text-xs">*-rpd-resume.service.spec.ts</span> and five <span class="mono text-xs">*-rate-limit-hold.service.spec.ts</span>.</li>
+          <li><span class="mono text-xs">llm-strategy-runner.service.spec.ts</span> drops five injected hold-service mocks for one <span class="mono text-xs">ProviderPool</span> fake — the interface becomes the test surface.</li>
+          <li>Per-provider behaviour becomes a data fixture (a config row) rather than a code path, so "does Mistral park after 4 consecutive 429s" is a unit test against <span class="mono text-xs">classifyExtra</span>, not an integration test through the whole runner.</li>
+        </ul>
+      </section>
+
+      <!-- ============ RISKS ============ -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">Risks &amp; open questions</h2>
+        <div class="space-y-3 text-sm text-slate-700">
+          <p><strong class="text-slate-900">Table unification needs a data migration.</strong> Merging 5 <span class="mono text-xs">*RateLimitHold</span> and 5 <span class="mono text-xs">*DispatchState</span> tables into 2 with a <span class="mono text-xs">pool</span> column. Holds are transient (expire within 24h) and dispatch state is ephemeral, so a cutover that copies live rows then drops the old tables is low-stakes; worst case a few parked runs wait one extra reset. Decide: copy-then-drop, or drop-and-let-the-next-sweep-recover.</p>
+          <p><strong class="text-slate-900">Never rename a live BullMQ queue.</strong> The 15 queue names (<span class="mono text-xs">llm-groq-runs</span>, <span class="mono text-xs">groq-free-dispatch</span>, <span class="mono text-xs">groq-rpd-resume</span>, …) stay as data in the config; the code goes generic around them. Renaming would orphan in-flight jobs on deploy.</p>
+          <p><strong class="text-slate-900">OpenRouter is the widest deviation.</strong> Account-scope hold, self-counted call budget, per-minute cooldown. <span class="mono text-xs">holdScope: "account"</span> and <span class="mono text-xs">dispatch.stop: "account-budget"</span> must be first-class in the config, not special-cased in the generic code. It is one provider on those axes today — but it is a real external constraint (OpenRouter's free tier genuinely is account-wide), so model it, don't fake it.</p>
+          <p><strong class="text-slate-900">Keep <span class="mono text-xs">FreeTierDispatchService</span> (OpenAI flagship/mini) separate for v1.</strong> Its stop condition is a token-budget percentage across named tiers — a third <span class="mono text-xs">dispatch.stop</span> shape. Folding it in is possible later; forcing it now widens scope and risk.</p>
+          <p><strong class="text-slate-900">Ternary-to-lookup is not free.</strong> A config lookup that returns <span class="mono text-xs">null</span> for a non-pool strategy needs the same "fall through to default" handling the ternaries have today. Cover deterministic/shuffle strategies explicitly in tests.</p>
+        </div>
+      </section>
+
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Recommendation</h2>
+        <p class="text-sm text-slate-700">
+          <strong>Strong.</strong> The abstraction is not speculative — every axis is already exercised by
+          multiple providers, and the frontend has already proven the config-list shape. Do it in the
+          order above; each step is independently shippable and independently revertible. Expected end
+          state: adding a provider is one config row, one <span class="mono text-xs">solver.ts</span> block
+          if its 429s are exotic, and one frontend row — down from 53 files.
+        </p>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-6 border-t border-slate-200">
+        Connections Lab · architecture deepening 1/4 · own analysis, pre-grilling · 2026-09-09
+      </footer>
+
+    </main>
+  </body>
+</html>

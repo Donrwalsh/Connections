@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deepening 7 — Fold /diagnose into the solve-assist step</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .font-serif { font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .lbl { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+      .deep-fill { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      pre.code { background:#0f172a; color:#e2e8f0; padding:1rem 1.15rem; border-radius:.6rem; overflow-x:auto; font-size:12.5px; line-height:1.55; }
+      pre.code .c { color:#7dd3fc; } pre.code .k { color:#f0abfc; } pre.code .s { color:#86efac; } pre.code .r { color:#fca5a5; }
+      table.t { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+      table.t th, table.t td { border: 1px solid #e2e8f0; padding: 7px 9px; text-align: left; vertical-align: top; }
+      table.t th { background: #f1f5f9; font-weight: 600; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900">
+    <main class="max-w-4xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="space-y-4">
+        <p class="lbl text-slate-400">Architecture deepening · candidate 7 of 8 (round 2, item 3)</p>
+        <h1 class="font-serif text-4xl">Fold <span class="mono text-3xl">/diagnose</span> into the solve-assist step</h1>
+        <p class="text-slate-600 max-w-2xl">Own analysis, pre-grilling. Small; pairs with candidate 6.</p>
+      </header>
+
+      <!-- FRICTION -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The friction</h2>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">orchestrator/src/assist.ts</span> (86 lines,
+          <span class="mono text-xs">runAssistStep</span>, backs <span class="mono text-xs">POST /diagnose</span>)
+          is a stripped, older copy of
+          <span class="mono text-xs">orchestrator/src/solve-assist.ts</span> (213 lines,
+          <span class="mono text-xs">solveAssist</span>, backs <span class="mono text-xs">POST /solve-assist</span>).
+          Same skeleton — <span class="mono text-xs">generateText → catch → classifyModelCallError →
+          parse groups → throw on empty</span> — with the same two hard-won tuning decisions
+          (<span class="mono text-xs">maxRetries: 0</span> so the AI SDK doesn't silently re-bill a doomed
+          call; the strategy runner is the only retry layer). <span class="mono text-xs">/diagnose</span>
+          is the frontend's in-game "AI Assist" button; <span class="mono text-xs">/solve-assist</span> is
+          the backend strategy runner's per-step call.
+        </p>
+        <table class="t">
+          <thead><tr><th></th><th class="mono text-xs">runAssistStep</th><th class="mono text-xs">solveAssist</th></tr></thead>
+          <tbody>
+            <tr><td>provider</td><td><span class="mono text-xs">defaultProvider()</span> only</td><td><span class="mono text-xs">provider ?? defaultProvider()</span></td></tr>
+            <tr><td>model / contextWindow override</td><td>—</td><td>✓</td></tr>
+            <tr><td>abort signal</td><td>—</td><td>✓ (forwards the HTTP request's signal)</td></tr>
+            <tr><td>telemetry (latency, usage, request/response body)</td><td>—</td><td>✓</td></tr>
+            <tr><td>group parsing</td><td><span class="mono text-xs">parseAnswerGroups</span> — bare <span class="mono text-xs">^ANSWER:$</span>, no <span class="mono text-xs">###</span>, no parenthetical strip</td><td><span class="mono text-xs">parseGroupProposals</span> + <span class="mono text-xs">parseAnswerGroups</span> — <span class="mono text-xs">###</span> headings, parenthetical strip, <span class="mono text-xs">### GROUPS</span> fallback</td></tr>
+            <tr><td>temperature</td><td><span class="mono text-xs">0.7</span> (own const)</td><td><span class="mono text-xs">0.7</span> (own const)</td></tr>
+          </tbody>
+        </table>
+        <p class="text-sm text-slate-700">
+          The two <span class="mono text-xs">parseAnswerGroups</span> functions have already diverged — a
+          model that answers with <span class="mono text-xs">### ANSWER</span> (what the current prompts
+          ask for) parses on the <span class="mono text-xs">/solve-assist</span> path and returns nothing
+          on <span class="mono text-xs">/diagnose</span>.
+        </p>
+      </section>
+
+      <!-- DELETION TEST -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Deletion test</h2>
+        <p class="text-sm text-slate-700">
+          Delete <span class="mono text-xs">assist.ts</span>. Where does its behaviour go? Into
+          <span class="mono text-xs">solveAssist</span> called with no <span class="mono text-xs">model</span>/<span class="mono text-xs">provider</span>
+          override and telemetry suppressed. Nothing new appears at the
+          <span class="mono text-xs">/diagnose</span> route — it becomes a thin adapter that maps
+          <span class="mono text-xs">AssistRequestSchema</span> onto the call and trims the response to
+          <span class="mono text-xs">{ response, groups, model }</span>. <strong>Concentrates.</strong>
+        </p>
+      </section>
+
+      <!-- SHAPE -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The deepened shape</h2>
+        <pre class="code"><span class="c">// solve-assist.ts — one step function</span>
+<span class="k">interface</span> SolveAssistOpts {
+  model?: string;
+  provider?: ModelProvider;
+  contextWindow?: number;
+  abortSignal?: AbortSignal;
+  captureTelemetry?: boolean;   <span class="c">// /diagnose passes false — skip include:{requestBody,responseBody}, latency, usage</span>
+}
+<span class="k">export async function</span> solveAssistStep(messages: ChatMessage[], opts: SolveAssistOpts = {}): Promise&lt;SolveAssistResult&gt;;
+
+<span class="c">// app.ts — /diagnose is now a thin route</span>
+app.post(<span class="s">"/diagnose"</span>, bodyLimit(...), <span class="k">async</span> (c) =&gt; {
+  <span class="k">const</span> parsed = AssistRequestSchema.safeParse(<span class="k">await</span> c.req.json());
+  ...
+  <span class="k">const</span> r = <span class="k">await</span> solveAssistStep(parsed.data.messages, { captureTelemetry: false });
+  <span class="k">return</span> c.json({ response: r.response, groups: r.groups, model: r.model }, 200);
+});</pre>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">AssistRequestSchema</span> / <span class="mono text-xs">AssistResponseSchema</span>
+          stay as the <span class="mono text-xs">/diagnose</span> wire contract (the frontend depends on
+          the trimmed shape). <span class="mono text-xs">SolveAssistRequestSchema</span> already
+          <span class="mono text-xs">.extend()</span>s <span class="mono text-xs">AssistRequestSchema</span>
+          — the relationship is already modelled; only the two step <em>functions</em> are redundant.
+          One <span class="mono text-xs">ASSIST_TEMPERATURE = 0.7</span> const.
+        </p>
+      </section>
+
+      <!-- WINS -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Wins</h2>
+        <ul class="text-sm space-y-1 list-disc pl-5 text-slate-700">
+          <li>locality: the <span class="mono text-xs">generateText</span> tuning (<span class="mono text-xs">maxRetries: 0</span>, abort forwarding, error classification) lives in one function</li>
+          <li>one parser path for both endpoints — directly enables candidate 6</li>
+          <li>the next provider-behaviour fix to the model call is made once, not once-and-maybe-twice</li>
+          <li>deletion: ~86 lines + <span class="mono text-xs">assist.test.ts</span> merged into <span class="mono text-xs">solve-assist.test.ts</span></li>
+        </ul>
+      </section>
+
+      <!-- RISKS -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">Risks &amp; open questions</h2>
+        <div class="space-y-3 text-sm text-slate-700">
+          <p><strong class="text-slate-900">The <span class="mono text-xs">/diagnose</span> response must not grow.</strong> The frontend consumes exactly <span class="mono text-xs">{ response, groups, model }</span>. The route trims; the step function's richer return stays internal. Assert this in <span class="mono text-xs">app.test.ts</span>.</p>
+          <p><strong class="text-slate-900">Parser unification changes <span class="mono text-xs">/diagnose</span> parsing behaviour.</strong> Today it only recognises a bare <span class="mono text-xs">ANSWER:</span> line. After, it recognises <span class="mono text-xs">### ANSWER</span> and strips parentheticals — a strict superset, so existing good responses still parse, but confirm no frontend prompt relies on the old strictness. This is the same decision as candidate 6; take them together.</p>
+          <p><strong class="text-slate-900">Telemetry-off path.</strong> <span class="mono text-xs">include: { requestBody: true, responseBody: true }</span> has a cost and <span class="mono text-xs">/diagnose</span> never persists anything — <span class="mono text-xs">captureTelemetry: false</span> should genuinely skip it, not compute-then-discard.</p>
+          <p><strong class="text-slate-900">Low urgency on its own.</strong> Two small files, one live bug (the divergent parser) that candidate 6 also fixes. Worth doing, not worth doing alone.</p>
+        </div>
+      </section>
+
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Recommendation</h2>
+        <p class="text-sm text-slate-700">
+          <strong>Worth exploring</strong>, bundled with candidate 6. Together they leave the orchestrator
+          with one model-call step and one answer grammar behind two thin routes.
+        </p>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-6 border-t border-slate-200">
+        Connections Lab · architecture deepening 7/8 · own analysis, pre-grilling · 2026-09-09
+      </footer>
+
+    </main>
+  </body>
+</html>
