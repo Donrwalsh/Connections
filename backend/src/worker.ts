@@ -21,21 +21,9 @@ import {
   FREE_TIER_POOLS,
   PROVIDER_POOLS,
   providerPoolById,
-  type ProviderPoolId,
 } from "./modules/provider-pool/provider-pool.config";
 import { DailyAutomationService } from "./modules/automation/daily-automation.service";
-import {
-  isLlmStrategy,
-  llmOllamaConcurrency,
-  llmOpenAIConcurrency,
-  llmGoogleConcurrency,
-  llmGroqConcurrency,
-  llmOpenRouterConcurrency,
-  llmMistralConcurrency,
-  llmSambaNovaConcurrency,
-  STRATEGY_SET,
-  workerRole,
-} from "./strategies";
+import { isLlmStrategy, STRATEGY_SET, workerRole } from "./strategies";
 
 interface FreeTierDispatchTickJobData {
   tier: FreeTierId;
@@ -122,16 +110,6 @@ async function bootstrap() {
    * configured limit (default 1 = fully serialized). Concurrency is read once
    * at boot.
    */
-  const llmConcurrencyByPool: Record<ProviderPoolId, () => number> = {
-    openai: llmOpenAIConcurrency,
-    ollama: llmOllamaConcurrency,
-    google: llmGoogleConcurrency,
-    groq: llmGroqConcurrency,
-    openrouter: llmOpenRouterConcurrency,
-    mistral: llmMistralConcurrency,
-    sambanova: llmSambaNovaConcurrency,
-  };
-
   const createLlmWorker = (
     queueName: string,
     expectedStrategy: string,
@@ -170,7 +148,7 @@ async function bootstrap() {
     const llmOllamaWorker = createLlmWorker(
       ollamaPool.queues.runs,
       ollamaPool.strategyName,
-      llmConcurrencyByPool.ollama(),
+      ollamaPool.concurrency(),
     );
     activeWorkers.push(llmOllamaWorker);
     activeQueueNames.push(ollamaPool.queues.runs);
@@ -186,7 +164,7 @@ async function bootstrap() {
       const runsWorker = createLlmWorker(
         pool.queues.runs,
         pool.strategyName,
-        llmConcurrencyByPool[pool.id](),
+        pool.concurrency(),
       );
       activeWorkers.push(runsWorker);
       activeQueueNames.push(pool.queues.runs);

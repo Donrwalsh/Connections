@@ -11,9 +11,10 @@
 // row stays minimal (it is a UI filter list); this row carries behaviour. A
 // parity test keeps the shared `id` / `strategyName` columns from drifting.
 //
-// Step 2 of docs/architecture/specs/01-provider-pool-module.md: this file is a
-// pure addition. Nothing reads it yet — step 3 onward replaces the per-provider
-// `strategyName` ternaries with `providerPool()` lookups.
+// See docs/architecture/specs/01-provider-pool-module.md. The strategy runner,
+// the queue router, the generic FreeDispatchService / RpdResumeService, the
+// worker registration loops and daily automation all read this list instead of
+// branching on `strategyName`.
 
 import {
   LLM_GOOGLE,
@@ -23,6 +24,13 @@ import {
   LLM_OPENAI,
   LLM_OPENROUTER,
   LLM_SAMBANOVA,
+  llmGoogleConcurrency,
+  llmGroqConcurrency,
+  llmMistralConcurrency,
+  llmOllamaConcurrency,
+  llmOpenAIConcurrency,
+  llmOpenRouterConcurrency,
+  llmSambaNovaConcurrency,
   llmGoogleRateLimitFallbackSeconds,
   llmGroqDailyHoldFallbackSeconds,
   llmGroqRateLimitFallbackSeconds,
@@ -127,6 +135,9 @@ export interface ProviderPool {
   /** Existing BullMQ queue names, verbatim — never renamed (renaming orphans
    * in-flight jobs). `freeDispatch` / `rpdResume` are present iff `freeTier`. */
   queues: { runs: string; freeDispatch?: string; rpdResume?: string };
+  /** How many of this pool's runs a worker processes at once (env-backed,
+   * `LLM_<ID>_CONCURRENCY`; default 1). */
+  concurrency: NumberThunk;
   /** `null` for providers with no free-tier machinery (openai — paid;
    * ollama — local). */
   freeTier: FreeTierConfig | null;
@@ -148,6 +159,7 @@ export const PROVIDER_POOLS: ProviderPool[] = [
     label: "Google",
     strategyName: LLM_GOOGLE,
     orchestratorProvider: "google",
+    concurrency: llmGoogleConcurrency,
     queues: {
       runs: "llm-google-runs",
       freeDispatch: "google-free-dispatch",
@@ -168,6 +180,7 @@ export const PROVIDER_POOLS: ProviderPool[] = [
     label: "Groq",
     strategyName: LLM_GROQ,
     orchestratorProvider: "groq",
+    concurrency: llmGroqConcurrency,
     queues: {
       runs: "llm-groq-runs",
       freeDispatch: "groq-free-dispatch",
@@ -186,6 +199,7 @@ export const PROVIDER_POOLS: ProviderPool[] = [
     label: "OpenRouter",
     strategyName: LLM_OPENROUTER,
     orchestratorProvider: "openrouter",
+    concurrency: llmOpenRouterConcurrency,
     queues: {
       runs: "llm-openrouter-runs",
       freeDispatch: "openrouter-free-dispatch",
@@ -214,6 +228,7 @@ export const PROVIDER_POOLS: ProviderPool[] = [
     label: "Mistral",
     strategyName: LLM_MISTRAL,
     orchestratorProvider: "mistral",
+    concurrency: llmMistralConcurrency,
     queues: {
       runs: "llm-mistral-runs",
       freeDispatch: "mistral-free-dispatch",
@@ -236,6 +251,7 @@ export const PROVIDER_POOLS: ProviderPool[] = [
     label: "SambaNova",
     strategyName: LLM_SAMBANOVA,
     orchestratorProvider: "sambanova",
+    concurrency: llmSambaNovaConcurrency,
     queues: {
       runs: "llm-sambanova-runs",
       freeDispatch: "sambanova-free-dispatch",
@@ -261,6 +277,7 @@ export const PROVIDER_POOLS: ProviderPool[] = [
     label: "OpenAI",
     strategyName: LLM_OPENAI,
     orchestratorProvider: "openai",
+    concurrency: llmOpenAIConcurrency,
     queues: { runs: "llm-openai-runs" },
     freeTier: null,
   },
@@ -269,6 +286,7 @@ export const PROVIDER_POOLS: ProviderPool[] = [
     label: "Ollama",
     strategyName: LLM_OLLAMA,
     orchestratorProvider: "ollama",
+    concurrency: llmOllamaConcurrency,
     queues: { runs: "llm-ollama-runs" },
     freeTier: null,
   },

@@ -60,6 +60,7 @@ describe("PROVIDER_POOLS row shape", () => {
       expect(pool.strategyName).toBe(`llm-${id}`);
       expect(pool.orchestratorProvider).toBe(id);
       expect(pool.queues.runs).toBe(`llm-${id}-runs`);
+      expect(pool.concurrency()).toBeGreaterThan(0);
     },
   );
 

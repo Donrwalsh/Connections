@@ -297,10 +297,21 @@ each route's response shape so drift fails loud.
 
 ### Step 7 — fold the knob families into the config (candidate 4)
 
-Move the ~28 per-provider accessor functions and ~28 `DEFAULT_*` consts from
-`backend/src/strategies.ts` into the provider-pool config as `poolKnobs(pool)` (or inline
-on the row). The accessors still read env at call time. `dispatch.pacing: "shared"` keeps
-reusing the `FREE_TIER_DISPATCH_*` values; dedicated pacers move onto their rows.
+The per-provider knob *references* are already on the config rows (steps 2–6):
+`rateLimitFallbackSeconds`, `dailyHoldFallbackSeconds`, `persistentRateLimitPark`, the
+`dispatch` pacing/budget thunks. This step adds the last one — `concurrency` — so
+`worker.ts` reads `pool.concurrency()` instead of a hand-listed `llm<P>Concurrency` map, and
+nothing outside `provider-pool.config.ts` imports a per-pool free-tier knob (the sole
+remaining exception is `llmGoogleRateLimitFallbackSeconds` as the deliberate non-pool
+fallback in the strategy runner, and `freeTierDispatch*` in the generic dispatcher, which is
+genuinely shared with the out-of-scope OpenAI `FreeTierDispatchService`).
+
+**Deferred (pure code-motion):** the accessor function *bodies* and their `DEFAULT_*`
+consts stay in `backend/src/strategies.ts`. Relocating ~28 functions + ~28 consts + their
+`strategies.spec.ts` coverage into a `provider-pool.knobs.ts` is behaviour-neutral file
+shuffling with wide import churn and no architectural change — `docs/architecture/04` can
+take it as its own focused pass. The config being the single point of *wiring* is the part
+that matters, and it is done.
 
 ---
 
