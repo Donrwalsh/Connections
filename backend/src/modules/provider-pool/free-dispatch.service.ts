@@ -67,7 +67,6 @@ export class FreeDispatchService {
   ): Promise<{ status: DispatchStatus; outcome: "started" | "alreadyExhausted" }> {
     const pool = this.freeTierPool(poolId);
     const { strategyName } = pool;
-    const ft = pool.freeTier;
 
     const existing = await this.stateRepo.findOne({ where: { id: poolId } });
     if (existing?.active) {
