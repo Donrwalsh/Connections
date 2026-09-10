@@ -1,7 +1,7 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { getRepositoryToken } from "@nestjs/typeorm";
 import { OpenRouterRpdResumeService } from "./openrouter-rpd-resume.service";
-import { OpenRouterRateLimitHoldService } from "./openrouter-rate-limit-hold.service";
+import { RateLimitHoldService } from "./rate-limit-hold.service";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { LLM_OPENROUTER_QUEUE } from "../queue/queue.module";
 import { runStrategyJobId } from "../queue/strategy.queue";
@@ -28,7 +28,7 @@ describe("OpenRouterRpdResumeService", () => {
       save: jest.fn().mockResolvedValue(undefined),
     };
     holdService = {
-      clearExpired: jest.fn().mockResolvedValue(true),
+      clearExpired: jest.fn().mockResolvedValue({ clearedModels: [], clearedAccountWide: true }),
       isHeld: jest.fn().mockResolvedValue(false),
     };
     queue = { add: jest.fn().mockResolvedValue(undefined) };
@@ -37,7 +37,7 @@ describe("OpenRouterRpdResumeService", () => {
       providers: [
         OpenRouterRpdResumeService,
         { provide: getRepositoryToken(StrategyRun), useValue: strategyRunRepo },
-        { provide: OpenRouterRateLimitHoldService, useValue: holdService },
+        { provide: RateLimitHoldService, useValue: holdService },
         { provide: LLM_OPENROUTER_QUEUE, useValue: queue },
       ],
     }).compile();
@@ -69,7 +69,7 @@ describe("OpenRouterRpdResumeService", () => {
   });
 
   it("re-dispatches nothing while the account hold is still live", async () => {
-    holdService.clearExpired.mockResolvedValue(false);
+    holdService.clearExpired.mockResolvedValue({ clearedModels: [], clearedAccountWide: false });
     holdService.isHeld.mockResolvedValue(true);
     strategyRunRepo.find.mockResolvedValue([parkedRun({ puzzle: { date: "2026-01-01" } })]);
 

@@ -1,7 +1,7 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { getRepositoryToken } from "@nestjs/typeorm";
 import { GroqRpdResumeService } from "./groq-rpd-resume.service";
-import { GroqRateLimitHoldService } from "./groq-rate-limit-hold.service";
+import { RateLimitHoldService } from "./rate-limit-hold.service";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { GROQ_RPD_RESUME_QUEUE, LLM_GROQ_QUEUE } from "../queue/queue.module";
 import { runStrategyJobId } from "../queue/strategy.queue";
@@ -33,7 +33,7 @@ describe("GroqRpdResumeService", () => {
   beforeEach(async () => {
     strategyRunRepo = { find: jest.fn().mockResolvedValue([]), save: jest.fn().mockResolvedValue(undefined) };
     holdService = {
-      clearExpired: jest.fn().mockResolvedValue([]),
+      clearExpired: jest.fn().mockResolvedValue({ clearedModels: [], clearedAccountWide: false }),
       heldModels: jest.fn().mockResolvedValue([]),
       nextResetAt: jest.fn().mockResolvedValue(null),
     };
@@ -44,7 +44,7 @@ describe("GroqRpdResumeService", () => {
       providers: [
         GroqRpdResumeService,
         { provide: getRepositoryToken(StrategyRun), useValue: strategyRunRepo },
-        { provide: GroqRateLimitHoldService, useValue: holdService },
+        { provide: RateLimitHoldService, useValue: holdService },
         { provide: LLM_GROQ_QUEUE, useValue: queue },
         { provide: GROQ_RPD_RESUME_QUEUE, useValue: resumeQueue },
       ],
@@ -63,7 +63,7 @@ describe("GroqRpdResumeService", () => {
   });
 
   it("revives parked runs whose model is no longer held and re-enqueues them", async () => {
-    holdService.clearExpired.mockResolvedValue(["openai/gpt-oss-20b"]);
+    holdService.clearExpired.mockResolvedValue({ clearedModels: ["openai/gpt-oss-20b"], clearedAccountWide: false });
     holdService.heldModels.mockResolvedValue(["openai/gpt-oss-120b"]);
     holdService.nextResetAt.mockResolvedValue(new Date(Date.now() + 5 * 60_000));
     strategyRunRepo.find.mockResolvedValue([
@@ -197,7 +197,7 @@ describe("GroqRpdResumeService", () => {
   });
 
   it("does nothing when there are no parked runs", async () => {
-    holdService.clearExpired.mockResolvedValue([]);
+    holdService.clearExpired.mockResolvedValue({ clearedModels: [], clearedAccountWide: false });
     strategyRunRepo.find.mockResolvedValue([]);
 
     const result = await service.runResume("sweep-1");

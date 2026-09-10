@@ -10,11 +10,7 @@ import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { LlmProposalStatus } from "./entities/llm-proposal.entity";
 import { OrchestratorService, type SolveAssistOutcome, type ChatMessage } from "./orchestrator.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
-import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
-import { GroqRateLimitHoldService } from "./groq-rate-limit-hold.service";
-import { OpenRouterRateLimitHoldService } from "./openrouter-rate-limit-hold.service";
-import { MistralRateLimitHoldService } from "./mistral-rate-limit-hold.service";
-import { SambaNovaRateLimitHoldService } from "./sambanova-rate-limit-hold.service";
+import { RateLimitHoldService } from "./rate-limit-hold.service";
 import {
   DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
   DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS,
@@ -43,14 +39,11 @@ describe("LlmStrategyRunner", () => {
     solveAssist: jest.Mock<Promise<SolveAssistOutcome>, unknown[]>;
   };
   let mockSupportedModelService: { getContextWindow: jest.Mock };
-  let mockRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
-  let mockGroqRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
-  let mockMistralRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
-  let mockSambaNovaRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
-  let mockOpenRouterHold: {
+  let mockRateLimitHold: {
     isHeld: jest.Mock;
     hold: jest.Mock;
     heldReason: jest.Mock;
+    heldModels: jest.Mock;
     nextResetAt: jest.Mock;
     clearExpired: jest.Mock;
   };
@@ -111,28 +104,13 @@ describe("LlmStrategyRunner", () => {
     mockSupportedModelService = {
       getContextWindow: jest.fn().mockResolvedValue(null),
     };
-    mockRpdHold = {
-      isHeld: jest.fn().mockResolvedValue(false),
-      hold: jest.fn().mockResolvedValue(undefined),
-    };
-    mockGroqRpdHold = {
-      isHeld: jest.fn().mockResolvedValue(false),
-      hold: jest.fn().mockResolvedValue(undefined),
-    };
-    mockMistralRpdHold = {
-      isHeld: jest.fn().mockResolvedValue(false),
-      hold: jest.fn().mockResolvedValue(undefined),
-    };
-    mockSambaNovaRpdHold = {
-      isHeld: jest.fn().mockResolvedValue(false),
-      hold: jest.fn().mockResolvedValue(undefined),
-    };
-    mockOpenRouterHold = {
+    mockRateLimitHold = {
       isHeld: jest.fn().mockResolvedValue(false),
       hold: jest.fn().mockResolvedValue(undefined),
       heldReason: jest.fn().mockResolvedValue(null),
+      heldModels: jest.fn().mockResolvedValue([]),
       nextResetAt: jest.fn().mockResolvedValue(null),
-      clearExpired: jest.fn().mockResolvedValue(false),
+      clearExpired: jest.fn().mockResolvedValue({ clearedModels: [], clearedAccountWide: false }),
     };
     mockManager = {
       insert: jest.fn().mockImplementation((entity: string, data?: unknown[]) => {
@@ -159,11 +137,7 @@ describe("LlmStrategyRunner", () => {
         { provide: getRepositoryToken(SolvePrompt), useValue: mockSolvePromptRepo },
         { provide: OrchestratorService, useValue: mockOrchestratorService },
         { provide: SupportedModelService, useValue: mockSupportedModelService },
-        { provide: GoogleRateLimitHoldService, useValue: mockRpdHold },
-        { provide: GroqRateLimitHoldService, useValue: mockGroqRpdHold },
-        { provide: OpenRouterRateLimitHoldService, useValue: mockOpenRouterHold },
-        { provide: MistralRateLimitHoldService, useValue: mockMistralRpdHold },
-        { provide: SambaNovaRateLimitHoldService, useValue: mockSambaNovaRpdHold },
+        { provide: RateLimitHoldService, useValue: mockRateLimitHold },
       ],
     }).compile();
 
@@ -1239,7 +1213,7 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("parks a held google run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {
-      mockRpdHold.isHeld.mockResolvedValue(true);
+      mockRateLimitHold.isHeld.mockResolvedValue(true);
       mockStrategyRunRepo.findOne.mockResolvedValue(
         makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" }),
       );
@@ -1250,7 +1224,7 @@ describe("LlmStrategyRunner", () => {
 
       expect(mockOrchestratorService.solveAssist).not.toHaveBeenCalled();
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockRpdHold.hold).not.toHaveBeenCalled();
+      expect(mockRateLimitHold.hold).not.toHaveBeenCalled();
     });
 
     it("records a hold and parks the run on a rate_limited_daily failure, touching no failure counter", async () => {
@@ -1267,7 +1241,10 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
 
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockRpdHold.hold).toHaveBeenCalledWith("llm-google", "gemini-3.6-flash");
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-google", {
+        modelName: "gemini-3.6-flash",
+        resetInSeconds: expect.any(Number),
+      });
       expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
     });
 
@@ -1291,7 +1268,7 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("parks a held groq run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {
-      mockGroqRpdHold.isHeld.mockResolvedValue(true);
+      mockRateLimitHold.isHeld.mockResolvedValue(true);
       mockStrategyRunRepo.findOne.mockResolvedValue(
         makeRun({ strategyName: "llm-groq", modelName: "openai/gpt-oss-20b" }),
       );
@@ -1302,7 +1279,7 @@ describe("LlmStrategyRunner", () => {
 
       expect(mockOrchestratorService.solveAssist).not.toHaveBeenCalled();
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockGroqRpdHold.hold).not.toHaveBeenCalled();
+      expect(mockRateLimitHold.hold).not.toHaveBeenCalled();
     });
 
     it("records a Groq hold using dailyResetSeconds and parks the run, touching no failure counter", async () => {
@@ -1319,7 +1296,10 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-groq", 0, "openai/gpt-oss-20b");
 
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockGroqRpdHold.hold).toHaveBeenCalledWith("llm-groq", "openai/gpt-oss-20b", 3600);
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-groq", {
+        modelName: "openai/gpt-oss-20b",
+        resetInSeconds: 3600,
+      });
       expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
     });
 
@@ -1336,11 +1316,10 @@ describe("LlmStrategyRunner", () => {
 
       await runner.runLlmStrategy(100, "llm-groq", 0, "openai/gpt-oss-20b");
 
-      expect(mockGroqRpdHold.hold).toHaveBeenCalledWith(
-        "llm-groq",
-        "openai/gpt-oss-20b",
-        DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
-      );
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-groq", {
+        modelName: "openai/gpt-oss-20b",
+        resetInSeconds: DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
+      });
     });
 
     it("never ends a Groq run in ERROR on a rate_limited_daily hit", async () => {
@@ -1384,7 +1363,7 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("parks a held sambanova run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {
-      mockSambaNovaRpdHold.isHeld.mockResolvedValue(true);
+      mockRateLimitHold.isHeld.mockResolvedValue(true);
       mockStrategyRunRepo.findOne.mockResolvedValue(
         makeRun({ strategyName: "llm-sambanova", modelName: "DeepSeek-V3.1" }),
       );
@@ -1395,7 +1374,7 @@ describe("LlmStrategyRunner", () => {
 
       expect(mockOrchestratorService.solveAssist).not.toHaveBeenCalled();
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockSambaNovaRpdHold.hold).not.toHaveBeenCalled();
+      expect(mockRateLimitHold.hold).not.toHaveBeenCalled();
     });
 
     it("records a per-model SambaNova hold using dailyResetSeconds and parks the run", async () => {
@@ -1416,7 +1395,10 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-sambanova", 0, "DeepSeek-V3.1");
 
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockSambaNovaRpdHold.hold).toHaveBeenCalledWith("llm-sambanova", "DeepSeek-V3.1", 7200);
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-sambanova", {
+        modelName: "DeepSeek-V3.1",
+        resetInSeconds: 7200,
+      });
     });
 
     it("falls back to the configured constant when a SambaNova daily hit carries no dailyResetSeconds", async () => {
@@ -1432,11 +1414,10 @@ describe("LlmStrategyRunner", () => {
 
       await runner.runLlmStrategy(100, "llm-sambanova", 0, "DeepSeek-V3.1");
 
-      expect(mockSambaNovaRpdHold.hold).toHaveBeenCalledWith(
-        "llm-sambanova",
-        "DeepSeek-V3.1",
-        DEFAULT_LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS,
-      );
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-sambanova", {
+        modelName: "DeepSeek-V3.1",
+        resetInSeconds: DEFAULT_LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS,
+      });
     });
 
     it("does not write a hold on a sambanova per-minute rate_limited hit, and keeps retrying", async () => {
@@ -1459,7 +1440,7 @@ describe("LlmStrategyRunner", () => {
 
       const result = await runner.runLlmStrategy(100, "llm-sambanova", 0, "DeepSeek-V3.1");
 
-      expect(mockSambaNovaRpdHold.hold).not.toHaveBeenCalled();
+      expect(mockRateLimitHold.hold).not.toHaveBeenCalled();
       expect(result.status).not.toBe(StrategyRunStatus.ERROR);
       expect(delaySpy).toHaveBeenCalledWith(DEFAULT_LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS * 1000);
     });
@@ -1481,7 +1462,7 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("parks a daily-held openrouter run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {
-      mockOpenRouterHold.heldReason.mockResolvedValue("daily");
+      mockRateLimitHold.heldReason.mockResolvedValue("daily");
       mockStrategyRunRepo.findOne.mockResolvedValue(
         makeRun({ strategyName: "llm-openrouter", modelName: "z-ai/glm-5.2:free" }),
       );
@@ -1492,11 +1473,11 @@ describe("LlmStrategyRunner", () => {
 
       expect(mockOrchestratorService.solveAssist).not.toHaveBeenCalled();
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockOpenRouterHold.hold).not.toHaveBeenCalled();
+      expect(mockRateLimitHold.hold).not.toHaveBeenCalled();
     });
 
     it("does NOT park an openrouter run for a per-minute-cooldown hold — it proceeds", async () => {
-      mockOpenRouterHold.heldReason.mockResolvedValue("per-minute-cooldown");
+      mockRateLimitHold.heldReason.mockResolvedValue("per-minute-cooldown");
       mockStrategyRunRepo.findOne.mockResolvedValue(
         makeRun({ strategyName: "llm-openrouter", modelName: "z-ai/glm-5.2:free" }),
       );
@@ -1529,7 +1510,10 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-openrouter", 0, "z-ai/glm-5.2:free");
 
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockOpenRouterHold.hold).toHaveBeenCalledWith("daily", 7200);
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-openrouter", {
+        reason: "daily",
+        resetInSeconds: 7200,
+      });
     });
 
     it("falls back to secondsUntilNextUtcMidnight when a daily hit carries no dailyResetSeconds", async () => {
@@ -1545,10 +1529,11 @@ describe("LlmStrategyRunner", () => {
 
       await runner.runLlmStrategy(100, "llm-openrouter", 0, "z-ai/glm-5.2:free");
 
-      const [reason, seconds] = mockOpenRouterHold.hold.mock.calls[0];
-      expect(reason).toBe("daily");
-      expect(seconds).toBeGreaterThan(0);
-      expect(seconds).toBeLessThanOrEqual(86_400);
+      const [strategy, opts] = mockRateLimitHold.hold.mock.calls[0];
+      expect(strategy).toBe("llm-openrouter");
+      expect(opts.reason).toBe("daily");
+      expect(opts.resetInSeconds).toBeGreaterThan(0);
+      expect(opts.resetInSeconds).toBeLessThanOrEqual(86_400);
     });
 
     it("writes a per-minute-cooldown hold on an openrouter per-minute rate_limited hit, and keeps retrying (not a failure)", async () => {
@@ -1571,10 +1556,10 @@ describe("LlmStrategyRunner", () => {
 
       const result = await runner.runLlmStrategy(100, "llm-openrouter", 0, "z-ai/glm-5.2:free");
 
-      expect(mockOpenRouterHold.hold).toHaveBeenCalledWith(
-        "per-minute-cooldown",
-        DEFAULT_OPENROUTER_DISPATCH_RPM_COOLDOWN_MS / 1000,
-      );
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-openrouter", {
+        reason: "per-minute-cooldown",
+        resetInSeconds: DEFAULT_OPENROUTER_DISPATCH_RPM_COOLDOWN_MS / 1000,
+      });
       expect(result.status).not.toBe(StrategyRunStatus.ERROR);
     });
 
@@ -1602,7 +1587,7 @@ describe("LlmStrategyRunner", () => {
       makeRun({ strategyName: "llm-mistral", modelName: "mistral-small-latest" });
 
     it("parks a held mistral run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {
-      mockMistralRpdHold.isHeld.mockResolvedValue(true);
+      mockRateLimitHold.isHeld.mockResolvedValue(true);
       mockStrategyRunRepo.findOne.mockResolvedValue(mistralRun());
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
@@ -1611,7 +1596,7 @@ describe("LlmStrategyRunner", () => {
 
       expect(mockOrchestratorService.solveAssist).not.toHaveBeenCalled();
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockMistralRpdHold.hold).not.toHaveBeenCalled();
+      expect(mockRateLimitHold.hold).not.toHaveBeenCalled();
     });
 
     it("below the attempt threshold: waits and retries a mistral rate_limited hit, no failure, no hold", async () => {
@@ -1631,7 +1616,7 @@ describe("LlmStrategyRunner", () => {
 
       const result = await runner.runLlmStrategy(100, "llm-mistral", 0, "mistral-small-latest");
 
-      expect(mockMistralRpdHold.hold).not.toHaveBeenCalled();
+      expect(mockRateLimitHold.hold).not.toHaveBeenCalled();
       expect(result.status).not.toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
     });
 
@@ -1650,11 +1635,10 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-mistral", 0, "mistral-small-latest");
 
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockMistralRpdHold.hold).toHaveBeenCalledWith(
-        "llm-mistral",
-        "mistral-small-latest",
-        DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
-      );
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-mistral", {
+        modelName: "mistral-small-latest",
+        resetInSeconds: DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
+      });
       expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(
         DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS,
       );
@@ -1672,12 +1656,11 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-mistral", 0, "mistral-small-latest");
 
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockMistralRpdHold.hold).toHaveBeenCalledTimes(1);
-      expect(mockMistralRpdHold.hold).toHaveBeenCalledWith(
-        "llm-mistral",
-        "mistral-small-latest",
-        DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
-      );
+      expect(mockRateLimitHold.hold).toHaveBeenCalledTimes(1);
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-mistral", {
+        modelName: "mistral-small-latest",
+        resetInSeconds: DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
+      });
       expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
     });
 
@@ -1698,7 +1681,7 @@ describe("LlmStrategyRunner", () => {
 
       const result = await runner.runLlmStrategy(100, "llm-mistral", 0, "mistral-small-latest");
 
-      expect(mockMistralRpdHold.hold).not.toHaveBeenCalled();
+      expect(mockRateLimitHold.hold).not.toHaveBeenCalled();
       expect(result.status).not.toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
     });
 
@@ -1763,8 +1746,11 @@ describe("LlmStrategyRunner", () => {
       expect(parked.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
       // The two guesses already made are kept, not thrown away.
       expect(parked.guessCount).toBe(2);
-      expect(mockRpdHold.hold).toHaveBeenCalledTimes(1);
-      expect(mockRpdHold.hold).toHaveBeenCalledWith("llm-google", "gemini-3.6-flash");
+      expect(mockRateLimitHold.hold).toHaveBeenCalledTimes(1);
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-google", {
+        modelName: "gemini-3.6-flash",
+        resetInSeconds: expect.any(Number),
+      });
       // The solved group is gone from the persisted run — that reduced word
       // set is what the resume below has to pick up from.
       expect(parking.availableWords).toEqual(["EGGPLANT", "FIG", "GRAPE", "HONEY"]);
@@ -1791,7 +1777,7 @@ describe("LlmStrategyRunner", () => {
       });
       mockStrategyRunRepo.findOne.mockResolvedValue(resuming);
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
-      mockRpdHold.isHeld.mockResolvedValue(false);
+      mockRateLimitHold.isHeld.mockResolvedValue(false);
       mockGuessRepo.find.mockResolvedValue([
         { words: ["APPLE", "BANANA", "CHERRY", "EGGPLANT"], result: GuessResult.FAILURE },
         { words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: GuessResult.SUCCESS },
@@ -1823,7 +1809,7 @@ describe("LlmStrategyRunner", () => {
       mockStrategyRunRepo.findOne.mockResolvedValue(resuming);
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockRpdHold.isHeld.mockResolvedValue(false);
+      mockRateLimitHold.isHeld.mockResolvedValue(false);
       mockOrchestratorService.solveAssist
         .mockResolvedValueOnce(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]))
         .mockResolvedValueOnce(makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]));

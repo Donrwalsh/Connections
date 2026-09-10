@@ -1,7 +1,7 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { getRepositoryToken } from "@nestjs/typeorm";
 import { SambaNovaRpdResumeService } from "./sambanova-rpd-resume.service";
-import { SambaNovaRateLimitHoldService } from "./sambanova-rate-limit-hold.service";
+import { RateLimitHoldService } from "./rate-limit-hold.service";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { SAMBANOVA_RPD_RESUME_QUEUE, LLM_SAMBANOVA_QUEUE } from "../queue/queue.module";
 import { runStrategyJobId } from "../queue/strategy.queue";
@@ -33,7 +33,7 @@ describe("SambaNovaRpdResumeService", () => {
       save: jest.fn().mockResolvedValue(undefined),
     };
     holdService = {
-      clearExpired: jest.fn().mockResolvedValue([]),
+      clearExpired: jest.fn().mockResolvedValue({ clearedModels: [], clearedAccountWide: false }),
       heldModels: jest.fn().mockResolvedValue([]),
       nextResetAt: jest.fn().mockResolvedValue(null),
     };
@@ -44,7 +44,7 @@ describe("SambaNovaRpdResumeService", () => {
       providers: [
         SambaNovaRpdResumeService,
         { provide: getRepositoryToken(StrategyRun), useValue: strategyRunRepo },
-        { provide: SambaNovaRateLimitHoldService, useValue: holdService },
+        { provide: RateLimitHoldService, useValue: holdService },
         { provide: LLM_SAMBANOVA_QUEUE, useValue: queue },
         { provide: SAMBANOVA_RPD_RESUME_QUEUE, useValue: resumeQueue },
       ],
@@ -61,7 +61,7 @@ describe("SambaNovaRpdResumeService", () => {
   });
 
   it("revives parked runs whose model is no longer held and re-enqueues them", async () => {
-    holdService.clearExpired.mockResolvedValue(["DeepSeek-V3.1"]);
+    holdService.clearExpired.mockResolvedValue({ clearedModels: ["DeepSeek-V3.1"], clearedAccountWide: false });
     holdService.heldModels.mockResolvedValue(["gpt-oss-120b"]);
     holdService.nextResetAt.mockResolvedValue(new Date(Date.now() + 5 * 60_000));
     strategyRunRepo.find.mockResolvedValue([
@@ -166,7 +166,7 @@ describe("SambaNovaRpdResumeService", () => {
   });
 
   it("does nothing when there are no parked runs", async () => {
-    holdService.clearExpired.mockResolvedValue([]);
+    holdService.clearExpired.mockResolvedValue({ clearedModels: [], clearedAccountWide: false });
     strategyRunRepo.find.mockResolvedValue([]);
 
     const result = await service.runResume("sweep-1");

@@ -6,7 +6,7 @@ import { MISTRAL_FREE_DISPATCH_QUEUE } from "../queue/queue.module";
 import { MistralDispatchState } from "./entities/mistral-dispatch-state.entity";
 import { StrategyService } from "../strategy/strategy.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
-import { MistralRateLimitHoldService } from "../strategy/mistral-rate-limit-hold.service";
+import { RateLimitHoldService } from "../strategy/rate-limit-hold.service";
 import {
   LLM_MISTRAL,
   freeTierDispatchMaxBatch,
@@ -41,7 +41,7 @@ export class MistralFreeDispatchService {
     @Inject(MISTRAL_FREE_DISPATCH_QUEUE) private readonly queue: Queue,
     @Inject(StrategyService) private readonly strategyService: StrategyService,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
-    @Inject(MistralRateLimitHoldService) private readonly holdService: MistralRateLimitHoldService,
+    @Inject(RateLimitHoldService) private readonly holdService: RateLimitHoldService,
   ) {}
 
   /**

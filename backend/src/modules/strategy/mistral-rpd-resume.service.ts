@@ -6,7 +6,7 @@ import { MISTRAL_RPD_RESUME_QUEUE, LLM_MISTRAL_QUEUE } from "../queue/queue.modu
 import { runStrategyJobId } from "../queue/strategy.queue";
 import { LLM_MISTRAL } from "../../strategies";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
-import { MistralRateLimitHoldService } from "./mistral-rate-limit-hold.service";
+import { RateLimitHoldService } from "./rate-limit-hold.service";
 
 /** Longest a re-armed sweep ever waits before looking again. */
 const REARM_MAX_DELAY_MS = 15 * 60_000;
@@ -26,7 +26,7 @@ export class MistralRpdResumeService {
   constructor(
     @InjectRepository(StrategyRun)
     private readonly strategyRunRepo: Repository<StrategyRun>,
-    @Inject(MistralRateLimitHoldService) private readonly holdService: MistralRateLimitHoldService,
+    @Inject(RateLimitHoldService) private readonly holdService: RateLimitHoldService,
     @Inject(LLM_MISTRAL_QUEUE) private readonly llmMistralQueue: Queue,
     @Inject(MISTRAL_RPD_RESUME_QUEUE) private readonly resumeQueue: Queue,
   ) {}
@@ -44,7 +44,7 @@ export class MistralRpdResumeService {
   async runResume(
     triggerJobId: string,
   ): Promise<{ cleared: string[]; redispatched: number; rearmedInMs?: number }> {
-    const cleared = await this.holdService.clearExpired();
+    const { clearedModels: cleared } = await this.holdService.clearExpired(LLM_MISTRAL);
     const stillHeld = new Set(await this.holdService.heldModels(LLM_MISTRAL));
 
     const parked = await this.strategyRunRepo.find({

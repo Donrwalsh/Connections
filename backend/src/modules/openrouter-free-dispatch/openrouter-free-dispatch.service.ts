@@ -6,7 +6,7 @@ import { OPENROUTER_FREE_DISPATCH_QUEUE } from "../queue/queue.module";
 import { OpenRouterDispatchState } from "./entities/openrouter-dispatch-state.entity";
 import { StrategyService } from "../strategy/strategy.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
-import { OpenRouterRateLimitHoldService } from "../strategy/openrouter-rate-limit-hold.service";
+import { RateLimitHoldService } from "../strategy/rate-limit-hold.service";
 import {
   LLM_OPENROUTER,
   openRouterCallsPerTrialEstimate,
@@ -52,8 +52,8 @@ export class OpenRouterFreeDispatchService {
     @Inject(OPENROUTER_FREE_DISPATCH_QUEUE) private readonly queue: Queue,
     @Inject(StrategyService) private readonly strategyService: StrategyService,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
-    @Inject(OpenRouterRateLimitHoldService)
-    private readonly holdService: OpenRouterRateLimitHoldService,
+    @Inject(RateLimitHoldService)
+    private readonly holdService: RateLimitHoldService,
   ) {}
 
   async start(): Promise<{
@@ -68,7 +68,7 @@ export class OpenRouterFreeDispatchService {
     }
 
     const models = await this.supportedModelService.findModelNamesByStrategy(LLM_OPENROUTER);
-    const held = await this.holdService.isHeld();
+    const held = await this.holdService.isHeld(LLM_OPENROUTER);
     const callsToday = await this.strategyService.countTodayLlmCalls(LLM_OPENROUTER);
     const budget = openRouterFreeDailyBudget();
 
@@ -112,7 +112,7 @@ export class OpenRouterFreeDispatchService {
       return;
     }
 
-    const reason = await this.holdService.heldReason();
+    const reason = await this.holdService.heldReason(LLM_OPENROUTER);
     if (reason === "daily") {
       await this.deactivate("account is daily-held");
       return;
@@ -233,7 +233,7 @@ export class OpenRouterFreeDispatchService {
   }
 
   private async rescheduleAfterCooldown(): Promise<void> {
-    const resetAt = await this.holdService.nextResetAt();
+    const resetAt = await this.holdService.nextResetAt(LLM_OPENROUTER);
     const delay = resetAt
       ? Math.max(0, resetAt.getTime() - Date.now())
       : openRouterDispatchRpmCooldownSeconds() * 1000;

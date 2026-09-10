@@ -6,7 +6,7 @@ import { LLM_OPENROUTER_QUEUE } from "../queue/queue.module";
 import { runStrategyJobId } from "../queue/strategy.queue";
 import { LLM_OPENROUTER } from "../../strategies";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
-import { OpenRouterRateLimitHoldService } from "./openrouter-rate-limit-hold.service";
+import { RateLimitHoldService } from "./rate-limit-hold.service";
 
 /**
  * The OpenRouter counterpart to GoogleRpdResumeService. Clears the single
@@ -25,15 +25,15 @@ export class OpenRouterRpdResumeService {
   constructor(
     @InjectRepository(StrategyRun)
     private readonly strategyRunRepo: Repository<StrategyRun>,
-    @Inject(OpenRouterRateLimitHoldService)
-    private readonly holdService: OpenRouterRateLimitHoldService,
+    @Inject(RateLimitHoldService)
+    private readonly holdService: RateLimitHoldService,
     @Inject(LLM_OPENROUTER_QUEUE) private readonly llmOpenRouterQueue: Queue,
   ) {}
 
   async runResume(): Promise<{ cleared: boolean; redispatched: number }> {
-    const cleared = await this.holdService.clearExpired();
+    const { clearedAccountWide: cleared } = await this.holdService.clearExpired(LLM_OPENROUTER);
 
-    if (await this.holdService.isHeld()) {
+    if (await this.holdService.isHeld(LLM_OPENROUTER)) {
       this.logger.log("openrouter-rpd resume: account still held — nothing to resume");
       return { cleared, redispatched: 0 };
     }

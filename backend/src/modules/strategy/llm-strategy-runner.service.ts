@@ -39,14 +39,8 @@ import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/st
 import { OrchestratorService, type ChatMessage, type SolveErrorCode } from "./orchestrator.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
-import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
-import { GroqRateLimitHoldService } from "./groq-rate-limit-hold.service";
-import {
-  OpenRouterRateLimitHoldService,
-  secondsUntilNextUtcMidnight,
-} from "./openrouter-rate-limit-hold.service";
-import { MistralRateLimitHoldService } from "./mistral-rate-limit-hold.service";
-import { SambaNovaRateLimitHoldService } from "./sambanova-rate-limit-hold.service";
+import { RateLimitHoldService } from "./rate-limit-hold.service";
+import { nextPacificMidnight, secondsUntilNextUtcMidnight } from "./rate-limit-reset-time";
 import { firstCombination } from "./combinatorics";
 import { GROUP_SIZE, parseGroupsSection } from "./parse-groups-section";
 import { applyOneOffWordFixups } from "./normalize-puzzle-word";
@@ -192,14 +186,7 @@ export class LlmStrategyRunner {
     private readonly solvePromptRepo: Repository<SolvePrompt>,
     @Inject(OrchestratorService) private readonly orchestratorService: OrchestratorService,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
-    @Inject(GoogleRateLimitHoldService) private readonly rpdHold: GoogleRateLimitHoldService,
-    @Inject(GroqRateLimitHoldService) private readonly groqRpdHold: GroqRateLimitHoldService,
-    @Inject(OpenRouterRateLimitHoldService)
-    private readonly openRouterHold: OpenRouterRateLimitHoldService,
-    @Inject(MistralRateLimitHoldService)
-    private readonly mistralRpdHold: MistralRateLimitHoldService,
-    @Inject(SambaNovaRateLimitHoldService)
-    private readonly sambaNovaRpdHold: SambaNovaRateLimitHoldService,
+    @Inject(RateLimitHoldService) private readonly rateLimitHold: RateLimitHoldService,
   ) {}
 
   async runLlmStrategy(puzzleId: number, strategyName: string, trialNumber = 0, model?: string) {
@@ -250,18 +237,17 @@ export class LlmStrategyRunner {
     // of daily quota parks immediately — cheap DB work instead of a doomed
     // provider call. The matching *-rpd-resume sweep re-dispatches it after
     // the reset.
-    const rpdHoldService =
-      strategyName === LLM_GOOGLE
-        ? this.rpdHold
-        : strategyName === LLM_GROQ
-          ? this.groqRpdHold
-          : strategyName === LLM_MISTRAL
-            ? this.mistralRpdHold
-            : strategyName === LLM_SAMBANOVA
-              ? this.sambaNovaRpdHold
-              : null;
+    const isPerModelHoldProvider =
+      strategyName === LLM_GOOGLE ||
+      strategyName === LLM_GROQ ||
+      strategyName === LLM_MISTRAL ||
+      strategyName === LLM_SAMBANOVA;
 
-    if (rpdHoldService && model && (await rpdHoldService.isHeld(strategyName, model))) {
+    if (
+      isPerModelHoldProvider &&
+      model &&
+      (await this.rateLimitHold.isHeld(strategyName, model))
+    ) {
       run.status = StrategyRunStatus.RATE_LIMITED_DAILY;
       run.finishedAt = new Date();
       await this.store.saveRun(run);
@@ -272,14 +258,14 @@ export class LlmStrategyRunner {
     }
 
     // OpenRouter's free tier is account-wide, not per-model, so its hold
-    // check takes no model and lives outside the per-model rpdHoldService
-    // ternary above. Only a 'daily' hold parks a run (resumed by the
-    // 00:05 UTC openrouter-rpd-resume cron); a 'per-minute-cooldown' hold
-    // is a signal to the *dispatch tick chain*, not a reason to park a
-    // run — a run that hits 20 RPM mid-flight just waits and retries.
+    // check takes no model and lives outside the per-model gate above. Only
+    // a 'daily' hold parks a run (resumed by the 00:05 UTC
+    // openrouter-rpd-resume cron); a 'per-minute-cooldown' hold is a signal
+    // to the *dispatch tick chain*, not a reason to park a run — a run that
+    // hits 20 RPM mid-flight just waits and retries.
     if (
       strategyName === LLM_OPENROUTER &&
-      (await this.openRouterHold.heldReason()) === "daily"
+      (await this.rateLimitHold.heldReason(strategyName)) === "daily"
     ) {
       run.status = StrategyRunStatus.RATE_LIMITED_DAILY;
       run.finishedAt = new Date();
@@ -494,38 +480,47 @@ export class LlmStrategyRunner {
 
         if (outcome.error.code === "rate_limited_daily" && model) {
           if (strategyName === LLM_GOOGLE) {
-            await this.rpdHold.hold(strategyName, model);
+            // Google's free-tier RPD quota resets at Pacific midnight; the
+            // runner derives the seconds-to-reset the unified hold store needs.
+            await this.rateLimitHold.hold(strategyName, {
+              modelName: model,
+              resetInSeconds: Math.max(
+                0,
+                Math.round((nextPacificMidnight().getTime() - Date.now()) / 1000),
+              ),
+            });
           } else if (strategyName === LLM_GROQ) {
-            await this.groqRpdHold.hold(
-              strategyName,
-              model,
-              outcome.error.dailyResetSeconds ?? llmGroqDailyHoldFallbackSeconds(),
-            );
+            await this.rateLimitHold.hold(strategyName, {
+              modelName: model,
+              resetInSeconds:
+                outcome.error.dailyResetSeconds ?? llmGroqDailyHoldFallbackSeconds(),
+            });
           } else if (strategyName === LLM_SAMBANOVA) {
-            await this.sambaNovaRpdHold.hold(
-              strategyName,
-              model,
-              outcome.error.dailyResetSeconds ?? llmSambaNovaDailyHoldFallbackSeconds(),
-            );
+            await this.rateLimitHold.hold(strategyName, {
+              modelName: model,
+              resetInSeconds:
+                outcome.error.dailyResetSeconds ?? llmSambaNovaDailyHoldFallbackSeconds(),
+            });
           }
         }
 
         if (outcome.error.code === "rate_limited_daily" && strategyName === LLM_OPENROUTER) {
-          // Account-wide hold — no model arg. secondsUntilNextUtcMidnight is
-          // the fallback when the orchestrator couldn't parse a reset.
-          await this.openRouterHold.hold(
-            "daily",
-            outcome.error.dailyResetSeconds ?? secondsUntilNextUtcMidnight(),
-          );
+          // Account-wide hold — no model. secondsUntilNextUtcMidnight is the
+          // fallback when the orchestrator couldn't parse a reset.
+          await this.rateLimitHold.hold(strategyName, {
+            reason: "daily",
+            resetInSeconds:
+              outcome.error.dailyResetSeconds ?? secondsUntilNextUtcMidnight(),
+          });
         }
 
         if (outcome.error.code === "rate_limited" && strategyName === LLM_OPENROUTER) {
           // A 20 RPM hit — back the whole dispatch tick chain off, not just
           // this run. hold() no-ops if a 'daily' hold is already live.
-          await this.openRouterHold.hold(
-            "per-minute-cooldown",
-            openRouterDispatchRpmCooldownSeconds(),
-          );
+          await this.rateLimitHold.hold(strategyName, {
+            reason: "per-minute-cooldown",
+            resetInSeconds: openRouterDispatchRpmCooldownSeconds(),
+          });
         }
 
         // Mistral: the park may come from the orchestrator (body said
@@ -538,7 +533,10 @@ export class LlmStrategyRunner {
           effectiveErrorCode === "rate_limited_daily" &&
           model
         ) {
-          await this.mistralRpdHold.hold(strategyName, model, mistralModelHoldFallbackSeconds());
+          await this.rateLimitHold.hold(strategyName, {
+            modelName: model,
+            resetInSeconds: mistralModelHoldFallbackSeconds(),
+          });
         }
       }
 

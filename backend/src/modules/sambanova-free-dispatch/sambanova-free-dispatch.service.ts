@@ -6,7 +6,7 @@ import { SAMBANOVA_FREE_DISPATCH_QUEUE } from "../queue/queue.module";
 import { SambaNovaDispatchState } from "./entities/sambanova-dispatch-state.entity";
 import { StrategyService } from "../strategy/strategy.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
-import { SambaNovaRateLimitHoldService } from "../strategy/sambanova-rate-limit-hold.service";
+import { RateLimitHoldService } from "../strategy/rate-limit-hold.service";
 import {
   LLM_SAMBANOVA,
   sambaNovaDispatchMaxBatch,
@@ -43,8 +43,8 @@ export class SambaNovaFreeDispatchService {
     @Inject(SAMBANOVA_FREE_DISPATCH_QUEUE) private readonly queue: Queue,
     @Inject(StrategyService) private readonly strategyService: StrategyService,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
-    @Inject(SambaNovaRateLimitHoldService)
-    private readonly holdService: SambaNovaRateLimitHoldService,
+    @Inject(RateLimitHoldService)
+    private readonly holdService: RateLimitHoldService,
   ) {}
 
   /**

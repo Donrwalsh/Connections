@@ -6,7 +6,7 @@ import { GOOGLE_FREE_DISPATCH_QUEUE } from "../queue/queue.module";
 import { GoogleDispatchState } from "./entities/google-dispatch-state.entity";
 import { StrategyService } from "../strategy/strategy.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
-import { GoogleRateLimitHoldService } from "../strategy/google-rate-limit-hold.service";
+import { RateLimitHoldService } from "../strategy/rate-limit-hold.service";
 import { LLM_GOOGLE, freeTierDispatchMaxBatch, freeTierDispatchMaxInFlight, freeTierDispatchTickMs } from "../../strategies";
 
 const TICK_JOB_NAME = "tick";
@@ -38,7 +38,7 @@ export class GoogleFreeDispatchService {
     @Inject(GOOGLE_FREE_DISPATCH_QUEUE) private readonly queue: Queue,
     @Inject(StrategyService) private readonly strategyService: StrategyService,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
-    @Inject(GoogleRateLimitHoldService) private readonly holdService: GoogleRateLimitHoldService,
+    @Inject(RateLimitHoldService) private readonly holdService: RateLimitHoldService,
   ) {}
 
   /**

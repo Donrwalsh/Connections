@@ -6,7 +6,7 @@ import { SAMBANOVA_RPD_RESUME_QUEUE, LLM_SAMBANOVA_QUEUE } from "../queue/queue.
 import { runStrategyJobId } from "../queue/strategy.queue";
 import { LLM_SAMBANOVA } from "../../strategies";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
-import { SambaNovaRateLimitHoldService } from "./sambanova-rate-limit-hold.service";
+import { RateLimitHoldService } from "./rate-limit-hold.service";
 
 /** Longest a re-armed sweep ever waits before looking again. */
 const REARM_MAX_DELAY_MS = 15 * 60_000;
@@ -27,8 +27,8 @@ export class SambaNovaRpdResumeService {
   constructor(
     @InjectRepository(StrategyRun)
     private readonly strategyRunRepo: Repository<StrategyRun>,
-    @Inject(SambaNovaRateLimitHoldService)
-    private readonly holdService: SambaNovaRateLimitHoldService,
+    @Inject(RateLimitHoldService)
+    private readonly holdService: RateLimitHoldService,
     @Inject(LLM_SAMBANOVA_QUEUE) private readonly llmSambaNovaQueue: Queue,
     @Inject(SAMBANOVA_RPD_RESUME_QUEUE) private readonly resumeQueue: Queue,
   ) {}
@@ -46,7 +46,7 @@ export class SambaNovaRpdResumeService {
   async runResume(
     triggerJobId: string,
   ): Promise<{ cleared: string[]; redispatched: number; rearmedInMs?: number }> {
-    const cleared = await this.holdService.clearExpired();
+    const { clearedModels: cleared } = await this.holdService.clearExpired(LLM_SAMBANOVA);
     const stillHeld = new Set(await this.holdService.heldModels(LLM_SAMBANOVA));
 
     const parked = await this.strategyRunRepo.find({

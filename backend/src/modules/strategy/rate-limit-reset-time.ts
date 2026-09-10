@@ -1,7 +1,15 @@
-import { Injectable, Logger } from "@nestjs/common";
-import { InjectRepository } from "@nestjs/typeorm";
-import { LessThanOrEqual, MoreThan, Repository } from "typeorm";
-import { GoogleRateLimitHold } from "./entities/google-rate-limit-hold.entity";
+/**
+ * Reset-clock helpers shared by the rate-limit hold path. These moved here
+ * verbatim when the five per-provider *RateLimitHoldService classes were
+ * unified into one RateLimitHoldService (which is provider-agnostic and takes
+ * a resetInSeconds it does not compute): the callers that decide *when* a hold
+ * lifts — the strategy runner and the per-provider resume sweeps — now import
+ * the clock math directly from here.
+ *
+ * `nextPacificMidnight` / `pacificDateStamp` were previously exported from
+ * google-rate-limit-hold.service.ts; `secondsUntilNextUtcMidnight` from
+ * openrouter-rate-limit-hold.service.ts.
+ */
 
 const PACIFIC_TZ = "America/Los_Angeles";
 
@@ -75,7 +83,7 @@ export function pacificDateStamp(now: Date = new Date()): string {
 /**
  * The next 00:00 in America/Los_Angeles, expressed as a UTC Date. Google AI
  * Studio's free-tier requests-per-day quota resets at Pacific midnight, so
- * this is when a hold should lift.
+ * this is when an llm-google hold should lift.
  */
 export function nextPacificMidnight(now: Date = new Date()): Date {
   const { year, month, day } = pacificParts(now);
@@ -92,66 +100,20 @@ export function nextPacificMidnight(now: Date = new Date()): Date {
 }
 
 /**
- * The source of truth for which Google models are currently held for
- * exhausting their free-tier requests-per-day quota. One row per held
- * (strategyName, modelName); the google-rpd-resume sweep clears rows whose
- * resetAt has passed. See
- * docs/superpowers/specs/2026-08-27-llm-google-rpd-hold-design.md.
+ * The seconds from `now` to the next 00:00:00 UTC — the fallback resetAt for
+ * an llm-openrouter 'daily' hold when the orchestrator couldn't parse a
+ * dailyResetSeconds from the 429 (OpenRouter's daily quota always resets at
+ * UTC midnight).
  */
-@Injectable()
-export class GoogleRateLimitHoldService {
-  private readonly logger = new Logger(GoogleRateLimitHoldService.name);
-
-  constructor(
-    @InjectRepository(GoogleRateLimitHold)
-    private readonly repo: Repository<GoogleRateLimitHold>,
-  ) {}
-
-  async hold(strategyName: string, modelName: string): Promise<void> {
-    const resetAt = nextPacificMidnight();
-    await this.repo.upsert(
-      { strategyName, modelName, heldAt: new Date(), resetAt },
-      ["strategyName", "modelName"],
-    );
-    this.logger.warn(
-      `RPD hold set for ${strategyName}/${modelName} until ${resetAt.toISOString()}`,
-    );
-  }
-
-  async isHeld(strategyName: string, modelName: string): Promise<boolean> {
-    const row = await this.repo.findOne({ where: { strategyName, modelName } });
-    return row !== null && row.resetAt.getTime() > Date.now();
-  }
-
-  async heldModels(strategyName: string): Promise<string[]> {
-    const rows = await this.repo.find({
-      where: { strategyName, resetAt: MoreThan(new Date()) },
-    });
-    return rows.map((r) => r.modelName);
-  }
-
-  /**
-   * The soonest still-future resetAt across this strategy's live holds, or
-   * null when nothing is held. The resume sweep uses it to decide how long
-   * to wait before re-arming itself for runs it could not revive yet.
-   */
-  async nextResetAt(strategyName: string): Promise<Date | null> {
-    const rows = await this.repo.find({
-      where: { strategyName, resetAt: MoreThan(new Date()) },
-    });
-    if (rows.length === 0) return null;
-    return rows.reduce((soonest, row) =>
-      row.resetAt.getTime() < soonest.resetAt.getTime() ? row : soonest,
-    ).resetAt;
-  }
-
-  async clearExpired(): Promise<string[]> {
-    const expired = await this.repo.find({
-      where: { resetAt: LessThanOrEqual(new Date()) },
-    });
-    if (expired.length > 0) {
-      await this.repo.remove(expired);
-    }
-    return expired.map((r) => r.modelName);
-  }
+export function secondsUntilNextUtcMidnight(now: Date = new Date()): number {
+  const nextMidnight = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() + 1,
+    0,
+    0,
+    0,
+    0,
+  );
+  return Math.max(0, Math.round((nextMidnight - now.getTime()) / 1000));
 }
