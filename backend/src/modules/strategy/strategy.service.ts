@@ -10,7 +10,7 @@ import {
   LLM_MISTRAL_QUEUE,
   LLM_SAMBANOVA_QUEUE,
 } from "../queue/queue.module";
-import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/strategy-run.entity";
+import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { Puzzle } from "../game/entities/puzzle.entity";

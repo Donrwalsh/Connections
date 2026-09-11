@@ -16,7 +16,7 @@ import { StrategyService } from "./strategy.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { Puzzle } from "../game/entities/puzzle.entity";
-import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
+import { Guess, GuessResult } from "./entities/guess.entity";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { LlmProposal } from "./entities/llm-proposal.entity";
 import {
@@ -109,13 +109,6 @@ describe("StrategyService", () => {
   const solvePuzzle = makePuzzle([
     ["APPLE", "BANANA", "CHERRY", "DATE"],
     ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
-  ]);
-
-  // Puzzle whose answer words never appear in makeRun()'s pool, so every
-  // guess against that pool evaluates to FAILURE.
-  const unsolvablePuzzle = makePuzzle([
-    ["ALPHA", "BRAVO", "CHARLIE", "DELTA"],
-    ["ECHO", "FOXTROT", "GOLF", "HOTEL"],
   ]);
 
   beforeEach(async () => {
