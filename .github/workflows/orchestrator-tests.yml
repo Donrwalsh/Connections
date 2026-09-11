@@ -11,10 +11,6 @@ jobs:
     name: Type-check, Build, and Test
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: ./orchestrator
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -24,16 +20,25 @@ jobs:
         with:
           node-version: 24
           cache: "npm"
-          cache-dependency-path: orchestrator/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Build answer-grammar
+        run: npm run build --workspace=packages/answer-grammar
+
+      - name: Test answer-grammar
+        run: npm run test:run --workspace=packages/answer-grammar
+
       - name: Type-check
+        working-directory: ./orchestrator
         run: npm run typecheck
 
       - name: Build
+        working-directory: ./orchestrator
         run: npm run build
 
       - name: Run tests
+        working-directory: ./orchestrator
         run: npm run test:run

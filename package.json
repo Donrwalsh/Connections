@@ -1,0 +1,9 @@
+{
+  "name": "connections",
+  "private": true,
+  "workspaces": [
+    "orchestrator",
+    "backend",
+    "packages/*"
+  ]
+}
