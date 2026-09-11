@@ -142,7 +142,7 @@ export interface StrategyRunListItemDto {
 
 // Per-status run counts for one leaderboard row. `queued` is the only field
 // not sourced from StrategyRun — a queued job has no row yet (see
-// StrategyService.getLeaderboard), so it's read live from the BullMQ queues
+// RunHistoryReadModel.getLeaderboard), so it's read live from the BullMQ queues
 // instead and merged in.
 export interface LeaderboardProgressDto {
   completed: number;
@@ -155,7 +155,7 @@ export interface LeaderboardProgressDto {
 // shuffle-smart, shuffle-foolish) or, for LLM strategies, one model —
 // aggregated across every puzzle it has ever run against. Only strategies/
 // models with at least one real StrategyRun appear at all; see
-// StrategyService.getLeaderboard for how the row set and `progress.queued`
+// RunHistoryReadModel.getLeaderboard for how the row set and `progress.queued`
 // are assembled.
 export interface LeaderboardRowDto {
   // modelName for LLM rows (several models can share one strategyName), the
