@@ -92,7 +92,8 @@ export class SolvePrompt {
   // untouched original text regardless of what's flagged here. A response
   // can trip more than one at once, which is why this is a list rather than
   // a single status value. Detection lives in
-  // llm-strategy-runner.service.ts's parseGroupsSection/evaluateProposals.
+  // answer-grammar's parseAnswer (text-only tags) and
+  // llm-strategy-runner.service.ts's evaluateProposals (board-aware tags).
   @Column({ type: "text", array: true, default: () => "'{}'" })
   issueTags: string[];
 

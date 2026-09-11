@@ -5,6 +5,6 @@
   "testRegex": ".e2e-spec.ts$",
   "setupFiles": ["<rootDir>/setup-env.ts"],
   "transform": {
-    "^.+\\.(t|j)s$": ["ts-jest", { "tsconfig": "<rootDir>/tsconfig.e2e.json" }]
+    "^.+\\.ts$": ["ts-jest", { "tsconfig": "<rootDir>/tsconfig.e2e.json" }]
   }
 }

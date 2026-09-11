@@ -26,7 +26,7 @@ import { SupportedModelService } from "../supported-model/supported-model.servic
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { RateLimitHoldService } from "./rate-limit-hold.service";
 import { firstCombination } from "./combinatorics";
-import { GROUP_SIZE, parseGroupsSection } from "./parse-groups-section";
+import { GROUP_SIZE } from "answer-grammar";
 import { applyOneOffWordFixups } from "./normalize-puzzle-word";
 
 const MODEL_ERROR_RETRY_BASE_DELAY_MS = 1000;
@@ -154,12 +154,13 @@ export function buildRetryPrompt(
 }
 
 /**
- * Iterative LLM strategy runner using the unified AI Assist prompt flow.
- * Each step sends the full conversation history to the orchestrator's
- * /solve-assist endpoint, which calls generateText and parses the ANSWER:
- * section. The runner creates 4 LlmProposal entries per prompt (one per
- * parsed group), submits the first as a guess, and builds the next prompt
- * (INITIAL or RETRY) based on the guess outcome.
+ * Iterative LLM strategy runner for the automated solving path. Each step
+ * sends the full conversation history to the orchestrator's /solve-step
+ * endpoint, which calls generateText and returns the full structured
+ * parse (answer-grammar's parseAnswer output). The runner creates 4
+ * LlmProposal entries per prompt (one per parsed group), submits the first
+ * as a guess, and builds the next prompt (INITIAL or RETRY) based on the
+ * guess outcome.
  */
 @Injectable()
 export class LlmStrategyRunner {
@@ -309,7 +310,7 @@ export class LlmStrategyRunner {
       // Append the user message to conversation history.
       messages.push({ role: "user", content: prompt });
 
-      const outcome = await this.orchestratorService.solveAssist(
+      const outcome = await this.orchestratorService.requestSolveStep(
         messages,
         model,
         provider,
@@ -321,9 +322,10 @@ export class LlmStrategyRunner {
       const promptType = state.lastFailedGuess
         ? SolvePromptType.RETRY
         : SolvePromptType.INITIAL_SOLVE;
-      // The orchestrator makes exactly one real OpenAI call per solveAssist
-      // invocation (no client-side retry — see orchestrator.service.ts), so
-      // every step's row is always its own first and only attempt.
+      // The orchestrator makes exactly one real OpenAI call per
+      // requestSolveStep invocation (no client-side retry — see
+      // orchestrator.service.ts), so every step's row is always its own
+      // first and only attempt.
       const attemptNumber = 1;
 
       if (outcome.ok) {
@@ -341,7 +343,7 @@ export class LlmStrategyRunner {
         // Correct the run's contextWindow to the actual value the call
         // used — may differ from the pre-call guess (see loadOrCreateRun)
         // since Ollama's is always capped at the orchestrator's own
-        // MODEL_CONTEXT_WINDOW (see OrchestratorService.solveAssist).
+        // MODEL_CONTEXT_WINDOW (see OrchestratorService.requestSolveStep).
         if (data.contextWindow !== undefined) {
           run.contextWindow = data.contextWindow;
         }
@@ -381,13 +383,19 @@ export class LlmStrategyRunner {
             run.finishedAt = new Date();
           }
         } else {
-          const { proposalWords, categoryMap, issueTags } = parseGroupsSection(
-            data.response ?? "",
-            groups,
+          // The orchestrator already ran the full structured parse
+          // (answer-grammar's parseAnswer) — no re-parsing of raw response
+          // text on this side any more.
+          const { proposalWords, categoryByGroup, textIssues } = data;
+          const categoryMap = new Map(
+            Object.entries(categoryByGroup).map(([groupNum, category]) => [
+              Number(groupNum),
+              category,
+            ]),
           );
           // currentPrompt is the same object already queued in
           // pendingPrompts, so mutating it here still reflects at flush time.
-          currentPrompt.issueTags = issueTags;
+          currentPrompt.issueTags = textIssues;
 
           const proposalEntries = this.buildProposalEntries(
             proposalWords,

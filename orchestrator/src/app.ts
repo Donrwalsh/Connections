@@ -3,13 +3,13 @@ import { bodyLimit } from "hono/body-limit";
 import {
   AssistRequestSchema,
   JudgeCategoryRequestSchema,
-  SolveAssistRequestSchema,
+  SolveStepRequestSchema,
   type JudgeCategoryResponse,
-  type SolveAssistResponse,
+  type SolveStepResponse,
 } from "./types.js";
 import { SolveError } from "./solver.js";
 import { runAssistStep } from "./assist.js";
-import { solveAssist } from "./solve-assist.js";
+import { runAnswerStep } from "./answer-step.js";
 import { judgeCategory } from "./judge-category.js";
 import type { ModelProvider } from "./provider.js";
 
@@ -94,14 +94,14 @@ app.post(
 );
 
 app.post(
-  "/solve-assist",
+  "/solve-step",
   bodyLimit({
     maxSize: SOLVE_BODY_LIMIT,
     onError: (c) => c.json({ error: "Request body too large" }, 413),
   }),
   async (c) => {
     const body = await c.req.json().catch(() => null);
-    const parsed = SolveAssistRequestSchema.safeParse(body);
+    const parsed = SolveStepRequestSchema.safeParse(body);
 
     if (!parsed.success) {
       return c.json(
@@ -111,17 +111,16 @@ app.post(
     }
 
     try {
-      const result = await solveAssist(
-        parsed.data.messages,
-        parsed.data.model,
-        parsed.data.provider as ModelProvider,
-        parsed.data.contextWindow,
-        c.req.raw.signal,
-      );
-      const response: SolveAssistResponse = result;
+      const result = await runAnswerStep(parsed.data.messages, {
+        model: parsed.data.model,
+        provider: parsed.data.provider as ModelProvider,
+        contextWindow: parsed.data.contextWindow,
+        abortSignal: c.req.raw.signal,
+      });
+      const response: SolveStepResponse = result;
       return c.json(response, 200);
     } catch (err) {
-      console.error("Solve-assist failed:", err);
+      console.error("Solve-step failed:", err);
       if (err instanceof SolveError) {
         return c.json(
           {
@@ -133,7 +132,7 @@ app.post(
         );
       }
       const message = err instanceof Error ? err.message : "Unknown error";
-      return c.json({ error: "Solve-assist failed", details: message }, 502);
+      return c.json({ error: "Solve-step failed", details: message }, 502);
     }
   },
 );

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseGroupProposals, solveAssist } from "./solve-assist.js";
+import { runAnswerStep } from "./answer-step.js";
 
-describe("solveAssist", () => {
+describe("runAnswerStep", () => {
   const generateTextMock = vi.hoisted(() => vi.fn());
   const getModelSpy = vi.hoisted(() => vi.fn());
 
@@ -32,7 +32,7 @@ describe("solveAssist", () => {
     vi.unstubAllEnvs();
   });
 
-  it("captures the raw request/response detail on a successful call", async () => {
+  it("captures the raw request/response detail on a successful call by default", async () => {
     generateTextMock.mockResolvedValueOnce({
       text: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
       response: {
@@ -48,7 +48,7 @@ describe("solveAssist", () => {
     });
 
     const controller = new AbortController();
-    const result = await solveAssist(MESSAGES, undefined, undefined, undefined, controller.signal);
+    const result = await runAnswerStep(MESSAGES, { abortSignal: controller.signal });
 
     // The mock ignores `include`/`abortSignal`, so this only guards against
     // the options being dropped — the real AI SDK gates request/response
@@ -71,6 +71,27 @@ describe("solveAssist", () => {
       id: "resp_123",
       choices: [{ message: { content: "### ANSWER..." } }],
     });
+    expect(result.latencyMs).toEqual(expect.any(Number));
+  });
+
+  it("skips requesting request/response body detail entirely when captureTelemetry is false", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
+      response: { modelId: "test-model" },
+      request: {},
+    });
+
+    const result = await runAnswerStep(MESSAGES, { captureTelemetry: false });
+
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.not.objectContaining({ include: expect.anything() }),
+    );
+    expect(result.requestBody).toBeUndefined();
+    expect(result.responseId).toBeUndefined();
+    expect(result.responseHeaders).toBeUndefined();
+    expect(result.responseBody).toBeUndefined();
+    expect(result.latencyMs).toBeUndefined();
+    expect(result.usage).toBeUndefined();
   });
 
   it("disables the AI SDK's own retry layer (maxRetries: 0)", async () => {
@@ -80,11 +101,9 @@ describe("solveAssist", () => {
       request: {},
     });
 
-    await solveAssist(MESSAGES);
+    await runAnswerStep(MESSAGES);
 
-    expect(generateTextMock).toHaveBeenCalledWith(
-      expect.objectContaining({ maxRetries: 0 }),
-    );
+    expect(generateTextMock).toHaveBeenCalledWith(expect.objectContaining({ maxRetries: 0 }));
   });
 
   it("passes contextWindow through to getModel", async () => {
@@ -94,7 +113,7 @@ describe("solveAssist", () => {
       request: {},
     });
 
-    await solveAssist(MESSAGES, "mistral-nemo", "ollama", 131072);
+    await runAnswerStep(MESSAGES, { model: "mistral-nemo", provider: "ollama", contextWindow: 131072 });
 
     expect(getModelSpy).toHaveBeenCalledWith("ollama", "mistral-nemo", 131072);
   });
@@ -107,7 +126,11 @@ describe("solveAssist", () => {
       request: {},
     });
 
-    const result = await solveAssist(MESSAGES, "mistral-nemo", "ollama", 131072);
+    const result = await runAnswerStep(MESSAGES, {
+      model: "mistral-nemo",
+      provider: "ollama",
+      contextWindow: 131072,
+    });
 
     expect(result.contextWindow).toBe(8192);
   });
@@ -119,9 +142,40 @@ describe("solveAssist", () => {
       request: {},
     });
 
-    const result = await solveAssist(MESSAGES, "gpt-4.1-nano", "openai", 128000);
+    const result = await runAnswerStep(MESSAGES, {
+      model: "gpt-4.1-nano",
+      provider: "openai",
+      contextWindow: 128000,
+    });
 
     expect(result.contextWindow).toBe(128000);
+  });
+
+  it("returns the full structured parse alongside the raw response", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text:
+        "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n\n" +
+        "### ANSWER\nAPPLE, BANANA, CHERRY, DATE",
+      response: { modelId: "gpt-4.1-nano" },
+      request: {},
+    });
+
+    const result = await runAnswerStep(MESSAGES);
+
+    expect(result.groups).toEqual([["APPLE", "BANANA", "CHERRY", "DATE"]]);
+    expect(result.proposalWords).toEqual([["APPLE", "BANANA", "CHERRY", "DATE"]]);
+    expect(result.categoryByGroup).toEqual({ "1": "Fruits" });
+    expect(result.textIssues).toEqual([]);
+  });
+
+  it("rejects a response with no parseable ANSWER or GROUPS section as invalid_group", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "I don't know the answer",
+      response: { modelId: "test-model" },
+      request: {},
+    });
+
+    await expect(runAnswerStep(MESSAGES)).rejects.toMatchObject({ code: "invalid_group" });
   });
 
   it("surfaces APICallError detail instead of discarding it", async () => {
@@ -138,7 +192,7 @@ describe("solveAssist", () => {
       }),
     );
 
-    await expect(solveAssist(MESSAGES)).rejects.toMatchObject({
+    await expect(runAnswerStep(MESSAGES)).rejects.toMatchObject({
       code: "model_error",
       details: {
         requestBody: { model: "gpt-4.1-nano" },
@@ -154,59 +208,9 @@ describe("solveAssist", () => {
   it("still classifies a plain non-API error as model_error with no call detail", async () => {
     generateTextMock.mockRejectedValueOnce(new Error("fetch failed"));
 
-    await expect(solveAssist(MESSAGES)).rejects.toMatchObject({
+    await expect(runAnswerStep(MESSAGES)).rejects.toMatchObject({
       code: "model_error",
       details: { requestBody: undefined, statusCode: undefined },
     });
-  });
-});
-
-describe("parseGroupProposals", () => {
-  it("parses a well-formed Words: line", () => {
-    const text = "Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n";
-    expect(parseGroupProposals(text)).toEqual([
-      { category: "Fruits", words: ["APPLE", "BANANA", "CHERRY", "DATE"] },
-    ]);
-  });
-
-  it("strips a trailing parenthetical explanation glued onto the Words: line", () => {
-    // Some models (Mistral especially) append their reasoning straight onto
-    // the Words: line instead of using the scratchpad — see
-    // llm-strategy-runner.service.ts's WORDS_PARENTHETICAL_RE on the
-    // backend, which this parser previously lacked (commit cdd6b22 fixed
-    // the backend but not this orchestrator-side parser).
-    const text =
-      "Group 1\nCategory: Senses\nWords: LOOK, TOUCH, SIGHT, SMELL (these are all senses)\n";
-    expect(parseGroupProposals(text)).toEqual([
-      { category: "Senses", words: ["LOOK", "TOUCH", "SIGHT", "SMELL"] },
-    ]);
-  });
-
-  it("discards a group whose parenthetical aside itself contains commas, without the fix inflating it past 4 words", () => {
-    const text =
-      "Group 1\nCategory: Senses\nWords: LOOK, TOUCH, SIGHT, SMELL (these are all senses, e.g. sight, sound)\n";
-    expect(parseGroupProposals(text)).toEqual([
-      { category: "Senses", words: ["LOOK", "TOUCH", "SIGHT", "SMELL"] },
-    ]);
-  });
-
-  it("parses multiple groups from a full ### GROUPS section", () => {
-    const text = [
-      "### GROUPS",
-      "Group 1",
-      "Category: Fruits",
-      "Words: APPLE, BANANA, CHERRY, DATE",
-      "Group 2",
-      "Category: Senses",
-      "Words: LOOK, TOUCH, SIGHT, SMELL (these are all senses)",
-      "### ANSWER",
-      "APPLE, BANANA, CHERRY, DATE",
-      "LOOK, TOUCH, SIGHT, SMELL",
-    ].join("\n");
-
-    expect(parseGroupProposals(text)).toEqual([
-      { category: "Fruits", words: ["APPLE", "BANANA", "CHERRY", "DATE"] },
-      { category: "Senses", words: ["LOOK", "TOUCH", "SIGHT", "SMELL"] },
-    ]);
   });
 });

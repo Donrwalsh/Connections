@@ -15,13 +15,20 @@ export interface ChatMessage {
   content: string;
 }
 
-export interface SolveAssistSuccess {
+export interface SolveStepSuccess {
   response: string;
   groups: string[][];
+  // The "### GROUPS" block's structured words (indexed by group number - 1,
+  // may be sparse) and each group's extracted category — the answer-grammar
+  // package's parseAnswer() output, computed once by the orchestrator and
+  // forwarded here so this class never re-parses raw response text itself.
+  proposalWords: string[][];
+  categoryByGroup: Record<string, string>;
+  textIssues: string[];
   model: string;
   // The context window actually used for this call — reported back by the
   // orchestrator, since it can differ from the contextWindow requested (see
-  // this class's solveAssist doc comment and provider.ts's
+  // this class's requestSolveStep doc comment and provider.ts's
   // effectiveContextWindow on the orchestrator side).
   contextWindow?: number;
   latencyMs: number;
@@ -32,7 +39,7 @@ export interface SolveAssistSuccess {
   responseBody?: unknown;
 }
 
-export interface SolveAssistFailure {
+export interface SolveStepFailure {
   error: string;
   code: SolveErrorCode;
   requestBody?: unknown;
@@ -50,9 +57,9 @@ export interface SolveAssistFailure {
   dailyResetSeconds?: number;
 }
 
-export type SolveAssistOutcome =
-  | { ok: true; data: SolveAssistSuccess }
-  | { ok: false; error: SolveAssistFailure };
+export type SolveStepOutcome =
+  | { ok: true; data: SolveStepSuccess }
+  | { ok: false; error: SolveStepFailure };
 
 export interface JudgeCategorySuccess {
   verdict: "correct" | "partial" | "lucky";
@@ -69,7 +76,7 @@ export interface JudgeCategorySuccess {
 
 export type JudgeCategoryOutcome =
   | { ok: true; data: JudgeCategorySuccess }
-  | { ok: false; error: SolveAssistFailure };
+  | { ok: false; error: SolveStepFailure };
 
 const TIMEOUT_MS = orchestratorTimeoutMs();
 
@@ -88,9 +95,9 @@ const ORCHESTRATOR_DISPATCHER = new Agent({
 });
 
 /**
- * Thin client for the orchestrator's POST /solve-assist endpoint. The LLM
- * strategy runner calls solveAssist for the unified AI Assist flow — the
- * backend owns prompt building and conversation state.
+ * Thin client for the orchestrator's POST /solve-step endpoint. The LLM
+ * strategy runner calls requestSolveStep for its automated per-step model
+ * call — the backend owns prompt building and conversation state.
  */
 @Injectable()
 export class OrchestratorService {
@@ -99,34 +106,39 @@ export class OrchestratorService {
   private readonly internalApiKey = loadEnv().INTERNAL_API_KEY;
 
   /**
-   * Calls the orchestrator's POST /solve-assist endpoint with the full
-   * conversation history. Used by the LLM strategy runner for the unified
-   * AI Assist flow — the backend owns prompt building and conversation state.
+   * Calls the orchestrator's POST /solve-step endpoint with the full
+   * conversation history. Used by the LLM strategy runner's automated
+   * per-step model call — the backend owns prompt building and conversation
+   * state.
    *
    * `model`/`provider` tell the orchestrator which model to actually call —
    * the backend has already validated `model` against the SupportedModel
    * table before a run ever gets this far (see StrategyDispatch), so this is
    * the one place that choice is handed off. Omit either to fall back to the
-   * orchestrator's own env-configured default (used for the provider-less
-   * /diagnose AI Assist path, which never sends these). `contextWindow` is
-   * this model's real context window (from SupportedModel) — omitted when
-   * the model hasn't been through a metadata refresh yet. For Ollama, the
-   * orchestrator always caps what it actually requests at its own
-   * MODEL_CONTEXT_WINDOW regardless of this value, and reports the true
-   * effective context window back on `SolveAssistSuccess.contextWindow`.
+   * orchestrator's own env-configured default (not used by this class today
+   * — the frontend's separate /diagnose AI Assist path never goes through
+   * here). `contextWindow` is this model's real context window (from
+   * SupportedModel) — omitted when the model hasn't been through a metadata
+   * refresh yet. For Ollama, the orchestrator always caps what it actually
+   * requests at its own MODEL_CONTEXT_WINDOW regardless of this value, and
+   * reports the true effective context window back on
+   * `SolveStepSuccess.contextWindow`.
    */
-  async solveAssist(
+  async requestSolveStep(
     messages: ChatMessage[],
     model?: string,
     provider?: "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral" | "sambanova",
     contextWindow?: number | null,
-  ): Promise<SolveAssistOutcome> {
-    return this.executeCall<SolveAssistSuccess>(
-      "/solve-assist",
+  ): Promise<SolveStepOutcome> {
+    return this.executeCall<SolveStepSuccess>(
+      "/solve-step",
       { messages, model, provider, contextWindow: contextWindow ?? undefined },
       (raw) => ({
         response: raw.response,
         groups: raw.groups,
+        proposalWords: raw.proposalWords,
+        categoryByGroup: raw.categoryByGroup,
+        textIssues: raw.textIssues,
         model: raw.model,
         contextWindow: raw.contextWindow,
         latencyMs: raw.latencyMs ?? 0,
@@ -144,7 +156,7 @@ export class OrchestratorService {
    * on whether `proposedCategory` names the same connection as
    * `actualCategory`. `model`/`provider` default to JUDGE_MODEL/
    * JUDGE_PROVIDER on the orchestrator side when omitted; the backend always
-   * passes both (from loadEnv()). Same failure shape as solveAssist.
+   * passes both (from loadEnv()). Same failure shape as requestSolveStep.
    */
   async judgeCategory(
     proposedCategory: string,
@@ -182,7 +194,7 @@ export class OrchestratorService {
     path: string,
     body: unknown,
     mapSuccess: (raw: any) => T, // eslint-disable-line @typescript-eslint/no-explicit-any
-  ): Promise<{ ok: true; data: T } | { ok: false; error: SolveAssistFailure }> {
+  ): Promise<{ ok: true; data: T } | { ok: false; error: SolveStepFailure }> {
     try {
       const response = await this.fetchOnce(path, body);
 
@@ -192,7 +204,7 @@ export class OrchestratorService {
       }
 
       const failureBody = (await response.json().catch(() => null)) as
-        | (Partial<SolveAssistFailure> & { code?: string; details?: Record<string, unknown> })
+        | (Partial<SolveStepFailure> & { code?: string; details?: Record<string, unknown> })
         | null;
       const callDetail = this.extractCallDetail(failureBody?.details);
 
@@ -229,7 +241,7 @@ export class OrchestratorService {
   private extractCallDetail(
     details?: Record<string, unknown>,
   ): Pick<
-    SolveAssistFailure,
+    SolveStepFailure,
     | "requestBody"
     | "responseId"
     | "responseHeaders"

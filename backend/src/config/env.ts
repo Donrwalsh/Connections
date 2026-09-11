@@ -41,7 +41,7 @@ function optionalInt(name: string, value: string | undefined, fallback: number):
  * by the caller (see orchestrator/app.service), which keeps the wait
  * bounded. When it does fire, the abort now propagates all the way to the
  * orchestrator's outbound OpenAI call (see orchestrator/app.ts and
- * solve-assist.ts) instead of just dropping the HTTP connection to the
+ * answer-step.ts) instead of just dropping the HTTP connection to the
  * orchestrator while that call keeps running — and billing — unseen.
  */
 export function orchestratorTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {

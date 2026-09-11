@@ -43,13 +43,13 @@ describe("Provider pool dispatch (e2e)", () => {
   let puzzleId: number;
 
   beforeAll(async () => {
-    // Fake orchestrator: every /solve-assist is a 429 daily-quota hit, so the
+    // Fake orchestrator: every /solve-step is a 429 daily-quota hit, so the
     // runner parks the run and the config-driven path writes the hold.
     orchestrator = http.createServer((req, res) => {
       let body = "";
       req.on("data", (c) => (body += c));
       req.on("end", () => {
-        if (req.url === "/solve-assist" && req.method === "POST") {
+        if (req.url === "/solve-step" && req.method === "POST") {
           res.writeHead(429, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({

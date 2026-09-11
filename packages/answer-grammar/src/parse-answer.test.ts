@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import { parseAnswer } from "./parse-answer";
 
 describe("parseAnswer", () => {
-  it("parses a clean ### GROUPS block into proposal words and categories", () => {
+  it("parses a clean response into groups, proposalWords and categories", () => {
     const response =
       "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n\n" +
       "### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
-    const result = parseAnswer(response, [["APPLE", "BANANA", "CHERRY", "DATE"]]);
+    const result = parseAnswer(response);
 
+    expect(result.groups).toEqual([["APPLE", "BANANA", "CHERRY", "DATE"]]);
     expect(result.proposalWords).toEqual([["APPLE", "BANANA", "CHERRY", "DATE"]]);
     expect(result.categoryByGroup.get(1)).toBe("Fruits");
     expect(result.textIssues).toEqual([]);
@@ -18,7 +19,7 @@ describe("parseAnswer", () => {
       "### GROUPS\n#### Group 1\nCategory: Fruits\n" +
       "Words: APPLE, BANANA, CHERRY, DATE (these are all fruits)\n\n" +
       "### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
-    const result = parseAnswer(response, [["APPLE", "BANANA", "CHERRY", "DATE"]]);
+    const result = parseAnswer(response);
 
     expect(result.proposalWords).toEqual([["APPLE", "BANANA", "CHERRY", "DATE"]]);
     expect(result.textIssues).toEqual(["parentheticalStripped"]);
@@ -28,7 +29,7 @@ describe("parseAnswer", () => {
     const response =
       "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n\n" +
       "### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
-    const result = parseAnswer(response, [["APPLE", "BANANA", "CHERRY", "DATE"]]);
+    const result = parseAnswer(response);
 
     expect(result.textIssues).toEqual([]);
   });
@@ -41,8 +42,8 @@ describe("parseAnswer", () => {
       "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n\n" +
       "### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
 
-    parseAnswer(withParenthetical, [["EGGPLANT", "FIG", "GRAPE", "HONEY"]]);
-    const second = parseAnswer(withoutParenthetical, [["APPLE", "BANANA", "CHERRY", "DATE"]]);
+    parseAnswer(withParenthetical);
+    const second = parseAnswer(withoutParenthetical);
 
     expect(second.textIssues).toEqual([]);
   });
@@ -52,17 +53,17 @@ describe("parseAnswer", () => {
       "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY\n\n" +
       "#### Group 2\nCategory: Misc\nWords: EGGPLANT, FIG, GRAPE, HONEY\n\n" +
       "### ANSWER\nEGGPLANT, FIG, GRAPE, HONEY";
-    const result = parseAnswer(response, [["EGGPLANT", "FIG", "GRAPE", "HONEY"]]);
+    const result = parseAnswer(response);
 
     expect(result.proposalWords).toEqual([undefined, ["EGGPLANT", "FIG", "GRAPE", "HONEY"]]);
     expect(result.textIssues).toEqual(["groupCountOff"]);
   });
 
-  it("still flags groupCountOff and falls back to fallbackGroups when every group has the wrong word count", () => {
+  it("still flags groupCountOff and falls back to the ANSWER block when every GROUPS entry has the wrong word count", () => {
     const response =
       "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY\n\n" +
       "### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
-    const result = parseAnswer(response, [["APPLE", "BANANA", "CHERRY", "DATE"]]);
+    const result = parseAnswer(response);
 
     expect(result.proposalWords).toEqual([["APPLE", "BANANA", "CHERRY", "DATE"]]);
     expect(result.textIssues).toEqual(["groupCountOff"]);
@@ -72,14 +73,14 @@ describe("parseAnswer", () => {
     const response =
       "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n\n" +
       "#### Group 2\nCategory: Misc\n\n### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
-    const result = parseAnswer(response, [["APPLE", "BANANA", "CHERRY", "DATE"]]);
+    const result = parseAnswer(response);
 
     expect(result.textIssues).toEqual(["unclassified"]);
   });
 
   it("flags unclassified even when parsedGroupWords ends up empty (single heading, no Words: line)", () => {
     const response = "### GROUPS\n#### Group 1\nCategory: Fruits\n\n### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
-    const result = parseAnswer(response, [["APPLE", "BANANA", "CHERRY", "DATE"]]);
+    const result = parseAnswer(response);
 
     expect(result.textIssues).toEqual(["unclassified"]);
     expect(result.proposalWords).toEqual([["APPLE", "BANANA", "CHERRY", "DATE"]]);
@@ -89,27 +90,42 @@ describe("parseAnswer", () => {
     const response =
       "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n\n" +
       "### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
-    const result = parseAnswer(response, [["APPLE", "BANANA", "CHERRY", "DATE"]]);
+    const result = parseAnswer(response);
 
     expect(result.textIssues).toEqual([]);
   });
 
-  it("falls back to fallbackGroups verbatim when the ### GROUPS section is missing entirely", () => {
+  it("falls back proposalWords to the ANSWER block verbatim when the ### GROUPS section is missing entirely", () => {
     const response = "### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
-    const result = parseAnswer(response, [["APPLE", "BANANA", "CHERRY", "DATE"]]);
+    const result = parseAnswer(response);
 
+    expect(result.groups).toEqual([["APPLE", "BANANA", "CHERRY", "DATE"]]);
     expect(result.proposalWords).toEqual([["APPLE", "BANANA", "CHERRY", "DATE"]]);
     expect(result.textIssues).toEqual([]);
     expect(result.categoryByGroup.size).toBe(0);
   });
 
-  it("strips markdown emphasis characters from words", () => {
+  it("falls back groups to the GROUPS block's words when the ANSWER block is missing entirely", () => {
+    const response = "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n";
+    const result = parseAnswer(response);
+
+    expect(result.groups).toEqual([["APPLE", "BANANA", "CHERRY", "DATE"]]);
+  });
+
+  it("strips markdown emphasis characters from GROUPS words", () => {
     const response =
       "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: **APPLE**, `BANANA`, CHERRY, DATE\n\n" +
       "### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
-    const result = parseAnswer(response, [["APPLE", "BANANA", "CHERRY", "DATE"]]);
+    const result = parseAnswer(response);
 
     expect(result.proposalWords).toEqual([["APPLE", "BANANA", "CHERRY", "DATE"]]);
+  });
+
+  it("strips markdown characters from ANSWER block lines", () => {
+    const response = "### ANSWER\n**APPLE**, `BANANA`, #CHERRY, -DATE";
+    const result = parseAnswer(response);
+
+    expect(result.groups).toEqual([["APPLE", "BANANA", "CHERRY", "DATE"]]);
   });
 
   it("keys categoryByGroup by the response's own group numbers, even out of order", () => {
@@ -117,10 +133,7 @@ describe("parseAnswer", () => {
       "### GROUPS\n#### Group 2\nCategory: Misc\nWords: EGGPLANT, FIG, GRAPE, HONEY\n\n" +
       "#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n\n" +
       "### ANSWER\nAPPLE, BANANA, CHERRY, DATE\nEGGPLANT, FIG, GRAPE, HONEY";
-    const result = parseAnswer(response, [
-      ["APPLE", "BANANA", "CHERRY", "DATE"],
-      ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
-    ]);
+    const result = parseAnswer(response);
 
     expect(result.categoryByGroup.get(1)).toBe("Fruits");
     expect(result.categoryByGroup.get(2)).toBe("Misc");
@@ -128,5 +141,12 @@ describe("parseAnswer", () => {
       ["APPLE", "BANANA", "CHERRY", "DATE"],
       ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
     ]);
+  });
+
+  it("returns empty groups when there is no ANSWER block and no GROUPS block", () => {
+    const result = parseAnswer("I don't know the answer");
+
+    expect(result.groups).toEqual([]);
+    expect(result.proposalWords).toEqual([]);
   });
 });
