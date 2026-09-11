@@ -1,6 +1,25 @@
-import { SolvePromptIssueTag } from "./entities/solve-prompt.entity";
-
 export const GROUP_SIZE = 4;
+
+export type AnswerTextIssue = "parentheticalStripped" | "groupCountOff" | "unclassified";
+
+export interface ParsedAnswer {
+  // The "### ANSWER" block's own lines, one group per line — the model's
+  // terse final restatement of its answer. Falls back to the "### GROUPS"
+  // block's structured words (see proposalWords) only when the ANSWER block
+  // itself yielded nothing. This is the wire-level "groups" field both
+  // POST /solve-step and POST /diagnose have always returned.
+  groups: string[][];
+  // The "### GROUPS" block's Category:/Words: extraction, indexed by group
+  // number - 1 (may be sparse — a group number that never parsed leaves a
+  // hole). Falls back to `groups` only when the GROUPS block itself yielded
+  // no group at all. This is what the backend's automated-solving path has
+  // always submitted as guesses (LlmProposal rows) — richer than `groups`
+  // because it also carries each group's category label and per-group
+  // parse-quality tracking (see textIssues).
+  proposalWords: string[][];
+  categoryByGroup: Map<number, string>;
+  textIssues: AnswerTextIssue[];
+}
 
 // Some models (Mistral especially) don't put their reasoning in the
 // scratchpad the prompt asks for — they append it straight onto the
@@ -13,26 +32,60 @@ export const GROUP_SIZE = 4;
 const WORDS_PARENTHETICAL_RE = /\([^)]*\)/g;
 
 /**
- * Parses the "Category:"/"Words:" lines out of a response's ### GROUPS
- * section (falling back to the whole response text if that heading is
- * missing), returning cleaned per-group word lists plus each group
- * number's extracted category. `fallbackGroups` (the already-parsed
- * ### ANSWER lines the orchestrator returns) is used verbatim when this
- * structured parse finds nothing.
- *
- * Extracted from LlmStrategyRunner (a pure function, no `this` dependency)
- * so it can also drive `backfill-issue-tags.ts`'s re-parse of historical
- * SolvePrompt.rawResponseText — a single source of truth for the parsing
- * regexes avoids the live runner and the backfill script silently drifting
- * apart over time.
+ * Splits the "### ANSWER" block into one word list per line — the model's
+ * terse final restatement of its answer, independent of the "### GROUPS"
+ * block's per-group reasoning. Used both as the primary source of `groups`
+ * and as the fallback source for `proposalWords` when the GROUPS block
+ * itself is empty or malformed.
  */
-export function parseGroupsSection(
-  responseText: string,
-  fallbackGroups: string[][],
-): { proposalWords: string[][]; categoryMap: Map<number, string>; issueTags: string[] } {
-  const categoryMap = new Map<number, string>();
+function parseAnswerBlock(responseText: string): string[][] {
+  const parts = responseText.split(/###?\s*ANSWER:?/i);
+  if (parts.length < 2) return [];
+
+  const answerBlock = parts[1].trim();
+  const lines = answerBlock
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const groups: string[][] = [];
+  for (const line of lines) {
+    const words = line
+      .split(",")
+      .map((w) => w.replace(/[`*#-]/g, "").trim())
+      .filter(Boolean);
+
+    if (words.length === GROUP_SIZE) {
+      groups.push(words);
+    }
+  }
+
+  return groups;
+}
+
+/**
+ * The single grammar for a solve model's response text — both the
+ * orchestrator (POST /solve-step, POST /diagnose) and the backend (live
+ * parsing, backfill-issue-tags.ts's re-parse of historical
+ * rawResponseText) import this so the parsing regexes never drift apart
+ * across copies again.
+ *
+ * Deliberately preserves two independent, pre-existing precedences rather
+ * than forcing them to agree — unifying the regexes was the actual goal;
+ * changing which section wins for either existing consumer was not:
+ *   - `groups`: ANSWER-block primary, GROUPS-block fallback (unchanged from
+ *     the orchestrator's own prior behaviour).
+ *   - `proposalWords`: GROUPS-block primary, ANSWER-block fallback
+ *     (unchanged from the backend's own prior behaviour — previously
+ *     fed by the orchestrator's `groups` as an external `fallbackGroups`
+ *     argument; now derived from the same response text directly instead).
+ */
+export function parseAnswer(responseText: string): ParsedAnswer {
+  const answerBlockGroups = parseAnswerBlock(responseText);
+
+  const categoryByGroup = new Map<number, string>();
   const parsedGroupWords: string[][] = [];
-  const tags = new Set<string>();
+  const issues = new Set<AnswerTextIssue>();
   const wrongCountGroupNumbers = new Set<number>();
   // Highest "Group N" heading number the response itself mentioned — the
   // catch-all below checks against this, never against the puzzle's
@@ -62,7 +115,7 @@ export function parseGroupsSection(
     const wordsMatch = chunk.match(/Words:\s*([^\n]+)/i);
 
     if (categoryMatch) {
-      categoryMap.set(groupNum, categoryMatch[1].trim());
+      categoryByGroup.set(groupNum, categoryMatch[1].trim());
     }
 
     if (wordsMatch) {
@@ -74,7 +127,7 @@ export function parseGroupsSection(
       // avoids that stateful pitfall entirely.
       const strippedWordsLine = rawWordsLine.replace(WORDS_PARENTHETICAL_RE, "");
       if (strippedWordsLine !== rawWordsLine) {
-        tags.add(SolvePromptIssueTag.PARENTHETICAL_STRIPPED);
+        issues.add("parentheticalStripped");
       }
 
       const wordsLine = strippedWordsLine
@@ -88,17 +141,25 @@ export function parseGroupsSection(
         // A Words: line was found and split, but produced the wrong word
         // count — the group is dropped (same as before), now flagged so
         // it's queryable rather than silently vanishing.
-        tags.add(SolvePromptIssueTag.GROUP_COUNT_OFF);
+        issues.add("groupCountOff");
         wrongCountGroupNumbers.add(groupNum);
       }
     }
   }
 
   // Use parsed words from the GROUPS block if available; fall back to the
-  // already-parsed ### ANSWER lines.
+  // ANSWER block's own lines.
   const usedStructuredParse = parsedGroupWords.length > 0;
-  const sourceGroups = usedStructuredParse ? parsedGroupWords : fallbackGroups;
+  const sourceGroups = usedStructuredParse ? parsedGroupWords : answerBlockGroups;
   const proposalWords = sourceGroups.map((group) => group.map((item) => item.trim()));
+
+  // The ANSWER block is the primary source for `groups`; only fall back to
+  // the GROUPS block's own (valid, non-sparse) words when the ANSWER block
+  // itself produced nothing at all.
+  const groups =
+    answerBlockGroups.length > 0
+      ? answerBlockGroups
+      : parsedGroupWords.filter((group): group is string[] => Boolean(group));
 
   // Catch-all: within the range of group numbers this response's own
   // headings actually mentioned (1..maxGroupNum), a group number that
@@ -113,9 +174,9 @@ export function parseGroupsSection(
   // loop's range is already the correct gate on its own.
   for (let groupNum = 1; groupNum <= maxGroupNum; groupNum++) {
     if (!parsedGroupWords[groupNum - 1] && !wrongCountGroupNumbers.has(groupNum)) {
-      tags.add(SolvePromptIssueTag.UNCLASSIFIED);
+      issues.add("unclassified");
     }
   }
 
-  return { proposalWords, categoryMap, issueTags: Array.from(tags) };
+  return { groups, proposalWords, categoryByGroup, textIssues: Array.from(issues) };
 }

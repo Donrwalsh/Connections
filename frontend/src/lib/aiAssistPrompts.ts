@@ -51,9 +51,18 @@ function buildInitialPrompt(items: string[], N: number): string {
     "",
     `Items: ${items.join(", ")}`,
     "",
-    `For each of your ${N} proposed groups, briefly explain (1-2 sentences) why you believe those four items belong together. Then output a line containing only "ANSWER:", followed by exactly ${N} lines, each with four comma-separated items — one line per group. Output nothing after those lines.`,
-    "",
     "Use each item exactly once. Only use items from the list above — do not introduce new words.",
+    "",
+    "Then produce your final answer using EXACTLY the format below — including a brief (1-2 sentence) Reasoning line for each group explaining why those four items belong together. Output nothing after the last line of ### ANSWER.",
+    "",
+    "### GROUPS",
+    ...Array.from(
+      { length: N },
+      (_, i) =>
+        `#### Group ${i + 1}\nReasoning: <1-2 sentences>\nCategory: <short category name>\nWords: <ITEM1>, <ITEM2>, <ITEM3>, <ITEM4>\n`,
+    ),
+    "### ANSWER",
+    ...Array.from({ length: N }, () => "<ITEM1>, <ITEM2>, <ITEM3>, <ITEM4>"),
   ].join("\n");
 }
 
@@ -83,9 +92,18 @@ function buildRetryPrompt(
     "",
     `The remaining items still to be grouped are: ${remainingItems.join(", ")}, forming ${N} group(s) of four.`,
     "",
-    `Considering this feedback, propose your best guess for all ${N} remaining groups. As before, briefly explain your reasoning for each, then output "ANSWER:" followed by ${N} lines of four comma-separated items.`,
-    "",
     "Use each item exactly once. Only use items from the list above — do not introduce new words.",
+    "",
+    "Considering this feedback, produce your final answer using EXACTLY the format below — including a brief (1-2 sentence) Reasoning line for each group. Output nothing after the last line of ### ANSWER.",
+    "",
+    "### GROUPS",
+    ...Array.from(
+      { length: N },
+      (_, i) =>
+        `#### Group ${i + 1}\nReasoning: <1-2 sentences>\nCategory: <short category name>\nWords: <ITEM1>, <ITEM2>, <ITEM3>, <ITEM4>\n`,
+    ),
+    "### ANSWER",
+    ...Array.from({ length: N }, () => "<ITEM1>, <ITEM2>, <ITEM3>, <ITEM4>"),
   );
 
   return parts.join("\n");

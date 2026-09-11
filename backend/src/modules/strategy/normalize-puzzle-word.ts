@@ -4,8 +4,9 @@ import { StrategyRun } from "./entities/strategy-run.entity";
 /**
  * One-off fixups for individual puzzle words whose literal text breaks the
  * LLM solve flow. The prompt lists items comma-joined and every downstream
- * parser (parse-groups-section.ts) splits the model's "Words:" line on
- * commas, so a word that itself contains a comma is impossible to round-trip
+ * parser (packages/answer-grammar's parseAnswer) splits the model's
+ * "Words:" line on commas, so a word that itself contains a comma is
+ * impossible to round-trip
  * — the model echoes it verbatim and the split yields the wrong token count,
  * silently dropping the whole group.
  *

@@ -23,7 +23,8 @@ services:
 
   orchestrator:
     build:
-      context: ./orchestrator
+      context: .
+      dockerfile: orchestrator/Dockerfile
       target: build
     container_name: ai_orchestrator
     restart: unless-stopped
@@ -53,9 +54,13 @@ services:
     ports:
       - "3001:3001"
     volumes:
-      - ./orchestrator/src:/app/src
-      - ./orchestrator/package.json:/app/package.json
-      - ./orchestrator/tsconfig.json:/app/tsconfig.json
+      - ./orchestrator/src:/app/orchestrator/src
+      - ./orchestrator/package.json:/app/orchestrator/package.json
+      - ./orchestrator/tsconfig.json:/app/orchestrator/tsconfig.json
+      - ./packages/answer-grammar/src:/app/packages/answer-grammar/src
+      - ./packages/answer-grammar/package.json:/app/packages/answer-grammar/package.json
+      - ./packages/answer-grammar/tsconfig.json:/app/packages/answer-grammar/tsconfig.json
+    working_dir: /app/orchestrator
     command: npm run dev
     healthcheck:
       test:
@@ -96,7 +101,8 @@ services:
 
   backend:
     build:
-      context: ./backend
+      context: .
+      dockerfile: backend/Dockerfile
       target: build
     container_name: nest_backend
     restart: unless-stopped
@@ -136,10 +142,14 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./backend/src:/app/src
-      - ./backend/package.json:/app/package.json
-      - ./backend/tsconfig.json:/app/tsconfig.json
+      - ./backend/src:/app/backend/src
+      - ./backend/package.json:/app/backend/package.json
+      - ./backend/tsconfig.json:/app/backend/tsconfig.json
+      - ./packages/answer-grammar/src:/app/packages/answer-grammar/src
+      - ./packages/answer-grammar/package.json:/app/packages/answer-grammar/package.json
+      - ./packages/answer-grammar/tsconfig.json:/app/packages/answer-grammar/tsconfig.json
       - ./.puzzle-cache:/app/.puzzle-cache
+    working_dir: /app/backend
     command: npm run start:dev
     healthcheck:
       test:
@@ -174,7 +184,8 @@ services:
 
   worker:
     build:
-      context: ./backend
+      context: .
+      dockerfile: backend/Dockerfile
       target: build
     container_name: strategy_worker
     restart: unless-stopped
@@ -210,10 +221,14 @@ services:
       orchestrator:
         condition: service_started
     volumes:
-      - ./backend/src:/app/src
-      - ./backend/package.json:/app/package.json
-      - ./backend/tsconfig.json:/app/tsconfig.json
+      - ./backend/src:/app/backend/src
+      - ./backend/package.json:/app/backend/package.json
+      - ./backend/tsconfig.json:/app/backend/tsconfig.json
+      - ./packages/answer-grammar/src:/app/packages/answer-grammar/src
+      - ./packages/answer-grammar/package.json:/app/packages/answer-grammar/package.json
+      - ./packages/answer-grammar/tsconfig.json:/app/packages/answer-grammar/tsconfig.json
       - ./.puzzle-cache:/app/.puzzle-cache
+    working_dir: /app/backend
     command: npx tsx --watch src/worker.ts
     healthcheck:
       test:

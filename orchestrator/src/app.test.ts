@@ -16,14 +16,8 @@ vi.mock("./solver.js", () => ({
   },
 }));
 
-vi.mock("./assist.js", () => ({
-  runAssistStep: vi.fn(async () => {
-    throw new Error("model call failed");
-  }),
-}));
-
-vi.mock("./solve-assist.js", () => ({
-  solveAssist: vi.fn(async () => {
+vi.mock("./answer-step.js", () => ({
+  runAnswerStep: vi.fn(async () => {
     throw new Error("model call failed");
   }),
 }));
@@ -34,11 +28,9 @@ vi.mock("./judge-category.js", () => ({
   }),
 }));
 
-import { runAssistStep } from "./assist.js";
-import { solveAssist } from "./solve-assist.js";
+import { runAnswerStep } from "./answer-step.js";
 import { judgeCategory } from "./judge-category.js";
-const runAssistStepMock = vi.mocked(runAssistStep);
-const solveAssistMock = vi.mocked(solveAssist);
+const runAnswerStepMock = vi.mocked(runAnswerStep);
 const judgeCategoryMock = vi.mocked(judgeCategory);
 
 function diagnoseRequest(body: unknown) {
@@ -52,8 +44,8 @@ function diagnoseRequest(body: unknown) {
   });
 }
 
-function solveAssistRequest(body: unknown) {
-  return app.request("/solve-assist", {
+function solveStepRequest(body: unknown) {
+  return app.request("/solve-step", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -77,10 +69,8 @@ function judgeCategoryRequest(
 describe("orchestrator app", () => {
   beforeEach(() => {
     process.env.INTERNAL_API_KEY = KEY;
-    runAssistStepMock.mockReset();
-    runAssistStepMock.mockRejectedValue(new Error("model call failed"));
-    solveAssistMock.mockReset();
-    solveAssistMock.mockRejectedValue(new Error("model call failed"));
+    runAnswerStepMock.mockReset();
+    runAnswerStepMock.mockRejectedValue(new Error("model call failed"));
     judgeCategoryMock.mockReset();
     judgeCategoryMock.mockRejectedValue(new Error("model call failed"));
   });
@@ -140,34 +130,43 @@ describe("orchestrator app", () => {
       expect(body.details).toContain("model call failed");
     });
 
-    it("returns the model's raw answer and parsed groups", async () => {
-      runAssistStepMock.mockResolvedValueOnce({
-        response: "Reasoning.\nANSWER:\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
+    it("returns the model's raw answer and parsed groups, trimmed to the button's contract", async () => {
+      runAnswerStepMock.mockResolvedValueOnce({
+        response: "### GROUPS\n#### Group 1\nCategory: A\nWords: AAAA, BBBB, CCCC, DDDD\n\n### ANSWER\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
         groups: [
           ["AAAA", "BBBB", "CCCC", "DDDD"],
           ["EEEE", "FFFF", "GGGG", "HHHH"],
         ],
+        proposalWords: [["AAAA", "BBBB", "CCCC", "DDDD"]],
+        categoryByGroup: { "1": "A" },
+        textIssues: [],
         model: "test-model",
+        latencyMs: 5,
       });
 
       const res = await diagnoseRequest(DIAGNOSE_BODY);
       expect(res.status).toBe(200);
+      // Trimmed to exactly {response, groups, model} — the richer fields
+      // runAnswerStep returns (proposalWords, categoryByGroup, textIssues,
+      // latencyMs, ...) never leak onto the button's wire contract.
       expect(await res.json()).toEqual({
-        response: "Reasoning.\nANSWER:\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
+        response: "### GROUPS\n#### Group 1\nCategory: A\nWords: AAAA, BBBB, CCCC, DDDD\n\n### ANSWER\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
         groups: [
           ["AAAA", "BBBB", "CCCC", "DDDD"],
           ["EEEE", "FFFF", "GGGG", "HHHH"],
         ],
         model: "test-model",
       });
-      expect(runAssistStepMock).toHaveBeenCalledWith(DIAGNOSE_BODY.messages);
+      expect(runAnswerStepMock).toHaveBeenCalledWith(DIAGNOSE_BODY.messages, {
+        captureTelemetry: false,
+      });
     });
 
     it("maps an unusable response to 400", async () => {
-      runAssistStepMock.mockRejectedValueOnce(
+      runAnswerStepMock.mockRejectedValueOnce(
         new SolveError(
           "invalid_group",
-          'Model response contained no "ANSWER:" section with group lines',
+          'Model response contained no parseable group proposals or "ANSWER:" section',
         ),
       );
       const res = await diagnoseRequest(DIAGNOSE_BODY);
@@ -184,144 +183,125 @@ describe("orchestrator app", () => {
     });
   });
 
-  describe("POST /solve-assist", () => {
-    const SOLVE_ASSIST_BODY = {
+  describe("POST /solve-step", () => {
+    const SOLVE_STEP_BODY = {
       messages: [{ role: "user", content: "Analyze the 16 provided items..." }],
       model: "gpt-4.1-nano-2025-04-14",
       provider: "openai",
     };
+    const BASE_RESULT = {
+      response: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
+      groups: [["AAAA", "BBBB", "CCCC", "DDDD"]],
+      proposalWords: [["AAAA", "BBBB", "CCCC", "DDDD"]],
+      categoryByGroup: {},
+      textIssues: [],
+      latencyMs: 5,
+    };
 
-    it("passes model and provider through to solveAssist", async () => {
-      solveAssistMock.mockResolvedValueOnce({
-        response: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
-        groups: [["AAAA", "BBBB", "CCCC", "DDDD"]],
-        proposals: [],
+    it("passes model and provider through to runAnswerStep", async () => {
+      runAnswerStepMock.mockResolvedValueOnce({
+        ...BASE_RESULT,
         model: "gpt-4.1-nano-2025-04-14",
-        latencyMs: 5,
       });
 
-      const res = await solveAssistRequest(SOLVE_ASSIST_BODY);
+      const res = await solveStepRequest(SOLVE_STEP_BODY);
 
       expect(res.status).toBe(200);
-      expect(solveAssistMock).toHaveBeenCalledWith(
-        SOLVE_ASSIST_BODY.messages,
-        "gpt-4.1-nano-2025-04-14",
-        "openai",
-        undefined,
-        expect.any(AbortSignal),
+      expect(runAnswerStepMock).toHaveBeenCalledWith(
+        SOLVE_STEP_BODY.messages,
+        expect.objectContaining({
+          model: "gpt-4.1-nano-2025-04-14",
+          provider: "openai",
+          contextWindow: undefined,
+          abortSignal: expect.any(AbortSignal),
+        }),
       );
     });
 
-    it("passes contextWindow through to solveAssist when given", async () => {
-      solveAssistMock.mockResolvedValueOnce({
-        response: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
-        groups: [["AAAA", "BBBB", "CCCC", "DDDD"]],
-        proposals: [],
-        model: "mistral-nemo",
-        latencyMs: 5,
-      });
+    it("passes contextWindow through to runAnswerStep when given", async () => {
+      runAnswerStepMock.mockResolvedValueOnce({ ...BASE_RESULT, model: "mistral-nemo" });
 
-      const res = await solveAssistRequest({ ...SOLVE_ASSIST_BODY, contextWindow: 131072 });
+      const res = await solveStepRequest({ ...SOLVE_STEP_BODY, contextWindow: 131072 });
 
       expect(res.status).toBe(200);
-      expect(solveAssistMock).toHaveBeenCalledWith(
-        SOLVE_ASSIST_BODY.messages,
-        "gpt-4.1-nano-2025-04-14",
-        "openai",
-        131072,
-        expect.any(AbortSignal),
+      expect(runAnswerStepMock).toHaveBeenCalledWith(
+        SOLVE_STEP_BODY.messages,
+        expect.objectContaining({
+          model: "gpt-4.1-nano-2025-04-14",
+          provider: "openai",
+          contextWindow: 131072,
+          abortSignal: expect.any(AbortSignal),
+        }),
       );
     });
 
     it("works without model/provider (falls back to the env-configured default)", async () => {
-      solveAssistMock.mockResolvedValueOnce({
-        response: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
-        groups: [["AAAA", "BBBB", "CCCC", "DDDD"]],
-        proposals: [],
-        model: "gpt-4.1-nano",
-        latencyMs: 5,
-      });
+      runAnswerStepMock.mockResolvedValueOnce({ ...BASE_RESULT, model: "gpt-4.1-nano" });
 
-      const res = await solveAssistRequest({ messages: SOLVE_ASSIST_BODY.messages });
+      const res = await solveStepRequest({ messages: SOLVE_STEP_BODY.messages });
 
       expect(res.status).toBe(200);
-      expect(solveAssistMock).toHaveBeenCalledWith(
-        SOLVE_ASSIST_BODY.messages,
-        undefined,
-        undefined,
-        undefined,
-        expect.any(AbortSignal),
+      expect(runAnswerStepMock).toHaveBeenCalledWith(
+        SOLVE_STEP_BODY.messages,
+        expect.objectContaining({
+          model: undefined,
+          provider: undefined,
+          contextWindow: undefined,
+          abortSignal: expect.any(AbortSignal),
+        }),
       );
     });
 
     it("rejects an unknown provider value", async () => {
-      const res = await solveAssistRequest({
-        messages: SOLVE_ASSIST_BODY.messages,
+      const res = await solveStepRequest({
+        messages: SOLVE_STEP_BODY.messages,
         provider: "anthropic",
       });
 
       expect(res.status).toBe(400);
-      expect(solveAssistMock).not.toHaveBeenCalled();
+      expect(runAnswerStepMock).not.toHaveBeenCalled();
     });
 
     it("accepts google as a provider value", async () => {
-      solveAssistMock.mockResolvedValueOnce({
-        response: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
-        groups: [["AAAA", "BBBB", "CCCC", "DDDD"]],
-        proposals: [],
-        model: "gemini-3.6-flash",
-        latencyMs: 5,
-      });
+      runAnswerStepMock.mockResolvedValueOnce({ ...BASE_RESULT, model: "gemini-3.6-flash" });
 
-      const res = await solveAssistRequest({
-        messages: SOLVE_ASSIST_BODY.messages,
+      const res = await solveStepRequest({
+        messages: SOLVE_STEP_BODY.messages,
         model: "gemini-3.6-flash",
         provider: "google",
       });
 
       expect(res.status).toBe(200);
-      expect(solveAssistMock).toHaveBeenCalledWith(
-        SOLVE_ASSIST_BODY.messages,
-        "gemini-3.6-flash",
-        "google",
-        undefined,
-        expect.any(AbortSignal),
+      expect(runAnswerStepMock).toHaveBeenCalledWith(
+        SOLVE_STEP_BODY.messages,
+        expect.objectContaining({ model: "gemini-3.6-flash", provider: "google" }),
       );
     });
 
     it("accepts mistral as a provider value", async () => {
-      solveAssistMock.mockResolvedValueOnce({
-        response: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
-        groups: [["AAAA", "BBBB", "CCCC", "DDDD"]],
-        proposals: [],
-        model: "mistral-small-latest",
-        latencyMs: 5,
-      });
+      runAnswerStepMock.mockResolvedValueOnce({ ...BASE_RESULT, model: "mistral-small-latest" });
 
-      const res = await solveAssistRequest({
-        messages: SOLVE_ASSIST_BODY.messages,
+      const res = await solveStepRequest({
+        messages: SOLVE_STEP_BODY.messages,
         model: "mistral-small-latest",
         provider: "mistral",
       });
 
       expect(res.status).toBe(200);
-      expect(solveAssistMock).toHaveBeenCalledWith(
-        SOLVE_ASSIST_BODY.messages,
-        "mistral-small-latest",
-        "mistral",
-        undefined,
-        expect.any(AbortSignal),
+      expect(runAnswerStepMock).toHaveBeenCalledWith(
+        SOLVE_STEP_BODY.messages,
+        expect.objectContaining({ model: "mistral-small-latest", provider: "mistral" }),
       );
     });
 
     it("returns 429 with retryAfterSeconds for a rate_limited failure", async () => {
       const { SolveError } = await import("./solver.js");
-      solveAssistMock.mockRejectedValueOnce(
+      runAnswerStepMock.mockRejectedValueOnce(
         new SolveError("rate_limited", "Google rate limit hit", { retryAfterSeconds: 3.86 }),
       );
 
-      const res = await solveAssistRequest({
-        messages: SOLVE_ASSIST_BODY.messages,
+      const res = await solveStepRequest({
+        messages: SOLVE_STEP_BODY.messages,
         model: "gemini-3.6-flash",
         provider: "google",
       });
@@ -334,12 +314,12 @@ describe("orchestrator app", () => {
 
     it("returns 429 for a rate_limited_daily failure", async () => {
       const { SolveError } = await import("./solver.js");
-      solveAssistMock.mockRejectedValueOnce(
+      runAnswerStepMock.mockRejectedValueOnce(
         new SolveError("rate_limited_daily", "Google daily quota exhausted"),
       );
 
-      const res = await solveAssistRequest({
-        messages: SOLVE_ASSIST_BODY.messages,
+      const res = await solveStepRequest({
+        messages: SOLVE_STEP_BODY.messages,
         model: "gemini-3.6-flash",
         provider: "google",
       });

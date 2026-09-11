@@ -65,19 +65,19 @@ export const SolveErrorCodeSchema = z.enum([
 export type SolveErrorCode = z.infer<typeof SolveErrorCodeSchema>;
 
 /**
- * Request body for POST /solve-assist. The backend strategy runner owns the
+ * Request body for POST /solve-step. The backend strategy runner owns the
  * session: it builds the prompts (INITIAL on a fresh step, RETRY after a
  * failed guess), accumulates the model's responses, and submits the full
  * message history on every call. The orchestrator stays stateless.
  *
  * `model`/`provider` are optional overrides: the backend validates `model`
  * against its SupportedModel table before ever calling this endpoint (see
- * StrategyService), so a strategy run always sends both. When omitted (the
+ * StrategyDispatch), so a strategy run always sends both. When omitted (the
  * provider-less /diagnose AI Assist path uses AssistRequestSchema directly
  * and never has these), the orchestrator falls back to its own
  * env-configured default provider/model.
  */
-export const SolveAssistRequestSchema = AssistRequestSchema.extend({
+export const SolveStepRequestSchema = AssistRequestSchema.extend({
   model: z
     .string()
     .min(1)
@@ -96,18 +96,29 @@ export const SolveAssistRequestSchema = AssistRequestSchema.extend({
       "This model's real context window, overriding MODEL_CONTEXT_WINDOW for Ollama's num_ctx",
     ),
 });
-export type SolveAssistRequest = z.infer<typeof SolveAssistRequestSchema>;
+export type SolveStepRequest = z.infer<typeof SolveStepRequestSchema>;
 
 /**
- * Response body for POST /solve-assist. Same base shape as AssistResponse
- * (raw model text, parsed ANSWER: groups, model identifier), plus per-call
- * telemetry (latency and token usage) that the backend persists onto its
- * SolvePrompt row.
+ * Response body for POST /solve-step. Same base shape as AssistResponse
+ * (raw model text, parsed ANSWER: groups, model identifier), plus the full
+ * structured parse from the shared answer-grammar package (proposalWords/
+ * categoryByGroup/textIssues — see answer-step.ts) and per-call telemetry
+ * (latency, token usage, raw request/response detail) that the backend
+ * persists onto its SolvePrompt row.
  */
-export const SolveAssistResponseSchema = AssistResponseSchema.extend({
-  latencyMs: z.number(),
+export const SolveStepResponseSchema = AssistResponseSchema.extend({
+  proposalWords: z
+    .array(z.array(z.string()))
+    .describe("### GROUPS-block words per group number (1-indexed, may contain gaps)"),
+  categoryByGroup: z
+    .record(z.string(), z.string())
+    .describe("Group number (as a string key) -> its extracted Category: text"),
+  textIssues: z
+    .array(z.enum(["parentheticalStripped", "groupCountOff", "unclassified"]))
+    .describe("Text-parsing issues found in the response, from the shared answer-grammar parser"),
+  latencyMs: z.number().optional(),
   // The context window actually used for this call — see
-  // solve-assist.ts's SolveAssistResult for why it can differ from the
+  // answer-step.ts's AnswerStepResult for why it can differ from the
   // request's contextWindow.
   contextWindow: z.number().optional(),
   usage: z
@@ -117,15 +128,19 @@ export const SolveAssistResponseSchema = AssistResponseSchema.extend({
       totalTokens: z.number().optional(),
     })
     .optional(),
+  requestBody: z.unknown().optional(),
+  responseId: z.string().optional(),
+  responseHeaders: z.record(z.string(), z.string()).optional(),
+  responseBody: z.unknown().optional(),
 });
-export type SolveAssistResponse = z.infer<typeof SolveAssistResponseSchema>;
+export type SolveStepResponse = z.infer<typeof SolveStepResponseSchema>;
 
 /**
  * Request body for POST /judge-category. Categories only — the four words
  * are deliberately not sent; the judge is comparing whether one label
  * names the same connection as another, and both already describe the same
  * items by construction. `model`/`provider` override JUDGE_MODEL/
- * JUDGE_PROVIDER, same override semantics as /solve-assist.
+ * JUDGE_PROVIDER, same override semantics as /solve-step.
  */
 export const JudgeCategoryRequestSchema = z.object({
   proposedCategory: z.string().min(1),
@@ -138,7 +153,7 @@ export type JudgeCategoryRequest = z.infer<typeof JudgeCategoryRequestSchema>;
 /**
  * Response body for POST /judge-category. The 3-way verdict plus a
  * one-sentence rationale, plus the same per-call telemetry / raw call
- * detail /solve-assist returns, which the backend persists onto its
+ * detail /solve-step returns, which the backend persists onto its
  * CategoryEvaluation row.
  */
 export const JudgeCategoryResponseSchema = z.object({
