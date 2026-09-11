@@ -37,11 +37,21 @@ import { GROUP_SIZE } from "answer-grammar";
  * re-running it (e.g. to catch runs still in flight during the first pass —
  * see the design spec's Risks section) is always safe.
  *
+ * Known limitation (inherited unchanged from prompt-reconstruction.ts): the
+ * replay below assumes one continuous conversation across all of a run's
+ * rows, rebuilding `history` from every earlier step in that run. But
+ * llm-strategy-runner.service.ts starts its in-memory `messages` array empty
+ * on every runLlmStrategy invocation while continuing globalPromptNumber
+ * from the database, so a run that was parked (e.g. hit a
+ * RATE_LIMITED_DAILY state) and later resumed has rows whose real
+ * conversation actually restarted mid-run. For those rows, the backfilled
+ * transcript won't match what was actually sent to the LLM.
+ *
  * Local dev (from backend/):
  *   npx tsx src/scripts/backfill-prompt-text.ts
  *
  * Production/container:
- *   docker exec <container> npx tsx src/scripts/backfill-prompt-text.ts
+ *   docker exec <container> npm run backfill:prompt-text
  */
 
 const logger = new Logger("BackfillPromptText");
