@@ -1,4 +1,6 @@
 import { Module } from "@nestjs/common";
+import { Queue } from "bullmq";
+import type { ProviderPoolId } from "../provider-pool/provider-pool.config";
 import {
   strategyQueue,
   llmOpenAIQueue,
@@ -47,6 +49,42 @@ export const MISTRAL_FREE_DISPATCH_QUEUE = "MISTRAL_FREE_DISPATCH_QUEUE";
 export const SAMBANOVA_FREE_DISPATCH_QUEUE = "SAMBANOVA_FREE_DISPATCH_QUEUE";
 export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
 
+/** The per-provider LLM runs queues, keyed by provider-pool id — for
+ * provider-agnostic consumers that resolve the pool themselves. */
+export const RUNS_QUEUE_BY_POOL = "RUNS_QUEUE_BY_POOL";
+/** The per-provider RPD-resume queues, keyed by provider-pool id (free-tier
+ * pools only). */
+export const RPD_RESUME_QUEUE_BY_POOL = "RPD_RESUME_QUEUE_BY_POOL";
+/** The per-provider free-dispatch tick queues, keyed by provider-pool id
+ * (free-tier pools only). */
+export const FREE_DISPATCH_QUEUE_BY_POOL = "FREE_DISPATCH_QUEUE_BY_POOL";
+
+const runsQueueByPool: ReadonlyMap<ProviderPoolId, Queue> = new Map([
+  ["openai", llmOpenAIQueue],
+  ["ollama", llmOllamaQueue],
+  ["google", llmGoogleQueue],
+  ["groq", llmGroqQueue],
+  ["openrouter", llmOpenRouterQueue],
+  ["mistral", llmMistralQueue],
+  ["sambanova", llmSambaNovaQueue],
+]);
+
+const rpdResumeQueueByPool: ReadonlyMap<ProviderPoolId, Queue> = new Map([
+  ["google", googleRpdResumeQueue],
+  ["groq", groqRpdResumeQueue],
+  ["openrouter", openRouterRpdResumeQueue],
+  ["mistral", mistralRpdResumeQueue],
+  ["sambanova", sambaNovaRpdResumeQueue],
+]);
+
+const freeDispatchQueueByPool: ReadonlyMap<ProviderPoolId, Queue> = new Map([
+  ["google", googleFreeDispatchQueue],
+  ["groq", groqFreeDispatchQueue],
+  ["openrouter", openRouterFreeDispatchQueue],
+  ["mistral", mistralFreeDispatchQueue],
+  ["sambanova", sambaNovaFreeDispatchQueue],
+]);
+
 @Module({
   providers: [
     { provide: STRATEGY_QUEUE, useValue: strategyQueue },
@@ -71,6 +109,9 @@ export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
     { provide: MISTRAL_FREE_DISPATCH_QUEUE, useValue: mistralFreeDispatchQueue },
     { provide: SAMBANOVA_FREE_DISPATCH_QUEUE, useValue: sambaNovaFreeDispatchQueue },
     { provide: DAILY_AUTOMATION_QUEUE, useValue: dailyAutomationQueue },
+    { provide: RUNS_QUEUE_BY_POOL, useValue: runsQueueByPool },
+    { provide: RPD_RESUME_QUEUE_BY_POOL, useValue: rpdResumeQueueByPool },
+    { provide: FREE_DISPATCH_QUEUE_BY_POOL, useValue: freeDispatchQueueByPool },
   ],
   exports: [
     STRATEGY_QUEUE,
@@ -95,6 +136,9 @@ export const DAILY_AUTOMATION_QUEUE = "DAILY_AUTOMATION_QUEUE";
     MISTRAL_FREE_DISPATCH_QUEUE,
     SAMBANOVA_FREE_DISPATCH_QUEUE,
     DAILY_AUTOMATION_QUEUE,
+    RUNS_QUEUE_BY_POOL,
+    RPD_RESUME_QUEUE_BY_POOL,
+    FREE_DISPATCH_QUEUE_BY_POOL,
   ],
 })
 export class QueueModule {}

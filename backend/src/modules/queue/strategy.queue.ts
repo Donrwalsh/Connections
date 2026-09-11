@@ -1,14 +1,6 @@
 import { Queue } from "bullmq";
 import { redisConnection } from "./redis.config";
-import {
-  LLM_OPENAI,
-  LLM_OLLAMA,
-  LLM_GOOGLE,
-  LLM_GROQ,
-  LLM_OPENROUTER,
-  LLM_MISTRAL,
-  LLM_SAMBANOVA,
-} from "../../strategies";
+import { providerPool, type ProviderPoolId } from "../provider-pool/provider-pool.config";
 
 export const strategyQueue = new Queue("strategy-runs", {
   connection: redisConnection,
@@ -98,30 +90,21 @@ export const llmSambaNovaQueue = new Queue("llm-sambanova-runs", {
 });
 
 /**
- * Routes a strategy run to the queue that processes it: the LLM strategies
- * get their per-provider queues, everything else stays on the shared
- * strategy-runs queue. The only place the strategy->queue mapping lives, so
- * enqueue call sites stay provider-agnostic.
+ * Routes a strategy run to the queue that processes it: a provider-pool
+ * strategy gets its pool's per-provider queue (looked up in
+ * `runsQueueByPool`), everything else stays on the shared strategy-runs
+ * `defaultQueue`. The strategy->queue mapping now lives entirely in
+ * `PROVIDER_POOLS`; this just indexes the caller's queue map by the resolved
+ * pool id.
  */
 export function queueForStrategy(
+  runsQueueByPool: ReadonlyMap<ProviderPoolId, Queue>,
   defaultQueue: Queue,
-  openAIQueue: Queue,
-  ollamaQueue: Queue,
-  googleQueue: Queue,
-  groqQueue: Queue,
-  openRouterQueue: Queue,
-  mistralQueue: Queue,
-  sambaNovaQueue: Queue,
   strategyName: string,
 ): Queue {
-  if (strategyName === LLM_OPENAI) return openAIQueue;
-  if (strategyName === LLM_OLLAMA) return ollamaQueue;
-  if (strategyName === LLM_GOOGLE) return googleQueue;
-  if (strategyName === LLM_GROQ) return groqQueue;
-  if (strategyName === LLM_OPENROUTER) return openRouterQueue;
-  if (strategyName === LLM_MISTRAL) return mistralQueue;
-  if (strategyName === LLM_SAMBANOVA) return sambaNovaQueue;
-  return defaultQueue;
+  const pool = providerPool(strategyName);
+  if (!pool) return defaultQueue;
+  return runsQueueByPool.get(pool.id) ?? defaultQueue;
 }
 
 /**

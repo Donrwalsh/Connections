@@ -16,16 +16,8 @@ import { OrchestratorService } from "./orchestrator.service";
 import { CategoryEvaluatorService } from "./category-evaluator.service";
 import { FreeTierUsageService } from "./free-tier-usage.service";
 import { RateLimitHoldService } from "./rate-limit-hold.service";
-import { MistralRpdResumeService } from "./mistral-rpd-resume.service";
-import { MistralRpdResumeBootstrap } from "./mistral-rpd-resume.bootstrap";
-import { SambaNovaRpdResumeService } from "./sambanova-rpd-resume.service";
-import { SambaNovaRpdResumeBootstrap } from "./sambanova-rpd-resume.bootstrap";
-import { OpenRouterRpdResumeService } from "./openrouter-rpd-resume.service";
-import { OpenRouterRpdResumeBootstrap } from "./openrouter-rpd-resume.bootstrap";
-import { GoogleRpdResumeService } from "./google-rpd-resume.service";
-import { GoogleRpdResumeBootstrap } from "./google-rpd-resume.bootstrap";
-import { GroqRpdResumeService } from "./groq-rpd-resume.service";
-import { GroqRpdResumeBootstrap } from "./groq-rpd-resume.bootstrap";
+import { RpdResumeService } from "../provider-pool/rpd-resume.service";
+import { RpdResumeBootstrap } from "../provider-pool/rpd-resume.bootstrap";
 import { GameModule } from "../game/game.module";
 import { SupportedModelModule } from "../supported-model/supported-model.module";
 
@@ -53,16 +45,8 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     CategoryEvaluatorService,
     FreeTierUsageService,
     RateLimitHoldService,
-    GoogleRpdResumeService,
-    GoogleRpdResumeBootstrap,
-    GroqRpdResumeService,
-    GroqRpdResumeBootstrap,
-    OpenRouterRpdResumeService,
-    OpenRouterRpdResumeBootstrap,
-    MistralRpdResumeService,
-    MistralRpdResumeBootstrap,
-    SambaNovaRpdResumeService,
-    SambaNovaRpdResumeBootstrap,
+    RpdResumeService,
+    RpdResumeBootstrap,
   ],
   exports: [
     StrategyService,
@@ -70,11 +54,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     CategoryEvaluatorService,
     FreeTierUsageService,
     RateLimitHoldService,
-    GoogleRpdResumeService,
-    GroqRpdResumeService,
-    OpenRouterRpdResumeService,
-    MistralRpdResumeService,
-    SambaNovaRpdResumeService,
+    RpdResumeService,
   ],
 })
 export class StrategyModule {}

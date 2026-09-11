@@ -1,3 +1,5 @@
+import { Queue } from "bullmq";
+
 import {
   LLM_GOOGLE,
   LLM_GROQ,
@@ -7,6 +9,7 @@ import {
   LLM_OPENROUTER,
   LLM_SAMBANOVA,
 } from "../../strategies";
+import type { ProviderPoolId } from "../provider-pool/provider-pool.config";
 import {
   categoryEvalJobId,
   queueForJudgeProvider,
@@ -22,32 +25,30 @@ const mistral = { name: "mistral" } as never;
 const sambanova = { name: "sambanova" } as never;
 const shared = { name: "shared" } as never;
 
+const runsQueueByPool = new Map<ProviderPoolId, Queue>([
+  ["openai", openai],
+  ["ollama", ollama],
+  ["google", google],
+  ["groq", groq],
+  ["openrouter", openrouter],
+  ["mistral", mistral],
+  ["sambanova", sambanova],
+]);
+
 describe("queueForStrategy", () => {
   it("routes each LLM strategy to its own queue and everything else to the shared queue", () => {
-    expect(
-      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, sambanova, LLM_OPENAI),
-    ).toBe(openai);
-    expect(
-      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, sambanova, LLM_OLLAMA),
-    ).toBe(ollama);
-    expect(
-      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, sambanova, LLM_GOOGLE),
-    ).toBe(google);
-    expect(
-      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, sambanova, LLM_GROQ),
-    ).toBe(groq);
-    expect(
-      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, sambanova, LLM_OPENROUTER),
-    ).toBe(openrouter);
-    expect(
-      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, sambanova, LLM_MISTRAL),
-    ).toBe(mistral);
-    expect(
-      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, sambanova, LLM_SAMBANOVA),
-    ).toBe(sambanova);
-    expect(
-      queueForStrategy(shared, openai, ollama, google, groq, openrouter, mistral, sambanova, "alphabetical"),
-    ).toBe(shared);
+    expect(queueForStrategy(runsQueueByPool, shared, LLM_OPENAI)).toBe(openai);
+    expect(queueForStrategy(runsQueueByPool, shared, LLM_OLLAMA)).toBe(ollama);
+    expect(queueForStrategy(runsQueueByPool, shared, LLM_GOOGLE)).toBe(google);
+    expect(queueForStrategy(runsQueueByPool, shared, LLM_GROQ)).toBe(groq);
+    expect(queueForStrategy(runsQueueByPool, shared, LLM_OPENROUTER)).toBe(openrouter);
+    expect(queueForStrategy(runsQueueByPool, shared, LLM_MISTRAL)).toBe(mistral);
+    expect(queueForStrategy(runsQueueByPool, shared, LLM_SAMBANOVA)).toBe(sambanova);
+    expect(queueForStrategy(runsQueueByPool, shared, "alphabetical")).toBe(shared);
+  });
+
+  it("falls back to the shared queue when the pool has no entry in the map", () => {
+    expect(queueForStrategy(new Map(), shared, LLM_GROQ)).toBe(shared);
   });
 });
 

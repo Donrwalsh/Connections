@@ -43,6 +43,7 @@ import {
   startOfTodayUtc,
 } from "../../strategies";
 import { runStrategyJobId, queueForStrategy } from "../queue/strategy.queue";
+import type { ProviderPoolId } from "../provider-pool/provider-pool.config";
 import { StrategyRunStore, computeInitialWordOrder } from "./strategy-run-store.service";
 import { reconstructSolvePrompts } from "./prompt-reconstruction";
 import {
@@ -219,23 +220,26 @@ export class StrategyService {
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
   ) {}
 
+  /** The injected per-provider runs queues, keyed by provider-pool id — built
+   * once so `queueFor` is a single map lookup with no provider branching. */
+  private runsQueueByPool?: ReadonlyMap<ProviderPoolId, Queue>;
+
   /**
-   * The queue a strategy's runs are dispatched to: all three LLM strategies
-   * (llm-openai, llm-ollama, llm-google) get their own per-provider queues,
-   * everything else the shared strategy-runs queue.
+   * The queue a strategy's runs are dispatched to: a provider-pool strategy
+   * gets its pool's per-provider queue, everything else the shared
+   * strategy-runs queue.
    */
   private queueFor(strategyName: string): Queue {
-    return queueForStrategy(
-      this.queue,
-      this.llmOpenAIQueue,
-      this.llmOllamaQueue,
-      this.llmGoogleQueue,
-      this.llmGroqQueue,
-      this.llmOpenRouterQueue,
-      this.llmMistralQueue,
-      this.llmSambaNovaQueue,
-      strategyName,
-    );
+    this.runsQueueByPool ??= new Map<ProviderPoolId, Queue>([
+      ["openai", this.llmOpenAIQueue],
+      ["ollama", this.llmOllamaQueue],
+      ["google", this.llmGoogleQueue],
+      ["groq", this.llmGroqQueue],
+      ["openrouter", this.llmOpenRouterQueue],
+      ["mistral", this.llmMistralQueue],
+      ["sambanova", this.llmSambaNovaQueue],
+    ]);
+    return queueForStrategy(this.runsQueueByPool, this.queue, strategyName);
   }
 
   async triggerRun(

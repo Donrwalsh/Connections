@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
+import type { QueryDeepPartialEntity } from "typeorm/query-builder/QueryPartialEntity";
 import { AutomationRunLog } from "./entities/automation-run-log.entity";
 import { CategoryEvaluatorService } from "../strategy/category-evaluator.service";
 import { FreeTierDispatchService } from "../free-tier-dispatch/free-tier-dispatch.service";
@@ -10,6 +11,18 @@ import { OpenRouterFreeDispatchService } from "../openrouter-free-dispatch/openr
 import { MistralFreeDispatchService } from "../mistral-free-dispatch/mistral-free-dispatch.service";
 import { SambaNovaFreeDispatchService } from "../sambanova-free-dispatch/sambanova-free-dispatch.service";
 import { ModelMetadataRefreshService } from "../supported-model/model-metadata-refresh.service";
+
+/** One free-tier burn leg: the dispatch service to start, the
+ * AutomationRunLog column pair to record into, and the "nothing to do"
+ * message. Ordered google -> groq -> openrouter -> mistral -> sambanova, the
+ * sequence `run()` fires them in. */
+interface BurnLeg {
+  service: { getStatus(): Promise<{ active: boolean }>; start(): Promise<{ outcome: string }> };
+  logKey: string;
+  outcomeColumn: keyof AutomationRunLog;
+  messageColumn: keyof AutomationRunLog;
+  exhaustedMessage: string;
+}
 
 // The same MAX_LIMIT CategoryEvaluatorService.enqueuePending already
 // enforces internally — the daily leg asks for as much as a manual dispatch
@@ -95,6 +108,46 @@ export class DailyAutomationService {
     private readonly modelMetadataRefreshService: ModelMetadataRefreshService,
   ) {}
 
+  private get burnLegs(): BurnLeg[] {
+    return [
+      {
+        service: this.googleFreeDispatchService,
+        logKey: "google",
+        outcomeColumn: "googleBurnOutcome",
+        messageColumn: "googleBurnMessage",
+        exhaustedMessage: "every Google model is currently RPD-held",
+      },
+      {
+        service: this.groqFreeDispatchService,
+        logKey: "groq",
+        outcomeColumn: "groqBurnOutcome",
+        messageColumn: "groqBurnMessage",
+        exhaustedMessage: "every Groq model is currently RPD-held",
+      },
+      {
+        service: this.openRouterFreeDispatchService,
+        logKey: "openrouter",
+        outcomeColumn: "openRouterBurnOutcome",
+        messageColumn: "openRouterBurnMessage",
+        exhaustedMessage: "OpenRouter daily budget spent or account held",
+      },
+      {
+        service: this.mistralFreeDispatchService,
+        logKey: "mistral",
+        outcomeColumn: "mistralBurnOutcome",
+        messageColumn: "mistralBurnMessage",
+        exhaustedMessage: "every Mistral model is currently held",
+      },
+      {
+        service: this.sambaNovaFreeDispatchService,
+        logKey: "sambanova",
+        outcomeColumn: "sambaNovaBurnOutcome",
+        messageColumn: "sambaNovaBurnMessage",
+        exhaustedMessage: "every SambaNova model is currently held",
+      },
+    ];
+  }
+
   async run(options: { skipJudgeLeg?: boolean } = {}): Promise<void> {
     const date = todayUtcDateStamp();
     const triggeredAt = new Date();
@@ -110,11 +163,9 @@ export class DailyAutomationService {
       await this.runJudgeLeg(date);
     }
     await this.runMiniBurnLeg(date);
-    await this.runGoogleBurnLeg(date);
-    await this.runGroqBurnLeg(date);
-    await this.runOpenRouterBurnLeg(date);
-    await this.runMistralBurnLeg(date);
-    await this.runSambaNovaBurnLeg(date);
+    for (const leg of this.burnLegs) {
+      await this.runPoolBurnLeg(leg, date);
+    }
   }
 
   async getTodayStatus(): Promise<AutomationRunLog | null> {
@@ -175,137 +226,36 @@ export class DailyAutomationService {
     }
   }
 
-  private async runGoogleBurnLeg(date: string): Promise<void> {
+  /**
+   * One free-tier burn leg: start `leg.service`'s dispatch cycle unless it is
+   * already running, and record the outcome into `leg`'s AutomationRunLog
+   * column pair. A failure is caught and logged as this leg's outcome — it
+   * never stops the next leg. Was five near-identical `run<P>BurnLeg`
+   * methods before the provider-pool unification.
+   */
+  private async runPoolBurnLeg(leg: BurnLeg, date: string): Promise<void> {
+    const record = (outcome: string, message: string) =>
+      this.runLogRepo.update({ date }, {
+        [leg.outcomeColumn]: outcome,
+        [leg.messageColumn]: message,
+      } as QueryDeepPartialEntity<AutomationRunLog>);
+
     try {
-      const current = await this.googleFreeDispatchService.getStatus();
+      const current = await leg.service.getStatus();
       if (current.active) {
-        await this.runLogRepo.update(
-          { date },
-          { googleBurnOutcome: "alreadyActive", googleBurnMessage: "already running" },
-        );
+        await record("alreadyActive", "already running");
         return;
       }
 
-      const result = await this.googleFreeDispatchService.start();
-      const message =
-        result.outcome === "alreadyExhausted" ? "every Google model is currently RPD-held" : "started";
-      await this.runLogRepo.update({ date }, { googleBurnOutcome: result.outcome, googleBurnMessage: message });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to start Google burn";
-      this.logger.error(`daily automation google-burn leg failed: ${message}`);
-      await this.runLogRepo.update({ date }, { googleBurnOutcome: "error", googleBurnMessage: message });
-    }
-  }
-
-  private async runGroqBurnLeg(date: string): Promise<void> {
-    try {
-      const current = await this.groqFreeDispatchService.getStatus();
-      if (current.active) {
-        await this.runLogRepo.update(
-          { date },
-          { groqBurnOutcome: "alreadyActive", groqBurnMessage: "already running" },
-        );
-        return;
-      }
-
-      const result = await this.groqFreeDispatchService.start();
-      const message =
-        result.outcome === "alreadyExhausted" ? "every Groq model is currently RPD-held" : "started";
-      await this.runLogRepo.update({ date }, { groqBurnOutcome: result.outcome, groqBurnMessage: message });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to start Groq burn";
-      this.logger.error(`daily automation groq-burn leg failed: ${message}`);
-      await this.runLogRepo.update({ date }, { groqBurnOutcome: "error", groqBurnMessage: message });
-    }
-  }
-
-  private async runOpenRouterBurnLeg(date: string): Promise<void> {
-    try {
-      const current = await this.openRouterFreeDispatchService.getStatus();
-      if (current.active) {
-        await this.runLogRepo.update(
-          { date },
-          { openRouterBurnOutcome: "alreadyActive", openRouterBurnMessage: "already running" },
-        );
-        return;
-      }
-
-      const result = await this.openRouterFreeDispatchService.start();
-      const message =
-        result.outcome === "alreadyExhausted"
-          ? "OpenRouter daily budget spent or account held"
-          : "started";
-      await this.runLogRepo.update(
-        { date },
-        { openRouterBurnOutcome: result.outcome, openRouterBurnMessage: message },
+      const result = await leg.service.start();
+      await record(
+        result.outcome,
+        result.outcome === "alreadyExhausted" ? leg.exhaustedMessage : "started",
       );
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to start OpenRouter burn";
-      this.logger.error(`daily automation openrouter-burn leg failed: ${message}`);
-      await this.runLogRepo.update(
-        { date },
-        { openRouterBurnOutcome: "error", openRouterBurnMessage: message },
-      );
-    }
-  }
-
-  private async runMistralBurnLeg(date: string): Promise<void> {
-    try {
-      const current = await this.mistralFreeDispatchService.getStatus();
-      if (current.active) {
-        await this.runLogRepo.update(
-          { date },
-          { mistralBurnOutcome: "alreadyActive", mistralBurnMessage: "already running" },
-        );
-        return;
-      }
-
-      const result = await this.mistralFreeDispatchService.start();
-      const message =
-        result.outcome === "alreadyExhausted"
-          ? "every Mistral model is currently held"
-          : "started";
-      await this.runLogRepo.update(
-        { date },
-        { mistralBurnOutcome: result.outcome, mistralBurnMessage: message },
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to start Mistral burn";
-      this.logger.error(`daily automation mistral-burn leg failed: ${message}`);
-      await this.runLogRepo.update(
-        { date },
-        { mistralBurnOutcome: "error", mistralBurnMessage: message },
-      );
-    }
-  }
-
-  private async runSambaNovaBurnLeg(date: string): Promise<void> {
-    try {
-      const current = await this.sambaNovaFreeDispatchService.getStatus();
-      if (current.active) {
-        await this.runLogRepo.update(
-          { date },
-          { sambaNovaBurnOutcome: "alreadyActive", sambaNovaBurnMessage: "already running" },
-        );
-        return;
-      }
-
-      const result = await this.sambaNovaFreeDispatchService.start();
-      const message =
-        result.outcome === "alreadyExhausted"
-          ? "every SambaNova model is currently held"
-          : "started";
-      await this.runLogRepo.update(
-        { date },
-        { sambaNovaBurnOutcome: result.outcome, sambaNovaBurnMessage: message },
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to start SambaNova burn";
-      this.logger.error(`daily automation sambanova-burn leg failed: ${message}`);
-      await this.runLogRepo.update(
-        { date },
-        { sambaNovaBurnOutcome: "error", sambaNovaBurnMessage: message },
-      );
+      const message = err instanceof Error ? err.message : `Failed to start ${leg.logKey} burn`;
+      this.logger.error(`daily automation ${leg.logKey}-burn leg failed: ${message}`);
+      await record("error", message);
     }
   }
 }

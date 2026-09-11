@@ -1,18 +1,10 @@
 import { Module } from "@nestjs/common";
-import { TypeOrmModule } from "@nestjs/typeorm";
-import { QueueModule } from "../queue/queue.module";
-import { StrategyModule } from "../strategy/strategy.module";
-import { SupportedModelModule } from "../supported-model/supported-model.module";
-import { MistralDispatchState } from "./entities/mistral-dispatch-state.entity";
+
+import { FreeDispatchModule } from "../provider-pool/free-dispatch.module";
 import { MistralFreeDispatchService } from "./mistral-free-dispatch.service";
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([MistralDispatchState]),
-    QueueModule,
-    StrategyModule,
-    SupportedModelModule,
-  ],
+  imports: [FreeDispatchModule],
   providers: [MistralFreeDispatchService],
   exports: [MistralFreeDispatchService],
 })
