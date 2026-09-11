@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchRunDetailByStrategyDate, fetchRunsForStrategyDate } from "../data/benchmark/api";
+import { useResource } from "../hooks/useResource";
 import type { GuessResultValue, StrategyRunDetail, StrategyRunListItem } from "../data/benchmark/types";
 
 interface GuessSequencePanelProps {
@@ -41,14 +42,11 @@ export function GuessSequencePanel({
   );
   const [activeRunId, setActiveRunId] = useState<number | null>(null);
   // Per-run detail is fetched lazily when a run is selected (full guess arrays
-  // are heavy — a deterministic run can hold ~2,400 guesses), then cached.
-  const [runDetails, setRunDetails] = useState<
+  // are heavy — a deterministic run can hold ~2,400 guesses), then cached by
+  // run id so reselecting an already-fetched run doesn't refetch it.
+  const [detailCache, setDetailCache] = useState<
     Record<number, StrategyRunDetail>
   >({});
-  const [detailLoading, setDetailLoading] = useState<Record<number, boolean>>(
-    {},
-  );
-  const [detailErrors, setDetailErrors] = useState<Record<number, string>>({});
 
   // Fetch strategy run lists on mount (or date change), regardless of isOpen
   // state. The list is deliberately slim (no guess arrays) so six strategies
@@ -58,9 +56,7 @@ export function GuessSequencePanel({
 
     const controller = new AbortController();
 
-    setRunDetails({});
-    setDetailLoading({});
-    setDetailErrors({});
+    setDetailCache({});
     setActiveRunId(null);
 
     const fetchStrategy = async (strategyId: string) => {
@@ -99,60 +95,31 @@ export function GuessSequencePanel({
   const selectedRun =
     currentRuns.find((run) => run.id === activeRunId) ?? currentRuns[0] ?? null;
 
-  const selectedDetail = selectedRun ? runDetails[selectedRun.id] : undefined;
-  const selectedDetailLoading = selectedRun
-    ? detailLoading[selectedRun.id]
-    : false;
-  const selectedDetailError = selectedRun
-    ? detailErrors[selectedRun.id]
-    : undefined;
-
-  // Ids whose detail is already fetched/cached, so the effect below skips them
-  // without reading state it would otherwise have to declare as a dependency.
-  const fetchedRunIds = useRef<Set<number>>(new Set());
+  const cachedDetail = selectedRun ? detailCache[selectedRun.id] : undefined;
 
   // Lazy-load the full guess list for the selected run, but only while the
-  // panel is open. Fetches are cached per run and aborted on unmount/switch.
+  // panel is open and only when this run isn't already cached below.
+  const {
+    data: fetchedDetail,
+    loading: selectedDetailLoading,
+    error: selectedDetailErrorObj,
+  } = useResource(
+    ["runDetail", selectedRun?.strategyName, date, selectedRun?.trialNumber],
+    (signal) => {
+      if (!selectedRun) return Promise.reject(new Error("No run selected"));
+      return fetchRunDetailByStrategyDate(selectedRun.strategyName, date, selectedRun.trialNumber, signal);
+    },
+    { enabled: isOpen && !!date && !!selectedRun && !cachedDetail },
+  );
+
   useEffect(() => {
-    if (!isOpen || !date || !selectedRun) return;
-    if (fetchedRunIds.current.has(selectedRun.id)) return;
+    if (!fetchedDetail || !selectedRun) return;
+    const id = selectedRun.id;
+    setDetailCache((prev) => (prev[id] === fetchedDetail ? prev : { ...prev, [id]: fetchedDetail }));
+  }, [fetchedDetail, selectedRun]);
 
-    const controller = new AbortController();
-    setDetailLoading((prev) => ({ ...prev, [selectedRun.id]: true }));
-    setDetailErrors((prev) => ({ ...prev, [selectedRun.id]: "" }));
-
-    fetchRunDetailByStrategyDate(
-      selectedRun.strategyName,
-      date,
-      selectedRun.trialNumber,
-      controller.signal,
-    )
-      .then((detail: StrategyRunDetail) => {
-        if (!controller.signal.aborted) {
-          setRunDetails((prev) => ({ ...prev, [selectedRun.id]: detail }));
-          fetchedRunIds.current.add(selectedRun.id);
-        }
-      })
-      .catch((err: unknown) => {
-        if (
-          (err as Error)?.name !== "AbortError" &&
-          !controller.signal.aborted
-        ) {
-          setDetailErrors((prev) => ({
-            ...prev,
-            [selectedRun.id]:
-              err instanceof Error ? err.message : "Failed to load run detail",
-          }));
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setDetailLoading((prev) => ({ ...prev, [selectedRun.id]: false }));
-        }
-      });
-
-    return () => controller.abort();
-  }, [isOpen, date, selectedRun]);
+  const selectedDetail = cachedDetail ?? fetchedDetail;
+  const selectedDetailError = selectedDetailErrorObj?.message;
 
   const handleStrategyClick = (strategyId: string) => {
     if (isOpen && activeStrategy === strategyId) {

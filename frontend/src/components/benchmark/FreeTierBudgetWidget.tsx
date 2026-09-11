@@ -6,7 +6,8 @@ import {
 } from "../../data/benchmark/api";
 import { formatCostUsd } from "../../data/benchmark/metrics";
 import { formatAutomationLine } from "./automationFormat";
-import type { FreeTierDispatchStatus, FreeTierId, FreeTierUsage, AutomationLegDisplay } from "../../data/benchmark/types";
+import { useResource } from "../../hooks/useResource";
+import type { FreeTierDispatchStatus, FreeTierId, AutomationLegDisplay } from "../../data/benchmark/types";
 import { StatusPill } from "./StatusPill";
 
 // Usage at or above this share of a tier's daily budget gets the warning
@@ -64,26 +65,12 @@ export interface FreeTierBudgetWidgetProps {
  * currently running for this tier and at what threshold, with a button to
  * disable it. */
 export function FreeTierBudgetWidget({ tier, spentUsd, refreshSignal, automation }: FreeTierBudgetWidgetProps) {
-  const [usage, setUsage] = useState<FreeTierUsage | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { data: usage, error } = useResource(["freeTierUsage", tier], (signal) =>
+    fetchFreeTierUsage(tier, signal),
+  );
   const [dispatchStatus, setDispatchStatus] = useState<FreeTierDispatchStatus | null>(null);
   const [isDisabling, setIsDisabling] = useState(false);
   const [disableError, setDisableError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setUsage(null);
-    setError(null);
-
-    const controller = new AbortController();
-    fetchFreeTierUsage(tier, controller.signal)
-      .then(setUsage)
-      .catch((err: unknown) => {
-        if (err instanceof Error && err.name === "AbortError") return;
-        setError(err instanceof Error ? err.message : "Failed to load token usage");
-      });
-
-    return () => controller.abort();
-  }, [tier]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -129,7 +116,7 @@ export function FreeTierBudgetWidget({ tier, spentUsd, refreshSignal, automation
     return (
       <div className="bench-free-tier" role="status">
         <span className="bench-free-tier__title">{title}</span>
-        <p className="bench-error">Couldn&apos;t load token usage: {error}</p>
+        <p className="bench-error">Couldn&apos;t load token usage: {error.message}</p>
       </div>
     );
   }

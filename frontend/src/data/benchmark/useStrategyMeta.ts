@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
 import { fetchSupportedModels } from "./api";
 import { formatModelStatsDescription } from "./formatModelStats";
+import { useResource } from "../../hooks/useResource";
 import { getStrategyMeta } from "./mockData";
 import { poolFromStrategyName, providerPoolLabel } from "./providerPools";
 import type { StrategyMeta, SupportedModelRecord } from "./types";
@@ -46,8 +46,23 @@ export function useStrategyMeta(strategyId: string | undefined): {
   isResolving: boolean;
 } {
   const staticMeta = strategyId ? getStrategyMeta(strategyId) : undefined;
-  const [dynamicMeta, setDynamicMeta] = useState<StrategyMeta | null>(null);
-  const [isResolving, setIsResolving] = useState(false);
+  const knownNonLlm = !!(staticMeta && staticMeta.kind !== "llm");
+
+  // Resolves live model data for every LLM row — either to synthesize a
+  // full StrategyMeta (when the static mock catalog doesn't recognize
+  // strategyId at all) or just to source a live, non-stale description for
+  // one the catalog does recognize. Skipped entirely for non-LLM rows,
+  // which are always fully described by the static catalog. Best-effort: a
+  // fetch failure just falls through to the "Unknown strategy" state below
+  // like any other miss.
+  const { data: models, loading: isResolving } = useResource(
+    ["supportedModels", strategyId],
+    (signal) => fetchSupportedModels(signal),
+    { enabled: !!strategyId && !knownNonLlm },
+  );
+  const match = models?.find((model) => model.modelName === strategyId);
+  const dynamicMeta = match ? buildDynamicMeta(match) : null;
+
   // For an LLM row, description always comes from live data once it
   // resolves (identity/copy — name/kind/strategyName — stays static); for
   // everything else the static entry is authoritative as-is.
@@ -57,39 +72,6 @@ export function useStrategyMeta(strategyId: string | undefined): {
         ? { ...staticMeta, description: dynamicMeta.description }
         : staticMeta
       : (staticMeta ?? dynamicMeta ?? undefined);
-
-  // Resolves live model data for every LLM row — either to synthesize a
-  // full StrategyMeta (when the static mock catalog doesn't recognize
-  // strategyId at all) or just to source a live, non-stale description for
-  // one the catalog does recognize. Skipped entirely for non-LLM rows,
-  // which are always fully described by the static catalog.
-  useEffect(() => {
-    const knownNonLlm = staticMeta && staticMeta.kind !== "llm";
-    if (!strategyId || knownNonLlm) {
-      setDynamicMeta(null);
-      setIsResolving(false);
-      return;
-    }
-
-    setIsResolving(true);
-    setDynamicMeta(null);
-
-    const controller = new AbortController();
-    fetchSupportedModels(controller.signal)
-      .then((models) => {
-        const match = models.find((model) => model.modelName === strategyId);
-        setDynamicMeta(match ? buildDynamicMeta(match) : null);
-      })
-      .catch(() => {
-        // Best-effort fallback, not a hard requirement — falls through to
-        // the "Unknown strategy" state below like any other miss.
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setIsResolving(false);
-      });
-
-    return () => controller.abort();
-  }, [strategyId]);
 
   return { meta, isResolving };
 }

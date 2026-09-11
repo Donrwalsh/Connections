@@ -1,45 +1,31 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { Game } from "../components/Game";
 import { GuessSequencePanel } from "../components/GuessSequencePanel";
 import { type Puzzle } from "../data/types";
+import { useResource } from "../hooks/useResource";
 
 export function PuzzlePage() {
   const { date } = useParams();
-
-  const [puzzleData, setPuzzleData] = useState<Puzzle | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
   const [isGuessPanelOpen, setIsGuessPanelOpen] = useState(false);
 
-  useEffect(() => {
-    setIsLoading(true);
-    setError(null);
-
+  const {
+    data: puzzleData,
+    loading: isLoading,
+    error,
+  } = useResource(["puzzle", date ?? "today"], async (signal) => {
     const endpoint = date
       ? `${import.meta.env.VITE_API_URL}/game/puzzle/${date}`
       : `${import.meta.env.VITE_API_URL}/game/puzzle/today`;
-
-    const controller = new AbortController();
-
-    fetch(endpoint, { signal: controller.signal })
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to load puzzle data");
-        return res.json();
-      })
-      .then((data: Puzzle) => {
-        setPuzzleData(data);
-        setIsLoading(false);
-      })
-      .catch((err: Error) => {
-        if (err.name === "AbortError") return;
-        console.error("Error fetching backend:", err);
-        setError(err.message);
-        setIsLoading(false);
-      });
-
-    return () => controller.abort();
-  }, [date]);
+    try {
+      const res = await fetch(endpoint, { signal });
+      if (!res.ok) throw new Error("Failed to load puzzle data");
+      return (await res.json()) as Puzzle;
+    } catch (err) {
+      if (!signal.aborted) console.error("Error fetching backend:", err);
+      throw err;
+    }
+  });
 
   if (isLoading) {
     return (
@@ -52,7 +38,7 @@ export function PuzzlePage() {
   if (error || !puzzleData) {
     return (
       <div className="app">
-        <h2>Error: {error ?? "No data found"}</h2>
+        <h2>Error: {error?.message ?? "No data found"}</h2>
       </div>
     );
   }
