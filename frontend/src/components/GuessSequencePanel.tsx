@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchRunDetailByStrategyDate, fetchRunsForStrategyDate } from "../data/benchmark/api";
 import { useResource } from "../hooks/useResource";
+import { useResources } from "../hooks/useResources";
 import type { GuessResultValue, StrategyRunDetail, StrategyRunListItem } from "../data/benchmark/types";
 
 interface GuessSequencePanelProps {
@@ -23,6 +24,8 @@ const STRATEGIES = [
   { id: "llm-google", label: "LLM · Google" },
 ];
 
+const STRATEGY_IDS = STRATEGIES.map((strat) => strat.id);
+
 export function GuessSequencePanel({
   date,
   puzzleId,
@@ -30,16 +33,6 @@ export function GuessSequencePanel({
   onToggle,
 }: GuessSequencePanelProps) {
   const [activeStrategy, setActiveStrategy] = useState<string>("alphabetical");
-
-  const [strategyRuns, setStrategyRuns] = useState<
-    Record<string, StrategyRunListItem[]>
-  >({});
-  const [loadingStrategies, setLoadingStrategies] = useState<
-    Record<string, boolean>
-  >({});
-  const [errorMessages, setErrorMessages] = useState<Record<string, string>>(
-    {},
-  );
   const [activeRunId, setActiveRunId] = useState<number | null>(null);
   // Per-run detail is fetched lazily when a run is selected (full guess arrays
   // are heavy — a deterministic run can hold ~2,400 guesses), then cached by
@@ -51,47 +44,21 @@ export function GuessSequencePanel({
   // Fetch strategy run lists on mount (or date change), regardless of isOpen
   // state. The list is deliberately slim (no guess arrays) so six strategies
   // load in a single parallel round of small requests.
+  const strategyResults = useResources(
+    date,
+    STRATEGY_IDS,
+    (strategyId, signal) => fetchRunsForStrategyDate(strategyId, date, signal),
+    { enabled: !!date },
+  );
+
+  // Selection resets whenever the run lists themselves get refetched for a
+  // new date, matching the previous reset-on-date-change effect.
   useEffect(() => {
-    if (!date) return;
-
-    const controller = new AbortController();
-
     setDetailCache({});
     setActiveRunId(null);
+  }, [date]);
 
-    const fetchStrategy = async (strategyId: string) => {
-      setLoadingStrategies((prev) => ({ ...prev, [strategyId]: true }));
-      setErrorMessages((prev) => ({ ...prev, [strategyId]: "" }));
-
-      try {
-        const runs = await fetchRunsForStrategyDate(strategyId, date, controller.signal);
-        if (!controller.signal.aborted) {
-          setStrategyRuns((prev) => ({ ...prev, [strategyId]: runs }));
-        }
-      } catch (err: unknown) {
-        if (
-          (err as Error)?.name !== "AbortError" &&
-          !controller.signal.aborted
-        ) {
-          setErrorMessages((prev) => ({
-            ...prev,
-            [strategyId]:
-              err instanceof Error ? err.message : "Failed to load strategy",
-          }));
-        }
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoadingStrategies((prev) => ({ ...prev, [strategyId]: false }));
-        }
-      }
-    };
-
-    STRATEGIES.forEach((strat) => fetchStrategy(strat.id));
-
-    return () => controller.abort();
-  }, [date]); // Triggered as soon as date is passed down
-
-  const currentRuns = strategyRuns[activeStrategy] ?? [];
+  const currentRuns = strategyResults[activeStrategy]?.data ?? [];
   const selectedRun =
     currentRuns.find((run) => run.id === activeRunId) ?? currentRuns[0] ?? null;
 
@@ -135,8 +102,8 @@ export function GuessSequencePanel({
     }
   };
 
-  const isLoadingCurrent = loadingStrategies[activeStrategy];
-  const currentError = errorMessages[activeStrategy];
+  const isLoadingCurrent = strategyResults[activeStrategy]?.loading;
+  const currentError = strategyResults[activeStrategy]?.error?.message;
 
   const averageGuesses = (runs: StrategyRunListItem[]) => {
     if (runs.length === 0) return null;
@@ -150,8 +117,8 @@ export function GuessSequencePanel({
       <div className="guess-sequence__header-actions">
         {STRATEGIES.map((strat) => {
           const isActive = isOpen && activeStrategy === strat.id;
-          const runs = strategyRuns[strat.id];
-          const isLoading = loadingStrategies[strat.id];
+          const runs = strategyResults[strat.id]?.data;
+          const isLoading = strategyResults[strat.id]?.loading;
           const stepCount = runs ? averageGuesses(runs) : null;
 
           return (
