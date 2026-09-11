@@ -310,6 +310,17 @@ export class LlmStrategyRunner {
       // Append the user message to conversation history.
       messages.push({ role: "user", content: prompt });
 
+      // Transcript through this attempt's user turn only — the assistant
+      // reply (if any) arrives further down this same iteration and belongs
+      // to the *next* row (matches the "[User]\n...\n\n[Assistant]\n..."
+      // step-boundary convention backfill-prompt-text.ts's formatConversation
+      // uses for historical rows exactly). Computed once here, before the
+      // call, so the CALL_ERROR branch below can still use it after its
+      // messages.pop() removes this turn from in-memory history.
+      const transcriptText = messages
+        .map((m) => `[${m.role === "user" ? "User" : "Assistant"}]\n${m.content}`)
+        .join("\n\n");
+
       const outcome = await this.orchestratorService.requestSolveStep(
         messages,
         model,
@@ -359,6 +370,7 @@ export class LlmStrategyRunner {
           promptType,
           status: SolvePromptStatus.PARSED,
           rawResponseText: data.response,
+          promptText: transcriptText,
           issueTags: [],
           temperature,
           promptTokens: data.usage?.promptTokens ?? null,
@@ -427,6 +439,7 @@ export class LlmStrategyRunner {
         pendingPrompts.push(
           this.buildCallErrorPromptRow(run.id, globalPromptNumber, promptType, {
             attemptNumber,
+            promptText: transcriptText,
             requestBody: outcome.error.requestBody,
             responseId: outcome.error.responseId,
             responseHeaders: outcome.error.responseHeaders,
@@ -517,6 +530,7 @@ export class LlmStrategyRunner {
     promptType: SolvePromptType,
     attempt: {
       attemptNumber: number;
+      promptText: string;
       requestBody?: unknown;
       responseId?: string;
       responseHeaders?: Record<string, string>;
@@ -533,6 +547,7 @@ export class LlmStrategyRunner {
       attemptNumber: attempt.attemptNumber,
       promptType,
       status: SolvePromptStatus.CALL_ERROR,
+      promptText: attempt.promptText,
       requestBody: attempt.requestBody ?? null,
       responseId: attempt.responseId ?? null,
       responseHeaders: attempt.responseHeaders ?? null,

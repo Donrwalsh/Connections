@@ -1,11 +1,21 @@
-import { GuessResult } from "./entities/guess.entity";
-import type { Guess } from "./entities/guess.entity";
-import { LlmProposalStatus } from "./entities/llm-proposal.entity";
-import type { LlmProposal } from "./entities/llm-proposal.entity";
-import { SolvePromptStatus, SolvePromptType } from "./entities/solve-prompt.entity";
-import type { SolvePrompt } from "./entities/solve-prompt.entity";
-import { formatConversation, reconstructSolvePrompts } from "./prompt-reconstruction";
-import { buildInitialPrompt, buildRetryPrompt } from "./llm-strategy-runner.service";
+import { GuessResult } from "../modules/strategy/entities/guess.entity";
+import type { Guess } from "../modules/strategy/entities/guess.entity";
+import { LlmProposalStatus } from "../modules/strategy/entities/llm-proposal.entity";
+import type { LlmProposal } from "../modules/strategy/entities/llm-proposal.entity";
+import { SolvePromptStatus, SolvePromptType } from "../modules/strategy/entities/solve-prompt.entity";
+import type { SolvePrompt } from "../modules/strategy/entities/solve-prompt.entity";
+import { formatConversation, reconstructPromptTexts } from "./backfill-prompt-text";
+import { buildInitialPrompt, buildRetryPrompt } from "../modules/strategy/llm-strategy-runner.service";
+
+// Repurposed from prompt-reconstruction.spec.ts (that module and its spec
+// are deleted now that every SolvePrompt row carries promptText directly —
+// see docs/architecture/specs/08-persist-prompt-text.md). Every fidelity
+// assertion from the original spec carries over unchanged: the backfill's
+// correctness bar is identical to reconstruction's original bar, just
+// exercised against reconstructPromptTexts's Map<promptId, text> output
+// instead of reconstructSolvePrompts's full read-model DTOs (this script has
+// no need to also re-derive proposals/promptType/error detail — those
+// already live untouched in their own columns/tables).
 
 function makeSolvePrompt(overrides: Partial<SolvePrompt>): SolvePrompt {
   return {
@@ -16,6 +26,7 @@ function makeSolvePrompt(overrides: Partial<SolvePrompt>): SolvePrompt {
     promptType: SolvePromptType.INITIAL_SOLVE,
     status: SolvePromptStatus.PARSED,
     rawResponseText: null,
+    promptText: null,
     promptTokens: null,
     completionTokens: null,
     totalTokens: null,
@@ -60,11 +71,11 @@ function makeGuess(overrides: Partial<Guess>): Guess {
   } as Guess;
 }
 
-describe("reconstructSolvePrompts", () => {
+describe("reconstructPromptTexts", () => {
   const originalWords = ["A", "B", "C", "D", "E", "F", "G", "H"];
 
   it("returns nothing when there are no solve prompts", () => {
-    expect(reconstructSolvePrompts(originalWords, [], [], new Map())).toEqual([]);
+    expect(reconstructPromptTexts(originalWords, [], [], new Map())).toEqual(new Map());
   });
 
   it("replays INITIAL -> RETRY -> INITIAL exactly like the live runner, including unused proposals", () => {
@@ -132,14 +143,14 @@ describe("reconstructSolvePrompts", () => {
       [3, guess3],
     ]);
 
-    const result = reconstructSolvePrompts(
+    const result = reconstructPromptTexts(
       originalWords,
       [prompt1, prompt2, prompt3],
       [proposal1, proposal2, proposal3, proposal4],
       guessesById,
     );
 
-    expect(result).toHaveLength(3);
+    expect(result.size).toBe(3);
 
     const initialPrompt = buildInitialPrompt(originalWords, 2);
     const retryPrompt = buildRetryPrompt(
@@ -151,17 +162,11 @@ describe("reconstructSolvePrompts", () => {
     const finalPrompt = buildInitialPrompt(["A", "B", "C", "D"], 1);
 
     // Step 1: no history yet, so it's just this step's own message.
-    expect(result[0]!.reconstructedPrompt).toBe(
-      formatConversation([{ role: "user", content: initialPrompt }]),
-    );
-    expect(result[0]!.proposals).toEqual([
-      { id: 1, words: ["A", "B", "C", "D"], category: "Cat1", status: LlmProposalStatus.USED, guess: { sequenceNumber: 1, result: GuessResult.FAILURE, guessedAt: guess1.guessedAt }, categoryEvaluation: null },
-      { id: 2, words: ["E", "F", "G", "H"], category: "Cat2", status: LlmProposalStatus.NOT_SELECTED, guess: null, categoryEvaluation: null },
-    ]);
+    expect(result.get(101)).toBe(formatConversation([{ role: "user", content: initialPrompt }]));
 
     // Step 2: the full transcript so far — step 1's prompt and response —
     // plus this step's own RETRY prompt referencing the failed guess.
-    expect(result[1]!.reconstructedPrompt).toBe(
+    expect(result.get(102)).toBe(
       formatConversation([
         { role: "user", content: initialPrompt },
         { role: "assistant", content: "response-1" },
@@ -173,7 +178,7 @@ describe("reconstructSolvePrompts", () => {
     // plus this step's own prompt — pool has shrunk to the 4 remaining
     // words, and — because step 2 succeeded — this is an INITIAL prompt
     // again, not a RETRY.
-    expect(result[2]!.reconstructedPrompt).toBe(
+    expect(result.get(103)).toBe(
       formatConversation([
         { role: "user", content: initialPrompt },
         { role: "assistant", content: "response-1" },
@@ -182,7 +187,6 @@ describe("reconstructSolvePrompts", () => {
         { role: "user", content: finalPrompt },
       ]),
     );
-    expect(result[2]!.promptType).toBe(SolvePromptType.INITIAL_SOLVE);
   });
 
   it("labels an off-by-one guess as 'one away' guidance in the retry prompt", () => {
@@ -203,14 +207,14 @@ describe("reconstructSolvePrompts", () => {
       result: GuessResult.OFF_BY_ONE,
     });
 
-    const result = reconstructSolvePrompts(
+    const result = reconstructPromptTexts(
       originalWords,
       [prompt1, prompt2],
       [proposal1],
       new Map([[1, guess1]]),
     );
 
-    expect(result[1]!.reconstructedPrompt).toBe(
+    expect(result.get(2)).toBe(
       formatConversation([
         { role: "user", content: buildInitialPrompt(originalWords, 2) },
         { role: "assistant", content: "" }, // prompt1.rawResponseText was never set
@@ -227,13 +231,13 @@ describe("reconstructSolvePrompts", () => {
     );
   });
 
-  it("includes a CALL_ERROR row in the output, with its own reconstructedPrompt, but never lets it corrupt later steps", () => {
-    // A CALL_ERROR row (the call itself failed, no model text at all) is
-    // now shown in the run's chain like any other step — but it never
-    // produced a real assistant reply, so it must not be folded into
-    // `history`: doing that would inject a phantom duplicated user turn
-    // plus an empty assistant turn, corrupting every later step's
-    // reconstructedPrompt for the rest of the run.
+  it("includes a CALL_ERROR row's own reconstructed text, but never lets it corrupt later steps", () => {
+    // A CALL_ERROR row (the call itself failed, no model text at all) still
+    // needs its own backfilled promptText — but it never produced a real
+    // assistant reply, so it must not be folded into `history`: doing that
+    // would inject a phantom duplicated user turn plus an empty assistant
+    // turn, corrupting every later step's reconstructed text for the rest of
+    // the run.
     const prompt1 = makeSolvePrompt({
       id: 1,
       promptNumber: 1,
@@ -247,12 +251,6 @@ describe("reconstructSolvePrompts", () => {
       promptType: SolvePromptType.RETRY,
       status: SolvePromptStatus.CALL_ERROR,
       rawResponseText: null,
-      errorName: "AI_APICallError",
-      errorMessage: "model down",
-      statusCode: 502,
-      isRetryable: true,
-      requestBody: { model: "gpt-4.1-nano" },
-      responseBody: { error: { message: "model down" } },
     });
     const prompt2 = makeSolvePrompt({
       id: 3,
@@ -261,35 +259,18 @@ describe("reconstructSolvePrompts", () => {
       rawResponseText: "response-2",
     });
 
-    const result = reconstructSolvePrompts(
-      originalWords,
-      [prompt1, callErrorPrompt, prompt2],
-      [],
-      new Map(),
-    );
+    const result = reconstructPromptTexts(originalWords, [prompt1, callErrorPrompt, prompt2], [], new Map());
 
-    // All three rows appear, in call order.
-    expect(result).toHaveLength(3);
-    expect(result.map((r) => r.id)).toEqual([1, 2, 3]);
+    // All three rows get an entry, in call order.
+    expect(result.size).toBe(3);
 
-    // The CALL_ERROR row carries its error detail through, has no proposals,
-    // and still gets a reconstructedPrompt reflecting the conversation up to
-    // that point (prompt1's turn, then its own attempted message).
-    const callErrorDto = result[1]!;
-    expect(callErrorDto.status).toBe(SolvePromptStatus.CALL_ERROR);
-    expect(callErrorDto.rawResponseText).toBeNull();
-    expect(callErrorDto.proposals).toEqual([]);
-    expect(callErrorDto.errorName).toBe("AI_APICallError");
-    expect(callErrorDto.errorMessage).toBe("model down");
-    expect(callErrorDto.statusCode).toBe(502);
-    expect(callErrorDto.isRetryable).toBe(true);
-    expect(callErrorDto.requestBody).toEqual({ model: "gpt-4.1-nano" });
-    expect(callErrorDto.responseBody).toEqual({ error: { message: "model down" } });
-    // No guess ever failed before this row (no proposals were passed at
-    // all), so lastFailedGuess is still null when it's built — the
-    // function's defensive fallback uses buildInitialPrompt even though
-    // this row's own promptType is RETRY (see its docblock).
-    expect(callErrorDto.reconstructedPrompt).toBe(
+    // The CALL_ERROR row still gets reconstructed text reflecting the
+    // conversation up to that point (prompt1's turn, then its own attempted
+    // message). No guess ever failed before this row (no proposals were
+    // passed at all), so lastFailedGuess is still null when it's built — the
+    // function's defensive fallback uses buildInitialPrompt even though this
+    // row's own promptType is RETRY (see its docblock).
+    expect(result.get(2)).toBe(
       formatConversation([
         { role: "user", content: buildInitialPrompt(originalWords, 2) },
         { role: "assistant", content: "response-1" },
@@ -298,10 +279,10 @@ describe("reconstructSolvePrompts", () => {
     );
 
     // ...and, critically, contributed no phantom turn to `history` —
-    // prompt2's reconstructedPrompt is exactly [prompt1's turn, prompt2's
-    // own message], not corrupted by an extra empty-assistant turn in
-    // between from the CALL_ERROR row.
-    expect(result[2]!.reconstructedPrompt).toBe(
+    // prompt2's reconstructed text is exactly [prompt1's turn, prompt2's own
+    // message], not corrupted by an extra empty-assistant turn in between
+    // from the CALL_ERROR row.
+    expect(result.get(3)).toBe(
       formatConversation([
         { role: "user", content: buildInitialPrompt(originalWords, 2) },
         { role: "assistant", content: "response-1" },
@@ -315,9 +296,9 @@ describe("reconstructSolvePrompts", () => {
     // crash if it ever does.
     const prompt = makeSolvePrompt({ id: 1, promptNumber: 1, promptType: SolvePromptType.RETRY });
 
-    const result = reconstructSolvePrompts(originalWords, [prompt], [], new Map());
+    const result = reconstructPromptTexts(originalWords, [prompt], [], new Map());
 
-    expect(result[0]!.reconstructedPrompt).toBe(
+    expect(result.get(1)).toBe(
       formatConversation([{ role: "user", content: buildInitialPrompt(originalWords, 2) }]),
     );
   });

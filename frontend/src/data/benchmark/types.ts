@@ -485,9 +485,8 @@ export type SolvePromptStatusValue =
   // any other step — see errorName/errorMessage/etc. below.
   | "callError";
 
-/** One step of an LLM run's solve loop. `reconstructedPrompt` is inferred by
- * the backend on the fly (prompt text itself isn't stored) — see
- * prompt-reconstruction.ts on the backend. */
+/** One step of an LLM run's solve loop. `reconstructedPrompt` is read
+ * directly from the backend's SolvePrompt.promptText column. */
 export interface SolvePromptRecord {
   id: number;
   promptNumber: number;

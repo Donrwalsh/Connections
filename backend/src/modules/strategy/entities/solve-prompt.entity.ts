@@ -84,6 +84,16 @@ export class SolvePrompt {
   @Column({ type: "text", nullable: true })
   rawResponseText: string | null;
 
+  // Full [User]/[Assistant] transcript through this attempt's user turn
+  // (the runner's llm-strategy-runner.service.ts builds this from the same
+  // `messages` array it sends the orchestrator — see that file's
+  // transcriptText). strategy-read.service.ts reads this directly as the
+  // chain-view's `reconstructedPrompt` field. Null only for rows written
+  // before this column existed; backfill-prompt-text.ts backfills those
+  // once (see docs/architecture/specs/08-persist-prompt-text.md).
+  @Column({ type: "text", nullable: true })
+  promptText: string | null;
+
   // Every model-response quality issue detected for this prompt (a group's
   // "Words:" line needing a trailing parenthetical stripped, a group whose
   // word count came out wrong, a proposed word that was never part of the

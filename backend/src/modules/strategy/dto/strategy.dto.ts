@@ -83,12 +83,13 @@ export interface SolvePromptDto {
   // always keeps the untouched original text regardless of what's flagged
   // here.
   issueTags: string[];
-  // Best-effort reconstruction of the *entire* chat payload actually sent —
-  // every earlier step's prompt/response plus this step's own new prompt,
-  // exactly as the runner's growing `messages` array would have looked. Not
-  // stored in the DB, so this is inferred from the run's starting word order
-  // and the guesses/responses recorded up to this step. See
-  // prompt-reconstruction.ts.
+  // The *entire* chat payload actually sent for this attempt — every earlier
+  // step's prompt/response plus this step's own new prompt, exactly as the
+  // runner's growing `messages` array looked at that point. Sourced directly
+  // from SolvePrompt.promptText (llm-strategy-runner.service.ts writes this
+  // on every new row; historical rows were backfilled once — see
+  // backfill-prompt-text.ts). Field name kept as `reconstructedPrompt` for
+  // frontend compatibility even though it's no longer reconstructed on read.
   reconstructedPrompt: string | null;
   proposals: LlmProposalDto[];
   // Populated only when status is 'callError' — the OpenAI call itself
