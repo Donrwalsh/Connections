@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   fetchFreeTierDispatchStatus,
   fetchFreeTierUsage,
@@ -7,7 +7,7 @@ import {
 import { formatCostUsd } from "../../data/benchmark/metrics";
 import { formatAutomationLine } from "./automationFormat";
 import { useResource } from "../../hooks/useResource";
-import type { FreeTierDispatchStatus, FreeTierId, AutomationLegDisplay } from "../../data/benchmark/types";
+import type { FreeTierId, AutomationLegDisplay } from "../../data/benchmark/types";
 import { StatusPill } from "./StatusPill";
 
 // Usage at or above this share of a tier's daily budget gets the warning
@@ -68,42 +68,26 @@ export function FreeTierBudgetWidget({ tier, spentUsd, refreshSignal, automation
   const { data: usage, error } = useResource(["freeTierUsage", tier], (signal) =>
     fetchFreeTierUsage(tier, signal),
   );
-  const [dispatchStatus, setDispatchStatus] = useState<FreeTierDispatchStatus | null>(null);
   const [isDisabling, setIsDisabling] = useState(false);
   const [disableError, setDisableError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    const poll = () => {
-      fetchFreeTierDispatchStatus(tier, controller.signal)
-        .then(setDispatchStatus)
-        .catch(() => {
-          // Best-effort — the token-usage figures above are this widget's
-          // main job, so a failed status check just leaves the indicator
-          // showing whatever it last knew (or nothing, on first load).
-        });
-    };
-
-    poll();
-    const intervalId = setInterval(poll, DISPATCH_STATUS_POLL_MS);
-
-    return () => {
-      controller.abort();
-      clearInterval(intervalId);
-    };
-    // refreshSignal is intentionally in the dependency list even though it's
-    // otherwise unused in the effect body — bumping it is how a sibling
-    // (FreeTierDispatchModal) triggers an immediate re-poll here instead of
-    // waiting up to DISPATCH_STATUS_POLL_MS.
-  }, [tier, refreshSignal]);
+  // refreshSignal is folded into the key rather than read directly — a
+  // sibling (FreeTierDispatchModal) bumps it to force an immediate re-poll
+  // here instead of waiting up to DISPATCH_STATUS_POLL_MS. Best-effort: a
+  // failed check just leaves the indicator showing whatever it last knew
+  // (keepPreviousData), same as before.
+  const { data: dispatchStatus, refetch: refetchDispatchStatus } = useResource(
+    ["freeTierDispatchStatus", tier, refreshSignal],
+    (signal) => fetchFreeTierDispatchStatus(tier, signal),
+    { keepPreviousData: true, refetchInterval: DISPATCH_STATUS_POLL_MS },
+  );
 
   function handleDisable() {
     setIsDisabling(true);
     setDisableError(null);
 
     stopFreeTierDispatch(tier)
-      .then(() => fetchFreeTierDispatchStatus(tier))
-      .then(setDispatchStatus)
+      .then(() => refetchDispatchStatus())
       .catch((err: unknown) => {
         setDisableError(err instanceof Error ? err.message : "Failed to disable auto-dispatch");
       })
