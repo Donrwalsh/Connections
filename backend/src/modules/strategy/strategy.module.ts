@@ -9,7 +9,7 @@ import { CategoryEvaluation } from "./entities/category-evaluation.entity";
 import { StrategyRun } from "./entities/strategy-run.entity";
 import { RateLimitHold } from "./entities/rate-limit-hold.entity";
 import { StrategyController } from "./strategy.controller";
-import { StrategyService } from "./strategy.service";
+import { RunHistoryReadModel } from "./strategy-read.service";
 import { DeterministicSolver } from "./deterministic-solver.service";
 import { StrategyDispatch } from "./strategy-dispatch.service";
 import { LlmStrategyRunner } from "./llm-strategy-runner.service";
@@ -40,7 +40,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
   ],
   controllers: [StrategyController],
   providers: [
-    StrategyService,
+    RunHistoryReadModel,
     DeterministicSolver,
     StrategyDispatch,
     StrategyRunStore,
@@ -53,7 +53,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     RpdResumeBootstrap,
   ],
   exports: [
-    StrategyService,
+    RunHistoryReadModel,
     StrategyDispatch,
     LlmStrategyRunner,
     CategoryEvaluatorService,

@@ -105,7 +105,7 @@ export class OrchestratorService {
    *
    * `model`/`provider` tell the orchestrator which model to actually call —
    * the backend has already validated `model` against the SupportedModel
-   * table before a run ever gets this far (see StrategyService), so this is
+   * table before a run ever gets this far (see StrategyDispatch), so this is
    * the one place that choice is handed off. Omit either to fall back to the
    * orchestrator's own env-configured default (used for the provider-less
    * /diagnose AI Assist path, which never sends these). `contextWindow` is

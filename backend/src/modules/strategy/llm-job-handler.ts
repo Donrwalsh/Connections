@@ -9,7 +9,7 @@ export interface RunStrategyJobData {
   date: string;
   trialNumber: number;
   // The dispatcher already validated this against the SupportedModel table
-  // before enqueueing (StrategyService/PuzzleIngestionService) — null/absent
+  // before enqueueing (StrategyDispatch/PuzzleIngestionService) — null/absent
   // for non-LLM strategies, which don't have a model at all.
   model?: string | null;
 }

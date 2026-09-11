@@ -12,7 +12,7 @@ import {
   LLM_MISTRAL_QUEUE,
   LLM_SAMBANOVA_QUEUE,
 } from "../queue/queue.module";
-import { StrategyService } from "./strategy.service";
+import { RunHistoryReadModel } from "./strategy-read.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { Puzzle } from "../game/entities/puzzle.entity";
@@ -28,8 +28,8 @@ import { GameService } from "../game/game.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import { ModelPrice } from "../supported-model/entities/model-price.entity";
 
-describe("StrategyService", () => {
-  let service: StrategyService;
+describe("RunHistoryReadModel", () => {
+  let service: RunHistoryReadModel;
   let mockQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockOpenAIQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockOllamaQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
@@ -225,7 +225,7 @@ describe("StrategyService", () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        StrategyService,
+        RunHistoryReadModel,
         StrategyRunStore,
         { provide: DataSource, useValue: mockDataSource },
         { provide: STRATEGY_QUEUE, useValue: mockQueue },
@@ -250,7 +250,7 @@ describe("StrategyService", () => {
       ],
     }).compile();
 
-    service = module.get<StrategyService>(StrategyService);
+    service = module.get<RunHistoryReadModel>(RunHistoryReadModel);
   });
 
   afterEach(() => {
@@ -1569,7 +1569,7 @@ describe("StrategyService", () => {
       expect(qb.orderBy).toHaveBeenCalledWith('"puzzleDate"', "DESC");
       expect(qb.addOrderBy).toHaveBeenCalledWith("run.id", "DESC");
       // limit()/offset(), not skip()/take() — see the comment in
-      // StrategyService.getRunHistory: skip/take are silently ignored once a
+      // RunHistoryReadModel.getRunHistory: skip/take are silently ignored once a
       // JOIN is present, which was the actual bug behind "every page returns
       // the full unpaginated result set".
       expect(qb.offset).toHaveBeenCalledWith(0);

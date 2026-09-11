@@ -43,7 +43,7 @@ import {
 } from "../supported-model/supported-model.service";
 
 // How many waiting/delayed BullMQ jobs to fetch per page when tallying
-// queued counts — see StrategyService.queuedCountsByKey.
+// queued counts — see RunHistoryReadModel.queuedCountsByKey.
 const QUEUE_PAGE_SIZE = 1000;
 
 const DEFAULT_RUN_HISTORY_LIMIT = 100;
@@ -175,7 +175,7 @@ interface LeaderboardAccumulator {
 }
 
 @Injectable()
-export class StrategyService {
+export class RunHistoryReadModel {
   // getLeaderboard aggregates the entire StrategyRun table in JS on every
   // call (see its doc comment); a short TTL cache turns the common case
   // (LeaderboardPage polled/reloaded repeatedly while dispatch cycles run in
@@ -521,7 +521,7 @@ export class StrategyService {
     };
 
     this.leaderboardCache = {
-      expiresAt: Date.now() + StrategyService.LEADERBOARD_CACHE_TTL_MS,
+      expiresAt: Date.now() + RunHistoryReadModel.LEADERBOARD_CACHE_TTL_MS,
       value: result,
     };
 
