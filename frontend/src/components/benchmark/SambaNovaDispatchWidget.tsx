@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { fetchSambaNovaDispatchStatus, stopSambaNovaDispatch } from "../../data/benchmark/api";
-import type { AutomationLegDisplay, SambaNovaDispatchStatus } from "../../data/benchmark/types";
+import type { AutomationLegDisplay } from "../../data/benchmark/types";
 import { formatAutomationLine } from "./automationFormat";
+import { useResource } from "../../hooks/useResource";
 import { StatusPill } from "./StatusPill";
 
 // Matches FreeTierBudgetWidget's own dispatch-status poll cadence.
@@ -22,41 +23,21 @@ export interface SambaNovaDispatchWidgetProps {
  * tpd caps are enforced by SambaNova itself, so this only ever shows
  * active/inactive. */
 export function SambaNovaDispatchWidget({ automation }: SambaNovaDispatchWidgetProps = {}) {
-  const [status, setStatus] = useState<SambaNovaDispatchStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [isDisabling, setIsDisabling] = useState(false);
   const [disableError, setDisableError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    const poll = () => {
-      fetchSambaNovaDispatchStatus(controller.signal)
-        .then((next) => {
-          setStatus(next);
-          setError(null);
-        })
-        .catch((err: unknown) => {
-          if (err instanceof Error && err.name === "AbortError") return;
-          setError(err instanceof Error ? err.message : "Failed to load SambaNova dispatch status");
-        });
-    };
-
-    poll();
-    const intervalId = setInterval(poll, DISPATCH_STATUS_POLL_MS);
-
-    return () => {
-      controller.abort();
-      clearInterval(intervalId);
-    };
-  }, []);
+  const { data: status, error, refetch: refetchStatus } = useResource(
+    ["sambaNovaDispatchStatus"],
+    (signal) => fetchSambaNovaDispatchStatus(signal),
+    { keepPreviousData: true, refetchInterval: DISPATCH_STATUS_POLL_MS },
+  );
 
   function handleDisable() {
     setIsDisabling(true);
     setDisableError(null);
 
     stopSambaNovaDispatch()
-      .then(() => fetchSambaNovaDispatchStatus())
-      .then(setStatus)
+      .then(() => refetchStatus())
       .catch((err: unknown) => {
         setDisableError(err instanceof Error ? err.message : "Failed to disable auto-dispatch");
       })
@@ -67,7 +48,7 @@ export function SambaNovaDispatchWidget({ automation }: SambaNovaDispatchWidgetP
     return (
       <div className="bench-free-tier" role="status">
         <span className="bench-free-tier__title">{TITLE}</span>
-        <p className="bench-error">Couldn&apos;t load SambaNova dispatch status: {error}</p>
+        <p className="bench-error">Couldn&apos;t load SambaNova dispatch status: {error.message}</p>
       </div>
     );
   }
