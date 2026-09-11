@@ -4,7 +4,7 @@ import { getRepositoryToken } from "@nestjs/typeorm";
 
 import { FREE_DISPATCH_QUEUE_BY_POOL } from "../queue/queue.module";
 import { RateLimitHoldService } from "../strategy/rate-limit-hold.service";
-import { StrategyService } from "../strategy/strategy.service";
+import { StrategyDispatch } from "../strategy/strategy-dispatch.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import { DispatchState } from "./entities/dispatch-state.entity";
 import { FreeDispatchService } from "./free-dispatch.service";
@@ -16,7 +16,7 @@ const zeroCounts = () => new Map(MODELS.map((m) => [m, 0]));
 type Mocks = {
   stateRepo: { findOne: jest.Mock; save: jest.Mock; update: jest.Mock };
   queue: { add: jest.Mock };
-  strategyService: {
+  strategyDispatch: {
     countTodayLlmCalls: jest.Mock;
     countInFlightByModel: jest.Mock;
     countTodayDispatchByModel: jest.Mock;
@@ -41,7 +41,7 @@ async function makeService(
     update: jest.fn().mockResolvedValue(undefined),
   };
   const queue = { add: jest.fn().mockResolvedValue(undefined) };
-  const strategyService = {
+  const strategyDispatch = {
     countTodayLlmCalls: jest.fn().mockResolvedValue(0),
     countInFlightByModel: jest.fn().mockResolvedValue(zeroCounts()),
     countTodayDispatchByModel: jest.fn().mockResolvedValue(zeroCounts()),
@@ -63,7 +63,7 @@ async function makeService(
       FreeDispatchService,
       { provide: getRepositoryToken(DispatchState), useValue: stateRepo },
       { provide: FREE_DISPATCH_QUEUE_BY_POOL, useValue: new Map([[poolId, queue]]) },
-      { provide: StrategyService, useValue: strategyService },
+      { provide: StrategyDispatch, useValue: strategyDispatch },
       { provide: SupportedModelService, useValue: supportedModelService },
       { provide: RateLimitHoldService, useValue: holdService },
     ],
@@ -73,7 +73,7 @@ async function makeService(
     service: module.get(FreeDispatchService),
     stateRepo,
     queue,
-    strategyService,
+    strategyDispatch,
     supportedModelService,
     holdService,
   };
@@ -201,7 +201,7 @@ describe.each([
 
       await m.service.runTick(poolId);
 
-      expect(m.strategyService.triggerStrategyRuns).not.toHaveBeenCalled();
+      expect(m.strategyDispatch.triggerStrategyRuns).not.toHaveBeenCalled();
       expect(m.stateRepo.update).toHaveBeenCalledWith({ id: poolId }, { active: false });
     });
 
@@ -210,11 +210,11 @@ describe.each([
       const inFlight = zeroCounts();
       inFlight.set("model-a", 3);
       m.stateRepo.findOne.mockResolvedValueOnce({ id: poolId, active: true });
-      m.strategyService.countInFlightByModel.mockResolvedValueOnce(inFlight);
+      m.strategyDispatch.countInFlightByModel.mockResolvedValueOnce(inFlight);
 
       await m.service.runTick(poolId);
 
-      expect(m.strategyService.triggerStrategyRuns).not.toHaveBeenCalled();
+      expect(m.strategyDispatch.triggerStrategyRuns).not.toHaveBeenCalled();
       expect(m.stateRepo.update).not.toHaveBeenCalled();
       expect(m.queue.add).toHaveBeenCalledWith(
         "tick",
@@ -227,13 +227,13 @@ describe.each([
       setBatch("1");
       m.stateRepo.findOne.mockResolvedValueOnce({ id: poolId, active: true });
       m.holdService.heldModels.mockResolvedValueOnce(["model-a"]);
-      m.strategyService.countTodayDispatchByModel.mockResolvedValueOnce(new Map([["model-b", 0]]));
-      m.strategyService.findUnrunPuzzleDatesForModel.mockResolvedValue([{ puzzleId: 9, date: "2026-05-01" }]);
+      m.strategyDispatch.countTodayDispatchByModel.mockResolvedValueOnce(new Map([["model-b", 0]]));
+      m.strategyDispatch.findUnrunPuzzleDatesForModel.mockResolvedValue([{ puzzleId: 9, date: "2026-05-01" }]);
 
       await m.service.runTick(poolId);
 
-      expect(m.strategyService.triggerStrategyRuns).toHaveBeenCalledTimes(1);
-      expect(m.strategyService.triggerStrategyRuns).toHaveBeenCalledWith(
+      expect(m.strategyDispatch.triggerStrategyRuns).toHaveBeenCalledTimes(1);
+      expect(m.strategyDispatch.triggerStrategyRuns).toHaveBeenCalledWith(
         9,
         strategyName,
         "2026-05-01",
@@ -243,18 +243,18 @@ describe.each([
 
     it("stops when every eligible model has run out of unrun puzzles", async () => {
       m.stateRepo.findOne.mockResolvedValueOnce({ id: poolId, active: true });
-      m.strategyService.findUnrunPuzzleDatesForModel.mockResolvedValue([]);
+      m.strategyDispatch.findUnrunPuzzleDatesForModel.mockResolvedValue([]);
 
       await m.service.runTick(poolId);
 
-      expect(m.strategyService.triggerStrategyRuns).not.toHaveBeenCalled();
+      expect(m.strategyDispatch.triggerStrategyRuns).not.toHaveBeenCalled();
       expect(m.stateRepo.update).toHaveBeenCalledWith({ id: poolId }, { active: false });
     });
 
     it("treats a triggerStrategyRuns failure as that model unavailable this tick, not a hard failure", async () => {
       setBatch("1");
       m.stateRepo.findOne.mockResolvedValueOnce({ id: poolId, active: true });
-      m.strategyService.triggerStrategyRuns.mockRejectedValue(new Error("model rejected"));
+      m.strategyDispatch.triggerStrategyRuns.mockRejectedValue(new Error("model rejected"));
 
       await expect(m.service.runTick(poolId)).resolves.toBeUndefined();
 
@@ -267,7 +267,7 @@ describe.each([
 
       await m.service.runTick(poolId);
 
-      expect(m.strategyService.triggerStrategyRuns).toHaveBeenCalledTimes(1);
+      expect(m.strategyDispatch.triggerStrategyRuns).toHaveBeenCalledTimes(1);
       expect(m.stateRepo.update).not.toHaveBeenCalled();
       expect(m.queue.add).toHaveBeenCalledWith(
         "tick",
@@ -324,7 +324,7 @@ describe("FreeDispatchService — openrouter (account-budget)", () => {
     });
 
     it("returns alreadyExhausted when callsToday already meets the budget", async () => {
-      m.strategyService.countTodayLlmCalls.mockResolvedValue(50);
+      m.strategyDispatch.countTodayLlmCalls.mockResolvedValue(50);
 
       const { outcome } = await m.service.start("openrouter");
 
@@ -343,7 +343,7 @@ describe("FreeDispatchService — openrouter (account-budget)", () => {
   describe("getStatus", () => {
     it("reports callsToday and the configured dailyBudget", async () => {
       m.stateRepo.findOne.mockResolvedValue({ id: "openrouter", active: true, startedAt: null });
-      m.strategyService.countTodayLlmCalls.mockResolvedValue(12);
+      m.strategyDispatch.countTodayLlmCalls.mockResolvedValue(12);
 
       const status = await m.service.getStatus("openrouter");
 
@@ -361,7 +361,7 @@ describe("FreeDispatchService — openrouter (account-budget)", () => {
 
       await m.service.runTick("openrouter");
 
-      expect(m.strategyService.triggerStrategyRuns).not.toHaveBeenCalled();
+      expect(m.strategyDispatch.triggerStrategyRuns).not.toHaveBeenCalled();
     });
 
     it("stops the cycle when the account is daily-held", async () => {
@@ -379,7 +379,7 @@ describe("FreeDispatchService — openrouter (account-budget)", () => {
 
       await m.service.runTick("openrouter");
 
-      expect(m.strategyService.triggerStrategyRuns).not.toHaveBeenCalled();
+      expect(m.strategyDispatch.triggerStrategyRuns).not.toHaveBeenCalled();
       expect(m.queue.add).toHaveBeenCalledWith(
         "tick",
         {},
@@ -389,20 +389,20 @@ describe("FreeDispatchService — openrouter (account-budget)", () => {
     });
 
     it("stops the cycle when callsToday + estimated in-flight cost reaches the budget", async () => {
-      m.strategyService.countTodayLlmCalls.mockResolvedValue(44);
-      m.strategyService.countInFlightByModel.mockResolvedValue(new Map([["model-a", 1]]));
+      m.strategyDispatch.countTodayLlmCalls.mockResolvedValue(44);
+      m.strategyDispatch.countInFlightByModel.mockResolvedValue(new Map([["model-a", 1]]));
 
       await m.service.runTick("openrouter");
 
       expect(m.stateRepo.update).toHaveBeenCalledWith({ id: "openrouter" }, { active: false });
-      expect(m.strategyService.triggerStrategyRuns).not.toHaveBeenCalled();
+      expect(m.strategyDispatch.triggerStrategyRuns).not.toHaveBeenCalled();
     });
 
     it("dispatches a batch across the least-allocated models and reschedules", async () => {
       await m.service.runTick("openrouter");
 
-      expect(m.strategyService.triggerStrategyRuns).toHaveBeenCalled();
-      expect(m.strategyService.triggerStrategyRuns.mock.calls[0]).toEqual([
+      expect(m.strategyDispatch.triggerStrategyRuns).toHaveBeenCalled();
+      expect(m.strategyDispatch.triggerStrategyRuns.mock.calls[0]).toEqual([
         1,
         "llm-openrouter",
         "2026-01-01",
@@ -412,16 +412,16 @@ describe("FreeDispatchService — openrouter (account-budget)", () => {
     });
 
     it("does not dispatch a whole trial when there is no budget headroom for one", async () => {
-      m.strategyService.countTodayLlmCalls.mockResolvedValue(46);
+      m.strategyDispatch.countTodayLlmCalls.mockResolvedValue(46);
 
       await m.service.runTick("openrouter");
 
-      expect(m.strategyService.triggerStrategyRuns).not.toHaveBeenCalled();
+      expect(m.strategyDispatch.triggerStrategyRuns).not.toHaveBeenCalled();
       expect(m.queue.add).toHaveBeenCalledWith("tick", {}, expect.objectContaining({ delay: 15_000 }));
     });
 
     it("stops when every model is out of unrun puzzles", async () => {
-      m.strategyService.findUnrunPuzzleDatesForModel.mockResolvedValue([]);
+      m.strategyDispatch.findUnrunPuzzleDatesForModel.mockResolvedValue([]);
 
       await m.service.runTick("openrouter");
 
@@ -430,16 +430,16 @@ describe("FreeDispatchService — openrouter (account-budget)", () => {
 
     it("honours an OPENROUTER_FREE_DAILY_BUDGET override", async () => {
       process.env.OPENROUTER_FREE_DAILY_BUDGET = "1000";
-      m.strategyService.countTodayLlmCalls.mockResolvedValue(60);
+      m.strategyDispatch.countTodayLlmCalls.mockResolvedValue(60);
 
       await m.service.runTick("openrouter");
 
-      expect(m.strategyService.triggerStrategyRuns).toHaveBeenCalled();
+      expect(m.strategyDispatch.triggerStrategyRuns).toHaveBeenCalled();
     });
 
     it("treats a triggerStrategyRuns failure as that model unavailable, not a hard failure", async () => {
       process.env.OPENROUTER_DISPATCH_MAX_BATCH = "1";
-      m.strategyService.triggerStrategyRuns.mockRejectedValue(new Error("model rejected"));
+      m.strategyDispatch.triggerStrategyRuns.mockRejectedValue(new Error("model rejected"));
 
       await expect(m.service.runTick("openrouter")).resolves.toBeUndefined();
 

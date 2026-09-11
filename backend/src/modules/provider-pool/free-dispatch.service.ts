@@ -10,7 +10,7 @@ import {
 } from "../../strategies";
 import { FREE_DISPATCH_QUEUE_BY_POOL } from "../queue/queue.module";
 import { RateLimitHoldService } from "../strategy/rate-limit-hold.service";
-import { StrategyService } from "../strategy/strategy.service";
+import { StrategyDispatch } from "../strategy/strategy-dispatch.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import { DispatchState } from "./entities/dispatch-state.entity";
 import {
@@ -56,7 +56,7 @@ export class FreeDispatchService {
     private readonly stateRepo: Repository<DispatchState>,
     @Inject(FREE_DISPATCH_QUEUE_BY_POOL)
     private readonly queueByPool: ReadonlyMap<ProviderPoolId, Queue>,
-    @Inject(StrategyService) private readonly strategyService: StrategyService,
+    @Inject(StrategyDispatch) private readonly strategyDispatch: StrategyDispatch,
     @Inject(SupportedModelService)
     private readonly supportedModelService: SupportedModelService,
     @Inject(RateLimitHoldService) private readonly holdService: RateLimitHoldService,
@@ -108,7 +108,7 @@ export class FreeDispatchService {
       startedAt: state?.startedAt ?? null,
     };
     if (pool.freeTier.dispatch.stop === "account-budget") {
-      status.callsToday = await this.strategyService.countTodayLlmCalls(pool.strategyName);
+      status.callsToday = await this.strategyDispatch.countTodayLlmCalls(pool.strategyName);
       status.dailyBudget = pool.freeTier.dispatch.budget();
     }
     return status;
@@ -147,7 +147,7 @@ export class FreeDispatchService {
     }
 
     const maxInFlight = pacing.maxInFlight();
-    const inFlight = await this.strategyService.countInFlightByModel(strategyName, eligibleModels);
+    const inFlight = await this.strategyDispatch.countInFlightByModel(strategyName, eligibleModels);
     const inFlightTotal = [...inFlight.values()].reduce((sum, count) => sum + count, 0);
 
     if (inFlightTotal >= maxInFlight) {
@@ -203,10 +203,10 @@ export class FreeDispatchService {
 
     const budget = dispatch.budget();
     const callsPerTrial = dispatch.callsPerTrial();
-    const callsToday = await this.strategyService.countTodayLlmCalls(strategyName);
+    const callsToday = await this.strategyDispatch.countTodayLlmCalls(strategyName);
 
     const maxInFlight = dispatch.maxInFlight();
-    const inFlight = await this.strategyService.countInFlightByModel(strategyName, models);
+    const inFlight = await this.strategyDispatch.countInFlightByModel(strategyName, models);
     const inFlightTotal = [...inFlight.values()].reduce((sum, c) => sum + c, 0);
     const estimatedInFlightCalls = inFlightTotal * callsPerTrial;
 
@@ -270,7 +270,7 @@ export class FreeDispatchService {
     candidateModels: string[],
     maxNewTrials: number,
   ): Promise<{ dispatched: number; allExhausted: boolean }> {
-    const allocation = await this.strategyService.countTodayDispatchByModel(
+    const allocation = await this.strategyDispatch.countTodayDispatchByModel(
       strategyName,
       candidateModels,
     );
@@ -282,7 +282,7 @@ export class FreeDispatchService {
 
       let target: { puzzleId: number; date: string } | undefined;
       try {
-        [target] = await this.strategyService.findUnrunPuzzleDatesForModel(strategyName, model, 1);
+        [target] = await this.strategyDispatch.findUnrunPuzzleDatesForModel(strategyName, model, 1);
       } catch (err) {
         this.logger.warn(
           `${poolId} free-tier dispatch tick: failed to look up a puzzle for '${model}': ${(err as Error).message}`,
@@ -297,7 +297,7 @@ export class FreeDispatchService {
       }
 
       try {
-        await this.strategyService.triggerStrategyRuns(
+        await this.strategyDispatch.triggerStrategyRuns(
           target.puzzleId,
           strategyName,
           target.date,
@@ -320,7 +320,7 @@ export class FreeDispatchService {
     if (models.length === 0) return true;
     if (pool.freeTier.dispatch.stop === "account-budget") {
       const held = await this.holdService.isHeld(pool.strategyName);
-      const callsToday = await this.strategyService.countTodayLlmCalls(pool.strategyName);
+      const callsToday = await this.strategyDispatch.countTodayLlmCalls(pool.strategyName);
       return held || callsToday >= pool.freeTier.dispatch.budget();
     }
     const held = new Set(await this.holdService.heldModels(pool.strategyName));

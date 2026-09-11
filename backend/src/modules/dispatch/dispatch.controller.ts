@@ -11,7 +11,7 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { ApiBody, ApiParam, ApiQuery } from "@nestjs/swagger";
-import { StrategyService } from "../strategy/strategy.service";
+import { StrategyDispatch } from "../strategy/strategy-dispatch.service";
 import { GameService } from "../game/game.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import { ModelMetadataRefreshService } from "../supported-model/model-metadata-refresh.service";
@@ -47,7 +47,7 @@ interface FreeTierDispatchOutcome {
 @Controller("dispatch")
 export class DispatchController {
   constructor(
-    @Inject(StrategyService) private readonly strategyService: StrategyService,
+    @Inject(StrategyDispatch) private readonly strategyDispatch: StrategyDispatch,
     @Inject(GameService) private readonly gameService: GameService,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
     @Inject(FreeTierDispatchService) private readonly freeTierDispatchService: FreeTierDispatchService,
@@ -102,7 +102,7 @@ export class DispatchController {
       // ever needed on this branch.
       await Promise.all(
         AUTOMATIC_STRATEGIES.map((strat) =>
-          this.strategyService.triggerStrategyRuns(puzzleId, strat, date),
+          this.strategyDispatch.triggerStrategyRuns(puzzleId, strat, date),
         ),
       );
 
@@ -115,7 +115,7 @@ export class DispatchController {
       };
     }
 
-    await this.strategyService.triggerStrategyRuns(puzzleId, strategyName, date);
+    await this.strategyDispatch.triggerStrategyRuns(puzzleId, strategyName, date);
 
     return {
       message: `Jobs queued for strategy '${strategyName}' on puzzle date ${date}`,
@@ -147,7 +147,7 @@ export class DispatchController {
     const strategyName = await this.supportedModelService.resolveSupportedStrategy(modelName);
     const puzzleId = await this.gameService.resolveDateToPuzzleId(date);
 
-    await this.strategyService.triggerStrategyRuns(puzzleId, strategyName, date, modelName);
+    await this.strategyDispatch.triggerStrategyRuns(puzzleId, strategyName, date, modelName);
 
     return {
       message: `Jobs queued for model '${modelName}' (strategy '${strategyName}') on puzzle date ${date}`,
@@ -185,7 +185,7 @@ export class DispatchController {
     }
 
     const strategyName = await this.supportedModelService.resolveSupportedStrategy(modelName);
-    const targets = await this.strategyService.findUnrunPuzzleDatesForModel(
+    const targets = await this.strategyDispatch.findUnrunPuzzleDatesForModel(
       strategyName,
       modelName,
       n,
@@ -200,7 +200,7 @@ export class DispatchController {
 
     await Promise.all(
       targets.map((target) =>
-        this.strategyService.triggerStrategyRuns(target.puzzleId, strategyName, target.date, modelName),
+        this.strategyDispatch.triggerStrategyRuns(target.puzzleId, strategyName, target.date, modelName),
       ),
     );
 
@@ -391,7 +391,7 @@ export class DispatchController {
   // (the figure the DELETE below would remove).
   @Get("runs/errored")
   async countErroredRuns() {
-    return this.strategyService.countErroredRuns();
+    return this.strategyDispatch.countErroredRuns();
   }
 
   // Bulk version of DELETE run/:runId — permanently deletes every strategy
@@ -404,7 +404,7 @@ export class DispatchController {
   @UseGuards(DispatchAuthGuard)
   @ApiBody({ type: DispatchAuthDto })
   async deleteErroredRuns() {
-    const result = await this.strategyService.deleteErroredRuns();
+    const result = await this.strategyDispatch.deleteErroredRuns();
     return {
       message: `Deleted ${result.deletedRuns} errored strategy run(s) and all related data`,
       ...result,
@@ -427,7 +427,7 @@ export class DispatchController {
   })
   @ApiBody({ type: DispatchAuthDto })
   async deleteRun(@Param("runId", ParseIntPipe) runId: number) {
-    const result = await this.strategyService.deleteRun(runId);
+    const result = await this.strategyDispatch.deleteRun(runId);
     return {
       message: `Deleted strategy run ${runId} and all related data`,
       runId,
