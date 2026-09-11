@@ -32,10 +32,11 @@ import {
   RunHistoryRowDto,
   RunHistorySortBy,
   RecentActivityEventDto,
+  SolvePromptDto,
+  LlmProposalDto,
 } from "./dto/strategy.dto";
 import { isLlmStrategy } from "../../strategies";
-import { StrategyRunStore, computeInitialWordOrder } from "./strategy-run-store.service";
-import { reconstructSolvePrompts } from "./prompt-reconstruction";
+import { StrategyRunStore } from "./strategy-run-store.service";
 import {
   SupportedModelService,
   PriceHistoryEntry,
@@ -646,24 +647,26 @@ export class RunHistoryReadModel {
   }
 
   /**
-   * Assembles the reconstructed guess-chain-of-proposals for an LLM run: every
-   * SolvePrompt (one per model call) alongside the candidate groups it parsed
-   * out and the best-effort reconstructed prompt text (see
-   * prompt-reconstruction.ts — prompt text itself isn't persisted). Guesses
-   * are fetched unpaginated here (unlike the DTO's main `guesses` field)
-   * because reconstruction needs the full sequence regardless of which page
-   * of guesses was requested; LLM run guess counts are small (bounded by the
+   * Assembles the guess-chain-of-proposals for an LLM run: every SolvePrompt
+   * (one per model call) alongside the candidate groups it parsed out and
+   * the prompt text actually sent (SolvePrompt.promptText, written directly
+   * by llm-strategy-runner.service.ts on every new row and backfilled once
+   * for historical rows — see backfill-prompt-text.ts). This used to replay
+   * the run's whole state machine on every read to regenerate that text
+   * (prompt-reconstruction.ts, retired once every row had promptText
+   * persisted); now it's a direct column read. Guesses are fetched
+   * unpaginated here (unlike the DTO's main `guesses` field) because a
+   * proposal's guess can be anywhere in the run regardless of which page of
+   * guesses was requested; LLM run guess counts are small (bounded by the
    * duplicate/failure/malformed limits), so this stays cheap.
    *
    * Includes CALL_ERROR rows (a call attempt that never produced usable
-   * model text) so a failed step is visible alongside successful ones —
-   * reconstructSolvePrompts knows to skip them when advancing conversation
-   * state (see its own docblock). The attemptNumber tiebreak keeps a step's
-   * own multiple rows in call order, since several can share one
-   * promptNumber.
+   * model text) so a failed step is visible alongside successful ones. The
+   * attemptNumber tiebreak keeps a step's own multiple rows in call order,
+   * since several can share one promptNumber.
    */
-  private async buildSolvePromptDtos(run: StrategyRun) {
-    const [solvePrompts, proposals, allGuesses, puzzle, catEvals] = await Promise.all([
+  private async buildSolvePromptDtos(run: StrategyRun): Promise<SolvePromptDto[]> {
+    const [solvePrompts, proposals, allGuesses, catEvals] = await Promise.all([
       this.solvePromptRepo.find({
         where: { strategyRunId: run.id },
         order: { promptNumber: "ASC", attemptNumber: "ASC" },
@@ -673,25 +676,20 @@ export class RunHistoryReadModel {
         where: { strategyRunId: run.id },
         select: { id: true, sequenceNumber: true, words: true, result: true, guessedAt: true },
       }),
-      this.puzzleRepo.findOne({
-        where: { id: run.puzzleId },
-        relations: { answerGroups: { members: true } },
-      }),
       this.categoryEvaluationRepo.find({ where: { strategyRunId: run.id } }),
     ]);
 
-    if (solvePrompts.length === 0 || !puzzle) {
+    if (solvePrompts.length === 0) {
       return [];
     }
 
     const guessesById = new Map(allGuesses.map((guess) => [guess.id, guess]));
-    const originalWords = computeInitialWordOrder(puzzle, run.strategyName);
 
-    const dtos = reconstructSolvePrompts(originalWords, solvePrompts, proposals, guessesById);
+    const dtos = this.mapSolvePromptDtos(solvePrompts, proposals, guessesById);
 
-    // Attach each run CategoryEvaluation to its proposal by llmProposalId —
-    // reconstructSolvePrompts leaves categoryEvaluation: null on every
-    // proposal, so proposals with no eval row simply keep that null.
+    // Attach each run's CategoryEvaluation to its proposal by llmProposalId —
+    // mapSolvePromptDtos leaves categoryEvaluation: null on every proposal,
+    // so proposals with no eval row simply keep that null.
     const evalByProposalId = new Map(catEvals.map((e) => [e.llmProposalId, e]));
     for (const prompt of dtos) {
       for (const proposal of prompt.proposals) {
@@ -701,6 +699,73 @@ export class RunHistoryReadModel {
     }
 
     return dtos;
+  }
+
+  // Straight SolvePrompt row -> SolvePromptDto mapping, including each row's
+  // candidate LlmProposal groups linked to their guess (if any). Formerly
+  // this lived inside prompt-reconstruction.ts's reconstructSolvePrompts,
+  // interleaved with the state-machine replay that regenerated
+  // reconstructedPrompt on every call; now that reconstructedPrompt is just
+  // `prompt.promptText`, no replay/state machine is needed at all.
+  private mapSolvePromptDtos(
+    solvePrompts: SolvePrompt[],
+    proposals: LlmProposal[],
+    guessesById: Map<number, Guess>,
+  ): SolvePromptDto[] {
+    const proposalsByPrompt = new Map<number, LlmProposal[]>();
+    for (const proposal of proposals) {
+      const list = proposalsByPrompt.get(proposal.solvePromptId) ?? [];
+      list.push(proposal);
+      proposalsByPrompt.set(proposal.solvePromptId, list);
+    }
+
+    return solvePrompts.map((prompt) => {
+      const promptProposals: LlmProposalDto[] = (proposalsByPrompt.get(prompt.id) ?? [])
+        .slice()
+        .sort((a, b) => a.id - b.id)
+        .map((proposal) => {
+          const guess = proposal.guessId !== null ? guessesById.get(proposal.guessId) : undefined;
+          return {
+            id: proposal.id,
+            words: proposal.words,
+            category: proposal.category,
+            status: proposal.status,
+            guess: guess
+              ? {
+                  sequenceNumber: guess.sequenceNumber,
+                  result: guess.result,
+                  guessedAt: guess.guessedAt,
+                }
+              : null,
+            // Default; buildSolvePromptDtos overwrites this by walking the
+            // returned dtos once it has the run's CategoryEvaluation rows.
+            categoryEvaluation: null,
+          };
+        });
+
+      return {
+        id: prompt.id,
+        promptNumber: prompt.promptNumber,
+        promptType: prompt.promptType,
+        status: prompt.status,
+        rawResponseText: prompt.rawResponseText,
+        promptTokens: prompt.promptTokens,
+        completionTokens: prompt.completionTokens,
+        totalTokens: prompt.totalTokens,
+        latencyMs: prompt.latencyMs,
+        temperature: prompt.temperature,
+        createdAt: prompt.createdAt,
+        issueTags: prompt.issueTags,
+        reconstructedPrompt: prompt.promptText,
+        proposals: promptProposals,
+        errorName: prompt.errorName,
+        errorMessage: prompt.errorMessage,
+        statusCode: prompt.statusCode,
+        isRetryable: prompt.isRetryable,
+        requestBody: prompt.requestBody,
+        responseBody: prompt.responseBody,
+      };
+    });
   }
 
   // Copies a CategoryEvaluation row 1:1 onto the guess-chain DTO shape.

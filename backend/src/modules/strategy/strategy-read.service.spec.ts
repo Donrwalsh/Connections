@@ -97,20 +97,6 @@ describe("RunHistoryReadModel", () => {
     ...overrides,
   });
 
-  const makePuzzle = (answerWords: string[][]) => ({
-    id: 100,
-    answerGroups: answerWords.map((words) => ({
-      members: words.map((word) => ({ word })),
-    })),
-  });
-
-  // Puzzle whose answer groups are exactly the 8 words of makeRun() split in
-  // half — used when a run is expected to solve cleanly.
-  const solvePuzzle = makePuzzle([
-    ["APPLE", "BANANA", "CHERRY", "DATE"],
-    ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
-  ]);
-
   beforeEach(async () => {
     mockQueue = {
       add: jest.fn().mockResolvedValue(undefined),
@@ -424,7 +410,8 @@ describe("RunHistoryReadModel", () => {
             guessedAt: new Date("2024-01-02T00:00:00Z"),
           },
         ])
-        // Second call: the unpaginated guesses used for reconstruction.
+        // Second call: the unpaginated guesses used to link proposals to
+        // their guess outcome.
         .mockResolvedValueOnce([
           {
             id: 1,
@@ -434,7 +421,6 @@ describe("RunHistoryReadModel", () => {
             guessedAt: new Date("2024-01-02T00:00:00Z"),
           },
         ]);
-      mockPuzzleRepo.findOne.mockResolvedValueOnce(solvePuzzle);
       mockSolvePromptRepo.find.mockResolvedValueOnce([
         {
           id: 501,
@@ -443,6 +429,7 @@ describe("RunHistoryReadModel", () => {
           promptType: "initialSolve",
           status: "parsed",
           rawResponseText: "raw",
+          promptText: "[User]\nsolve for APPLE etc\n\n[Assistant]\nraw",
           promptTokens: 10,
           completionTokens: 20,
           totalTokens: 30,
@@ -481,8 +468,11 @@ describe("RunHistoryReadModel", () => {
           categoryEvaluation: null,
         },
       ]);
-      expect(typeof result.solvePrompts[0]!.reconstructedPrompt).toBe("string");
-      expect(result.solvePrompts[0]!.reconstructedPrompt).toContain("APPLE");
+      // reconstructedPrompt is read straight off the row's promptText column
+      // now — no replay involved.
+      expect(result.solvePrompts[0]!.reconstructedPrompt).toBe(
+        "[User]\nsolve for APPLE etc\n\n[Assistant]\nraw",
+      );
     });
 
     it("should attach the categoryEvaluation DTO to a used proposal that has one, and null to proposals without", async () => {
@@ -515,7 +505,6 @@ describe("RunHistoryReadModel", () => {
             guessedAt: new Date("2024-01-02T00:01:00Z"),
           },
         ]);
-      mockPuzzleRepo.findOne.mockResolvedValueOnce(solvePuzzle);
       mockSolvePromptRepo.find.mockResolvedValueOnce([
         {
           id: 501,
@@ -524,6 +513,7 @@ describe("RunHistoryReadModel", () => {
           promptType: "initialSolve",
           status: "parsed",
           rawResponseText: "raw",
+          promptText: "[User]\nprompt\n\n[Assistant]\nraw",
           promptTokens: 10,
           completionTokens: 20,
           totalTokens: 30,
@@ -615,14 +605,13 @@ describe("RunHistoryReadModel", () => {
     it("should fetch every SolvePrompt row for the run, including CALL_ERROR ones, with a deterministic attemptNumber tiebreak", async () => {
       // CALL_ERROR rows (an OpenAI call attempt that never produced usable
       // model text) are shown on the run detail page alongside successful
-      // steps — reconstructSolvePrompts knows to skip them when advancing
-      // conversation state, so the query here fetches everything.
+      // steps — each still has its own promptText, so the query here
+      // fetches everything.
       mockStrategyRunRepo.findOne.mockResolvedValueOnce(
         makeRun({ id: 7, strategyName: "llm-openai", availableWords: [] }),
       );
       mockGuessRepo.count.mockResolvedValueOnce(0);
       mockGuessRepo.find.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
-      mockPuzzleRepo.findOne.mockResolvedValueOnce(solvePuzzle);
       mockSolvePromptRepo.find.mockResolvedValueOnce([]);
 
       await service.getRunDetailByRunId(7);

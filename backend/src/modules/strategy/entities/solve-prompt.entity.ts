@@ -86,10 +86,11 @@ export class SolvePrompt {
 
   // Full [User]/[Assistant] transcript through this attempt's user turn
   // (the runner's llm-strategy-runner.service.ts builds this from the same
-  // `messages` array it sends the orchestrator; see that file's
-  // transcriptText and prompt-reconstruction.ts's formatConversation, which
-  // this mirrors exactly). Null only for pre-migration rows pending a
-  // one-time backfill script (out of scope for this migration).
+  // `messages` array it sends the orchestrator — see that file's
+  // transcriptText). strategy-read.service.ts reads this directly as the
+  // chain-view's `reconstructedPrompt` field. Null only for rows written
+  // before this column existed; backfill-prompt-text.ts backfills those
+  // once (see docs/architecture/specs/08-persist-prompt-text.md).
   @Column({ type: "text", nullable: true })
   promptText: string | null;
 

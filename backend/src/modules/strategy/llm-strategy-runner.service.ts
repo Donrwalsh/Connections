@@ -312,11 +312,11 @@ export class LlmStrategyRunner {
 
       // Transcript through this attempt's user turn only — the assistant
       // reply (if any) arrives further down this same iteration and belongs
-      // to the *next* row (matches prompt-reconstruction.ts's
-      // formatConversation step-boundary convention exactly). Computed once
-      // here, before the call, so the CALL_ERROR branch below can still use
-      // it after its messages.pop() removes this turn from in-memory
-      // history.
+      // to the *next* row (matches the "[User]\n...\n\n[Assistant]\n..."
+      // step-boundary convention backfill-prompt-text.ts's formatConversation
+      // uses for historical rows exactly). Computed once here, before the
+      // call, so the CALL_ERROR branch below can still use it after its
+      // messages.pop() removes this turn from in-memory history.
       const transcriptText = messages
         .map((m) => `[${m.role === "user" ? "User" : "Assistant"}]\n${m.content}`)
         .join("\n\n");

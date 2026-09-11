@@ -14,9 +14,9 @@ const GROUP_SIZE = 4;
 
 /**
  * The word order a fresh run starts with, keyed by strategy. Extracted out of
- * loadOrCreateRun so the prompt-reconstruction path (strategy-read.service.ts) can
- * recompute the exact same starting order for an LLM run without duplicating
- * this switch and risking drift.
+ * loadOrCreateRun so backfill-prompt-text.ts can recompute the exact same
+ * starting order for an LLM run (needed to replay historical prompts) without
+ * duplicating this switch and risking drift.
  */
 export function computeInitialWordOrder(puzzle: Puzzle, strategyName: string): string[] {
   switch (strategyName) {
