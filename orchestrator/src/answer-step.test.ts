@@ -57,6 +57,7 @@ describe("runAnswerStep", () => {
     // `abortSignal`, running (and billing) the call to completion instead.
     expect(generateTextMock).toHaveBeenCalledWith(
       expect.objectContaining({
+        temperature: 0.7,
         include: { requestBody: true, responseBody: true },
         abortSignal: controller.signal,
       }),

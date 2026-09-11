@@ -8,7 +8,6 @@ import {
   type SolveStepResponse,
 } from "./types.js";
 import { SolveError } from "./solver.js";
-import { runAssistStep } from "./assist.js";
 import { runAnswerStep } from "./answer-step.js";
 import { judgeCategory } from "./judge-category.js";
 import type { ModelProvider } from "./provider.js";
@@ -72,9 +71,13 @@ app.post(
     try {
       // Conversational AI Assist: the frontend owns the session (prompt
       // building, history, guess submission) and sends the full message
-      // history here. Nothing is persisted by this service.
-      const assistResult = await runAssistStep(parsed.data.messages);
-      return c.json(assistResult, 200);
+      // history here. Nothing is persisted by this service, so telemetry
+      // capture is skipped entirely (see AnswerStepOpts.captureTelemetry).
+      // The frontend's own prompts (aiAssistPrompts.ts) now ask for the same
+      // ### GROUPS / ### ANSWER format the automated solving path does, so
+      // this shares the exact same step function and grammar.
+      const result = await runAnswerStep(parsed.data.messages, { captureTelemetry: false });
+      return c.json({ response: result.response, groups: result.groups, model: result.model }, 200);
     } catch (err) {
       console.error("Diagnose failed:", err);
       if (err instanceof SolveError) {

@@ -124,6 +124,25 @@ code sketch used `Record<number, string>`; `buildProposalEntries` consumes it as
 today. Keep it a `Map` in the shared type to avoid a needless conversion at the one real call
 site.
 
+**`/diagnose`'s prompt was never asking for the `### GROUPS`/`### ANSWER` format at all** —
+found while implementing PR 3, not during grilling. `frontend/src/lib/aiAssistPrompts.ts`
+asks the model for free-form reasoning followed by a bare `"ANSWER:"` line (no `###`, no
+`### GROUPS` section); `llm-strategy-runner.service.ts`'s `buildInitialPrompt`/
+`buildRetryPrompt` ask for `### GROUPS` + `### ANSWER`. `assist.ts`'s simpler parser (only
+matching bare `ANSWER:`) was therefore not a stale copy of `solve-assist.ts`'s — it was
+correctly parsing the different, simpler contract its own prompt actually asked for. Doc 7's
+framing of this as parser drift/staleness was wrong; folding `/diagnose` onto the shared
+`parseAnswer` as originally proposed would have broken it. Confirmed with the user (who wants
+the two prompt formats aligned anyway) and resolved by updating
+`frontend/src/lib/aiAssistPrompts.ts` to also emit `### GROUPS` (with an added `Reasoning:`
+line per group, preceding `Category:`/`Words:`, so the button's reasoning-per-group UX is
+preserved — `Game.tsx` renders `response` verbatim in a `<pre>`, and the shared parser's
+`Category:`/`Words:` regexes ignore any other line in a group's chunk, so the extra
+`Reasoning:` line is harmless) and `### ANSWER`, in the same structure and wording as the
+backend's prompts. Verified end-to-end: a realistic filled-in response in the new format
+parses through the real `parseAnswer` with the expected `groups`/`proposalWords`/
+`categoryByGroup`, zero `textIssues`.
+
 ---
 
 ## Design
@@ -352,6 +371,12 @@ against a stale contract on either side.
 
 ### PR 3 — Fold `/diagnose` into `runAnswerStep`, final naming sweep
 
+- **Prerequisite, found during implementation (see "Corrections" above):** update
+  `frontend/src/lib/aiAssistPrompts.ts`'s `buildInitialPrompt`/`buildRetryPrompt` to emit
+  `### GROUPS` (with a per-group `Reasoning:` line ahead of `Category:`/`Words:`) and
+  `### ANSWER`, matching the backend's prompt structure, instead of the old bare `"ANSWER:"`
+  format. Without this, folding `/diagnose` onto the shared `parseAnswer` would silently change
+  (break) how its responses parse. Update `aiAssistPrompts.test.ts` to match.
 - Add `AnswerStepOpts.captureTelemetry` (real skip, not compute-then-discard — see Design).
 - Delete `assist.ts`; `/diagnose` becomes the thin adapter shown above.
 - Merge `assist.test.ts`'s cases into `answer-step.test.ts`.
@@ -359,7 +384,7 @@ against a stale contract on either side.
   assertion.
 - Final sweep: grep the repo for `solve-assist`/`solveAssist`/`SolveAssist` — expect zero
   hits outside git history and this spec's own "before" column. Fix
-  `docker-compose.local-ollama-worker.yml`'s comment.
+  `docker-compose.local-ollama-worker.yml`'s and `README.md`'s remaining references.
 
 ---
 

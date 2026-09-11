@@ -48,7 +48,7 @@ Frontend "AI Assist" button
   └─ POST /api/diagnose ──► backend ──► POST /diagnose ──► orchestrator ──► default provider (openai)
 
 Frontend strategy panel (llm-openai / llm-ollama buttons)
-  └─ POST /dispatch/model/:model/:date ──► worker ──► POST /solve-assist ──► orchestrator ──► OpenAI or Ollama
+  └─ POST /dispatch/model/:model/:date ──► worker ──► POST /solve-step ──► orchestrator ──► OpenAI or Ollama
        (strategy is resolved from the model's SupportedModel row; queues one new trial of
        `model` per call, up to LLM_TRIALS_PER_MODEL trials for that model)
 ```
@@ -180,7 +180,8 @@ Postgres and Redis connection settings (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PAS
 
 ## Development & Testing
 
-Requires Node 24.
+Requires Node 24. `orchestrator`, `backend`, and `packages/answer-grammar` are npm workspaces —
+install once at the repo root (`npm ci`), not per-directory.
 
 ```bash
 # Backend (Jest)
@@ -242,6 +243,8 @@ The backend E2E suite (`backend/test/app.e2e-spec.ts`) boots the real NestJS app
 │       ├── solver.ts          # generateObject call to the selected model
 │       ├── prompt.ts          # Prompt builder
 │       └── types.ts           # Zod schemas (request/response/model output)
+├── packages/
+│   └── answer-grammar/         # Shared npm workspace: parses a solve model's ### GROUPS / ### ANSWER text
 ├── docker-compose.yml          # Local dev — all services including Ollama, bind-mounted source
 ├── docker-compose.prod.yml     # Production (e.g. Coolify) — built images, no Ollama
 └── docker-compose.local-ollama-worker.yml  # Runs on your machine — Ollama + local orchestrator + WORKER_ROLE=ollama worker
@@ -276,7 +279,7 @@ This works because `backend/src/worker.ts` reads a `WORKER_ROLE` env var (see `w
 | `cloud` | everything *except* `llm-ollama-runs` | `docker-compose.prod.yml`'s `worker` service |
 | `ollama` | only `llm-ollama-runs` | your machine's worker (`docker-compose.local-ollama-worker.yml`) |
 
-One subtlety: neither worker ever calls a model API directly — `LlmStrategyRunner` always calls out to an orchestrator's `POST /solve-assist` (see `backend/src/modules/strategy/orchestrator.service.ts`), and the orchestrator is what actually talks to OpenAI or Ollama. So `docker-compose.local-ollama-worker.yml` runs *three* services on your machine: `ollama`, a second small `orchestrator` instance configured with `OLLAMA_BASE_URL=http://ollama:11434`, and the `WORKER_ROLE=ollama` worker — the worker only ever calls its local orchestrator, which is the only thing that talks to Ollama. Nothing on your machine listens on a port reachable from the internet.
+One subtlety: neither worker ever calls a model API directly — `LlmStrategyRunner` always calls out to an orchestrator's `POST /solve-step` (see `backend/src/modules/strategy/orchestrator.service.ts`), and the orchestrator is what actually talks to OpenAI or Ollama. So `docker-compose.local-ollama-worker.yml` runs *three* services on your machine: `ollama`, a second small `orchestrator` instance configured with `OLLAMA_BASE_URL=http://ollama:11434`, and the `WORKER_ROLE=ollama` worker — the worker only ever calls its local orchestrator, which is the only thing that talks to Ollama. Nothing on your machine listens on a port reachable from the internet.
 
 Setup:
 

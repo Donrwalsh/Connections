@@ -16,12 +16,6 @@ vi.mock("./solver.js", () => ({
   },
 }));
 
-vi.mock("./assist.js", () => ({
-  runAssistStep: vi.fn(async () => {
-    throw new Error("model call failed");
-  }),
-}));
-
 vi.mock("./answer-step.js", () => ({
   runAnswerStep: vi.fn(async () => {
     throw new Error("model call failed");
@@ -34,10 +28,8 @@ vi.mock("./judge-category.js", () => ({
   }),
 }));
 
-import { runAssistStep } from "./assist.js";
 import { runAnswerStep } from "./answer-step.js";
 import { judgeCategory } from "./judge-category.js";
-const runAssistStepMock = vi.mocked(runAssistStep);
 const runAnswerStepMock = vi.mocked(runAnswerStep);
 const judgeCategoryMock = vi.mocked(judgeCategory);
 
@@ -77,8 +69,6 @@ function judgeCategoryRequest(
 describe("orchestrator app", () => {
   beforeEach(() => {
     process.env.INTERNAL_API_KEY = KEY;
-    runAssistStepMock.mockReset();
-    runAssistStepMock.mockRejectedValue(new Error("model call failed"));
     runAnswerStepMock.mockReset();
     runAnswerStepMock.mockRejectedValue(new Error("model call failed"));
     judgeCategoryMock.mockReset();
@@ -140,34 +130,43 @@ describe("orchestrator app", () => {
       expect(body.details).toContain("model call failed");
     });
 
-    it("returns the model's raw answer and parsed groups", async () => {
-      runAssistStepMock.mockResolvedValueOnce({
-        response: "Reasoning.\nANSWER:\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
+    it("returns the model's raw answer and parsed groups, trimmed to the button's contract", async () => {
+      runAnswerStepMock.mockResolvedValueOnce({
+        response: "### GROUPS\n#### Group 1\nCategory: A\nWords: AAAA, BBBB, CCCC, DDDD\n\n### ANSWER\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
         groups: [
           ["AAAA", "BBBB", "CCCC", "DDDD"],
           ["EEEE", "FFFF", "GGGG", "HHHH"],
         ],
+        proposalWords: [["AAAA", "BBBB", "CCCC", "DDDD"]],
+        categoryByGroup: { "1": "A" },
+        textIssues: [],
         model: "test-model",
+        latencyMs: 5,
       });
 
       const res = await diagnoseRequest(DIAGNOSE_BODY);
       expect(res.status).toBe(200);
+      // Trimmed to exactly {response, groups, model} — the richer fields
+      // runAnswerStep returns (proposalWords, categoryByGroup, textIssues,
+      // latencyMs, ...) never leak onto the button's wire contract.
       expect(await res.json()).toEqual({
-        response: "Reasoning.\nANSWER:\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
+        response: "### GROUPS\n#### Group 1\nCategory: A\nWords: AAAA, BBBB, CCCC, DDDD\n\n### ANSWER\nAAAA, BBBB, CCCC, DDDD\nEEEE, FFFF, GGGG, HHHH",
         groups: [
           ["AAAA", "BBBB", "CCCC", "DDDD"],
           ["EEEE", "FFFF", "GGGG", "HHHH"],
         ],
         model: "test-model",
       });
-      expect(runAssistStepMock).toHaveBeenCalledWith(DIAGNOSE_BODY.messages);
+      expect(runAnswerStepMock).toHaveBeenCalledWith(DIAGNOSE_BODY.messages, {
+        captureTelemetry: false,
+      });
     });
 
     it("maps an unusable response to 400", async () => {
-      runAssistStepMock.mockRejectedValueOnce(
+      runAnswerStepMock.mockRejectedValueOnce(
         new SolveError(
           "invalid_group",
-          'Model response contained no "ANSWER:" section with group lines',
+          'Model response contained no parseable group proposals or "ANSWER:" section',
         ),
       );
       const res = await diagnoseRequest(DIAGNOSE_BODY);
