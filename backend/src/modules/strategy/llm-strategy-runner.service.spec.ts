@@ -632,6 +632,47 @@ describe("LlmStrategyRunner", () => {
       expect(snapshots[1][2].content).toContain("Feedback on Previous Guess:");
     });
 
+    it("should persist promptText on success rows as the transcript through the user turn, for both INITIAL and RETRY prompts", async () => {
+      // Same INITIAL -> RETRY scenario as the prior test, but asserting the
+      // promptText column this task adds instead of the messages sent.
+      const snapshots = captureMessages([
+        makeAssistResponse([["APPLE", "EGGPLANT", "CHERRY", "FIG"]]),
+        makeAssistResponse([
+          ["APPLE", "BANANA", "CHERRY", "DATE"],
+          ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        ]),
+      ]);
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows).toHaveLength(2);
+
+      // INITIAL row: transcript through this call's user turn only -- the
+      // assistant reply that arrives this same iteration is the *next*
+      // row's concern.
+      expect(promptRows[0]).toEqual(
+        expect.objectContaining({
+          promptType: "initialSolve",
+          promptText: `[User]\n${snapshots[0][0].content}`,
+        }),
+      );
+
+      // RETRY row: full transcript up through this call's RETRY user turn --
+      // the prior user/assistant pair plus the new feedback prompt.
+      expect(promptRows[1]).toEqual(
+        expect.objectContaining({
+          promptType: "retry",
+          promptText:
+            `[User]\n${snapshots[1][0].content}\n\n` +
+            `[Assistant]\n${snapshots[1][1].content}\n\n` +
+            `[User]\n${snapshots[1][2].content}`,
+        }),
+      );
+    });
+
     it("should consult the Ollama provider for the llm-ollama strategy", async () => {
       mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-ollama" }));
       mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
@@ -1028,6 +1069,58 @@ describe("LlmStrategyRunner", () => {
         );
       } finally {
         delete process.env.LLM_MAX_MODEL_ERRORS;
+      }
+    });
+
+    it("should persist promptText on a CALL_ERROR row as the pre-pop transcript, for both INITIAL and RETRY prompts", async () => {
+      // Three calls: (1) an INITIAL call that errors outright, (2) a
+      // successful INITIAL call whose guess fails and sets up a RETRY
+      // prompt, (3) a RETRY call that errors. LLM_MAX_DUPLICATE_GUESSES=1
+      // (tripped only by call 3's duplicate_group code) stops the run after
+      // exactly these three calls without terminating early on call 1's
+      // model_error, which the default maxModelErrors tolerates.
+      process.env.LLM_MAX_DUPLICATE_GUESSES = "1";
+      try {
+        const snapshots = captureMessages([
+          { ok: false, error: { error: "model down", code: "model_error" } },
+          makeAssistResponse([["APPLE", "EGGPLANT", "CHERRY", "FIG"]]),
+          { ok: false, error: { error: "duplicate", code: "duplicate_group" } },
+        ]);
+
+        await runner.runLlmStrategy(100, "llm-openai");
+
+        const promptRows = mockManager.insert.mock.calls
+          .filter((call) => call[0] === "SolvePrompt")
+          .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+        expect(promptRows).toHaveLength(3);
+
+        // Row 0: INITIAL CALL_ERROR -- transcript is just this call's own
+        // user turn (messages was empty before it).
+        expect(promptRows[0]).toEqual(
+          expect.objectContaining({
+            promptType: "initialSolve",
+            status: "callError",
+            promptText: `[User]\n${snapshots[0][0].content}`,
+          }),
+        );
+
+        // Row 2: RETRY CALL_ERROR -- the pre-pop transcript through this
+        // call's RETRY user turn (call 2's user/assistant pair plus the new
+        // retry prompt), captured before the runner's messages.pop() removes
+        // that turn from in-memory history for the next attempt. This is
+        // the *actual* prompt sent for this attempt, not a re-derived one.
+        expect(promptRows[2]).toEqual(
+          expect.objectContaining({
+            promptType: "retry",
+            status: "callError",
+            promptText:
+              `[User]\n${snapshots[2][0].content}\n\n` +
+              `[Assistant]\n${snapshots[2][1].content}\n\n` +
+              `[User]\n${snapshots[2][2].content}`,
+          }),
+        );
+      } finally {
+        delete process.env.LLM_MAX_DUPLICATE_GUESSES;
       }
     });
 
