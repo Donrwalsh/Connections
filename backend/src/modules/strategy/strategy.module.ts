@@ -10,6 +10,7 @@ import { StrategyRun } from "./entities/strategy-run.entity";
 import { RateLimitHold } from "./entities/rate-limit-hold.entity";
 import { StrategyController } from "./strategy.controller";
 import { StrategyService } from "./strategy.service";
+import { DeterministicSolver } from "./deterministic-solver.service";
 import { LlmStrategyRunner } from "./llm-strategy-runner.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { OrchestratorService } from "./orchestrator.service";
@@ -39,6 +40,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
   controllers: [StrategyController],
   providers: [
     StrategyService,
+    DeterministicSolver,
     StrategyRunStore,
     LlmStrategyRunner,
     OrchestratorService,

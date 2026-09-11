@@ -2,7 +2,7 @@ import { NestFactory } from "@nestjs/core";
 import { Logger } from "@nestjs/common";
 import { Worker, Job } from "bullmq";
 import { AppModule } from "./app.module";
-import { StrategyService } from "./modules/strategy/strategy.service";
+import { DeterministicSolver } from "./modules/strategy/deterministic-solver.service";
 import { LlmStrategyRunner } from "./modules/strategy/llm-strategy-runner.service";
 import { CategoryEvaluatorService } from "./modules/strategy/category-evaluator.service";
 import {
@@ -35,7 +35,7 @@ async function bootstrap() {
   logger.log(`starting worker process with role='${role}'`);
 
   const appContext = await NestFactory.createApplicationContext(AppModule);
-  const strategyService = appContext.get(StrategyService);
+  const deterministicSolver = appContext.get(DeterministicSolver);
   const llmStrategyRunner = appContext.get(LlmStrategyRunner);
   const categoryEvaluatorService = appContext.get(CategoryEvaluatorService);
   const puzzleIngestionService = appContext.get(PuzzleIngestionService);
@@ -76,7 +76,7 @@ async function bootstrap() {
               trialNumber,
               model ?? undefined,
             )
-          : await strategyService.runDeterministicStrategy(puzzleId, strategyName, trialNumber);
+          : await deterministicSolver.runDeterministicStrategy(puzzleId, strategyName, trialNumber);
 
         logger.log(
           `finished job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName} trial=${trialNumber} status=${result.status}`,
