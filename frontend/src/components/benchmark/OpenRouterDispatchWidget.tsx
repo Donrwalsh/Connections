@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   fetchOpenRouterDispatchStatus,
   stopOpenRouterDispatch,
 } from "../../data/benchmark/api";
-import type { AutomationLegDisplay, OpenRouterDispatchStatus } from "../../data/benchmark/types";
+import type { AutomationLegDisplay } from "../../data/benchmark/types";
 import { formatAutomationLine } from "./automationFormat";
+import { useResource } from "../../hooks/useResource";
 import { StatusPill } from "./StatusPill";
 
 // Matches FreeTierBudgetWidget's own dispatch-status poll cadence.
@@ -24,41 +25,21 @@ export interface OpenRouterDispatchWidgetProps {
  * *total* requests across all :free models, so there is a single
  * account-wide "calls today / budget" number worth surfacing. */
 export function OpenRouterDispatchWidget({ automation }: OpenRouterDispatchWidgetProps = {}) {
-  const [status, setStatus] = useState<OpenRouterDispatchStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [isDisabling, setIsDisabling] = useState(false);
   const [disableError, setDisableError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    const poll = () => {
-      fetchOpenRouterDispatchStatus(controller.signal)
-        .then((next) => {
-          setStatus(next);
-          setError(null);
-        })
-        .catch((err: unknown) => {
-          if (err instanceof Error && err.name === "AbortError") return;
-          setError(err instanceof Error ? err.message : "Failed to load OpenRouter dispatch status");
-        });
-    };
-
-    poll();
-    const intervalId = setInterval(poll, DISPATCH_STATUS_POLL_MS);
-
-    return () => {
-      controller.abort();
-      clearInterval(intervalId);
-    };
-  }, []);
+  const { data: status, error, refetch: refetchStatus } = useResource(
+    ["openRouterDispatchStatus"],
+    (signal) => fetchOpenRouterDispatchStatus(signal),
+    { keepPreviousData: true, refetchInterval: DISPATCH_STATUS_POLL_MS },
+  );
 
   function handleDisable() {
     setIsDisabling(true);
     setDisableError(null);
 
     stopOpenRouterDispatch()
-      .then(() => fetchOpenRouterDispatchStatus())
-      .then(setStatus)
+      .then(() => refetchStatus())
       .catch((err: unknown) => {
         setDisableError(err instanceof Error ? err.message : "Failed to disable auto-dispatch");
       })
@@ -69,7 +50,7 @@ export function OpenRouterDispatchWidget({ automation }: OpenRouterDispatchWidge
     return (
       <div className="bench-free-tier" role="status">
         <span className="bench-free-tier__title">{TITLE}</span>
-        <p className="bench-error">Couldn&apos;t load OpenRouter dispatch status: {error}</p>
+        <p className="bench-error">Couldn&apos;t load OpenRouter dispatch status: {error.message}</p>
       </div>
     );
   }

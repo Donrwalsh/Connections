@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { fetchGoogleDispatchStatus, stopGoogleDispatch } from "../../data/benchmark/api";
-import type { AutomationLegDisplay, GoogleDispatchStatus } from "../../data/benchmark/types";
+import type { AutomationLegDisplay } from "../../data/benchmark/types";
 import { formatAutomationLine } from "./automationFormat";
+import { useResource } from "../../hooks/useResource";
 import { StatusPill } from "./StatusPill";
 
 // Matches FreeTierBudgetWidget's own dispatch-status poll cadence.
@@ -21,41 +22,21 @@ export interface GoogleDispatchWidgetProps {
  * progress bar against — Google's constraint is a per-day request cap
  * enforced by Google itself, so this only ever shows active/inactive. */
 export function GoogleDispatchWidget({ automation }: GoogleDispatchWidgetProps = {}) {
-  const [status, setStatus] = useState<GoogleDispatchStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [isDisabling, setIsDisabling] = useState(false);
   const [disableError, setDisableError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    const poll = () => {
-      fetchGoogleDispatchStatus(controller.signal)
-        .then((next) => {
-          setStatus(next);
-          setError(null);
-        })
-        .catch((err: unknown) => {
-          if (err instanceof Error && err.name === "AbortError") return;
-          setError(err instanceof Error ? err.message : "Failed to load Google dispatch status");
-        });
-    };
-
-    poll();
-    const intervalId = setInterval(poll, DISPATCH_STATUS_POLL_MS);
-
-    return () => {
-      controller.abort();
-      clearInterval(intervalId);
-    };
-  }, []);
+  const { data: status, error, refetch: refetchStatus } = useResource(
+    ["googleDispatchStatus"],
+    (signal) => fetchGoogleDispatchStatus(signal),
+    { keepPreviousData: true, refetchInterval: DISPATCH_STATUS_POLL_MS },
+  );
 
   function handleDisable() {
     setIsDisabling(true);
     setDisableError(null);
 
     stopGoogleDispatch()
-      .then(() => fetchGoogleDispatchStatus())
-      .then(setStatus)
+      .then(() => refetchStatus())
       .catch((err: unknown) => {
         setDisableError(err instanceof Error ? err.message : "Failed to disable auto-dispatch");
       })
@@ -66,7 +47,7 @@ export function GoogleDispatchWidget({ automation }: GoogleDispatchWidgetProps =
     return (
       <div className="bench-free-tier" role="status">
         <span className="bench-free-tier__title">{TITLE}</span>
-        <p className="bench-error">Couldn&apos;t load Google dispatch status: {error}</p>
+        <p className="bench-error">Couldn&apos;t load Google dispatch status: {error.message}</p>
       </div>
     );
   }

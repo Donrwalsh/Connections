@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   fetchFreeTierDispatchStatus,
   fetchFreeTierUsage,
@@ -6,7 +6,8 @@ import {
 } from "../../data/benchmark/api";
 import { formatCostUsd } from "../../data/benchmark/metrics";
 import { formatAutomationLine } from "./automationFormat";
-import type { FreeTierDispatchStatus, FreeTierId, FreeTierUsage, AutomationLegDisplay } from "../../data/benchmark/types";
+import { useResource } from "../../hooks/useResource";
+import type { FreeTierId, AutomationLegDisplay } from "../../data/benchmark/types";
 import { StatusPill } from "./StatusPill";
 
 // Usage at or above this share of a tier's daily budget gets the warning
@@ -64,59 +65,29 @@ export interface FreeTierBudgetWidgetProps {
  * currently running for this tier and at what threshold, with a button to
  * disable it. */
 export function FreeTierBudgetWidget({ tier, spentUsd, refreshSignal, automation }: FreeTierBudgetWidgetProps) {
-  const [usage, setUsage] = useState<FreeTierUsage | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [dispatchStatus, setDispatchStatus] = useState<FreeTierDispatchStatus | null>(null);
+  const { data: usage, error } = useResource(["freeTierUsage", tier], (signal) =>
+    fetchFreeTierUsage(tier, signal),
+  );
   const [isDisabling, setIsDisabling] = useState(false);
   const [disableError, setDisableError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setUsage(null);
-    setError(null);
-
-    const controller = new AbortController();
-    fetchFreeTierUsage(tier, controller.signal)
-      .then(setUsage)
-      .catch((err: unknown) => {
-        if (err instanceof Error && err.name === "AbortError") return;
-        setError(err instanceof Error ? err.message : "Failed to load token usage");
-      });
-
-    return () => controller.abort();
-  }, [tier]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    const poll = () => {
-      fetchFreeTierDispatchStatus(tier, controller.signal)
-        .then(setDispatchStatus)
-        .catch(() => {
-          // Best-effort — the token-usage figures above are this widget's
-          // main job, so a failed status check just leaves the indicator
-          // showing whatever it last knew (or nothing, on first load).
-        });
-    };
-
-    poll();
-    const intervalId = setInterval(poll, DISPATCH_STATUS_POLL_MS);
-
-    return () => {
-      controller.abort();
-      clearInterval(intervalId);
-    };
-    // refreshSignal is intentionally in the dependency list even though it's
-    // otherwise unused in the effect body — bumping it is how a sibling
-    // (FreeTierDispatchModal) triggers an immediate re-poll here instead of
-    // waiting up to DISPATCH_STATUS_POLL_MS.
-  }, [tier, refreshSignal]);
+  // refreshSignal is folded into the key rather than read directly — a
+  // sibling (FreeTierDispatchModal) bumps it to force an immediate re-poll
+  // here instead of waiting up to DISPATCH_STATUS_POLL_MS. Best-effort: a
+  // failed check just leaves the indicator showing whatever it last knew
+  // (keepPreviousData), same as before.
+  const { data: dispatchStatus, refetch: refetchDispatchStatus } = useResource(
+    ["freeTierDispatchStatus", tier, refreshSignal],
+    (signal) => fetchFreeTierDispatchStatus(tier, signal),
+    { keepPreviousData: true, refetchInterval: DISPATCH_STATUS_POLL_MS },
+  );
 
   function handleDisable() {
     setIsDisabling(true);
     setDisableError(null);
 
     stopFreeTierDispatch(tier)
-      .then(() => fetchFreeTierDispatchStatus(tier))
-      .then(setDispatchStatus)
+      .then(() => refetchDispatchStatus())
       .catch((err: unknown) => {
         setDisableError(err instanceof Error ? err.message : "Failed to disable auto-dispatch");
       })
@@ -129,7 +100,7 @@ export function FreeTierBudgetWidget({ tier, spentUsd, refreshSignal, automation
     return (
       <div className="bench-free-tier" role="status">
         <span className="bench-free-tier__title">{title}</span>
-        <p className="bench-error">Couldn&apos;t load token usage: {error}</p>
+        <p className="bench-error">Couldn&apos;t load token usage: {error.message}</p>
       </div>
     );
   }

@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { fetchGroqDispatchStatus, stopGroqDispatch } from "../../data/benchmark/api";
-import type { AutomationLegDisplay, GroqDispatchStatus } from "../../data/benchmark/types";
+import type { AutomationLegDisplay } from "../../data/benchmark/types";
 import { formatAutomationLine } from "./automationFormat";
+import { useResource } from "../../hooks/useResource";
 import { StatusPill } from "./StatusPill";
 
 // Matches FreeTierBudgetWidget's own dispatch-status poll cadence.
@@ -21,41 +22,21 @@ export interface GroqDispatchWidgetProps {
  * progress bar against — Groq's constraint is a per-model per-day request
  * cap enforced by Groq itself, so this only ever shows active/inactive. */
 export function GroqDispatchWidget({ automation }: GroqDispatchWidgetProps = {}) {
-  const [status, setStatus] = useState<GroqDispatchStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [isDisabling, setIsDisabling] = useState(false);
   const [disableError, setDisableError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    const poll = () => {
-      fetchGroqDispatchStatus(controller.signal)
-        .then((next) => {
-          setStatus(next);
-          setError(null);
-        })
-        .catch((err: unknown) => {
-          if (err instanceof Error && err.name === "AbortError") return;
-          setError(err instanceof Error ? err.message : "Failed to load Groq dispatch status");
-        });
-    };
-
-    poll();
-    const intervalId = setInterval(poll, DISPATCH_STATUS_POLL_MS);
-
-    return () => {
-      controller.abort();
-      clearInterval(intervalId);
-    };
-  }, []);
+  const { data: status, error, refetch: refetchStatus } = useResource(
+    ["groqDispatchStatus"],
+    (signal) => fetchGroqDispatchStatus(signal),
+    { keepPreviousData: true, refetchInterval: DISPATCH_STATUS_POLL_MS },
+  );
 
   function handleDisable() {
     setIsDisabling(true);
     setDisableError(null);
 
     stopGroqDispatch()
-      .then(() => fetchGroqDispatchStatus())
-      .then(setStatus)
+      .then(() => refetchStatus())
       .catch((err: unknown) => {
         setDisableError(err instanceof Error ? err.message : "Failed to disable auto-dispatch");
       })
@@ -66,7 +47,7 @@ export function GroqDispatchWidget({ automation }: GroqDispatchWidgetProps = {})
     return (
       <div className="bench-free-tier" role="status">
         <span className="bench-free-tier__title">{TITLE}</span>
-        <p className="bench-error">Couldn&apos;t load Groq dispatch status: {error}</p>
+        <p className="bench-error">Couldn&apos;t load Groq dispatch status: {error.message}</p>
       </div>
     );
   }
