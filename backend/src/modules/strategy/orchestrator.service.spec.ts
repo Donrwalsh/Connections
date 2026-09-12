@@ -1,3 +1,4 @@
+import { Agent } from "undici";
 import { OrchestratorService, type ChatMessage } from "./orchestrator.service";
 
 describe("OrchestratorService", () => {
@@ -41,10 +42,10 @@ describe("OrchestratorService", () => {
     jest.restoreAllMocks();
   });
 
-  it("should return the solve-assist data on a 200", async () => {
+  it("should return the solve-step data on a 200", async () => {
     mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
 
-    const outcome = await service.solveAssist(messages);
+    const outcome = await service.requestSolveStep(messages);
 
     expect(outcome).toEqual({
       ok: true,
@@ -58,7 +59,7 @@ describe("OrchestratorService", () => {
     });
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://orchestrator.test/solve-assist",
+      "http://orchestrator.test/solve-step",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -75,7 +76,7 @@ describe("OrchestratorService", () => {
       mockResponse({ ok: true, status: 200, body: { ...successBody, contextWindow: 8192 } }),
     );
 
-    const outcome = await service.solveAssist(messages, "mistral-nemo", "ollama", 131072);
+    const outcome = await service.requestSolveStep(messages, "mistral-nemo", "ollama", 131072);
 
     expect(outcome).toEqual({
       ok: true,
@@ -86,10 +87,10 @@ describe("OrchestratorService", () => {
   it("should include contextWindow in the request body when given", async () => {
     mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
 
-    await service.solveAssist(messages, "mistral-nemo", "ollama", 131072);
+    await service.requestSolveStep(messages, "mistral-nemo", "ollama", 131072);
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://orchestrator.test/solve-assist",
+      "http://orchestrator.test/solve-step",
       expect.objectContaining({
         body: JSON.stringify({
           messages,
@@ -104,10 +105,10 @@ describe("OrchestratorService", () => {
   it("should include the model and provider in the request body when given", async () => {
     mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
 
-    await service.solveAssist(messages, "gpt-4.1-nano-2025-04-14", "openai");
+    await service.requestSolveStep(messages, "gpt-4.1-nano-2025-04-14", "openai");
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://orchestrator.test/solve-assist",
+      "http://orchestrator.test/solve-step",
       expect.objectContaining({
         body: JSON.stringify({
           messages,
@@ -121,10 +122,10 @@ describe("OrchestratorService", () => {
   it("should include the google provider in the request body when given", async () => {
     mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
 
-    await service.solveAssist(messages, "gemini-3.6-flash", "google");
+    await service.requestSolveStep(messages, "gemini-3.6-flash", "google");
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://orchestrator.test/solve-assist",
+      "http://orchestrator.test/solve-step",
       expect.objectContaining({
         body: JSON.stringify({
           messages,
@@ -138,10 +139,10 @@ describe("OrchestratorService", () => {
   it("should include the openrouter provider in the request body when given", async () => {
     mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
 
-    await service.solveAssist(messages, "z-ai/glm-5.2:free", "openrouter");
+    await service.requestSolveStep(messages, "z-ai/glm-5.2:free", "openrouter");
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://orchestrator.test/solve-assist",
+      "http://orchestrator.test/solve-step",
       expect.objectContaining({
         body: JSON.stringify({
           messages,
@@ -155,10 +156,10 @@ describe("OrchestratorService", () => {
   it("should include the mistral provider in the request body when given", async () => {
     mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
 
-    await service.solveAssist(messages, "mistral-small-latest", "mistral");
+    await service.requestSolveStep(messages, "mistral-small-latest", "mistral");
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://orchestrator.test/solve-assist",
+      "http://orchestrator.test/solve-step",
       expect.objectContaining({
         body: JSON.stringify({
           messages,
@@ -172,10 +173,10 @@ describe("OrchestratorService", () => {
   it("should include the sambanova provider in the request body when given", async () => {
     mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
 
-    await service.solveAssist(messages, "DeepSeek-V3.1", "sambanova");
+    await service.requestSolveStep(messages, "DeepSeek-V3.1", "sambanova");
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://orchestrator.test/solve-assist",
+      "http://orchestrator.test/solve-step",
       expect.objectContaining({
         body: JSON.stringify({
           messages,
@@ -184,6 +185,15 @@ describe("OrchestratorService", () => {
         }),
       }),
     );
+  });
+
+  it("passes an undici dispatcher so undici's own header/body timeouts don't preempt ORCHESTRATOR_TIMEOUT_MS", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: successBody }));
+
+    await service.requestSolveStep(messages);
+
+    const init = mockFetch.mock.calls[0][1] as { dispatcher?: unknown };
+    expect(init.dispatcher).toBeInstanceOf(Agent);
   });
 
   it("should extract dailyResetSeconds from a SambaNova rate_limited_daily failure", async () => {
@@ -199,7 +209,7 @@ describe("OrchestratorService", () => {
       }),
     );
 
-    const outcome = await service.solveAssist(messages, "DeepSeek-V3.1", "sambanova");
+    const outcome = await service.requestSolveStep(messages, "DeepSeek-V3.1", "sambanova");
 
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) {
@@ -221,7 +231,7 @@ describe("OrchestratorService", () => {
       }),
     );
 
-    const outcome = await service.solveAssist(messages, "z-ai/glm-5.2:free", "openrouter");
+    const outcome = await service.requestSolveStep(messages, "z-ai/glm-5.2:free", "openrouter");
 
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) {
@@ -243,7 +253,7 @@ describe("OrchestratorService", () => {
       }),
     );
 
-    const outcome = await service.solveAssist(messages, "gemini-3.6-flash", "google");
+    const outcome = await service.requestSolveStep(messages, "gemini-3.6-flash", "google");
 
     expect(outcome).toEqual({
       ok: false,
@@ -268,7 +278,7 @@ describe("OrchestratorService", () => {
       }),
     );
 
-    const outcome = await service.solveAssist(messages);
+    const outcome = await service.requestSolveStep(messages);
 
     expect(outcome).toEqual({
       ok: false,
@@ -293,7 +303,7 @@ describe("OrchestratorService", () => {
       }),
     );
 
-    const outcome = await service.solveAssist(
+    const outcome = await service.requestSolveStep(
       [{ role: "user", content: "hi" }],
       "gemini-3.6-flash",
       "google",
@@ -314,7 +324,7 @@ describe("OrchestratorService", () => {
       }),
     );
 
-    const outcome = await service.solveAssist(messages);
+    const outcome = await service.requestSolveStep(messages);
 
     expect(outcome).toEqual({
       ok: true,
@@ -342,7 +352,7 @@ describe("OrchestratorService", () => {
       }),
     );
 
-    const outcome = await service.solveAssist(messages);
+    const outcome = await service.requestSolveStep(messages);
 
     expect(outcome).toEqual({
       ok: false,
@@ -365,7 +375,7 @@ describe("OrchestratorService", () => {
       }),
     );
 
-    const outcome = await service.solveAssist(messages);
+    const outcome = await service.requestSolveStep(messages);
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(outcome).toEqual({
@@ -381,7 +391,7 @@ describe("OrchestratorService", () => {
   it("should classify a network failure as model_error with no retry", async () => {
     mockFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
 
-    const outcome = await service.solveAssist(messages);
+    const outcome = await service.requestSolveStep(messages);
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(outcome).toMatchObject({
@@ -403,7 +413,7 @@ describe("OrchestratorService", () => {
     });
     mockFetch.mockRejectedValueOnce(fetchFailed);
 
-    const outcome = await service.solveAssist(messages);
+    const outcome = await service.requestSolveStep(messages);
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(outcome).toEqual({
@@ -424,7 +434,7 @@ describe("OrchestratorService", () => {
     ]);
     mockFetch.mockRejectedValueOnce(fetchFailed);
 
-    const outcome = await service.solveAssist(messages);
+    const outcome = await service.requestSolveStep(messages);
 
     if (outcome.ok) throw new Error("expected failure");
     expect(outcome.error.error).toContain("ECONNREFUSED");
@@ -437,7 +447,7 @@ describe("OrchestratorService", () => {
     abortError.name = "AbortError";
     mockFetch.mockRejectedValueOnce(abortError);
 
-    const outcome = await service.solveAssist(messages);
+    const outcome = await service.requestSolveStep(messages);
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(outcome).toEqual({
@@ -458,7 +468,7 @@ describe("OrchestratorService", () => {
       mockResponse({ ok: true, status: 200, body: successBodyWithDetail }),
     );
 
-    const outcome = await service.solveAssist(messages);
+    const outcome = await service.requestSolveStep(messages);
 
     expect(outcome).toEqual({ ok: true, data: successBodyWithDetail });
   });
@@ -482,7 +492,7 @@ describe("OrchestratorService", () => {
       }),
     );
 
-    const outcome = await service.solveAssist(messages);
+    const outcome = await service.requestSolveStep(messages);
 
     expect(outcome).toEqual({
       ok: false,
@@ -515,7 +525,7 @@ describe("OrchestratorService", () => {
       }),
     );
 
-    const outcome = await service.solveAssist(messages);
+    const outcome = await service.requestSolveStep(messages);
 
     expect(outcome).toEqual({
       ok: false,

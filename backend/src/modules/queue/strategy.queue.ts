@@ -1,14 +1,6 @@
 import { Queue } from "bullmq";
 import { redisConnection } from "./redis.config";
-import {
-  LLM_OPENAI,
-  LLM_OLLAMA,
-  LLM_GOOGLE,
-  LLM_GROQ,
-  LLM_OPENROUTER,
-  LLM_MISTRAL,
-  LLM_SAMBANOVA,
-} from "../../strategies";
+import { providerPool, type ProviderPoolId } from "../provider-pool/provider-pool.config";
 
 export const strategyQueue = new Queue("strategy-runs", {
   connection: redisConnection,
@@ -98,46 +90,42 @@ export const llmSambaNovaQueue = new Queue("llm-sambanova-runs", {
 });
 
 /**
- * Routes a strategy run to the queue that processes it: the LLM strategies
- * get their per-provider queues, everything else stays on the shared
- * strategy-runs queue. The only place the strategy->queue mapping lives, so
- * enqueue call sites stay provider-agnostic.
+ * Routes a strategy run to the queue that processes it: a provider-pool
+ * strategy gets its pool's per-provider queue (looked up in
+ * `runsQueueByPool`), everything else stays on the shared strategy-runs
+ * `defaultQueue`. The strategy->queue mapping now lives entirely in
+ * `PROVIDER_POOLS`; this just indexes the caller's queue map by the resolved
+ * pool id.
  */
 export function queueForStrategy(
+  runsQueueByPool: ReadonlyMap<ProviderPoolId, Queue>,
   defaultQueue: Queue,
-  openAIQueue: Queue,
-  ollamaQueue: Queue,
-  googleQueue: Queue,
-  groqQueue: Queue,
-  openRouterQueue: Queue,
-  mistralQueue: Queue,
-  sambaNovaQueue: Queue,
   strategyName: string,
 ): Queue {
-  if (strategyName === LLM_OPENAI) return openAIQueue;
-  if (strategyName === LLM_OLLAMA) return ollamaQueue;
-  if (strategyName === LLM_GOOGLE) return googleQueue;
-  if (strategyName === LLM_GROQ) return groqQueue;
-  if (strategyName === LLM_OPENROUTER) return openRouterQueue;
-  if (strategyName === LLM_MISTRAL) return mistralQueue;
-  if (strategyName === LLM_SAMBANOVA) return sambaNovaQueue;
-  return defaultQueue;
+  const pool = providerPool(strategyName);
+  if (!pool) return defaultQueue;
+  return runsQueueByPool.get(pool.id) ?? defaultQueue;
 }
 
 /**
  * The LLM queue a judge job rides — the judge provider's own queue, so
  * category-evaluation jobs share that provider's worker concurrency and
- * rate budget with its solve runs (see the design doc).
+ * rate budget with its solve runs (see the design doc). Any provider pool
+ * can judge, not just openai/ollama/google — JUDGE_PROVIDER is validated at
+ * boot (see env.ts) and JUDGE_MODEL x JUDGE_PROVIDER consistency at dispatch
+ * time (see CategoryEvaluatorService.enqueuePending), so a pool missing from
+ * `runsQueueByPool` here means the provider-pool config itself is broken,
+ * not a bad env value — fail loud rather than silently default.
  */
 export function queueForJudgeProvider(
-  provider: "openai" | "ollama" | "google",
-  openAIQueue: Queue,
-  ollamaQueue: Queue,
-  googleQueue: Queue,
+  provider: ProviderPoolId,
+  runsQueueByPool: ReadonlyMap<ProviderPoolId, Queue>,
 ): Queue {
-  if (provider === "ollama") return ollamaQueue;
-  if (provider === "google") return googleQueue;
-  return openAIQueue;
+  const queue = runsQueueByPool.get(provider);
+  if (!queue) {
+    throw new Error(`No run queue registered for provider pool "${provider}"`);
+  }
+  return queue;
 }
 
 /** Deterministic job id so a re-enqueue of a still-pending evaluation collapses. */

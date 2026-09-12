@@ -1,13 +1,12 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { RunHistoryTable } from "../../components/benchmark/RunHistoryTable";
 import { StatusPill } from "../../components/benchmark/StatusPill";
 import { fetchLeaderboard, fetchRunHistory } from "../../data/benchmark/api";
 import { formatCostUsd, formatDuration, formatSuccessRate } from "../../data/benchmark/metrics";
+import { useResource } from "../../hooks/useResource";
 import { useStrategyMeta } from "../../data/benchmark/useStrategyMeta";
 import type {
-  LeaderboardRow,
-  RunHistory,
   RunHistorySortBy,
   RunHistorySortDir,
   RunStatus,
@@ -39,62 +38,45 @@ export function StrategyPuzzlePage() {
   const resolvedKind = meta?.kind;
   const resolvedModelId = meta?.id;
 
-  const [leaderboardRow, setLeaderboardRow] = useState<LeaderboardRow | null>(null);
-  const [history, setHistory] = useState<RunHistory | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState<RunHistorySortBy>("puzzleDate");
   const [sortDir, setSortDir] = useState<RunHistorySortDir>("desc");
   const [status, setStatus] = useState<RunStatus | null>(null);
 
-  useEffect(() => {
-    if (!strategyId) return;
+  // Best-effort — see the header comment above; a miss just leaves the
+  // summary stats blank, so the fetch's own error is never surfaced.
+  const { data: leaderboardData } = useResource(
+    ["leaderboard", strategyId],
+    (signal) => fetchLeaderboard(signal),
+    { enabled: !!strategyId },
+  );
+  const leaderboardRow = leaderboardData
+    ? ([...leaderboardData.deterministic, ...leaderboardData.llm].find((r) => r.id === strategyId) ?? null)
+    : null;
 
-    const controller = new AbortController();
-    fetchLeaderboard(controller.signal)
-      .then((data) => {
-        const row = [...data.deterministic, ...data.llm].find((r) => r.id === strategyId);
-        setLeaderboardRow(row ?? null);
-      })
-      .catch(() => {
-        // Best-effort — see the header comment above.
-      });
-
-    return () => controller.abort();
-  }, [strategyId]);
-
-  useEffect(() => {
-    if (!resolvedStrategyName) return;
-
-    setIsLoading(true);
-    setError(null);
-
-    const controller = new AbortController();
-    fetchRunHistory(
-      resolvedStrategyName,
-      {
-        model: resolvedKind === "llm" ? resolvedModelId : undefined,
-        page,
-        limit: PAGE_SIZE,
-        sortBy,
-        sortDir,
-        status: status ?? undefined,
-      },
-      controller.signal,
-    )
-      .then((data) => {
-        setHistory(data);
-        setIsLoading(false);
-      })
-      .catch((err: unknown) => {
-        if (err instanceof Error && err.name === "AbortError") return;
-        setError(err instanceof Error ? err.message : "Failed to load runs");
-        setIsLoading(false);
-      });
-
-    return () => controller.abort();
-  }, [resolvedStrategyName, resolvedKind, resolvedModelId, page, sortBy, sortDir, status]);
+  const {
+    data: history,
+    loading: isLoading,
+    error,
+  } = useResource(
+    ["runHistory", resolvedStrategyName, resolvedKind, resolvedModelId, page, sortBy, sortDir, status],
+    (signal) => {
+      if (!resolvedStrategyName) return Promise.reject(new Error("Strategy not resolved"));
+      return fetchRunHistory(
+        resolvedStrategyName,
+        {
+          model: resolvedKind === "llm" ? resolvedModelId : undefined,
+          page,
+          limit: PAGE_SIZE,
+          sortBy,
+          sortDir,
+          status: status ?? undefined,
+        },
+        signal,
+      );
+    },
+    { enabled: !!resolvedStrategyName },
+  );
 
   function handleStatusChange(newStatus: RunStatus | null) {
     setPage(1);
@@ -245,7 +227,7 @@ export function StrategyPuzzlePage() {
       </header>
 
       {isLoading ? <p className="bench-muted">Loading runs…</p> : null}
-      {error && !isLoading ? <p className="bench-error">{error}</p> : null}
+      {error && !isLoading ? <p className="bench-error">{error.message}</p> : null}
 
       {!isLoading && !error && history ? (
         <>

@@ -7,7 +7,7 @@
 #
 # Why there's an 'orchestrator' service here too, not just 'worker': the
 # worker never calls a model API directly — it always calls out to an
-# orchestrator's POST /solve-assist endpoint, which is what actually talks
+# orchestrator's POST /solve-step endpoint, which is what actually talks
 # to OpenAI or Ollama (see backend/src/modules/strategy/orchestrator.service.ts
 # and orchestrator/src/provider.ts). The orchestrator in your deployed stack
 # only ever gets called with provider="openai" (the 'worker' service there
@@ -57,7 +57,9 @@ services:
     #           capabilities: [gpu]
 
   orchestrator:
-    build: ./orchestrator
+    build:
+      context: .
+      dockerfile: orchestrator/Dockerfile
     container_name: local_ollama_orchestrator
     restart: unless-stopped
     environment:
@@ -83,7 +85,9 @@ services:
       start_period: 10s
 
   worker:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: local_ollama_worker
     restart: unless-stopped
     command: node dist/worker.js

@@ -302,6 +302,170 @@ function mistralMonthlyRateLimitFromBody(
 }
 
 /**
+ * Turns a provider's 429 `APICallError` into a `rate_limited` /
+ * `rate_limited_daily` `SolveError`, or `null` to fall through to
+ * `model_error` when the response carries no usable rate-limit signal. One
+ * entry per `ModelProvider` (the `Record` is total, so adding a provider is a
+ * compile error until its 429 handling is decided); `null` means "this
+ * provider has no special 429 handling" — openai and ollama.
+ */
+type RateLimit429Classifier = (
+  err: APICallError,
+  message: string,
+  details: SolveErrorDetails,
+  apiDetails: SolveErrorDetails,
+) => SolveError | null;
+
+const RATE_LIMIT_429_CLASSIFIERS: Record<ModelProvider, RateLimit429Classifier | null> = {
+  openai: null,
+  ollama: null,
+
+  google: (err, message, details, apiDetails) => {
+    const retryAfterSeconds = parseGoogleRateLimit(err.responseBody);
+    if (retryAfterSeconds !== null) {
+      return new SolveError("rate_limited", `Google rate limit hit: ${message}`, {
+        ...details,
+        ...apiDetails,
+        errorName: err.name,
+        retryAfterSeconds,
+      });
+    }
+    if (isGoogleDailyRateLimit(err.responseBody)) {
+      return new SolveError("rate_limited_daily", `Google daily quota exhausted: ${message}`, {
+        ...details,
+        ...apiDetails,
+        errorName: err.name,
+      });
+    }
+    return null;
+  },
+
+  groq: (err, message, details, apiDetails) => {
+    const headers = err.responseHeaders ?? {};
+    const remainingRequests = headers["x-ratelimit-remaining-requests"];
+    const perDayDimension = groqPerDayRateLimitDimension(err.responseBody, message);
+
+    if (remainingRequests === "0" || perDayDimension !== null) {
+      // `x-ratelimit-reset-requests` counts down to the daily request reset
+      // (hours out), so it's a sound proxy for when any per-day quota —
+      // requests or tokens — clears. `retry-after` / `reset-tokens` on a
+      // tokens-per-day hit only measure the seconds until a sliver of
+      // today's token bucket trickles back, which would re-park the run
+      // minutes later, so they're a fallback for a requests-per-day hit
+      // only. A tokens-per-day hit with no `reset-requests` header carries
+      // no dailyResetSeconds at all — the backend then holds the model for
+      // LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS.
+      const resetRequests = parseGroqResetDuration(headers["x-ratelimit-reset-requests"]);
+      const dailyResetSeconds =
+        perDayDimension === "tokens"
+          ? resetRequests
+          : (resetRequests ?? parseSecondsHeader(headers["retry-after"]));
+      return new SolveError("rate_limited_daily", `Groq daily quota exhausted: ${message}`, {
+        ...details,
+        ...apiDetails,
+        errorName: err.name,
+        dailyResetSeconds,
+      });
+    }
+
+    const retryAfterSeconds =
+      parseSecondsHeader(headers["retry-after"]) ??
+      parseGroqResetDuration(headers["x-ratelimit-reset-tokens"]);
+    return new SolveError("rate_limited", `Groq rate limit hit: ${message}`, {
+      ...details,
+      ...apiDetails,
+      errorName: err.name,
+      retryAfterSeconds,
+    });
+  },
+
+  openrouter: (err, message, details, apiDetails) => {
+    const headers = err.responseHeaders ?? {};
+    const resetSeconds = parseResetTimestampSeconds(headers["x-ratelimit-reset"]);
+    const retryAfter = parseSecondsHeader(headers["retry-after"]);
+
+    if (resetSeconds !== undefined || retryAfter !== undefined) {
+      if (resetSeconds !== undefined && resetSeconds > DAILY_RESET_THRESHOLD_SECONDS) {
+        return new SolveError("rate_limited_daily", `OpenRouter daily quota exhausted: ${message}`, {
+          ...details,
+          ...apiDetails,
+          errorName: err.name,
+          dailyResetSeconds: resetSeconds,
+        });
+      }
+      return new SolveError("rate_limited", `OpenRouter rate limit hit: ${message}`, {
+        ...details,
+        ...apiDetails,
+        errorName: err.name,
+        retryAfterSeconds: retryAfter ?? resetSeconds,
+      });
+    }
+    // No usable rate-limit signal — fall through to model_error, same as the
+    // Groq branch does when its headers are absent.
+    return null;
+  },
+
+  mistral: (err, message, details, apiDetails) => {
+    if (mistralMonthlyRateLimitFromBody(err.responseBody, message)) {
+      // Monthly / quota wall — park the model. dailyResetSeconds is left
+      // unset (Mistral gives no reset countdown); the backend falls back to
+      // MISTRAL_MODEL_HOLD_FALLBACK_SECONDS.
+      return new SolveError("rate_limited_daily", `Mistral monthly quota exhausted: ${message}`, {
+        ...details,
+        ...apiDetails,
+        errorName: err.name,
+      });
+    }
+    const headers = err.responseHeaders ?? {};
+    const retryAfterSeconds = parseSecondsHeader(headers["retry-after"]);
+    // A bare 429 is unambiguously a rate limit even when nothing else about
+    // it is legible — return rate_limited (not model_error). The runner's
+    // consecutive-429 heuristic is the safety net for a monthly wall the
+    // body did not announce.
+    return new SolveError("rate_limited", `Mistral rate limit hit: ${message}`, {
+      ...details,
+      ...apiDetails,
+      errorName: err.name,
+      retryAfterSeconds,
+    });
+  },
+
+  sambanova: (err, message, details, apiDetails) => {
+    // SambaNova's free-tier caps are per-model (20 req/min, 20 req/day, 200K
+    // tokens/day). Its 429 carries duration-style reset headers. Classify by
+    // reset distance, like the OpenRouter branch: a long reset is the
+    // per-model daily (requests or tokens) hit, a short one is the 20 RPM
+    // hit. Header names/format confirmed against a real 429.
+    const headers = err.responseHeaders ?? {};
+    const dayResetSeconds = parseGroqResetDuration(headers["x-ratelimit-reset-requests-day"]);
+    const minuteResetSeconds =
+      parseGroqResetDuration(headers["x-ratelimit-reset-requests"]) ??
+      parseSecondsHeader(headers["retry-after"]);
+    const resetSeconds = dayResetSeconds ?? minuteResetSeconds;
+
+    if (resetSeconds !== undefined) {
+      if (resetSeconds > DAILY_RESET_THRESHOLD_SECONDS) {
+        return new SolveError("rate_limited_daily", `SambaNova daily quota exhausted: ${message}`, {
+          ...details,
+          ...apiDetails,
+          errorName: err.name,
+          dailyResetSeconds: resetSeconds,
+        });
+      }
+      return new SolveError("rate_limited", `SambaNova rate limit hit: ${message}`, {
+        ...details,
+        ...apiDetails,
+        errorName: err.name,
+        retryAfterSeconds: minuteResetSeconds ?? resetSeconds,
+      });
+    }
+    // No usable rate-limit signal — fall through to model_error, same as the
+    // Groq and OpenRouter branches do when their headers are absent.
+    return null;
+  },
+};
+
+/**
  * Classifies an AI SDK failure from generateObject/generateText into a typed
  * SolveError. Malformed-but-present output (no/undecodable object) is
  * recoverable — callers may re-prompt. Provider/network failures are not,
@@ -356,145 +520,14 @@ export function classifyModelCallError(
         statusCode: undefined,
       };
 
-  if (provider === "google" && APICallError.isInstance(err) && err.statusCode === 429) {
-    const retryAfterSeconds = parseGoogleRateLimit(err.responseBody);
-    if (retryAfterSeconds !== null) {
-      return new SolveError("rate_limited", `Google rate limit hit: ${message}`, {
-        ...details,
-        ...apiDetails,
-        errorName: err.name,
-        retryAfterSeconds,
-      });
-    }
-    if (isGoogleDailyRateLimit(err.responseBody)) {
-      return new SolveError("rate_limited_daily", `Google daily quota exhausted: ${message}`, {
-        ...details,
-        ...apiDetails,
-        errorName: err.name,
-      });
-    }
-  }
-
-  if (provider === "groq" && APICallError.isInstance(err) && err.statusCode === 429) {
-    const headers = err.responseHeaders ?? {};
-    const remainingRequests = headers["x-ratelimit-remaining-requests"];
-    const perDayDimension = groqPerDayRateLimitDimension(err.responseBody, message);
-
-    if (remainingRequests === "0" || perDayDimension !== null) {
-      // `x-ratelimit-reset-requests` counts down to the daily request reset
-      // (hours out), so it's a sound proxy for when any per-day quota —
-      // requests or tokens — clears. `retry-after` / `reset-tokens` on a
-      // tokens-per-day hit only measure the seconds until a sliver of
-      // today's token bucket trickles back, which would re-park the run
-      // minutes later, so they're a fallback for a requests-per-day hit
-      // only. A tokens-per-day hit with no `reset-requests` header carries
-      // no dailyResetSeconds at all — the backend then holds the model for
-      // LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS.
-      const resetRequests = parseGroqResetDuration(headers["x-ratelimit-reset-requests"]);
-      const dailyResetSeconds =
-        perDayDimension === "tokens"
-          ? resetRequests
-          : (resetRequests ?? parseSecondsHeader(headers["retry-after"]));
-      return new SolveError("rate_limited_daily", `Groq daily quota exhausted: ${message}`, {
-        ...details,
-        ...apiDetails,
-        errorName: err.name,
-        dailyResetSeconds,
-      });
-    }
-
-    const retryAfterSeconds =
-      parseSecondsHeader(headers["retry-after"]) ??
-      parseGroqResetDuration(headers["x-ratelimit-reset-tokens"]);
-    return new SolveError("rate_limited", `Groq rate limit hit: ${message}`, {
-      ...details,
-      ...apiDetails,
-      errorName: err.name,
-      retryAfterSeconds,
-    });
-  }
-
-  if (provider === "openrouter" && APICallError.isInstance(err) && err.statusCode === 429) {
-    const headers = err.responseHeaders ?? {};
-    const resetSeconds = parseResetTimestampSeconds(headers["x-ratelimit-reset"]);
-    const retryAfter = parseSecondsHeader(headers["retry-after"]);
-
-    if (resetSeconds !== undefined || retryAfter !== undefined) {
-      if (resetSeconds !== undefined && resetSeconds > DAILY_RESET_THRESHOLD_SECONDS) {
-        return new SolveError("rate_limited_daily", `OpenRouter daily quota exhausted: ${message}`, {
-          ...details,
-          ...apiDetails,
-          errorName: err.name,
-          dailyResetSeconds: resetSeconds,
-        });
-      }
-      return new SolveError("rate_limited", `OpenRouter rate limit hit: ${message}`, {
-        ...details,
-        ...apiDetails,
-        errorName: err.name,
-        retryAfterSeconds: retryAfter ?? resetSeconds,
-      });
-    }
-    // No usable rate-limit signal — fall through to model_error, same as the
-    // Groq branch does when its headers are absent.
-  }
-
-  if (provider === "mistral" && APICallError.isInstance(err) && err.statusCode === 429) {
-    if (mistralMonthlyRateLimitFromBody(err.responseBody, message)) {
-      // Monthly / quota wall — park the model. dailyResetSeconds is left
-      // unset (Mistral gives no reset countdown); the backend falls back to
-      // MISTRAL_MODEL_HOLD_FALLBACK_SECONDS.
-      return new SolveError("rate_limited_daily", `Mistral monthly quota exhausted: ${message}`, {
-        ...details,
-        ...apiDetails,
-        errorName: err.name,
-      });
-    }
-    const headers = err.responseHeaders ?? {};
-    const retryAfterSeconds = parseSecondsHeader(headers["retry-after"]);
-    // A bare 429 is unambiguously a rate limit even when nothing else about
-    // it is legible — return rate_limited (not model_error). The runner's
-    // consecutive-429 heuristic is the safety net for a monthly wall the
-    // body did not announce.
-    return new SolveError("rate_limited", `Mistral rate limit hit: ${message}`, {
-      ...details,
-      ...apiDetails,
-      errorName: err.name,
-      retryAfterSeconds,
-    });
-  }
-
-  if (provider === "sambanova" && APICallError.isInstance(err) && err.statusCode === 429) {
-    // SambaNova's free-tier caps are per-model (20 req/min, 20 req/day, 200K
-    // tokens/day). Its 429 carries duration-style reset headers. Classify by
-    // reset distance, like the OpenRouter branch: a long reset is the
-    // per-model daily (requests or tokens) hit, a short one is the 20 RPM
-    // hit. Header names/format confirmed against a real 429.
-    const headers = err.responseHeaders ?? {};
-    const dayResetSeconds = parseGroqResetDuration(headers["x-ratelimit-reset-requests-day"]);
-    const minuteResetSeconds =
-      parseGroqResetDuration(headers["x-ratelimit-reset-requests"]) ??
-      parseSecondsHeader(headers["retry-after"]);
-    const resetSeconds = dayResetSeconds ?? minuteResetSeconds;
-
-    if (resetSeconds !== undefined) {
-      if (resetSeconds > DAILY_RESET_THRESHOLD_SECONDS) {
-        return new SolveError("rate_limited_daily", `SambaNova daily quota exhausted: ${message}`, {
-          ...details,
-          ...apiDetails,
-          errorName: err.name,
-          dailyResetSeconds: resetSeconds,
-        });
-      }
-      return new SolveError("rate_limited", `SambaNova rate limit hit: ${message}`, {
-        ...details,
-        ...apiDetails,
-        errorName: err.name,
-        retryAfterSeconds: minuteResetSeconds ?? resetSeconds,
-      });
-    }
-    // No usable rate-limit signal — fall through to model_error, same as the
-    // Groq and OpenRouter branches do when their headers are absent.
+  if (APICallError.isInstance(err) && err.statusCode === 429) {
+    const classified = RATE_LIMIT_429_CLASSIFIERS[provider]?.(
+      err,
+      message,
+      details,
+      apiDetails,
+    );
+    if (classified) return classified;
   }
 
   return new SolveError("model_error", `Model call failed: ${message}`, {

@@ -53,7 +53,7 @@ export class FreeTierUsageService {
    * sources that both bill the same provider budget:
    *
    *  - SolvePrompt.totalTokens for every solve step of a run on one of the
-   *    tier's models (the per-call figure StrategyService's cost math uses);
+   *    tier's models (the per-call figure RunHistoryReadModel's cost math uses);
    *  - CategoryEvaluation.totalTokens for every category-judge call whose
    *    judgeModel is one of the tier's models — the LLM-as-judge runs on
    *    JUDGE_MODEL (a mini/nano model by default), so its spend lands in

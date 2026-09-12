@@ -351,53 +351,18 @@ export interface AutomationStatus {
   sambaNovaBurn: AutomationBurnLeg;
 }
 
-/** GET /dispatch/google — whether the Google free-daily-quota dispatch cycle
- * (see the backend's GoogleFreeDispatchService) is currently running. Unlike
- * FreeTierDispatchStatus there's no threshold — Google's constraint is a
- * per-day request cap, not a token budget. */
-export interface GoogleDispatchStatus {
+/** GET /dispatch/pool/:poolId — whether a provider pool's free-daily-quota
+ * dispatch cycle (see the backend's unified FreeDispatchService) is
+ * currently running. `callsToday`/`dailyBudget` are present only for the one
+ * account-budget pool (openrouter, which caps total requests across all
+ * :free models rather than per-model) — every other pool's constraint is a
+ * per-model per-day request cap enforced by the provider itself, so there's
+ * no single number to show. */
+export interface PoolDispatchStatus {
   active: boolean;
   startedAt: string | null;
-}
-
-/** GET /dispatch/groq — whether the Groq free-daily-quota dispatch cycle
- * (see the backend's GroqFreeDispatchService) is currently running. Same
- * shape as GoogleDispatchStatus — no token threshold, Groq's constraint is
- * a per-model per-day request cap enforced by Groq itself. */
-export interface GroqDispatchStatus {
-  active: boolean;
-  startedAt: string | null;
-}
-
-/** GET /dispatch/openrouter — whether the OpenRouter free-daily-budget
- * dispatch cycle (see the backend's OpenRouterFreeDispatchService) is
- * running, plus the account-wide daily-call counter. OpenRouter's free tier
- * caps total requests across all :free models (not per-model), so unlike
- * Groq/Google there IS a single number to show. */
-export interface OpenRouterDispatchStatus {
-  active: boolean;
-  startedAt: string | null;
-  callsToday: number;
-  dailyBudget: number;
-}
-
-/** GET /dispatch/mistral — whether the Mistral free-dispatch cycle (see the
- * backend's MistralFreeDispatchService) is currently running. Same shape as
- * GroqDispatchStatus — no token threshold; Mistral's constraints (1 req/sec,
- * per-pool TPM, per-pool monthly tokens) are enforced by Mistral itself. */
-export interface MistralDispatchStatus {
-  active: boolean;
-  startedAt: string | null;
-}
-
-/** GET /dispatch/sambanova — whether the SambaNova free-tier dispatch cycle
- * (see the backend's SambaNovaFreeDispatchService) is currently running.
- * Same shape as GroqDispatchStatus — no token threshold; SambaNova's
- * per-model 20 rpm / 20 rpd / 200K tpd caps are enforced by SambaNova
- * itself. */
-export interface SambaNovaDispatchStatus {
-  active: boolean;
-  startedAt: string | null;
+  callsToday?: number;
+  dailyBudget?: number;
 }
 
 /** One daily-automation leg as a widget presents it: a single
@@ -495,9 +460,8 @@ export type SolvePromptStatusValue =
   // any other step — see errorName/errorMessage/etc. below.
   | "callError";
 
-/** One step of an LLM run's solve loop. `reconstructedPrompt` is inferred by
- * the backend on the fly (prompt text itself isn't stored) — see
- * prompt-reconstruction.ts on the backend. */
+/** One step of an LLM run's solve loop. `reconstructedPrompt` is read
+ * directly from the backend's SolvePrompt.promptText column. */
 export interface SolvePromptRecord {
   id: number;
   promptNumber: number;

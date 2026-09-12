@@ -58,7 +58,7 @@ export function buildJudgePrompt(proposedCategory: string, actualCategory: strin
  * Runs one LLM-judge call: does `proposedCategory` name the same connection
  * as `actualCategory`? Structured output via generateObject so the verdict
  * can't drift; temperature 0 for reproducibility. Captures the same raw
- * request/response detail solve-assist.ts does. A model-call failure is
+ * request/response detail answer-step.ts does. A model-call failure is
  * rethrown as a typed SolveError (classifyModelCallError) carrying whatever
  * detail was captured.
  */

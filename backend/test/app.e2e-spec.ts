@@ -25,6 +25,7 @@ import {
 import { LlmStrategyRunner } from "../src/modules/strategy/llm-strategy-runner.service";
 import { llmOpenAIQueue } from "../src/modules/queue/strategy.queue";
 import { freeTierDispatchQueue } from "../src/modules/queue/free-tier-dispatch.queue";
+import { parseAnswer } from "answer-grammar";
 
 const TEST_DATE = "1999-12-31";
 
@@ -47,7 +48,7 @@ describe("App (e2e)", () => {
       let body = "";
       req.on("data", (chunk) => (body += chunk));
       req.on("end", () => {
-        if (req.url === "/solve-assist" && req.method === "POST") {
+        if (req.url === "/solve-step" && req.method === "POST") {
           // Reply with whichever TEST_GROUPS group is still fully present in
           // the latest prompt's remaining-items list, so each call makes
           // real progress instead of re-proposing an already-solved group
@@ -63,14 +64,22 @@ describe("App (e2e)", () => {
             TEST_GROUPS.find((g) => g.words.every((w) => promptText.includes(w))) ??
             TEST_GROUPS[0];
           const words = nextGroup.words;
+          const responseText =
+            `### GROUPS\n#### Group 1\nCategory: E2E fake\nWords: ${words.join(", ")}\n\n` +
+            `### ANSWER\n${words.join(", ")}`;
+          // Run the real answer-grammar parser, same as the real
+          // orchestrator's runAnswerStep, so this fake's response shape
+          // never drifts from what the live service actually sends.
+          const answer = parseAnswer(responseText);
 
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
-              response:
-                `### GROUPS\n#### Group 1\nCategory: E2E fake\nWords: ${words.join(", ")}\n\n` +
-                `### ANSWER\n${words.join(", ")}`,
-              groups: [words],
+              response: responseText,
+              groups: answer.groups,
+              proposalWords: answer.proposalWords,
+              categoryByGroup: Object.fromEntries(answer.categoryByGroup),
+              textIssues: answer.textIssues,
               model: "e2e-fake-model",
             }),
           );
@@ -865,7 +874,7 @@ describe("App (e2e)", () => {
     const result = await llmStrategyRunner.runLlmStrategy(puzzle.id, "llm-openai", 99);
 
     // The fake orchestrator always proposes the next unsolved answer group
-    // (see the /solve-assist handler above), so the run solves fully.
+    // (see the /solve-step handler above), so the run solves fully.
     expect(result.status).toBe(StrategyRunStatus.COMPLETED);
 
     const run = await dataSource.getRepository(StrategyRun).findOneByOrFail({

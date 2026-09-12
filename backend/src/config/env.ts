@@ -18,8 +18,21 @@ export interface AppEnv {
   DB_MIGRATIONS_RUN: boolean;
   DISPATCH_PASSWORD: string;
   JUDGE_MODEL: string;
-  JUDGE_PROVIDER: "openai" | "ollama" | "google";
+  JUDGE_PROVIDER: "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral" | "sambanova";
 }
+
+/** Every provider-pool id the judge can ride — mirrors ProviderPoolId
+ * (provider-pool.config.ts), duplicated here rather than imported so this
+ * low-level config module stays free of feature-module dependencies. */
+const JUDGE_PROVIDERS = [
+  "openai",
+  "ollama",
+  "google",
+  "groq",
+  "openrouter",
+  "mistral",
+  "sambanova",
+] as const;
 
 function required(name: string, value: string | undefined): string {
   if (!value) {
@@ -41,7 +54,7 @@ function optionalInt(name: string, value: string | undefined, fallback: number):
  * by the caller (see orchestrator/app.service), which keeps the wait
  * bounded. When it does fire, the abort now propagates all the way to the
  * orchestrator's outbound OpenAI call (see orchestrator/app.ts and
- * solve-assist.ts) instead of just dropping the HTTP connection to the
+ * answer-step.ts) instead of just dropping the HTTP connection to the
  * orchestrator while that call keeps running — and billing — unseen.
  */
 export function orchestratorTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
@@ -63,13 +76,16 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
 
   const dispatchPassword = env.DISPATCH_PASSWORD ?? "";
 
-  // A bad JUDGE_PROVIDER would otherwise fall through queueForJudgeProvider's
-  // default to the OpenAI queue and produce a callError row per proposal
-  // instead of failing at boot.
+  // A bad JUDGE_PROVIDER would otherwise throw deep inside
+  // queueForJudgeProvider on the first dispatch instead of failing at boot.
+  // JUDGE_MODEL x JUDGE_PROVIDER consistency (is this model actually
+  // registered for this provider?) is checked separately, at dispatch time —
+  // see CategoryEvaluatorService.enqueuePending — since that needs the
+  // SupportedModel table, not just the env.
   const judgeProvider = env.JUDGE_PROVIDER ?? "openai";
-  if (!["openai", "ollama", "google"].includes(judgeProvider)) {
+  if (!JUDGE_PROVIDERS.includes(judgeProvider as (typeof JUDGE_PROVIDERS)[number])) {
     throw new Error(
-      `JUDGE_PROVIDER must be one of openai|ollama|google, got '${judgeProvider}'.`,
+      `JUDGE_PROVIDER must be one of ${JUDGE_PROVIDERS.join("|")}, got '${judgeProvider}'.`,
     );
   }
 
@@ -107,6 +123,6 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
     DB_MIGRATIONS_RUN: env.DB_MIGRATIONS_RUN !== "false",
     DISPATCH_PASSWORD: dispatchPassword,
     JUDGE_MODEL: env.JUDGE_MODEL ?? "gpt-4.1-nano",
-    JUDGE_PROVIDER: judgeProvider as "openai" | "ollama" | "google",
+    JUDGE_PROVIDER: judgeProvider as AppEnv["JUDGE_PROVIDER"],
   };
 }

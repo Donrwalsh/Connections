@@ -7,7 +7,30 @@ import { StrategyRun } from "./entities/strategy-run.entity";
 import { Guess, GuessResult } from "./entities/guess.entity";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { OrchestratorService } from "./orchestrator.service";
-import { LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE, LLM_GOOGLE_QUEUE } from "../queue/queue.module";
+import { RUNS_QUEUE_BY_POOL } from "../queue/queue.module";
+import { SupportedModelService } from "../supported-model/supported-model.service";
+import type { ProviderPoolId } from "../provider-pool/provider-pool.config";
+import type { Queue } from "bullmq";
+
+/** A RUNS_QUEUE_BY_POOL fixture covering every pool — `openaiAdd` lets a
+ * test assert on the openai queue specifically (the judge default), the
+ * other six pools get a shared no-op queue. */
+function runsQueueByPool(openaiAdd: jest.Mock = jest.fn()): ReadonlyMap<ProviderPoolId, Queue> {
+  const noopQueue = { add: jest.fn() } as unknown as Queue;
+  return new Map<ProviderPoolId, Queue>([
+    ["openai", { add: openaiAdd } as unknown as Queue],
+    ["ollama", noopQueue],
+    ["google", noopQueue],
+    ["groq", noopQueue],
+    ["openrouter", noopQueue],
+    ["mistral", noopQueue],
+    ["sambanova", noopQueue],
+  ]);
+}
+
+function mockSupportedModelService(): { assertSupported: jest.Mock } {
+  return { assertSupported: jest.fn().mockResolvedValue(undefined) };
+}
 
 const puzzle = {
   id: 7,
@@ -69,7 +92,6 @@ describe("CategoryEvaluatorService.evaluateProposal", () => {
       }),
     };
 
-    const noopQueue = { add: jest.fn() };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CategoryEvaluatorService,
@@ -78,9 +100,8 @@ describe("CategoryEvaluatorService.evaluateProposal", () => {
         { provide: getRepositoryToken(Puzzle), useValue: puzzleRepo },
         { provide: getRepositoryToken(StrategyRun), useValue: { findOne: jest.fn(), delete: jest.fn() } },
         { provide: OrchestratorService, useValue: orchestrator },
-        { provide: LLM_OPENAI_QUEUE, useValue: noopQueue },
-        { provide: LLM_OLLAMA_QUEUE, useValue: noopQueue },
-        { provide: LLM_GOOGLE_QUEUE, useValue: noopQueue },
+        { provide: RUNS_QUEUE_BY_POOL, useValue: runsQueueByPool() },
+        { provide: SupportedModelService, useValue: mockSupportedModelService() },
       ],
     }).compile();
     service = module.get(CategoryEvaluatorService);
@@ -176,6 +197,7 @@ describe("CategoryEvaluatorService.enqueuePending", () => {
   let service: CategoryEvaluatorService;
   let openaiAdd: jest.Mock;
   let qb: Record<string, jest.Mock>;
+  let supportedModelService: { assertSupported: jest.Mock };
 
   beforeEach(async () => {
     // See the evaluateProposal block: CategoryEvaluatorService field
@@ -194,6 +216,7 @@ describe("CategoryEvaluatorService.enqueuePending", () => {
       select: jest.fn().mockReturnThis(),
       getRawMany: jest.fn().mockResolvedValue([{ id: 90 }, { id: 88 }, { id: 80 }]),
     };
+    supportedModelService = mockSupportedModelService();
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CategoryEvaluatorService,
@@ -205,9 +228,8 @@ describe("CategoryEvaluatorService.enqueuePending", () => {
           useValue: { findOne: jest.fn(), delete: jest.fn() },
         },
         { provide: OrchestratorService, useValue: { judgeCategory: jest.fn() } },
-        { provide: LLM_OPENAI_QUEUE, useValue: { add: openaiAdd } },
-        { provide: LLM_OLLAMA_QUEUE, useValue: { add: jest.fn() } },
-        { provide: LLM_GOOGLE_QUEUE, useValue: { add: jest.fn() } },
+        { provide: RUNS_QUEUE_BY_POOL, useValue: runsQueueByPool(openaiAdd) },
+        { provide: SupportedModelService, useValue: supportedModelService },
       ],
     }).compile();
     service = module.get(CategoryEvaluatorService);
@@ -228,6 +250,22 @@ describe("CategoryEvaluatorService.enqueuePending", () => {
       { jobId: "cat-eval-90" },
     );
     expect(qb.limit).toHaveBeenCalledWith(10);
+  });
+
+  it("checks JUDGE_MODEL against JUDGE_PROVIDER (llm-openai, the default) before enqueuing anything", async () => {
+    await service.enqueuePending({ limit: 10 });
+    expect(supportedModelService.assertSupported).toHaveBeenCalledWith("llm-openai", "gpt-4.1-nano");
+  });
+
+  it("throws and enqueues nothing when JUDGE_MODEL isn't a supported model for JUDGE_PROVIDER", async () => {
+    supportedModelService.assertSupported.mockRejectedValueOnce(
+      new Error("Model 'gpt-4.1-nano' is not a supported model for strategy 'llm-openai'."),
+    );
+
+    await expect(service.enqueuePending({ limit: 10 })).rejects.toThrow(
+      /not a supported model/,
+    );
+    expect(openaiAdd).not.toHaveBeenCalled();
   });
 
   it("clamps limit to 1..500", async () => {
@@ -291,9 +329,8 @@ describe("CategoryEvaluatorService.getCoverage", () => {
           useValue: { findOne: jest.fn(), delete: jest.fn() },
         },
         { provide: OrchestratorService, useValue: { judgeCategory: jest.fn() } },
-        { provide: LLM_OPENAI_QUEUE, useValue: { add: jest.fn() } },
-        { provide: LLM_OLLAMA_QUEUE, useValue: { add: jest.fn() } },
-        { provide: LLM_GOOGLE_QUEUE, useValue: { add: jest.fn() } },
+        { provide: RUNS_QUEUE_BY_POOL, useValue: runsQueueByPool() },
+        { provide: SupportedModelService, useValue: mockSupportedModelService() },
       ],
     }).compile();
     service = module.get(CategoryEvaluatorService);
@@ -355,9 +392,8 @@ describe("CategoryEvaluatorService.deleteRunEvaluations", () => {
         { provide: getRepositoryToken(Puzzle), useValue: { findOne: jest.fn() } },
         { provide: getRepositoryToken(StrategyRun), useValue: strategyRunRepo },
         { provide: OrchestratorService, useValue: { judgeCategory: jest.fn() } },
-        { provide: LLM_OPENAI_QUEUE, useValue: { add: jest.fn() } },
-        { provide: LLM_OLLAMA_QUEUE, useValue: { add: jest.fn() } },
-        { provide: LLM_GOOGLE_QUEUE, useValue: { add: jest.fn() } },
+        { provide: RUNS_QUEUE_BY_POOL, useValue: runsQueueByPool() },
+        { provide: SupportedModelService, useValue: mockSupportedModelService() },
       ],
     }).compile();
     service = module.get(CategoryEvaluatorService);
@@ -416,9 +452,8 @@ describe("CategoryEvaluatorService failed-judge-call maintenance", () => {
           useValue: { findOne: jest.fn(), delete: jest.fn() },
         },
         { provide: OrchestratorService, useValue: { judgeCategory: jest.fn() } },
-        { provide: LLM_OPENAI_QUEUE, useValue: { add: jest.fn() } },
-        { provide: LLM_OLLAMA_QUEUE, useValue: { add: jest.fn() } },
-        { provide: LLM_GOOGLE_QUEUE, useValue: { add: jest.fn() } },
+        { provide: RUNS_QUEUE_BY_POOL, useValue: runsQueueByPool() },
+        { provide: SupportedModelService, useValue: mockSupportedModelService() },
       ],
     }).compile();
     service = module.get(CategoryEvaluatorService);

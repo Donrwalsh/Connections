@@ -56,6 +56,22 @@ export function providerPoolLabel(id: ProviderPoolId): string {
   return LABEL_BY_ID.get(id) ?? id;
 }
 
+const POOL_BY_ID = new Map<ProviderPoolId, ProviderPool>(
+  PROVIDER_POOLS.map((pool) => [pool.id, pool]),
+);
+
+/** The full pool row for `id` — for a caller (PoolDispatchWidget's mounts on
+ * ActivityPage) that needs the row itself, not just its label. Throws for an
+ * id outside PROVIDER_POOLS, which can only happen from a typo in code —
+ * every ProviderPoolId has a row. */
+export function providerPoolById(id: ProviderPoolId): ProviderPool {
+  const pool = POOL_BY_ID.get(id);
+  if (!pool) {
+    throw new Error(`No provider pool with id "${id}"`);
+  }
+  return pool;
+}
+
 function isPoolId(value: string): value is ProviderPoolId {
   return POOL_IDS.has(value as ProviderPoolId);
 }

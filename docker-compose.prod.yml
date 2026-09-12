@@ -102,7 +102,9 @@ services:
       - "100.122.242.72:6379:6379"
 
   orchestrator:
-    build: ./orchestrator
+    build:
+      context: .
+      dockerfile: orchestrator/Dockerfile
     container_name: ai_orchestrator
     restart: unless-stopped
     environment:
@@ -132,7 +134,9 @@ services:
       start_period: 10s
 
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: nest_backend
     restart: unless-stopped
     environment:
@@ -206,7 +210,9 @@ services:
   # that actually applies pending TypeORM migrations at startup
   # (DB_MIGRATIONS_RUN defaults to true here — leave it unset).
   worker:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: strategy_worker
     restart: unless-stopped
     command: node dist/worker.js

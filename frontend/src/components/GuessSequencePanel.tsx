@@ -1,6 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchRunDetailByStrategyDate, fetchRunsForStrategyDate } from "../data/benchmark/api";
+import {
+  PROVIDER_POOLS,
+  poolFromStrategyName,
+  providerPoolLabel,
+} from "../data/benchmark/providerPools";
+import { useResource } from "../hooks/useResource";
+import { useResources } from "../hooks/useResources";
 import type { GuessResultValue, StrategyRunDetail, StrategyRunListItem } from "../data/benchmark/types";
 
 interface GuessSequencePanelProps {
@@ -10,17 +17,32 @@ interface GuessSequencePanelProps {
   onToggle: () => void;
 }
 
-const STRATEGIES = [
+// The deterministic + shuffle strategies always get a toggle button. Their
+// names are stable, so this half stays a local literal; only the provider
+// half below is derived.
+const BASE_STRATEGIES: { id: string; label: string }[] = [
   { id: "alphabetical", label: "Alphabetical" },
   { id: "reverse-alphabetical", label: "Rev-Alphabetical" },
   { id: "order", label: "Order" },
   { id: "reverse-order", label: "Rev-Order" },
   { id: "shuffle-smart", label: "Shuffle-Smart" },
   { id: "shuffle-foolish", label: "Shuffle-Foolish" },
-  { id: "llm-openai", label: "LLM · OpenAI" },
-  { id: "llm-ollama", label: "LLM · Ollama" },
-  { id: "llm-google", label: "LLM · Google" },
 ];
+
+// One toggle per LLM provider pool, in PROVIDER_POOLS order, derived so a
+// provider added to providerPools.ts (and wired up in the backend) shows up
+// here automatically instead of silently going missing. Unlike the base
+// strategies, a provider button only renders once its run list has loaded
+// with at least one run for the current puzzle — see the map() below.
+const PROVIDER_STRATEGIES: { id: string; label: string }[] = PROVIDER_POOLS.map(
+  (pool) => ({ id: pool.strategyName, label: `LLM · ${pool.label}` }),
+);
+
+const STRATEGIES = [...BASE_STRATEGIES, ...PROVIDER_STRATEGIES];
+
+const PROVIDER_STRATEGY_IDS = new Set(PROVIDER_STRATEGIES.map((strat) => strat.id));
+
+const STRATEGY_IDS = STRATEGIES.map((strat) => strat.id);
 
 export function GuessSequencePanel({
   date,
@@ -29,130 +51,76 @@ export function GuessSequencePanel({
   onToggle,
 }: GuessSequencePanelProps) {
   const [activeStrategy, setActiveStrategy] = useState<string>("alphabetical");
-
-  const [strategyRuns, setStrategyRuns] = useState<
-    Record<string, StrategyRunListItem[]>
-  >({});
-  const [loadingStrategies, setLoadingStrategies] = useState<
-    Record<string, boolean>
-  >({});
-  const [errorMessages, setErrorMessages] = useState<Record<string, string>>(
-    {},
-  );
   const [activeRunId, setActiveRunId] = useState<number | null>(null);
   // Per-run detail is fetched lazily when a run is selected (full guess arrays
-  // are heavy — a deterministic run can hold ~2,400 guesses), then cached.
-  const [runDetails, setRunDetails] = useState<
+  // are heavy — a deterministic run can hold ~2,400 guesses), then cached by
+  // run id so reselecting an already-fetched run doesn't refetch it.
+  const [detailCache, setDetailCache] = useState<
     Record<number, StrategyRunDetail>
   >({});
-  const [detailLoading, setDetailLoading] = useState<Record<number, boolean>>(
-    {},
-  );
-  const [detailErrors, setDetailErrors] = useState<Record<number, string>>({});
 
   // Fetch strategy run lists on mount (or date change), regardless of isOpen
-  // state. The list is deliberately slim (no guess arrays) so six strategies
-  // load in a single parallel round of small requests.
+  // state. The list is deliberately slim (no guess arrays) so every strategy
+  // — the base set plus each provider pool — loads in a single parallel round
+  // of small requests. The provider lists are fetched even though most will
+  // come back empty: the panel needs them to decide which provider toggles to
+  // show.
+  const strategyResults = useResources(
+    date,
+    STRATEGY_IDS,
+    (strategyId, signal) => fetchRunsForStrategyDate(strategyId, date, signal),
+    { enabled: !!date },
+  );
+
+  // Selection resets whenever the run lists themselves get refetched for a
+  // new date, matching the previous reset-on-date-change effect.
   useEffect(() => {
-    if (!date) return;
-
-    const controller = new AbortController();
-
-    setRunDetails({});
-    setDetailLoading({});
-    setDetailErrors({});
+    setDetailCache({});
     setActiveRunId(null);
+  }, [date]);
 
-    const fetchStrategy = async (strategyId: string) => {
-      setLoadingStrategies((prev) => ({ ...prev, [strategyId]: true }));
-      setErrorMessages((prev) => ({ ...prev, [strategyId]: "" }));
+  // A provider tab can only be selected while its button is showing, but if
+  // the date then changes to a puzzle that provider never attempted, its
+  // button disappears and the panel would strand on a tab with no toggle.
+  // Fall back to the first base strategy once we know the active provider has
+  // no runs for this puzzle.
+  useEffect(() => {
+    if (!PROVIDER_STRATEGY_IDS.has(activeStrategy)) return;
+    const runs = strategyResults[activeStrategy]?.data;
+    if (runs && runs.length === 0) {
+      setActiveStrategy(BASE_STRATEGIES[0].id);
+    }
+  }, [activeStrategy, strategyResults]);
 
-      try {
-        const runs = await fetchRunsForStrategyDate(strategyId, date, controller.signal);
-        if (!controller.signal.aborted) {
-          setStrategyRuns((prev) => ({ ...prev, [strategyId]: runs }));
-        }
-      } catch (err: unknown) {
-        if (
-          (err as Error)?.name !== "AbortError" &&
-          !controller.signal.aborted
-        ) {
-          setErrorMessages((prev) => ({
-            ...prev,
-            [strategyId]:
-              err instanceof Error ? err.message : "Failed to load strategy",
-          }));
-        }
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoadingStrategies((prev) => ({ ...prev, [strategyId]: false }));
-        }
-      }
-    };
-
-    STRATEGIES.forEach((strat) => fetchStrategy(strat.id));
-
-    return () => controller.abort();
-  }, [date]); // Triggered as soon as date is passed down
-
-  const currentRuns = strategyRuns[activeStrategy] ?? [];
+  const currentRuns = strategyResults[activeStrategy]?.data ?? [];
   const selectedRun =
     currentRuns.find((run) => run.id === activeRunId) ?? currentRuns[0] ?? null;
 
-  const selectedDetail = selectedRun ? runDetails[selectedRun.id] : undefined;
-  const selectedDetailLoading = selectedRun
-    ? detailLoading[selectedRun.id]
-    : false;
-  const selectedDetailError = selectedRun
-    ? detailErrors[selectedRun.id]
-    : undefined;
-
-  // Ids whose detail is already fetched/cached, so the effect below skips them
-  // without reading state it would otherwise have to declare as a dependency.
-  const fetchedRunIds = useRef<Set<number>>(new Set());
+  const cachedDetail = selectedRun ? detailCache[selectedRun.id] : undefined;
 
   // Lazy-load the full guess list for the selected run, but only while the
-  // panel is open. Fetches are cached per run and aborted on unmount/switch.
+  // panel is open and only when this run isn't already cached below.
+  const {
+    data: fetchedDetail,
+    loading: selectedDetailLoading,
+    error: selectedDetailErrorObj,
+  } = useResource(
+    ["runDetail", selectedRun?.strategyName, date, selectedRun?.trialNumber],
+    (signal) => {
+      if (!selectedRun) return Promise.reject(new Error("No run selected"));
+      return fetchRunDetailByStrategyDate(selectedRun.strategyName, date, selectedRun.trialNumber, signal);
+    },
+    { enabled: isOpen && !!date && !!selectedRun && !cachedDetail },
+  );
+
   useEffect(() => {
-    if (!isOpen || !date || !selectedRun) return;
-    if (fetchedRunIds.current.has(selectedRun.id)) return;
+    if (!fetchedDetail || !selectedRun) return;
+    const id = selectedRun.id;
+    setDetailCache((prev) => (prev[id] === fetchedDetail ? prev : { ...prev, [id]: fetchedDetail }));
+  }, [fetchedDetail, selectedRun]);
 
-    const controller = new AbortController();
-    setDetailLoading((prev) => ({ ...prev, [selectedRun.id]: true }));
-    setDetailErrors((prev) => ({ ...prev, [selectedRun.id]: "" }));
-
-    fetchRunDetailByStrategyDate(
-      selectedRun.strategyName,
-      date,
-      selectedRun.trialNumber,
-      controller.signal,
-    )
-      .then((detail: StrategyRunDetail) => {
-        if (!controller.signal.aborted) {
-          setRunDetails((prev) => ({ ...prev, [selectedRun.id]: detail }));
-          fetchedRunIds.current.add(selectedRun.id);
-        }
-      })
-      .catch((err: unknown) => {
-        if (
-          (err as Error)?.name !== "AbortError" &&
-          !controller.signal.aborted
-        ) {
-          setDetailErrors((prev) => ({
-            ...prev,
-            [selectedRun.id]:
-              err instanceof Error ? err.message : "Failed to load run detail",
-          }));
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setDetailLoading((prev) => ({ ...prev, [selectedRun.id]: false }));
-        }
-      });
-
-    return () => controller.abort();
-  }, [isOpen, date, selectedRun]);
+  const selectedDetail = cachedDetail ?? fetchedDetail;
+  const selectedDetailError = selectedDetailErrorObj?.message;
 
   const handleStrategyClick = (strategyId: string) => {
     if (isOpen && activeStrategy === strategyId) {
@@ -168,8 +136,8 @@ export function GuessSequencePanel({
     }
   };
 
-  const isLoadingCurrent = loadingStrategies[activeStrategy];
-  const currentError = errorMessages[activeStrategy];
+  const isLoadingCurrent = strategyResults[activeStrategy]?.loading;
+  const currentError = strategyResults[activeStrategy]?.error?.message;
 
   const averageGuesses = (runs: StrategyRunListItem[]) => {
     if (runs.length === 0) return null;
@@ -182,9 +150,15 @@ export function GuessSequencePanel({
     <section className="guess-sequence">
       <div className="guess-sequence__header-actions">
         {STRATEGIES.map((strat) => {
+          const runs = strategyResults[strat.id]?.data;
+          // Provider toggles only appear once their run list has resolved with
+          // at least one run for this puzzle; the base deterministic/shuffle
+          // strategies always get a button.
+          if (PROVIDER_STRATEGY_IDS.has(strat.id) && !(runs && runs.length > 0)) {
+            return null;
+          }
           const isActive = isOpen && activeStrategy === strat.id;
-          const runs = strategyRuns[strat.id];
-          const isLoading = loadingStrategies[strat.id];
+          const isLoading = strategyResults[strat.id]?.loading;
           const stepCount = runs ? averageGuesses(runs) : null;
 
           return (
@@ -335,9 +309,8 @@ function formatResult(result: GuessResultValue): string {
 }
 
 function formatStrategyName(strategyName: string): string {
-  if (strategyName === "llm-openai") return "LLM · OpenAI";
-  if (strategyName === "llm-ollama") return "LLM · Ollama";
-  if (strategyName === "llm-google") return "LLM · Google";
+  const pool = poolFromStrategyName(strategyName);
+  if (pool) return `LLM · ${providerPoolLabel(pool)}`;
   return strategyName
     .split("-")
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))

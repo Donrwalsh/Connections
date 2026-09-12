@@ -831,6 +831,150 @@ describe("GuessSequencePanel Component", () => {
     expect(link).toHaveAttribute("href", "/leaderboard/mistral/100");
   });
 
+  // Fetch stub for the provider-toggle tests: the given strategy ids come back
+  // with a single completed run, every other strategy (base or provider) comes
+  // back empty.
+  function setupFetchWithRunsFor(strategyIds: string[]) {
+    const withRuns = new Set(strategyIds);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        const urlStr = String(url);
+        const strategyId =
+          urlStr.match(/\/strategy\/([^/]+)\//)?.[1] ?? "alphabetical";
+
+        if (urlStr.includes("/run/")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              id: 90,
+              strategyName: strategyId,
+              trialNumber: 1,
+              status: "completed",
+              startedAt: "2024-01-15T00:00:00Z",
+              finishedAt: "2024-01-15T00:05:00Z",
+              guessCount: 1,
+              meta: { total: 1, page: 1, limit: 200 },
+              guesses: [
+                {
+                  sequenceNumber: 1,
+                  words: ["A", "B", "C", "D"],
+                  result: "success",
+                  guessedAt: "2024-01-15T00:00:00Z",
+                },
+              ],
+            }),
+          });
+        }
+
+        if (!withRuns.has(strategyId)) {
+          return Promise.resolve({ ok: true, json: async () => [] });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => [
+            {
+              id: 90,
+              strategyName: strategyId,
+              trialNumber: 1,
+              status: "completed",
+              guessCount: 1,
+            },
+          ],
+        });
+      }),
+    );
+  }
+
+  it("hides a provider toggle when it has no runs for this puzzle", async () => {
+    setupFetchWithRunsFor(["llm-openai"]);
+
+    renderWithRouter(
+      <GuessSequencePanel
+        date="2024-01-15"
+        puzzleId={100}
+        isOpen={false}
+        onToggle={() => {}}
+      />,
+    );
+
+    // The provider that ran shows; the ones that didn't never render a button.
+    expect(
+      await screen.findByRole("button", { name: /Show LLM · OpenAI/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Show LLM · Groq/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Show LLM · Mistral/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Show LLM · SambaNova/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Show LLM · OpenRouter/ }),
+    ).not.toBeInTheDocument();
+
+    // Base deterministic/shuffle toggles always render, runs or not.
+    expect(
+      screen.getByRole("button", { name: /Show Alphabetical/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders a toggle for each newly-supported provider that has runs, labelled from the provider pool", async () => {
+    setupFetchWithRunsFor([
+      "llm-groq",
+      "llm-openrouter",
+      "llm-mistral",
+      "llm-sambanova",
+    ]);
+
+    renderWithRouter(
+      <GuessSequencePanel
+        date="2024-01-15"
+        puzzleId={100}
+        isOpen={false}
+        onToggle={() => {}}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: /Show LLM · Groq/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Show LLM · OpenRouter/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Show LLM · Mistral/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Show LLM · SambaNova/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("opens the guess sequence for a newly-supported provider", async () => {
+    setupFetchWithRunsFor(["llm-mistral"]);
+
+    renderWithRouter(
+      <GuessSequencePanel
+        date="2024-01-15"
+        puzzleId={100}
+        isOpen={true}
+        onToggle={() => {}}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Show LLM · Mistral/ }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Strategy: LLM · Mistral · Status: completed · 1 guess",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("does not render the 'view full run' link when puzzleId isn't a valid number", async () => {
     // Regression: a stale-cached /game/puzzle/:date response from before the
     // `id` field existed would resolve puzzleId to undefined. The link must

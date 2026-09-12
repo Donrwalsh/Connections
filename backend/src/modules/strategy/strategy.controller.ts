@@ -9,7 +9,7 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { ApiParam, ApiQuery } from "@nestjs/swagger";
-import { StrategyService } from "./strategy.service";
+import { RunHistoryReadModel } from "./strategy-read.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import { FreeTierUsageService } from "./free-tier-usage.service";
 import { STRATEGY_SET } from "../../strategies";
@@ -17,7 +17,7 @@ import { STRATEGY_SET } from "../../strategies";
 @Controller("strategy")
 export class StrategyController {
   constructor(
-    @Inject(StrategyService) private readonly strategyService: StrategyService,
+    @Inject(RunHistoryReadModel) private readonly runHistoryReadModel: RunHistoryReadModel,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
     @Inject(FreeTierUsageService) private readonly freeTierUsageService: FreeTierUsageService,
   ) {}
@@ -34,7 +34,7 @@ export class StrategyController {
   // segment is unambiguous with :strategyName/... regardless of order.
   @Get("leaderboard")
   async getLeaderboard() {
-    return this.strategyService.getLeaderboard();
+    return this.runHistoryReadModel.getLeaderboard();
   }
 
   // Same reasoning as "models"/"leaderboard" above. Two distinct routes
@@ -77,7 +77,7 @@ export class StrategyController {
       .map((id) => `llm-${id}`)
       .filter((name) => STRATEGY_SET.has(name));
 
-    return this.strategyService.getRecentActivity(
+    return this.runHistoryReadModel.getRecentActivity(
       strategyNames.length > 0 ? strategyNames : undefined,
     );
   }
@@ -87,7 +87,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', or 'llm-ollama'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or an LLM provider strategy ('llm-openai', 'llm-ollama', 'llm-google', 'llm-groq', 'llm-openrouter', 'llm-mistral', 'llm-sambanova')",
     example: "alphabetical",
   })
   @ApiParam({
@@ -103,7 +103,7 @@ export class StrategyController {
       );
     }
 
-    return this.strategyService.getRunsForPuzzle(date, strategyName);
+    return this.runHistoryReadModel.getRunsForPuzzle(date, strategyName);
   }
 
   @Get(":strategyName/puzzle/:date/run/:trialNumber")
@@ -111,7 +111,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', or 'llm-ollama'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or an LLM provider strategy ('llm-openai', 'llm-ollama', 'llm-google', 'llm-groq', 'llm-openrouter', 'llm-mistral', 'llm-sambanova')",
     example: "alphabetical",
   })
   @ApiParam({
@@ -140,7 +140,7 @@ export class StrategyController {
       );
     }
 
-    return this.strategyService.getRunDetail(date, strategyName, trialNumber, page, limit);
+    return this.runHistoryReadModel.getRunDetail(date, strategyName, trialNumber, page, limit);
   }
 
   @Get(":strategyName/puzzle-id/:puzzleId")
@@ -148,7 +148,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', or 'llm-ollama'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or an LLM provider strategy ('llm-openai', 'llm-ollama', 'llm-google', 'llm-groq', 'llm-openrouter', 'llm-mistral', 'llm-sambanova')",
     example: "llm-openai",
   })
   @ApiParam({
@@ -167,7 +167,7 @@ export class StrategyController {
       );
     }
 
-    return this.strategyService.getRunsForPuzzleId(puzzleId, strategyName);
+    return this.runHistoryReadModel.getRunsForPuzzleId(puzzleId, strategyName);
   }
 
   @Get(":strategyName/runs")
@@ -175,7 +175,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', or 'llm-ollama'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or an LLM provider strategy ('llm-openai', 'llm-ollama', 'llm-google', 'llm-groq', 'llm-openrouter', 'llm-mistral', 'llm-sambanova')",
     example: "alphabetical",
   })
   @ApiQuery({
@@ -235,7 +235,7 @@ export class StrategyController {
       );
     }
 
-    return this.strategyService.getRunHistory(strategyName, {
+    return this.runHistoryReadModel.getRunHistory(strategyName, {
       model,
       page,
       limit,
@@ -262,7 +262,7 @@ export class StrategyController {
     @Query("page", new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query("limit", new DefaultValuePipe(200), ParseIntPipe) limit: number,
   ) {
-    return this.strategyService.getRunDetailByRunId(runId, page, limit);
+    return this.runHistoryReadModel.getRunDetailByRunId(runId, page, limit);
   }
 
   @Get(":strategyName/puzzle/:date/run/:trialNumber/guess/:sequenceNumber")
@@ -270,7 +270,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', or 'llm-ollama'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or an LLM provider strategy ('llm-openai', 'llm-ollama', 'llm-google', 'llm-groq', 'llm-openrouter', 'llm-mistral', 'llm-sambanova')",
     example: "alphabetical",
   })
   @ApiParam({
@@ -304,6 +304,6 @@ export class StrategyController {
       );
     }
 
-    return this.strategyService.getGuessDetail(date, strategyName, trialNumber, sequenceNumber);
+    return this.runHistoryReadModel.getGuessDetail(date, strategyName, trialNumber, sequenceNumber);
   }
 }

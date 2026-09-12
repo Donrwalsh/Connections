@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review — Connections Lab (round 3)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .font-serif { font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .lbl { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+      .deep-fill { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .ghost { opacity: .34; }
+      table.t { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+      table.t th, table.t td { border: 1px solid #e2e8f0; padding: 7px 9px; text-align: left; vertical-align: top; }
+      table.t th { background: #f1f5f9; font-weight: 600; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-14">
+
+      <header class="space-y-5">
+        <div>
+          <h1 class="font-serif text-4xl">Architecture review — Connections Lab</h1>
+          <p class="text-slate-500 mt-1">Round 3 · 2026-09-09 · "anything beyond the 8?"</p>
+        </div>
+        <p class="text-slate-700 max-w-3xl">
+          The high-yield friction is in rounds 1–2 (docs <span class="mono text-sm">01–08</span>). This
+          pass swept the areas those rounds didn't touch — the frontend, the game/ingestion modules, the
+          <span class="mono text-sm">supported-model</span> module, the bootstrap family, the judge path.
+          Three candidates worth naming, one of them Strong. Several modules were checked and found
+          <em>healthy</em> — listed at the end so a future pass doesn't re-tread them.
+        </p>
+        <div class="flex flex-wrap gap-4 text-xs text-slate-600 border-t border-b border-slate-200 py-3">
+          <span class="flex items-center gap-2"><span class="inline-block w-4 h-4 border-2 border-slate-800 bg-white"></span> module</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-4 h-4 deep-fill"></span> deep module</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-4 h-4 bg-red-100 border border-red-400"></span> copied shape</span>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-16">
+
+        <!-- ============================ CANDIDATE 9 ============================ -->
+        <article class="space-y-6">
+          <h2 class="font-serif text-2xl">9 · A frontend data-fetching seam (<span class="mono text-xl">useResource</span>)</h2>
+          <div class="flex flex-wrap gap-2">
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800">Strong</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">frontend</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">in-process</span>
+          </div>
+
+          <div class="text-sm mono text-slate-600 leading-relaxed">
+            frontend/src/components/GuessSequencePanel.tsx · benchmark/GuessChainVisualizer.tsx · benchmark/*DispatchWidget.tsx ×5 ·<br />
+            benchmark/FreeTierBudgetWidget.tsx · benchmark/CategoryJudgingWidget.tsx · pages/benchmark/PuzzleRunsPage.tsx · StrategyPuzzlePage.tsx · pages/PuzzlePage.tsx · components/Game.tsx<br />
+            <span class="text-slate-400">— 18 hand-rolled <span class="mono">new AbortController()</span> fetch blocks across 13 files; <span class="mono">hooks/</span> holds exactly one hook (<span class="mono">useConnectionsGame</span>)</span>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-xl border border-slate-200 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">Before — every component re-writes the fetch lifecycle</p>
+              <svg viewBox="0 0 300 250" class="w-full h-[250px]">
+                <g font-size="8.5" fill="#334155">
+                  <rect x="14" y="16" width="272" height="150" fill="#fee2e2" stroke="#ef4444"/>
+                  <text x="24" y="32" class="mono">useState(data) · useState(isLoading) · useState(error)</text>
+                  <text x="24" y="48" class="mono">useEffect(() =&gt; {</text>
+                  <text x="34" y="62" class="mono">const c = new AbortController();</text>
+                  <text x="34" y="76" class="mono">setLoading(true); setError(null);</text>
+                  <text x="34" y="90" class="mono">fetchX(..., c.signal)</text>
+                  <text x="44" y="104" class="mono">.then(setData).catch(setError).finally(...)</text>
+                  <text x="34" y="118" class="mono">return () =&gt; c.abort();</text>
+                  <text x="24" y="132" class="mono">}, [dep, refreshSignal])</text>
+                  <text x="24" y="152" fill="#b91c1c">— written 18×, each slightly different</text>
+                </g>
+                <text x="150" y="188" text-anchor="middle" font-size="9" fill="#b91c1c">race on dep-change, missing abort, stale closure —</text>
+                <text x="150" y="202" text-anchor="middle" font-size="9" fill="#b91c1c">bugs live in how each copy is written</text>
+                <text x="150" y="228" text-anchor="middle" font-size="9" fill="#64748b">post-mutation refetch = a hand-passed <tspan class="mono">refreshSignal</tspan> counter</text>
+              </svg>
+            </div>
+            <div class="rounded-xl border border-slate-300 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">After — one hook owns the lifecycle</p>
+              <svg viewBox="0 0 300 250" class="w-full h-[250px]">
+                <rect x="45" y="30" width="210" height="96" rx="6" class="deep-fill"/>
+                <text x="150" y="50" text-anchor="middle" class="lbl" fill="#e2e8f0">useResource(key, fetcher)</text>
+                <text x="150" y="72" text-anchor="middle" font-size="9" fill="#cbd5e1">abort on unmount + on key change</text>
+                <text x="150" y="86" text-anchor="middle" font-size="9" fill="#cbd5e1">ignore out-of-order responses</text>
+                <text x="150" y="100" text-anchor="middle" font-size="9" fill="#cbd5e1">{ data, error, loading, refetch }</text>
+                <text x="150" y="160" text-anchor="middle" font-size="9" fill="#64748b">components: <tspan class="mono">const {data,loading} = useResource(...)</tspan></text>
+                <text x="150" y="178" text-anchor="middle" font-size="9" fill="#64748b"><tspan class="mono">refetch()</tspan> replaces the refreshSignal counter</text>
+                <text x="150" y="210" text-anchor="middle" font-size="8.5" fill="#94a3b8">(or adopt a tiny lib — TanStack Query — but a ~40-line hook covers this app)</text>
+              </svg>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+            <p><span class="lbl text-slate-400">Problem</span><br />The fetch lifecycle — abort on unmount, reset-on-dep-change, out-of-order-response guarding, loading/error state, post-mutation refetch — is re-implemented in every component. The interface (<span class="mono text-xs">data/loading/error/refetch</span> + a cleanup) is as big as the payload ("call one endpoint"). <strong>No locality:</strong> a race-condition fix has 18 sites.</p>
+            <p><span class="lbl text-slate-400">Solution</span><br />One <span class="mono text-xs">useResource(key, fetcher)</span> hook (or a small library) that owns the lifecycle. Components declare a key and a fetcher and read <span class="mono text-xs">{ data, loading, error, refetch }</span>. The <span class="mono text-xs">refreshSignal</span> counter convention — currently passed between <span class="mono text-xs">FreeTierDispatchModal</span>, <span class="mono text-xs">FreeTierBudgetWidget</span>, <span class="mono text-xs">PuzzleRunsPage</span> — collapses into <span class="mono text-xs">refetch()</span>.</p>
+          </div>
+
+          <ul class="text-sm grid sm:grid-cols-2 gap-x-8 gap-y-1 list-disc pl-5 marker:text-emerald-500">
+            <li>locality: abort / race / reset logic in one place</li>
+            <li>the interface is the test surface: test the hook once, hard</li>
+            <li>leverage: one fix (e.g. retry-on-focus) reaches every fetch</li>
+            <li>components shrink to markup + a one-line data call</li>
+            <li>the 5 <span class="mono text-xs">*DispatchWidget</span> polls become trivially identical (feeds candidate 10)</li>
+          </ul>
+          <div class="text-xs bg-amber-50 border border-amber-300 rounded-lg p-3 text-amber-900">
+            Grill: build vs adopt. A ~40-line <span class="mono">useResource</span> keeps the dependency count at zero and is easy to test; TanStack Query brings caching/dedup/focus-refetch for free but is a real dependency and a migration. The app has ~13 fetch sites — likely below the line where the library pays for itself, but worth a deliberate call.
+          </div>
+        </article>
+
+        <!-- ============================ CANDIDATE 10 ============================ -->
+        <article class="space-y-6">
+          <h2 class="font-serif text-2xl">10 · The provider-pool seam runs through the edge too</h2>
+          <div class="flex flex-wrap gap-2">
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">Worth exploring</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">extends candidate 1</span>
+          </div>
+
+          <div class="text-sm mono text-slate-600 leading-relaxed">
+            backend/src/modules/dispatch/dispatch.controller.ts <span class="text-slate-400">— GET+DELETE /dispatch/{google,groq,openrouter,mistral,sambanova}</span><br />
+            frontend/src/data/benchmark/api.ts <span class="text-slate-400">— fetch{P}DispatchStatus + stop{P}Dispatch ×5</span><br />
+            frontend/src/data/benchmark/types.ts <span class="text-slate-400">— {P}DispatchStatus ×5</span><br />
+            frontend/src/components/benchmark/{P}DispatchWidget.tsx <span class="text-slate-400">×5 (~4 lines of real difference each)</span>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-xl border border-slate-200 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">Before — the pool list stops at the backend services</p>
+              <svg viewBox="0 0 300 210" class="w-full h-[210px]">
+                <g font-size="9" fill="#334155">
+                  <rect x="20" y="16" width="260" height="22" fill="#ecfdf5" stroke="#059669"/>
+                  <text x="28" y="31">providerPools.ts / PROVIDER_POOLS — one row per provider ✓</text>
+                  <rect x="20" y="48" width="260" height="22" fill="#fee2e2" stroke="#ef4444"/>
+                  <text x="28" y="63">dispatch.controller.ts — 5× GET + 5× DELETE, hand-written</text>
+                  <rect x="20" y="80" width="260" height="22" fill="#fee2e2" stroke="#ef4444"/>
+                  <text x="28" y="95">api.ts — fetch{P}DispatchStatus / stop{P}Dispatch ×5</text>
+                  <rect x="20" y="112" width="260" height="22" fill="#fee2e2" stroke="#ef4444"/>
+                  <text x="28" y="127">types.ts — {P}DispatchStatus type ×5</text>
+                  <rect x="20" y="144" width="260" height="22" fill="#fee2e2" stroke="#ef4444"/>
+                  <text x="28" y="159">{P}DispatchWidget.tsx ×5</text>
+                </g>
+                <text x="150" y="188" text-anchor="middle" font-size="9" fill="#b91c1c">a 6th provider = 4 more hand-edits past the config row</text>
+              </svg>
+            </div>
+            <div class="rounded-xl border border-slate-300 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">After — the list drives the edge</p>
+              <svg viewBox="0 0 300 210" class="w-full h-[210px]">
+                <rect x="40" y="26" width="220" height="30" rx="5" fill="#ecfdf5" stroke="#059669"/>
+                <text x="150" y="45" text-anchor="middle" font-size="9" class="mono" fill="#065f46">PROVIDER_POOLS (shared)</text>
+                <g font-size="9">
+                  <rect x="30" y="78" width="110" height="46" rx="5" class="deep-fill"/>
+                  <text x="85" y="98" text-anchor="middle" font-size="8" fill="#e2e8f0">GET/DELETE</text>
+                  <text x="85" y="110" text-anchor="middle" font-size="8" fill="#cbd5e1">/dispatch/pool/:id</text>
+                  <rect x="160" y="78" width="110" height="46" rx="5" class="deep-fill"/>
+                  <text x="215" y="98" text-anchor="middle" font-size="8" fill="#e2e8f0">fetchPoolDispatch</text>
+                  <text x="215" y="110" text-anchor="middle" font-size="8" fill="#cbd5e1">Status(poolId)</text>
+                  <rect x="95" y="146" width="110" height="40" rx="5" class="deep-fill"/>
+                  <text x="150" y="163" text-anchor="middle" font-size="8" fill="#e2e8f0">&lt;PoolDispatchWidget</text>
+                  <text x="150" y="175" text-anchor="middle" font-size="8" fill="#cbd5e1">pool={p} /&gt; in a map</text>
+                </g>
+              </svg>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+            <p><span class="lbl text-slate-400">Problem</span><br />Candidate 1 collapses the backend provider stacks, but the same per-provider shape is hand-copied at the HTTP edge and all the way into the React tree. <span class="mono text-xs">providerPools.ts</span> already exists as the list — the routes, the client, and the widgets just don't read it.</p>
+            <p><span class="lbl text-slate-400">Solution</span><br />One <span class="mono text-xs">/dispatch/pool/:poolId</span> route pair (keep the old paths as shims), one <span class="mono text-xs">fetchPoolDispatchStatus(poolId)</span> / <span class="mono text-xs">stopPoolDispatch(poolId)</span>, one <span class="mono text-xs">&lt;PoolDispatchWidget pool={…}&gt;</span> rendered from <span class="mono text-xs">PROVIDER_POOLS.map()</span> (<span class="mono text-xs">GuessSequencePanel</span> already derives its provider toggles this way — follow that).</p>
+          </div>
+
+          <ul class="text-sm grid sm:grid-cols-2 gap-x-8 gap-y-1 list-disc pl-5 marker:text-amber-500">
+            <li>leverage: a provider is one config row end to end</li>
+            <li>the dispatch-status widget's poll logic is written once (needs candidate 9)</li>
+            <li>the <span class="mono text-xs">DispatchStatus</span> union in <span class="mono text-xs">types.ts</span> becomes one generic shape</li>
+            <li>small on its own — real value is as candidate 1's finish line</li>
+          </ul>
+          <div class="text-xs bg-slate-100 border border-slate-300 rounded-lg p-3 text-slate-700">
+            Minor, same family: <span class="mono">strategy.queue.ts</span>'s <span class="mono">queueForJudgeProvider(provider, …)</span> is a second, narrower copy of <span class="mono">queueForStrategy</span> — it maps a provider to a queue but only knows <span class="mono">openai | ollama | google</span>, so a category-judge can't run on the other four providers. Candidate 3's pool lookup unifies both and removes that asymmetry for free.
+          </div>
+        </article>
+
+        <!-- ============================ CANDIDATE 11 ============================ -->
+        <article class="space-y-6">
+          <h2 class="font-serif text-2xl">11 · One home for retry / backoff / date helpers</h2>
+          <div class="flex flex-wrap gap-2">
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">Speculative</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">backend</span>
+          </div>
+
+          <div class="text-sm mono text-slate-600 leading-relaxed">
+            puzzle-ingestion.service.ts (<span class="text-slate-400">delay, computeBackoff, isRetryableStatus, formatDate, addDays</span>) ·
+            llm-strategy-runner.service.ts (<span class="text-slate-400">delay, modelErrorBackoff</span>) ·
+            {google,groq,mistral,sambanova}-rpd-resume.service.ts (<span class="text-slate-400">REARM_MAX_DELAY, delay math</span>) ·
+            strategies.ts (<span class="text-slate-400">startOfTodayUtc, nextDailyAutomationRunAt</span>)
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+            <p><span class="lbl text-slate-400">Problem</span><br />"Sleep N ms", "exponential backoff with a ceiling", "is this HTTP status retryable", and "start of today in UTC" are each re-implemented in three-to-five files. Each copy is tiny, so none is <em>painful</em> — but a backoff-policy change (jitter, a different cap) is a multi-file hunt, and the copies have already diverged in their ceilings and jitter.</p>
+            <p><span class="lbl text-slate-400">Solution</span><br />A <span class="mono text-xs">backend/src/common/</span> pair: <span class="mono text-xs">retry.ts</span> (<span class="mono text-xs">delay</span>, <span class="mono text-xs">backoff({attempt, base, cap, jitter})</span>, <span class="mono text-xs">isRetryableHttpStatus</span>) and the existing <span class="mono text-xs">startOfTodayUtc</span> promoted out of <span class="mono text-xs">strategies.ts</span> into a <span class="mono text-xs">time.ts</span>. Callers import instead of redefining.</p>
+          </div>
+
+          <ul class="text-sm grid sm:grid-cols-2 gap-x-8 gap-y-1 list-disc pl-5 marker:text-slate-400">
+            <li>one backoff policy, tuned once</li>
+            <li>low leverage — the copies are small and rarely change</li>
+            <li>best done opportunistically while touching each file for candidates 1 / 5</li>
+          </ul>
+        </article>
+
+      </section>
+
+      <!-- ============================ ALREADY HEALTHY ============================ -->
+      <section class="rounded-xl border border-slate-200 bg-white p-6 space-y-3">
+        <p class="lbl text-slate-400">Checked this round, found healthy — skip in future passes</p>
+        <ul class="text-sm space-y-1.5 list-disc pl-5 text-slate-700">
+          <li><span class="mono text-xs">supported-model/</span> — a genuinely deep module. <span class="mono text-xs">OpenRouterClient</span> (28 lines) is a real adapter; <span class="mono text-xs">openrouter-metadata.util.ts</span> (22) is pure parsers; <span class="mono text-xs">supported-model.service.ts</span> has focused, single-purpose methods. Nothing to deepen.</li>
+          <li><span class="mono text-xs">game/game.service.ts</span> — minor: <span class="mono text-xs">puzzleDateToId</span> and <span class="mono text-xs">resolveDateToPuzzleId</span> are near-duplicates, and <span class="mono text-xs">GameService.evaluateGuessOnPuzzle</span> is a <span class="mono text-xs">static</span> on an injectable class. Cosmetic, not structural.</li>
+          <li><span class="mono text-xs">auth/</span>, <span class="mono text-xs">app.setup.ts</span> — small, single-purpose, no friction.</li>
+          <li>The <span class="mono text-xs">*.bootstrap.ts</span> family — the four <span class="mono text-xs">*-rpd-resume.bootstrap.ts</span> are covered by candidate 1; the remaining three (<span class="mono text-xs">daily-automation</span>, <span class="mono text-xs">puzzle-queue</span>, <span class="mono text-xs">model-metadata-refresh</span>) share a shape but differ enough (cron vs startup-only) that a base class would be thin. Not worth it.</li>
+          <li>The 60+ migration files — many are one-liners (<span class="mono text-xs">add-{provider}-models</span>), but migrations are append-only history by design; consolidating them is not a deepening.</li>
+        </ul>
+      </section>
+
+      <!-- ============================ TOP RECOMMENDATION ============================ -->
+      <section id="top-recommendation" class="rounded-2xl border-2 border-emerald-600 bg-white p-8 space-y-4">
+        <p class="lbl text-emerald-700">Top recommendation</p>
+        <h2 class="font-serif text-2xl">Candidate 9 — the frontend fetch hook — is the only round-3 item that stands on its own.</h2>
+        <p class="text-sm text-slate-700 max-w-3xl">
+          It is a real locality problem (18 copies of one lifecycle) with a clean deepening and it is
+          independent of everything in rounds 1–2, so it can proceed in parallel. Candidate 10 is the
+          natural closing move for candidate 1 — do it when that work reaches the edge, not before.
+          Candidate 11 is cleanup to fold in opportunistically.
+        </p>
+        <p class="text-sm text-slate-700 max-w-3xl">
+          <strong>Diminishing returns note:</strong> round 1 (provider pools, <span class="mono text-xs">01–04</span>)
+          and the <span class="mono text-xs">strategy.service.ts</span> split (<span class="mono text-xs">05</span>)
+          are where the leverage is. Rounds 2–3 are progressively smaller. After candidate 9, the codebase
+          is in good shape structurally — further passes will mostly surface style, not architecture.
+        </p>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-8 border-t border-slate-200">
+        Connections Lab · architecture review round 3 · candidates 1–8 in <span class="mono">docs/architecture/01–08</span> · 2026-09-09
+      </footer>
+
+    </main>
+  </body>
+</html>

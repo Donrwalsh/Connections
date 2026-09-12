@@ -83,12 +83,13 @@ export interface SolvePromptDto {
   // always keeps the untouched original text regardless of what's flagged
   // here.
   issueTags: string[];
-  // Best-effort reconstruction of the *entire* chat payload actually sent —
-  // every earlier step's prompt/response plus this step's own new prompt,
-  // exactly as the runner's growing `messages` array would have looked. Not
-  // stored in the DB, so this is inferred from the run's starting word order
-  // and the guesses/responses recorded up to this step. See
-  // prompt-reconstruction.ts.
+  // The *entire* chat payload actually sent for this attempt — every earlier
+  // step's prompt/response plus this step's own new prompt, exactly as the
+  // runner's growing `messages` array looked at that point. Sourced directly
+  // from SolvePrompt.promptText (llm-strategy-runner.service.ts writes this
+  // on every new row; historical rows were backfilled once — see
+  // backfill-prompt-text.ts). Field name kept as `reconstructedPrompt` for
+  // frontend compatibility even though it's no longer reconstructed on read.
   reconstructedPrompt: string | null;
   proposals: LlmProposalDto[];
   // Populated only when status is 'callError' — the OpenAI call itself
@@ -142,7 +143,7 @@ export interface StrategyRunListItemDto {
 
 // Per-status run counts for one leaderboard row. `queued` is the only field
 // not sourced from StrategyRun — a queued job has no row yet (see
-// StrategyService.getLeaderboard), so it's read live from the BullMQ queues
+// RunHistoryReadModel.getLeaderboard), so it's read live from the BullMQ queues
 // instead and merged in.
 export interface LeaderboardProgressDto {
   completed: number;
@@ -155,7 +156,7 @@ export interface LeaderboardProgressDto {
 // shuffle-smart, shuffle-foolish) or, for LLM strategies, one model —
 // aggregated across every puzzle it has ever run against. Only strategies/
 // models with at least one real StrategyRun appear at all; see
-// StrategyService.getLeaderboard for how the row set and `progress.queued`
+// RunHistoryReadModel.getLeaderboard for how the row set and `progress.queued`
 // are assembled.
 export interface LeaderboardRowDto {
   // modelName for LLM rows (several models can share one strategyName), the

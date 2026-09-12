@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deepening 4 — Pool config for the strategies.ts knobs</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .font-serif { font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .lbl { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+      pre.code { background:#0f172a; color:#e2e8f0; padding:1rem 1.15rem; border-radius:.6rem; overflow-x:auto; font-size:12.5px; line-height:1.55; }
+      pre.code .c { color:#7dd3fc; } pre.code .k { color:#f0abfc; } pre.code .s { color:#86efac; }
+      table.t { border-collapse: collapse; width: 100%; font-size: 13px; }
+      table.t th, table.t td { border: 1px solid #e2e8f0; padding: 7px 10px; text-align: left; vertical-align: top; }
+      table.t th { background: #f1f5f9; font-weight: 600; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900">
+    <main class="max-w-4xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="space-y-4">
+        <p class="lbl text-slate-400">Architecture deepening · candidate 4 of 4</p>
+        <h1 class="font-serif text-4xl">Fold the per-provider knob families in <span class="mono text-3xl">strategies.ts</span> into the pool config</h1>
+        <p class="text-slate-600 max-w-2xl">Own analysis, pre-grilling. The smallest and most optional of the four — speculative until candidate 1 lands the config list.</p>
+      </header>
+
+      <!-- FRICTION -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The friction</h2>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">backend/src/strategies.ts</span> is ~730 lines. Beyond the genuine
+          shared logic (trial counts, prompt limits, temperature, the daily-automation cron), it has
+          grown a <strong>per-provider family</strong> of roughly 28 accessor functions, each a
+          three-line wrapper of the same form:
+        </p>
+        <pre class="code"><span class="k">export function</span> llmGroqRateLimitFallbackSeconds(env = process.env): number {
+  <span class="k">return</span> positiveTrialCount(env.LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS,
+                            DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS);
+}</pre>
+        <table class="t">
+          <thead><tr><th>Family</th><th>Members (× provider)</th></tr></thead>
+          <tbody>
+            <tr><td>worker concurrency</td><td><span class="mono text-xs">llm{Google,Groq,OpenRouter,Mistral,SambaNova}Concurrency</span></td></tr>
+            <tr><td>per-minute fallback wait</td><td><span class="mono text-xs">llm{…}RateLimitFallbackSeconds</span> ×5</td></tr>
+            <tr><td>daily-hold fallback</td><td><span class="mono text-xs">llmGroqDailyHoldFallbackSeconds</span>, <span class="mono text-xs">llmSambaNovaDailyHoldFallbackSeconds</span>, <span class="mono text-xs">mistralModelHoldFallbackSeconds</span></td></tr>
+            <tr><td>dedicated dispatch pacing</td><td><span class="mono text-xs">{openRouter,sambaNova}Dispatch{TickMs,MaxBatch,MaxInFlight}</span> + <span class="mono text-xs">openRouterDispatchRpmCooldownSeconds</span></td></tr>
+            <tr><td>OpenRouter account budget</td><td><span class="mono text-xs">openRouterFreeDailyBudget</span>, <span class="mono text-xs">openRouterCallsPerTrialEstimate</span></td></tr>
+            <tr><td>Mistral streak heuristic</td><td><span class="mono text-xs">mistralPersistentRateLimitAttempts</span>, <span class="mono text-xs">mistralPersistentRateLimitElapsedMs</span></td></tr>
+          </tbody>
+        </table>
+        <p class="text-sm text-slate-700">
+          Each new provider adds ~6–10 more. The file is now mostly boilerplate, and the accessor name is
+          the only thing tying an env var to the provider that reads it — there is no one place that says
+          "here is everything tunable about Groq."
+        </p>
+      </section>
+
+      <!-- NOT THE PROBLEM -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">What is <em>not</em> the problem</h2>
+        <p class="text-sm text-slate-700">
+          The env-var <em>surface</em> is fine — operators legitimately tune
+          <span class="mono text-xs">LLM_GROQ_CONCURRENCY</span> independently of
+          <span class="mono text-xs">LLM_MISTRAL_CONCURRENCY</span>, and
+          <span class="mono text-xs">config/env.ts</span> already documents them. The shallowness is the
+          <strong>28 hand-written functions</strong> that each do
+          <span class="mono text-xs">read env / coerce / default</span> — an interface (28 named getters)
+          nearly as large as its implementation (one <span class="mono text-xs">positiveTrialCount</span> call each).
+        </p>
+      </section>
+
+      <!-- SHAPE -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The deepened shape</h2>
+        <p class="text-sm text-slate-700">
+          One typed record per pool, resolved once from env, hung off the same
+          <span class="mono text-xs">PROVIDER_POOLS</span> list candidate 1 introduces. One generic
+          reader; the env-var name is derived from the pool id.
+        </p>
+        <pre class="code"><span class="c">// provider-pool.config.ts</span>
+<span class="k">interface</span> PoolKnobs {
+  concurrency: number;                 <span class="c">// LLM_&lt;ID&gt;_CONCURRENCY</span>
+  rateLimitFallbackSeconds: number;    <span class="c">// LLM_&lt;ID&gt;_RATE_LIMIT_FALLBACK_SECONDS</span>
+  dailyHoldFallbackSeconds?: number;   <span class="c">// LLM_&lt;ID&gt;_DAILY_HOLD_FALLBACK_SECONDS</span>
+  dispatch?:
+    | { pacing: <span class="s">"shared"</span> }                            <span class="c">// reuse FREE_TIER_DISPATCH_*</span>
+    | { pacing: <span class="s">"dedicated"</span>; tickMs; maxBatch; maxInFlight; rpmCooldownMs? };
+  accountBudget?: { dailyBudget; callsPerTrial };  <span class="c">// openrouter only</span>
+  streakHeuristic?: { attempts; elapsedMs };       <span class="c">// mistral only</span>
+}
+
+<span class="k">function</span> poolKnobs(pool: ProviderPool, env = process.env): PoolKnobs {
+  <span class="k">const</span> ID = pool.id.toUpperCase();
+  <span class="k">return</span> {
+    concurrency: intEnv(env, <span class="s">`LLM_${ID}_CONCURRENCY`</span>, pool.defaults.concurrency),
+    rateLimitFallbackSeconds: intEnv(env, <span class="s">`LLM_${ID}_RATE_LIMIT_FALLBACK_SECONDS`</span>, 60),
+    …
+  };
+}</pre>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">strategies.ts</span> keeps its genuinely shared exports and loses the
+          28 wrappers plus their 28 <span class="mono text-xs">DEFAULT_*</span> consts (defaults move to
+          the pool row). Callers change from
+          <span class="mono text-xs">llmGroqConcurrency()</span> to
+          <span class="mono text-xs">poolKnobs(pool).concurrency</span> — and by that point the caller
+          already holds a <span class="mono text-xs">pool</span> (candidates 1–3).
+        </p>
+      </section>
+
+      <!-- TESTS -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Tests</h2>
+        <ul class="text-sm space-y-1.5 list-disc pl-5 text-slate-700">
+          <li>~28 tiny "reads env / falls back to default" specs become one parametrised
+            <span class="mono text-xs">poolKnobs</span> spec: for each pool, assert the env override wins and the default applies.</li>
+          <li>The coercion edge cases (negative, zero, non-numeric) are tested once on <span class="mono text-xs">intEnv</span> instead of re-tested per accessor.</li>
+        </ul>
+      </section>
+
+      <!-- RISKS -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">Risks &amp; open questions</h2>
+        <div class="space-y-3 text-sm text-slate-700">
+          <p><strong class="text-slate-900">Derived env-var names hurt greppability.</strong> Today <span class="mono text-xs">grep LLM_GROQ_CONCURRENCY</span> finds the reader. With <span class="mono text-xs">`LLM_${ID}_CONCURRENCY`</span> it finds nothing. Mitigate: keep a static manifest (a plain array of the literal names per pool) that <span class="mono text-xs">config/env.ts</span> documentation and a startup validation both iterate — so the names still exist as literals in one place.</p>
+          <p><strong class="text-slate-900">Some knobs genuinely resist templating.</strong> <span class="mono text-xs">mistralPersistentRateLimitElapsedMs</span> reads a <em>seconds</em> env and returns <em>milliseconds</em>; <span class="mono text-xs">openRouterDispatchRpmCooldownSeconds</span> reads <em>ms</em> and returns <em>seconds</em>. These unit conversions stay as small explicit functions on the record, not templated.</p>
+          <p><strong class="text-slate-900">Lowest priority.</strong> This is pure boilerplate reduction with no behaviour or testability change to the running system beyond the spec collapse. It only pays off once 1–3 have introduced the pool object that callers hold. Do it last, or skip it if the pool config from candidate 1 already absorbs most of these inline.</p>
+        </div>
+      </section>
+
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Recommendation</h2>
+        <p class="text-sm text-slate-700">
+          <strong>Worth exploring / speculative.</strong> Real cleanup — ~28 functions and ~28 constants
+          gone, one parametrised spec — but no leverage or locality gain that candidates 1–3 don't
+          already deliver. Fold it into candidate 1's config work rather than running it as a separate
+          pass.
+        </p>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-6 border-t border-slate-200">
+        Connections Lab · architecture deepening 4/4 · own analysis, pre-grilling · 2026-09-09
+      </footer>
+
+    </main>
+  </body>
+</html>
