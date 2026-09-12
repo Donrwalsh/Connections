@@ -4,7 +4,7 @@ import { Repository } from "typeorm";
 import { Queue } from "bullmq";
 import { FREE_TIER_DISPATCH_QUEUE } from "../queue/queue.module";
 import { FreeTierDispatchState } from "./entities/free-tier-dispatch-state.entity";
-import { StrategyService } from "../strategy/strategy.service";
+import { StrategyDispatch } from "../strategy/strategy-dispatch.service";
 import { FreeTierUsageService, FreeTierId } from "../strategy/free-tier-usage.service";
 import {
   LLM_OPENAI,
@@ -55,7 +55,7 @@ export class FreeTierDispatchService {
     @InjectRepository(FreeTierDispatchState)
     private readonly stateRepo: Repository<FreeTierDispatchState>,
     @Inject(FREE_TIER_DISPATCH_QUEUE) private readonly queue: Queue,
-    @Inject(StrategyService) private readonly strategyService: StrategyService,
+    @Inject(StrategyDispatch) private readonly strategyDispatch: StrategyDispatch,
     @Inject(FreeTierUsageService) private readonly freeTierUsageService: FreeTierUsageService,
   ) {}
 
@@ -162,7 +162,7 @@ export class FreeTierDispatchService {
 
     const tokenEstimate = freeTierDispatchTokenEstimate();
     const maxInFlight = freeTierDispatchMaxInFlight();
-    const inFlight = await this.strategyService.countInFlightByModel(LLM_OPENAI, usage.models);
+    const inFlight = await this.strategyDispatch.countInFlightByModel(LLM_OPENAI, usage.models);
     const inFlightTotal = [...inFlight.values()].reduce((sum, count) => sum + count, 0);
 
     if (inFlightTotal >= maxInFlight) {
@@ -200,7 +200,7 @@ export class FreeTierDispatchService {
       maxInFlight - inFlightTotal,
     );
 
-    const allocation = await this.strategyService.countTodayDispatchByModel(LLM_OPENAI, usage.models);
+    const allocation = await this.strategyDispatch.countTodayDispatchByModel(LLM_OPENAI, usage.models);
     const exhausted = new Set<string>();
     let dispatched = 0;
 
@@ -209,7 +209,7 @@ export class FreeTierDispatchService {
 
       let target: { puzzleId: number; date: string } | undefined;
       try {
-        [target] = await this.strategyService.findUnrunPuzzleDatesForModel(LLM_OPENAI, model, 1);
+        [target] = await this.strategyDispatch.findUnrunPuzzleDatesForModel(LLM_OPENAI, model, 1);
       } catch (err) {
         this.logger.warn(
           `free-tier dispatch tick for '${tier}': failed to look up a puzzle for '${model}': ` +
@@ -225,7 +225,7 @@ export class FreeTierDispatchService {
       }
 
       try {
-        await this.strategyService.triggerStrategyRuns(
+        await this.strategyDispatch.triggerStrategyRuns(
           target.puzzleId,
           LLM_OPENAI,
           target.date,

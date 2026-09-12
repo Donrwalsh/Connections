@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deepening 10 — The provider-pool seam at the edge</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .font-serif { font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .lbl { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+      .deep-fill { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      pre.code { background:#0f172a; color:#e2e8f0; padding:1rem 1.15rem; border-radius:.6rem; overflow-x:auto; font-size:12.5px; line-height:1.55; }
+      pre.code .c { color:#7dd3fc; } pre.code .k { color:#f0abfc; } pre.code .s { color:#86efac; }
+      table.t { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+      table.t th, table.t td { border: 1px solid #e2e8f0; padding: 7px 9px; text-align: left; vertical-align: top; }
+      table.t th { background: #f1f5f9; font-weight: 600; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900">
+    <main class="max-w-4xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="space-y-4">
+        <p class="lbl text-slate-400">Architecture deepening · candidate 10 of 11 (round 3, item 2)</p>
+        <h1 class="font-serif text-4xl">The provider-pool seam runs through the edge too</h1>
+        <p class="text-slate-600 max-w-2xl">Own analysis, pre-grilling. This is candidate 1's finish line — do it as that work reaches the HTTP edge and the React tree, not standalone.</p>
+      </header>
+
+      <!-- FRICTION -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The friction</h2>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">frontend/src/data/benchmark/providerPools.ts</span> already
+          establishes the config list — its own comment: <em>"Adding a provider strategy to the backend
+          means adding one row here — the pill, the filter chip, and the row description all derive from
+          this list."</em> That principle stops at the display layer. The <em>dispatch-control</em> path
+          for the same providers is still hand-copied, five times, across four files on two sides:
+        </p>
+        <table class="t">
+          <thead><tr><th>File</th><th>Per-provider shape</th></tr></thead>
+          <tbody>
+            <tr><td><span class="mono text-xs">backend/…/dispatch.controller.ts</span></td><td><span class="mono text-xs">@Get("google")</span> + <span class="mono text-xs">@Delete("google")</span> … ×5 (google, groq, openrouter, mistral, sambanova) — each body is <span class="mono text-xs">return this.{p}FreeDispatchService.getStatus()</span> / <span class="mono text-xs">.stop()</span>, plus 5 injected services</td></tr>
+            <tr><td><span class="mono text-xs">frontend/…/api.ts</span></td><td><span class="mono text-xs">fetch{P}DispatchStatus()</span> + <span class="mono text-xs">stop{P}Dispatch()</span> ×5 — each <span class="mono text-xs">fetchJson("/dispatch/{p}")</span> / <span class="mono text-xs">fetchJson("/dispatch/{p}", {method:"DELETE"})</span></td></tr>
+            <tr><td><span class="mono text-xs">frontend/…/types.ts</span></td><td><span class="mono text-xs">{P}DispatchStatus</span> interface ×5 — four are <em>"same shape as GroqDispatchStatus"</em> per their own comments; <span class="mono text-xs">OpenRouterDispatchStatus</span> adds <span class="mono text-xs">callsToday</span>/<span class="mono text-xs">dailyBudget</span></td></tr>
+            <tr><td><span class="mono text-xs">frontend/…/benchmark/{P}DispatchWidget.tsx</span></td><td>×5 — normalised diff between any two is ~3 lines: a <span class="mono text-xs">TITLE</span> const, a doc comment, an <span class="mono text-xs">aria-label</span></td></tr>
+          </tbody>
+        </table>
+        <p class="text-sm text-slate-700">
+          A sixth provider is <strong>four hand-edits past the config row</strong> — a route pair, a
+          client pair, a type, a component — none of which candidate 1 (backend machinery) removes.
+        </p>
+      </section>
+
+      <!-- DELETION TEST -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Deletion test</h2>
+        <p class="text-sm text-slate-700">
+          Delete <span class="mono text-xs">GroqDispatchWidget.tsx</span>,
+          <span class="mono text-xs">fetchGroqDispatchStatus</span>,
+          <span class="mono text-xs">GroqDispatchStatus</span>, the <span class="mono text-xs">@Get/@Delete("groq")</span>
+          pair. Behaviour <strong>concentrates</strong> into one generic route, one client function, one
+          component parameterised by a pool row. Only OpenRouter's extra fields need somewhere to go —
+          covered below.
+        </p>
+      </section>
+
+      <!-- SHAPE -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The deepened shape</h2>
+        <pre class="code"><span class="c">// backend — one route pair, delegating to candidate 1's unified FreeDispatchService</span>
+<span class="k">@Get</span>(<span class="s">"pool/:poolId"</span>)    getPoolDispatchStatus(@Param(<span class="s">"poolId"</span>) id: string) { <span class="k">return</span> this.freeDispatch.getStatus(id); }
+<span class="k">@Delete</span>(<span class="s">"pool/:poolId"</span>) stopPoolDispatch(@Param(<span class="s">"poolId"</span>) id: string)      { <span class="k">return</span> this.freeDispatch.stop(id); }
+<span class="c">// keep /dispatch/google … as one-line shims for a release, then remove</span>
+
+<span class="c">// frontend/api.ts — one pair</span>
+<span class="k">export const</span> fetchPoolDispatchStatus = (poolId: ProviderPoolId, s?: AbortSignal) =&gt;
+  fetchJson&lt;PoolDispatchStatus&gt;(<span class="s">`/dispatch/pool/${poolId}`</span>, s);
+<span class="k">export const</span> stopPoolDispatch = (poolId: ProviderPoolId, s?: AbortSignal) =&gt;
+  fetchJson&lt;PoolDispatchStatus&gt;(<span class="s">`/dispatch/pool/${poolId}`</span>, s, { method: <span class="s">"DELETE"</span> });
+
+<span class="c">// frontend/types.ts — one shape, optional account-budget fields</span>
+<span class="k">interface</span> PoolDispatchStatus { active: boolean; startedAt: string | <span class="k">null</span>;
+  callsToday?: number; dailyBudget?: number; }   <span class="c">// present only for account-scope pools</span>
+
+<span class="c">// one component, rendered from the list — GuessSequencePanel already does this for toggles</span>
+{PROVIDER_POOLS.map((pool) =&gt; &lt;PoolDispatchWidget key={pool.id} pool={pool} /&gt;)}</pre>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">PoolDispatchWidget</span> reads
+          <span class="mono text-xs">pool.label</span> / <span class="mono text-xs">pool.constraintBlurb</span>
+          from the row (add the blurb field) and shows the budget bar only when
+          <span class="mono text-xs">dailyBudget</span> is present — the one real display difference,
+          driven by data instead of by a separate file.
+        </p>
+      </section>
+
+      <!-- MINOR SIBLING -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Minor, same family: <span class="mono text-lg">queueForJudgeProvider</span></h2>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">strategy.queue.ts</span> has
+          <span class="mono text-xs">queueForStrategy(...8 queues..., name)</span> <em>and</em> a second,
+          narrower <span class="mono text-xs">queueForJudgeProvider(provider, openAI, ollama, google)</span>
+          — both map a provider to its BullMQ queue, but the judge version only knows three providers. A
+          side effect: a category-judge can't run on groq / openrouter / mistral / sambanova even though
+          the solve path supports all seven. Candidate 3's <span class="mono text-xs">providerPool(strategyName).queues.runs</span>
+          lookup replaces both and removes the asymmetry at no extra cost. Fold this into candidate 3.
+        </p>
+      </section>
+
+      <!-- WINS / RISKS -->
+      <section class="grid md:grid-cols-2 gap-6">
+        <div class="space-y-2">
+          <h3 class="font-serif text-lg">Wins</h3>
+          <ul class="text-sm space-y-1 list-disc pl-5 text-slate-700">
+            <li>leverage: a provider is one config row, backend to pixel</li>
+            <li>the <span class="mono text-xs">DispatchStatus</span> union collapses to one shape</li>
+            <li>the widget's poll logic is written once (pairs with candidate 9)</li>
+            <li>the judge path silently gains four providers</li>
+          </ul>
+        </div>
+        <div class="space-y-2">
+          <h3 class="font-serif text-lg">Risks</h3>
+          <ul class="text-sm space-y-1 list-disc pl-5 text-slate-700">
+            <li>needs candidate 1's unified <span class="mono text-xs">FreeDispatchService</span> underneath — order after it</li>
+            <li>keep the old <span class="mono text-xs">/dispatch/{provider}</span> paths as shims for one release; the frontend is deployed together so the window is short</li>
+            <li><span class="mono text-xs">poolId</span> in the URL must be validated against <span class="mono text-xs">PROVIDER_POOLS</span> (reject unknown) — a route param is user input</li>
+            <li>small on its own; real value is closing candidate 1 cleanly</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Recommendation</h2>
+        <p class="text-sm text-slate-700">
+          <strong>Worth exploring</strong>, sequenced as the last step of candidate 1. On its own it is a
+          modest dedup; as candidate 1's finish line it makes "one row per provider" true from the
+          database to the DOM.
+        </p>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-6 border-t border-slate-200">
+        Connections Lab · architecture deepening 10/11 · own analysis, pre-grilling · 2026-09-09
+      </footer>
+
+    </main>
+  </body>
+</html>

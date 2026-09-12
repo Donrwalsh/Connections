@@ -594,7 +594,7 @@ export function llmTemperature(env: NodeJS.ProcessEnv = process.env): number {
 
 /**
  * Start of the current UTC calendar day — shared by FreeTierUsageService and
- * StrategyService.countTodayDispatchByModel so "today" means the same thing
+ * StrategyDispatch.countTodayDispatchByModel so "today" means the same thing
  * (the provider's own usage-window reset) everywhere daily token/dispatch
  * accounting is done.
  */
@@ -705,7 +705,7 @@ export function freeTierDispatchTokenEstimate(env: NodeJS.ProcessEnv = process.e
  * For LLM strategies this would bulk-create 1..llmMaxTrialsPerModel() trials
  * for a single model in one shot — the per-model cap in full, not a partial
  * slice, so it's only correct for a single model at a time. LLM dispatch
- * instead goes through StrategyService.triggerStrategyRuns one call per
+ * instead goes through StrategyDispatch.triggerStrategyRuns one call per
  * trial, naming a model each time and tracking each model's count
  * separately.
  */

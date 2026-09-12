@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deepening 2 — Unified RateLimitHold</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .font-serif { font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .lbl { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+      pre.code { background:#0f172a; color:#e2e8f0; padding:1rem 1.15rem; border-radius:.6rem; overflow-x:auto; font-size:12.5px; line-height:1.55; }
+      pre.code .c { color:#7dd3fc; }
+      pre.code .k { color:#f0abfc; }
+      pre.code .s { color:#86efac; }
+      table.t { border-collapse: collapse; width: 100%; font-size: 13px; }
+      table.t th, table.t td { border: 1px solid #e2e8f0; padding: 7px 10px; text-align: left; vertical-align: top; }
+      table.t th { background: #f1f5f9; font-weight: 600; }
+      .ok { color:#059669; } .no { color:#dc2626; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900">
+    <main class="max-w-4xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="space-y-4">
+        <p class="lbl text-slate-400">Architecture deepening · candidate 2 of 4</p>
+        <h1 class="font-serif text-4xl">One <span class="mono text-3xl">RateLimitHold</span> table behind one hold interface</h1>
+        <p class="text-slate-600 max-w-2xl">
+          The smallest deletion-test-positive move, and the seam candidate 1 builds on. Own analysis,
+          pre-grilling.
+        </p>
+      </header>
+
+      <!-- FRICTION -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The friction</h2>
+        <p class="text-sm text-slate-700">
+          Five entities — <span class="mono text-xs">GoogleRateLimitHold</span>,
+          <span class="mono text-xs">GroqRateLimitHold</span>,
+          <span class="mono text-xs">OpenRouterRateLimitHold</span>,
+          <span class="mono text-xs">MistralRateLimitHold</span>,
+          <span class="mono text-xs">SambaNovaRateLimitHold</span>. Four of them are byte-identical schemas:
+        </p>
+        <pre class="code"><span class="k">@Entity</span>(<span class="s">"GroqRateLimitHold"</span>)
+<span class="k">@Unique</span>(<span class="s">"UQ_…_strategyName_modelName"</span>, [<span class="s">"strategyName"</span>, <span class="s">"modelName"</span>])
+<span class="k">class</span> GroqRateLimitHold {
+  id: number;  strategyName: string;  modelName: string;
+  heldAt: Date;  resetAt: Date;
+}</pre>
+        <p class="text-sm text-slate-700">
+          The fifth, <span class="mono text-xs">OpenRouterRateLimitHold</span>, differs by one column
+          (<span class="mono text-xs">reason: "daily" | "per-minute-cooldown"</span>) and drops
+          <span class="mono text-xs">modelName</span> — its free tier is account-wide. Each entity has a
+          matching <span class="mono text-xs">*RateLimitHoldService</span> with the same six methods
+          (<span class="mono text-xs">hold · isHeld · heldModels · nextResetAt · clearExpired</span>) and a
+          matching migration whose DDL is identical to its siblings'. The services have already drifted
+          in log wording and doc comments — a sign the copies are maintained by hand, badly.
+        </p>
+        <p class="text-sm text-slate-700">
+          <strong>Shallow:</strong> the interface (six small methods) is a fraction of five copied
+          implementations. <strong>No locality:</strong> a change to hold semantics — say, indexing
+          <span class="mono text-xs">resetAt</span> for the sweep query — is five edits in five files plus
+          five migrations. <span class="mono text-xs">RateLimitHold</span> is referenced by 34 non-spec
+          files today.
+        </p>
+      </section>
+
+      <!-- DELETION TEST -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Deletion test</h2>
+        <p class="text-sm text-slate-700">
+          Delete the four per-provider hold entities and their services. The logic doesn't move to a call
+          site — it <strong>concentrates</strong> into one <span class="mono text-xs">RateLimitHold</span>
+          entity and one service. The only thing that was ever provider-specific — <em>how</em>
+          <span class="mono text-xs">resetAt</span> is computed — already lives in the caller
+          (<span class="mono text-xs">.hold()</span> takes <span class="mono text-xs">resetInSeconds</span>;
+          the runner and the orchestrator's 429 classifier decide the number). Passes cleanly.
+        </p>
+      </section>
+
+      <!-- SHAPE -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The deepened shape</h2>
+        <p class="text-sm text-slate-700">
+          One entity. <span class="mono text-xs">strategyName</span> already discriminates the provider —
+          it holds <span class="mono text-xs">"llm-groq"</span>, <span class="mono text-xs">"llm-mistral"</span>,
+          etc. — so no new column is needed for the per-model providers.
+          <span class="mono text-xs">modelName</span> becomes nullable to absorb OpenRouter's account-wide
+          row; an optional <span class="mono text-xs">reason</span> column carries OpenRouter's
+          daily/cooldown distinction and is <span class="mono text-xs">null</span> for everyone else.
+        </p>
+        <pre class="code"><span class="k">@Entity</span>(<span class="s">"RateLimitHold"</span>)
+<span class="k">@Unique</span>(<span class="s">"UQ_RateLimitHold_strategy_model"</span>, [<span class="s">"strategyName"</span>, <span class="s">"modelName"</span>])
+<span class="k">class</span> RateLimitHold {
+  id: number;
+  strategyName: string;            <span class="c">// the discriminator — already present</span>
+  modelName: string | null;       <span class="c">// null ⇒ account-wide hold (openrouter)</span>
+  reason: string | null;          <span class="c">// "daily" | "per-minute-cooldown" | null</span>
+  heldAt: Date;
+  resetAt: Date;
+}
+
+<span class="k">@Injectable</span>()
+<span class="k">class</span> RateLimitHoldService {
+  hold(strategyName, opts: { modelName?: string; reason?: string; resetInSeconds: number }): Promise&lt;void&gt;;
+  isHeld(strategyName, modelName?: string): Promise&lt;boolean&gt;;
+  heldReason(strategyName): Promise&lt;string | null&gt;;      <span class="c">// account-scope callers</span>
+  heldModels(strategyName): Promise&lt;string[]&gt;;
+  nextResetAt(strategyName): Promise&lt;Date | null&gt;;
+  clearExpired(strategyName?): Promise&lt;string[]&gt;;         <span class="c">// all pools, or one</span>
+}</pre>
+        <p class="text-sm text-slate-700">
+          Postgres treats <span class="mono text-xs">NULL</span>s as distinct in a unique index, so the
+          per-model unique constraint keeps working and the single account-wide OpenRouter row coexists.
+          If a stricter guarantee is wanted, a partial unique index on
+          <span class="mono text-xs">strategyName WHERE modelName IS NULL</span> pins it to one row.
+        </p>
+      </section>
+
+      <!-- BEHIND THE SEAM -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">What sits behind the seam</h2>
+        <p class="text-sm text-slate-700">
+          One TypeORM repository, one set of queries, one place to add an index. The
+          <span class="mono text-xs">holdScope</span> decision (per-model vs account) is the only branch,
+          and it is driven by whether the caller passes a <span class="mono text-xs">modelName</span> —
+          which the pool config from candidate 1 would supply. Callers stop importing five different
+          hold-service classes.
+        </p>
+      </section>
+
+      <!-- ADAPTER RULE -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Two implementations, or one?</h2>
+        <p class="text-sm text-slate-700">
+          "One adapter = hypothetical seam, two = real." Here there are two genuine hold shapes —
+          per-model and account-wide — and both are exercised in production. That justifies a single
+          service with a scope parameter rather than two services or an interface with two
+          implementations: the shared surface (a row with <span class="mono text-xs">heldAt/resetAt</span>
+          and an expiry sweep) dwarfs the difference (one nullable column).
+        </p>
+      </section>
+
+      <!-- MIGRATION -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">Migration path</h2>
+        <ol class="text-sm space-y-2 list-decimal pl-5 text-slate-700">
+          <li>New migration: create <span class="mono text-xs">RateLimitHold</span>; copy rows from all five legacy tables (<span class="mono text-xs">INSERT … SELECT</span>, mapping the absent <span class="mono text-xs">modelName</span> for OpenRouter to <span class="mono text-xs">NULL</span> and its <span class="mono text-xs">reason</span> across); drop the five legacy tables.</li>
+          <li>Replace the five entities + five services with the one entity + one service. Update <span class="mono text-xs">strategy.module.ts</span> (one <span class="mono text-xs">forFeature</span> entry, one provider) and the ~34 referencing files — mostly a find-and-replace of the injected type.</li>
+          <li>Collapse the five <span class="mono text-xs">*-rate-limit-hold.service.spec.ts</span> into one.</li>
+          <li>Because holds expire within 24h, the copy step is optional — a "create new, drop old" migration with no data copy costs at most one extra reset cycle for currently-parked runs. Choose based on how much you dislike that.</li>
+        </ol>
+      </section>
+
+      <!-- WINS -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Wins</h2>
+        <ul class="text-sm space-y-1 list-disc pl-5 text-slate-700">
+          <li>interface shrinks; one implementation absorbs five copies</li>
+          <li>locality: one query path to index, profile, and reason about</li>
+          <li>one hold spec instead of five near-copies that drift</li>
+          <li>the seam candidate 1's <span class="mono text-xs">FreeDispatchService</span> and <span class="mono text-xs">RpdResumeService</span> both depend on</li>
+          <li>a new provider's hold is zero new files</li>
+        </ul>
+      </section>
+
+      <!-- RISKS -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">Risks &amp; open questions</h2>
+        <div class="space-y-3 text-sm text-slate-700">
+          <p><strong class="text-slate-900">Nullable <span class="mono text-xs">modelName</span> weakens the type.</strong> Per-model call sites must not forget to pass it. Mitigate with a narrow method surface: <span class="mono text-xs">isHeld(strategy, model)</span> for per-model, <span class="mono text-xs">heldReason(strategy)</span> for account — the pool config picks which the caller uses, so it is decided once per provider, not per call.</p>
+          <p><strong class="text-slate-900">The unique-constraint semantics change subtly.</strong> Today each table has its own <span class="mono text-xs">UQ(strategyName, modelName)</span>; unified, the constraint spans providers. That is fine — <span class="mono text-xs">strategyName</span> differs — but the migration's constraint name and the NULL-handling deserve an explicit test.</p>
+          <p><strong class="text-slate-900">Do this before, not after, candidate 1.</strong> If the pool module lands first it will just have to be re-plumbed onto the unified table. Order matters.</p>
+          <p><strong class="text-slate-900">OpenRouter's <span class="mono text-xs">hold()</span> has a precedence rule</strong> ("a per-minute-cooldown request is a no-op while a daily hold is live"). That logic moves into the unified service, guarded by <span class="mono text-xs">reason != null</span>, and needs its own test — it is the one piece of behaviour, not just schema, that is provider-specific.</p>
+        </div>
+      </section>
+
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Recommendation</h2>
+        <p class="text-sm text-slate-700">
+          <strong>Strong, and first.</strong> One migration, a mechanical type swap across ~34 files, five
+          spec files become one. Low risk because the data is transient. It is the wedge that makes
+          candidate 1 tractable.
+        </p>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-6 border-t border-slate-200">
+        Connections Lab · architecture deepening 2/4 · own analysis, pre-grilling · 2026-09-09
+      </footer>
+
+    </main>
+  </body>
+</html>

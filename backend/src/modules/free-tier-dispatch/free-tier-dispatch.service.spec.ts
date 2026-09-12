@@ -4,7 +4,7 @@ import { getRepositoryToken } from "@nestjs/typeorm";
 import { FreeTierDispatchService } from "./free-tier-dispatch.service";
 import { FreeTierDispatchState } from "./entities/free-tier-dispatch-state.entity";
 import { FREE_TIER_DISPATCH_QUEUE } from "../queue/queue.module";
-import { StrategyService } from "../strategy/strategy.service";
+import { StrategyDispatch } from "../strategy/strategy-dispatch.service";
 import { FreeTierId, FreeTierUsageService } from "../strategy/free-tier-usage.service";
 
 const FLAGSHIP_MODELS = ["gpt-5.4", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1", "gpt-4o", "o1", "o3"];
@@ -28,7 +28,7 @@ describe("FreeTierDispatchService", () => {
   let service: FreeTierDispatchService;
   let mockStateRepo: { findOne: jest.Mock; save: jest.Mock; update: jest.Mock };
   let mockQueue: { add: jest.Mock };
-  let mockStrategyService: {
+  let mockStrategyDispatch: {
     countInFlightByModel: jest.Mock;
     countTodayDispatchByModel: jest.Mock;
     findUnrunPuzzleDatesForModel: jest.Mock;
@@ -63,7 +63,7 @@ describe("FreeTierDispatchService", () => {
       update: jest.fn().mockResolvedValue(undefined),
     };
     mockQueue = { add: jest.fn().mockResolvedValue(undefined) };
-    mockStrategyService = {
+    mockStrategyDispatch = {
       countInFlightByModel: jest.fn().mockResolvedValue(zeroCounts()),
       countTodayDispatchByModel: jest.fn().mockResolvedValue(zeroCounts()),
       findUnrunPuzzleDatesForModel: jest.fn().mockResolvedValue([{ puzzleId: 1, date: "2024-01-01" }]),
@@ -78,7 +78,7 @@ describe("FreeTierDispatchService", () => {
         FreeTierDispatchService,
         { provide: getRepositoryToken(FreeTierDispatchState), useValue: mockStateRepo },
         { provide: FREE_TIER_DISPATCH_QUEUE, useValue: mockQueue },
-        { provide: StrategyService, useValue: mockStrategyService },
+        { provide: StrategyDispatch, useValue: mockStrategyDispatch },
         { provide: FreeTierUsageService, useValue: mockFreeTierUsageService },
       ],
     }).compile();
@@ -266,7 +266,7 @@ describe("FreeTierDispatchService", () => {
       await service.runTick("mini");
 
       expect(mockStateRepo.update).toHaveBeenCalledWith({ tier: "mini" }, { active: false });
-      expect(mockStrategyService.triggerStrategyRuns).not.toHaveBeenCalled();
+      expect(mockStrategyDispatch.triggerStrategyRuns).not.toHaveBeenCalled();
       expect(mockQueue.add).not.toHaveBeenCalled();
     });
 
@@ -278,12 +278,12 @@ describe("FreeTierDispatchService", () => {
       inFlight.set("gpt-4.1-nano", 3);
       mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
-      mockStrategyService.countInFlightByModel.mockResolvedValueOnce(inFlight);
+      mockStrategyDispatch.countInFlightByModel.mockResolvedValueOnce(inFlight);
 
       await service.runTick("mini");
 
-      expect(mockStrategyService.triggerStrategyRuns).not.toHaveBeenCalled();
-      expect(mockStrategyService.countTodayDispatchByModel).not.toHaveBeenCalled();
+      expect(mockStrategyDispatch.triggerStrategyRuns).not.toHaveBeenCalled();
+      expect(mockStrategyDispatch.countTodayDispatchByModel).not.toHaveBeenCalled();
       expect(mockStateRepo.update).not.toHaveBeenCalled();
       expect(mockQueue.add).toHaveBeenCalledWith(
         "tick",
@@ -300,11 +300,11 @@ describe("FreeTierDispatchService", () => {
       inFlight.set("gpt-4.1-nano", 2); // cap is 3, so only 1 more trial has headroom
       mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
-      mockStrategyService.countInFlightByModel.mockResolvedValueOnce(inFlight);
+      mockStrategyDispatch.countInFlightByModel.mockResolvedValueOnce(inFlight);
 
       await service.runTick("mini");
 
-      expect(mockStrategyService.triggerStrategyRuns).toHaveBeenCalledTimes(1);
+      expect(mockStrategyDispatch.triggerStrategyRuns).toHaveBeenCalledTimes(1);
     });
 
     it("should hold off on new dispatches, but keep ticking, when the token budget is nearly spoken for", async () => {
@@ -318,11 +318,11 @@ describe("FreeTierDispatchService", () => {
       // trials in flight (100 per model) at the 4000-token estimate, that's
       // 3,600,000 reserved — already well over budget on its own.
       const heavyInFlight = new Map(MINI_MODELS.map((model) => [model, 100]));
-      mockStrategyService.countInFlightByModel.mockResolvedValueOnce(heavyInFlight);
+      mockStrategyDispatch.countInFlightByModel.mockResolvedValueOnce(heavyInFlight);
 
       await service.runTick("mini");
 
-      expect(mockStrategyService.triggerStrategyRuns).not.toHaveBeenCalled();
+      expect(mockStrategyDispatch.triggerStrategyRuns).not.toHaveBeenCalled();
       expect(mockStateRepo.update).not.toHaveBeenCalled();
       expect(mockQueue.add).toHaveBeenCalledWith(
         "tick",
@@ -342,15 +342,15 @@ describe("FreeTierDispatchService", () => {
       const allocation = new Map(MINI_MODELS.map((model) => [model, 5]));
       allocation.set("o4-mini", 0);
       allocation.set("o3-mini", 0);
-      mockStrategyService.countTodayDispatchByModel.mockResolvedValueOnce(allocation);
-      mockStrategyService.findUnrunPuzzleDatesForModel.mockResolvedValue([
+      mockStrategyDispatch.countTodayDispatchByModel.mockResolvedValueOnce(allocation);
+      mockStrategyDispatch.findUnrunPuzzleDatesForModel.mockResolvedValue([
         { puzzleId: 42, date: "2024-06-01" },
       ]);
 
       await service.runTick("mini");
 
-      expect(mockStrategyService.triggerStrategyRuns).toHaveBeenCalledTimes(2);
-      const dispatchedModels = mockStrategyService.triggerStrategyRuns.mock.calls.map((call) => call[3]);
+      expect(mockStrategyDispatch.triggerStrategyRuns).toHaveBeenCalledTimes(2);
+      const dispatchedModels = mockStrategyDispatch.triggerStrategyRuns.mock.calls.map((call) => call[3]);
       expect(new Set(dispatchedModels)).toEqual(new Set(["o4-mini", "o3-mini"]));
     });
 
@@ -362,7 +362,7 @@ describe("FreeTierDispatchService", () => {
 
       await service.runTick("mini");
 
-      expect(mockStrategyService.triggerStrategyRuns).toHaveBeenCalledTimes(1);
+      expect(mockStrategyDispatch.triggerStrategyRuns).toHaveBeenCalledTimes(1);
       expect(mockStateRepo.update).not.toHaveBeenCalled();
       expect(mockQueue.add).toHaveBeenCalledWith(
         "tick",
@@ -378,19 +378,19 @@ describe("FreeTierDispatchService", () => {
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
 
       const allocation = zeroCounts();
-      mockStrategyService.countTodayDispatchByModel.mockResolvedValueOnce(allocation);
+      mockStrategyDispatch.countTodayDispatchByModel.mockResolvedValueOnce(allocation);
       // Every model ties at 0, so iteration order decides who's tried
       // first — exhaust all of them except the last so the loop is forced
       // to fall through to a model that actually has a puzzle.
-      mockStrategyService.findUnrunPuzzleDatesForModel.mockResolvedValue([]);
-      mockStrategyService.findUnrunPuzzleDatesForModel.mockImplementation(async (_s, model: string) =>
+      mockStrategyDispatch.findUnrunPuzzleDatesForModel.mockResolvedValue([]);
+      mockStrategyDispatch.findUnrunPuzzleDatesForModel.mockImplementation(async (_s, model: string) =>
         model === "gpt-5-nano" ? [{ puzzleId: 1, date: "2024-01-01" }] : [],
       );
 
       await service.runTick("mini");
 
-      expect(mockStrategyService.triggerStrategyRuns).toHaveBeenCalledTimes(1);
-      expect(mockStrategyService.triggerStrategyRuns).toHaveBeenCalledWith(
+      expect(mockStrategyDispatch.triggerStrategyRuns).toHaveBeenCalledTimes(1);
+      expect(mockStrategyDispatch.triggerStrategyRuns).toHaveBeenCalledWith(
         1,
         "llm-openai",
         "2024-01-01",
@@ -401,11 +401,11 @@ describe("FreeTierDispatchService", () => {
     it("should stop the cycle when every model has run out of unrun puzzles", async () => {
       mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
-      mockStrategyService.findUnrunPuzzleDatesForModel.mockResolvedValue([]);
+      mockStrategyDispatch.findUnrunPuzzleDatesForModel.mockResolvedValue([]);
 
       await service.runTick("mini");
 
-      expect(mockStrategyService.triggerStrategyRuns).not.toHaveBeenCalled();
+      expect(mockStrategyDispatch.triggerStrategyRuns).not.toHaveBeenCalled();
       expect(mockStateRepo.update).toHaveBeenCalledWith({ tier: "mini" }, { active: false });
       expect(mockQueue.add).not.toHaveBeenCalled();
     });
@@ -415,7 +415,7 @@ describe("FreeTierDispatchService", () => {
       process.env.FREE_TIER_DISPATCH_TOKEN_ESTIMATE = "1";
       mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
-      mockStrategyService.triggerStrategyRuns.mockRejectedValue(new Error("model rejected"));
+      mockStrategyDispatch.triggerStrategyRuns.mockRejectedValue(new Error("model rejected"));
 
       await expect(service.runTick("mini")).resolves.toBeUndefined();
 
@@ -451,20 +451,20 @@ describe("FreeTierDispatchService", () => {
           thresholdPercent: 90,
         });
         mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("flagship"));
-        mockStrategyService.countInFlightByModel.mockResolvedValueOnce(zeroCounts("flagship"));
+        mockStrategyDispatch.countInFlightByModel.mockResolvedValueOnce(zeroCounts("flagship"));
 
         const allocation = new Map(FLAGSHIP_MODELS.map((model) => [model, 5]));
         allocation.set("o1", 0);
         allocation.set("o3", 0);
-        mockStrategyService.countTodayDispatchByModel.mockResolvedValueOnce(allocation);
-        mockStrategyService.findUnrunPuzzleDatesForModel.mockResolvedValue([
+        mockStrategyDispatch.countTodayDispatchByModel.mockResolvedValueOnce(allocation);
+        mockStrategyDispatch.findUnrunPuzzleDatesForModel.mockResolvedValue([
           { puzzleId: 7, date: "2024-03-01" },
         ]);
 
         await service.runTick("flagship");
 
-        expect(mockStrategyService.triggerStrategyRuns).toHaveBeenCalledTimes(2);
-        const dispatchedModels = mockStrategyService.triggerStrategyRuns.mock.calls.map(
+        expect(mockStrategyDispatch.triggerStrategyRuns).toHaveBeenCalledTimes(2);
+        const dispatchedModels = mockStrategyDispatch.triggerStrategyRuns.mock.calls.map(
           (call) => call[3],
         );
         expect(new Set(dispatchedModels)).toEqual(new Set(["o1", "o3"]));
@@ -479,7 +479,7 @@ describe("FreeTierDispatchService", () => {
           thresholdPercent: 90,
         });
         mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("flagship"));
-        mockStrategyService.findUnrunPuzzleDatesForModel.mockResolvedValue([]);
+        mockStrategyDispatch.findUnrunPuzzleDatesForModel.mockResolvedValue([]);
 
         await service.runTick("flagship");
 

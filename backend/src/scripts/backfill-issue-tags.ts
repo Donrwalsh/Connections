@@ -6,7 +6,7 @@ import { SolvePrompt, SolvePromptIssueTag } from "../modules/strategy/entities/s
 import { StrategyRun } from "../modules/strategy/entities/strategy-run.entity";
 import { LlmProposal } from "../modules/strategy/entities/llm-proposal.entity";
 import { Puzzle } from "../modules/game/entities/puzzle.entity";
-import { parseGroupsSection } from "../modules/strategy/parse-groups-section";
+import { parseAnswer } from "answer-grammar";
 
 /**
  * One-off backfill for SolvePrompt rows written before groupCountOff/
@@ -16,8 +16,10 @@ import { parseGroupsSection } from "../modules/strategy/parse-groups-section";
  * 1774000000000-add-solve-prompt-issue-tags migration, from the old
  * wordsHadParenthetical boolean) — this re-derives the other three tags
  * from data every historical row already has: rawResponseText (re-parsed
- * with the exact same parseGroupsSection used live) and each step's stored
- * LlmProposal rows (checked against the puzzle's real word set).
+ * with answer-grammar's parseAnswer — the same shared package the live
+ * runner imports, so a re-run always matches whatever the live runner
+ * would compute for the same raw text) and each step's stored LlmProposal
+ * rows (checked against the puzzle's real word set).
  *
  * Idempotent: recomputes deterministically and only writes rows whose tag
  * set actually changes, so re-running it is always safe.
@@ -95,9 +97,9 @@ async function main() {
     const addedCountByTag = new Map<string, number>();
 
     for (const prompt of prompts) {
-      const parsed = parseGroupsSection(prompt.rawResponseText ?? "", []);
+      const parsed = parseAnswer(prompt.rawResponseText ?? "");
       const tags = new Set(prompt.issueTags);
-      for (const tag of parsed.issueTags) {
+      for (const tag of parsed.textIssues) {
         tags.add(tag);
       }
 

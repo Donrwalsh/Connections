@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review — Connections Lab</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .font-serif { font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif; }
+      .seam { stroke-dasharray: 5 4; }
+      .lbl { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .deep-fill { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .ghost { opacity: .34; }
+      .mermaid { display: flex; justify-content: center; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-14">
+
+      <header class="space-y-5">
+        <div>
+          <h1 class="font-serif text-4xl text-slate-900">Architecture review — Connections Lab</h1>
+          <p class="text-slate-500 mt-1">2026-09-09 · branch <span class="mono text-sm">feature/guess-sequence-all-providers</span></p>
+        </div>
+        <p class="text-slate-700 max-w-3xl">
+          The last ~40 commits are almost entirely one activity: bringing a new LLM provider online
+          (Google, Groq, OpenRouter, Mistral, SambaNova). Each one lands as a hand-copied stack of
+          modules. SambaNova was <span class="mono text-sm">53 files, +2,600 lines</span>. The
+          codebase currently holds <span class="mono text-sm">75</span> near-identical per-provider
+          files. Every candidate below is about turning that copied breadth into one deep module.
+        </p>
+        <div class="flex flex-wrap gap-4 text-xs text-slate-600 border-t border-b border-slate-200 py-3">
+          <span class="flex items-center gap-2"><span class="inline-block w-4 h-4 border-2 border-slate-800 bg-white"></span> module</span>
+          <span class="flex items-center gap-2"><svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" class="seam" stroke="#475569" stroke-width="2"/></svg> seam</span>
+          <span class="flex items-center gap-2"><svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="#dc2626" stroke-width="2"/></svg> leakage</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-4 h-4 deep-fill"></span> deep module</span>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-16">
+
+        <!-- ============================ CANDIDATE 1 ============================ -->
+        <article class="space-y-6">
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="font-serif text-2xl">1 · Collapse the per-provider free-tier stack into one Provider Pool module</h2>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800">Strong</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">in-process</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">config-driven</span>
+          </div>
+
+          <div class="text-sm mono text-slate-600 leading-relaxed">
+            backend/src/modules/{google,groq,openrouter,mistral,sambanova}-free-dispatch/**<br />
+            backend/src/modules/strategy/{provider}-rate-limit-hold.service.ts · {provider}-rpd-resume.{service,bootstrap}.ts<br />
+            backend/src/modules/strategy/entities/{provider}-rate-limit-hold.entity.ts<br />
+            backend/src/modules/queue/{provider}-free-dispatch.queue.ts · {provider}-rpd-resume.queue.ts<br />
+            backend/src/modules/queue/queue.module.ts · strategy.queue.ts · strategy.module.ts · worker.ts<br />
+            backend/src/modules/automation/daily-automation.service.ts · dispatch/dispatch.controller.ts · strategies.ts
+          </div>
+
+          <!-- before / after : mass + collapse -->
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-xl border border-slate-200 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">Before — five shallow stacks</p>
+              <svg viewBox="0 0 300 300" class="w-full h-[300px]">
+                <!-- five identical columns -->
+                <g>
+                  <text x="150" y="14" text-anchor="middle" class="lbl" fill="#94a3b8">google · groq · openrouter · mistral · sambanova</text>
+                </g>
+                <g font-size="9" fill="#334155">
+                  <!-- column template repeated x5 -->
+                  <g transform="translate(6,26)">
+                    <rect width="52" height="26" fill="#fee2e2" stroke="#ef4444"/>
+                    <text x="26" y="16" text-anchor="middle">hold</text>
+                    <rect y="30" width="52" height="26" fill="#fee2e2" stroke="#ef4444"/>
+                    <text x="26" y="46" text-anchor="middle">resume</text>
+                    <rect y="60" width="52" height="26" fill="#fee2e2" stroke="#ef4444"/>
+                    <text x="26" y="76" text-anchor="middle">dispatch</text>
+                    <rect y="90" width="52" height="20" fill="#fef3c7" stroke="#d97706"/>
+                    <text x="26" y="103" text-anchor="middle">2 queues</text>
+                    <rect y="114" width="52" height="20" fill="#e2e8f0" stroke="#64748b"/>
+                    <text x="26" y="127" text-anchor="middle">entity</text>
+                    <rect y="138" width="52" height="20" fill="#e2e8f0" stroke="#64748b"/>
+                    <text x="26" y="151" text-anchor="middle">module</text>
+                  </g>
+                  <use href="#col" x="0"/>
+                </g>
+                <g font-size="9" fill="#334155">
+                  <g transform="translate(64,26)"><rect width="52" height="26" fill="#fee2e2" stroke="#ef4444"/><text x="26" y="16" text-anchor="middle">hold</text><rect y="30" width="52" height="26" fill="#fee2e2" stroke="#ef4444"/><text x="26" y="46" text-anchor="middle">resume</text><rect y="60" width="52" height="26" fill="#fee2e2" stroke="#ef4444"/><text x="26" y="76" text-anchor="middle">dispatch</text><rect y="90" width="52" height="20" fill="#fef3c7" stroke="#d97706"/><text x="26" y="103" text-anchor="middle">2 queues</text><rect y="114" width="52" height="20" fill="#e2e8f0" stroke="#64748b"/><text x="26" y="127" text-anchor="middle">entity</text><rect y="138" width="52" height="20" fill="#e2e8f0" stroke="#64748b"/><text x="26" y="151" text-anchor="middle">module</text></g>
+                  <g transform="translate(122,26)"><rect width="52" height="26" fill="#fee2e2" stroke="#ef4444"/><text x="26" y="16" text-anchor="middle">hold</text><rect y="30" width="52" height="26" fill="#fee2e2" stroke="#ef4444"/><text x="26" y="46" text-anchor="middle">resume</text><rect y="60" width="52" height="26" fill="#fee2e2" stroke="#ef4444"/><text x="26" y="76" text-anchor="middle">dispatch</text><rect y="90" width="52" height="20" fill="#fef3c7" stroke="#d97706"/><text x="26" y="103" text-anchor="middle">2 queues</text><rect y="114" width="52" height="20" fill="#e2e8f0" stroke="#64748b"/><text x="26" y="127" text-anchor="middle">entity</text><rect y="138" width="52" height="20" fill="#e2e8f0" stroke="#64748b"/><text x="26" y="151" text-anchor="middle">module</text></g>
+                  <g transform="translate(180,26)"><rect width="52" height="26" fill="#fee2e2" stroke="#ef4444"/><text x="26" y="16" text-anchor="middle">hold</text><rect y="30" width="52" height="26" fill="#fee2e2" stroke="#ef4444"/><text x="26" y="46" text-anchor="middle">resume</text><rect y="60" width="52" height="26" fill="#fee2e2" stroke="#ef4444"/><text x="26" y="76" text-anchor="middle">dispatch</text><rect y="90" width="52" height="20" fill="#fef3c7" stroke="#d97706"/><text x="26" y="103" text-anchor="middle">2 queues</text><rect y="114" width="52" height="20" fill="#e2e8f0" stroke="#64748b"/><text x="26" y="127" text-anchor="middle">entity</text><rect y="138" width="52" height="20" fill="#e2e8f0" stroke="#64748b"/><text x="26" y="151" text-anchor="middle">module</text></g>
+                  <g transform="translate(238,26)"><rect width="52" height="26" fill="#fee2e2" stroke="#ef4444"/><text x="26" y="16" text-anchor="middle">hold</text><rect y="30" width="52" height="26" fill="#fee2e2" stroke="#ef4444"/><text x="26" y="46" text-anchor="middle">resume</text><rect y="60" width="52" height="26" fill="#fee2e2" stroke="#ef4444"/><text x="26" y="76" text-anchor="middle">dispatch</text><rect y="90" width="52" height="20" fill="#fef3c7" stroke="#d97706"/><text x="26" y="103" text-anchor="middle">2 queues</text><rect y="114" width="52" height="20" fill="#e2e8f0" stroke="#64748b"/><text x="26" y="127" text-anchor="middle">entity</text><rect y="138" width="52" height="20" fill="#e2e8f0" stroke="#64748b"/><text x="26" y="151" text-anchor="middle">module</text></g>
+                </g>
+                <text x="150" y="200" text-anchor="middle" font-size="10" fill="#64748b">+ 5 rows in queue.module.ts · strategy.module.ts</text>
+                <text x="150" y="216" text-anchor="middle" font-size="10" fill="#64748b">+ 3 worker registrations each · 1 automation leg each</text>
+                <text x="150" y="232" text-anchor="middle" font-size="10" fill="#64748b">+ 4 ternary chains in llm-strategy-runner.service.ts</text>
+                <text x="150" y="262" text-anchor="middle" font-size="11" fill="#b91c1c" font-weight="bold">15 files per provider · 75 total</text>
+              </svg>
+            </div>
+
+            <div class="rounded-xl border border-slate-300 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">After — one deep module + a config row</p>
+              <svg viewBox="0 0 300 300" class="w-full h-[300px]">
+                <rect x="40" y="30" width="220" height="150" rx="6" class="deep-fill"/>
+                <text x="150" y="52" text-anchor="middle" class="lbl" fill="#e2e8f0">Provider Pool module</text>
+                <g class="ghost" font-size="9" fill="#e2e8f0">
+                  <rect x="58" y="66" width="80" height="20" fill="none" stroke="#94a3b8"/>
+                  <text x="98" y="80" text-anchor="middle">RateLimitHold</text>
+                  <rect x="162" y="66" width="80" height="20" fill="none" stroke="#94a3b8"/>
+                  <text x="202" y="80" text-anchor="middle">RpdResume</text>
+                  <rect x="58" y="94" width="80" height="20" fill="none" stroke="#94a3b8"/>
+                  <text x="98" y="108" text-anchor="middle">FreeDispatch tick</text>
+                  <rect x="162" y="94" width="80" height="20" fill="none" stroke="#94a3b8"/>
+                  <text x="202" y="108" text-anchor="middle">hold semantics</text>
+                </g>
+                <text x="150" y="140" text-anchor="middle" font-size="10" fill="#cbd5e1">isHeld() · runTick(pool) · resume(pool)</text>
+                <text x="150" y="158" text-anchor="middle" font-size="9" fill="#94a3b8" class="mono">one RateLimitHold table (pool column)</text>
+
+                <!-- config table feeding it -->
+                <rect x="70" y="210" width="160" height="66" rx="4" fill="#ecfdf5" stroke="#059669"/>
+                <text x="150" y="226" text-anchor="middle" font-size="9" class="mono" fill="#065f46">PROVIDER_POOLS = [</text>
+                <text x="150" y="240" text-anchor="middle" font-size="9" class="mono" fill="#065f46">{ groq, hold: "header-duration" },</text>
+                <text x="150" y="254" text-anchor="middle" font-size="9" class="mono" fill="#065f46">{ mistral, hold: "fixed-fallback" },</text>
+                <text x="150" y="268" text-anchor="middle" font-size="9" class="mono" fill="#065f46">… one row per provider ]</text>
+                <line x1="150" y1="210" x2="150" y2="182" stroke="#059669" stroke-width="1.5" marker-end="url(#ah)"/>
+                <defs><marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#059669"/></marker></defs>
+              </svg>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+            <p><span class="lbl text-slate-400">Problem</span><br />Every provider is a copied stack whose interface — <span class="mono text-xs">isHeld</span>, <span class="mono text-xs">runTick</span>, <span class="mono text-xs">resume</span> — is a fraction of its implementation; five copies already drift.</p>
+            <p><span class="lbl text-slate-400">Solution</span><br />One <span class="mono text-xs">ProviderPool</span> module parameterised by a config record (strategy, queue names, hold semantics, pacing knobs); the frontend's <span class="mono text-xs">providerPools.ts</span> already proves the shape.</p>
+          </div>
+
+          <ul class="text-sm grid sm:grid-cols-2 gap-x-8 gap-y-1 list-disc pl-5 marker:text-emerald-500">
+            <li>leverage: one interface, N providers</li>
+            <li>locality: hold/resume bugs concentrate in one module</li>
+            <li>interface is the test surface: one suite covers every pool</li>
+            <li>next provider = one config row, not 53 files</li>
+            <li>delete ~60 files; kill 4 ternary chains</li>
+            <li>drift between Groq and Mistral copies disappears</li>
+          </ul>
+        </article>
+
+        <!-- ============================ CANDIDATE 2 ============================ -->
+        <article class="space-y-6">
+          <h2 class="font-serif text-2xl">2 · One <span class="mono text-xl">RateLimitHold</span> table behind one hold interface</h2>
+          <div class="flex flex-wrap gap-2">
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800">Strong</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">in-process</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">one migration</span>
+          </div>
+
+          <div class="text-sm mono text-slate-600 leading-relaxed">
+            backend/src/modules/strategy/entities/{google,groq,openrouter,mistral,sambanova}-rate-limit-hold.entity.ts<br />
+            backend/src/modules/strategy/{provider}-rate-limit-hold.service.ts (×5)<br />
+            backend/src/migrations/177700… · 178200… · 178900… · 179200… · 179700…
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-xl border border-slate-200 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">Before — five identical schemas &amp; services</p>
+              <svg viewBox="0 0 300 250" class="w-full h-[250px]">
+                <g font-size="9">
+                  <g transform="translate(10,20)">
+                    <rect width="130" height="92" fill="#fff" stroke="#94a3b8"/>
+                    <text x="8" y="16" class="mono" fill="#475569">GroqRateLimitHold</text>
+                    <text x="8" y="34" fill="#64748b">strategyName · modelName</text>
+                    <text x="8" y="48" fill="#64748b">heldAt · resetAt</text>
+                    <text x="8" y="62" fill="#64748b">UQ(strategy, model)</text>
+                    <text x="8" y="82" fill="#94a3b8">6 methods, identical</text>
+                  </g>
+                  <g transform="translate(160,20)" class="ghost">
+                    <rect width="130" height="92" fill="#fff" stroke="#94a3b8"/>
+                    <text x="8" y="16" class="mono" fill="#475569">MistralRateLimitHold</text>
+                    <text x="8" y="34" fill="#64748b">strategyName · modelName</text>
+                    <text x="8" y="48" fill="#64748b">heldAt · resetAt</text>
+                    <text x="8" y="62" fill="#64748b">UQ(strategy, model)</text>
+                  </g>
+                  <g transform="translate(10,124)" class="ghost">
+                    <rect width="130" height="70" fill="#fff" stroke="#94a3b8"/>
+                    <text x="8" y="16" class="mono" fill="#475569">GoogleRateLimitHold</text>
+                    <text x="8" y="34" fill="#64748b">…same five columns</text>
+                  </g>
+                  <g transform="translate(160,124)" class="ghost">
+                    <rect width="130" height="70" fill="#fff" stroke="#94a3b8"/>
+                    <text x="8" y="16" class="mono" fill="#475569">OpenRouterRateLimitHold</text>
+                    <text x="8" y="34" fill="#64748b">…same five columns</text>
+                  </g>
+                  <text x="150" y="220" text-anchor="middle" font-size="10" fill="#b91c1c">5 tables · 5 repos · 5 services · 5 migrations</text>
+                  <text x="150" y="236" text-anchor="middle" font-size="9" fill="#64748b">only <tspan class="mono">resetAt</tspan> math differs — and that lives in the caller</text>
+                </g>
+              </svg>
+            </div>
+
+            <div class="rounded-xl border border-slate-300 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">After — one table, one service, a discriminator</p>
+              <svg viewBox="0 0 300 250" class="w-full h-[250px]">
+                <rect x="50" y="40" width="200" height="120" rx="6" class="deep-fill"/>
+                <text x="150" y="62" text-anchor="middle" class="lbl" fill="#e2e8f0">RateLimitHoldService</text>
+                <text x="150" y="86" text-anchor="middle" font-size="10" fill="#cbd5e1" class="mono">RateLimitHold</text>
+                <text x="150" y="104" text-anchor="middle" font-size="9" fill="#94a3b8">strategyName (already the discriminator)</text>
+                <text x="150" y="118" text-anchor="middle" font-size="9" fill="#94a3b8">modelName · heldAt · resetAt</text>
+                <text x="150" y="140" text-anchor="middle" font-size="9" fill="#cbd5e1">hold() · isHeld() · heldModels() · clearExpired()</text>
+                <text x="150" y="196" text-anchor="middle" font-size="10" fill="#64748b">caller passes the computed <tspan class="mono">resetAt</tspan></text>
+                <text x="150" y="212" text-anchor="middle" font-size="10" fill="#64748b">— header-duration / fixed-fallback / daily-clock</text>
+                <text x="150" y="228" text-anchor="middle" font-size="10" fill="#059669" font-weight="bold">deletion test: passes — logic concentrates</text>
+              </svg>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+            <p><span class="lbl text-slate-400">Problem</span><br /><span class="mono text-xs">Groq/Mistral/Google/OpenRouter/SambaNovaRateLimitHold</span> are byte-identical schemas; the services share the same six-method body and have already drifted in logging and comments.</p>
+            <p><span class="lbl text-slate-400">Solution</span><br />One <span class="mono text-xs">RateLimitHold</span> entity keyed on <span class="mono text-xs">(strategyName, modelName)</span> — <span class="mono text-xs">strategyName</span> already names the provider — and one <span class="mono text-xs">RateLimitHoldService</span>.</p>
+          </div>
+
+          <ul class="text-sm grid sm:grid-cols-2 gap-x-8 gap-y-1 list-disc pl-5 marker:text-emerald-500">
+            <li>interface shrinks; implementation absorbs the copies</li>
+            <li>locality: one query path to index and reason about</li>
+            <li>one hold spec, not five near-copies</li>
+            <li>smallest deletion-test-positive move; unblocks candidate 1</li>
+          </ul>
+        </article>
+
+        <!-- ============================ CANDIDATE 3 ============================ -->
+        <article class="space-y-6">
+          <h2 class="font-serif text-2xl">3 · Resolve provider behaviour through a pool lookup, not <span class="mono text-xl">strategyName</span> ternaries</h2>
+          <div class="flex flex-wrap gap-2">
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">Worth exploring</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">in-process</span>
+          </div>
+
+          <div class="text-sm mono text-slate-600 leading-relaxed">
+            backend/src/modules/strategy/llm-strategy-runner.service.ts (lines ~209, 253, 332, 496–540)<br />
+            orchestrator/src/solver.ts (per-provider 429 classification blocks)
+          </div>
+
+          <div class="rounded-xl border border-slate-200 bg-white p-4">
+            <pre class="mermaid">
+flowchart TB
+  subgraph BEFORE["runLlmStrategy — provider knowledge leaks 4×"]
+    direction TB
+    S["strategyName"] --> T1["ternary → provider string"]
+    S --> T2["ternary → which of 6 hold services"]
+    S --> T3["ternary → rateLimitFallbackSeconds fn"]
+    S --> T4["if LLM_GROQ / else if LLM_SAMBANOVA … → write hold"]
+    T2 --> H["6 injected *RateLimitHoldService, most unused per run"]
+  end
+  classDef leak stroke:#dc2626,stroke-width:2px,fill:#fee2e2;
+  class T1,T2,T3,T4 leak
+            </pre>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-xl border border-slate-200 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">Before — cross-section of one run call</p>
+              <svg viewBox="0 0 300 210" class="w-full h-[210px]">
+                <g font-size="10">
+                  <rect x="20" y="10" width="260" height="24" fill="#fee2e2" stroke="#ef4444"/><text x="30" y="26" fill="#7f1d1d">derive provider (7-branch ?:)</text>
+                  <rect x="20" y="38" width="260" height="24" fill="#fee2e2" stroke="#ef4444"/><text x="30" y="54" fill="#7f1d1d">pick hold service (5-branch ?:)</text>
+                  <rect x="20" y="66" width="260" height="24" fill="#fee2e2" stroke="#ef4444"/><text x="30" y="82" fill="#7f1d1d">pick fallback-seconds fn (4-branch ?:)</text>
+                  <rect x="20" y="94" width="260" height="24" fill="#fff" stroke="#94a3b8"/><text x="30" y="110" fill="#475569">run the solve loop</text>
+                  <rect x="20" y="122" width="260" height="24" fill="#fee2e2" stroke="#ef4444"/><text x="30" y="138" fill="#7f1d1d">if GROQ / else if SAMBANOVA … write hold</text>
+                  <text x="150" y="170" text-anchor="middle" font-size="9" fill="#64748b">6 hold services injected into the constructor</text>
+                  <text x="150" y="184" text-anchor="middle" font-size="9" fill="#64748b">every runner test mocks all 6</text>
+                </g>
+              </svg>
+            </div>
+            <div class="rounded-xl border border-slate-300 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">After — one seam</p>
+              <svg viewBox="0 0 300 210" class="w-full h-[210px]">
+                <g font-size="10">
+                  <rect x="20" y="20" width="260" height="26" fill="#ecfdf5" stroke="#059669"/><text x="30" y="37" fill="#065f46" class="mono">pool = providerPool(strategyName)</text>
+                  <rect x="40" y="70" width="220" height="90" rx="6" class="deep-fill"/>
+                  <text x="150" y="90" text-anchor="middle" class="lbl" fill="#e2e8f0">ProviderPool</text>
+                  <text x="150" y="112" text-anchor="middle" font-size="9" fill="#cbd5e1" class="mono">pool.hold.isHeld(model)</text>
+                  <text x="150" y="128" text-anchor="middle" font-size="9" fill="#cbd5e1" class="mono">pool.rateLimitFallbackSeconds</text>
+                  <text x="150" y="144" text-anchor="middle" font-size="9" fill="#cbd5e1" class="mono">pool.classifyDailyHold(err)</text>
+                  <text x="150" y="188" text-anchor="middle" font-size="9" fill="#64748b">runner test injects one pool stub</text>
+                </g>
+              </svg>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+            <p><span class="lbl text-slate-400">Problem</span><br />The runner re-derives the provider four times from <span class="mono text-xs">strategyName</span> and carries six hold-service dependencies to use one per run; <span class="mono text-xs">solver.ts</span> mirrors the same per-provider fan-out.</p>
+            <p><span class="lbl text-slate-400">Solution</span><br />A <span class="mono text-xs">providerPool(strategyName)</span> lookup returning the pool's config and its hold port; the runner and the classifier read from it instead of branching.</p>
+          </div>
+
+          <ul class="text-sm grid sm:grid-cols-2 gap-x-8 gap-y-1 list-disc pl-5 marker:text-amber-500">
+            <li>locality: rate-limit shape for a provider lives in one record</li>
+            <li>leverage: add a provider without touching the runner</li>
+            <li>runner tests drop five hold-service mocks</li>
+            <li>rides on candidate 1 / 2; do it after, not before</li>
+          </ul>
+        </article>
+
+        <!-- ============================ CANDIDATE 4 ============================ -->
+        <article class="space-y-6">
+          <h2 class="font-serif text-2xl">4 · Fold the per-provider knob families in <span class="mono text-xl">strategies.ts</span> into the pool config</h2>
+          <div class="flex flex-wrap gap-2">
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">Worth exploring</span>
+            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">in-process</span>
+          </div>
+
+          <div class="text-sm mono text-slate-600 leading-relaxed">backend/src/strategies.ts (~730 lines)</div>
+
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-xl border border-slate-200 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">Before — one knob family per provider</p>
+              <svg viewBox="0 0 300 220" class="w-full h-[220px]">
+                <g font-size="8.5" class="mono" fill="#475569">
+                  <text x="12" y="20">llmGroqConcurrency()</text>
+                  <text x="12" y="34">llmGroqRateLimitFallbackSeconds()</text>
+                  <text x="12" y="48">llmGroqDailyHoldFallbackSeconds()</text>
+                  <text x="12" y="62" class="ghost">llmMistralConcurrency()</text>
+                  <text x="12" y="76" class="ghost">llmMistralRateLimitFallbackSeconds()</text>
+                  <text x="12" y="90" class="ghost">mistralModelHoldFallbackSeconds()</text>
+                  <text x="12" y="104" class="ghost">mistralPersistentRateLimitAttempts()</text>
+                  <text x="12" y="118" class="ghost">sambaNovaDispatchTickMs()</text>
+                  <text x="12" y="132" class="ghost">sambaNovaDispatchMaxBatch()</text>
+                  <text x="12" y="146" class="ghost">sambaNovaDispatchMaxInFlight()</text>
+                  <text x="12" y="160" class="ghost">openRouterDispatchTickMs() … ×4</text>
+                </g>
+                <text x="150" y="196" text-anchor="middle" font-size="10" fill="#b91c1c">~40 near-identical 3-line env readers</text>
+                <text x="150" y="210" text-anchor="middle" font-size="9" fill="#64748b">each: positiveTrialCount(env.X, DEFAULT_X)</text>
+              </svg>
+            </div>
+            <div class="rounded-xl border border-slate-300 bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">After — one record per pool</p>
+              <svg viewBox="0 0 300 220" class="w-full h-[220px]">
+                <rect x="30" y="24" width="240" height="150" rx="6" class="deep-fill"/>
+                <text x="150" y="44" text-anchor="middle" class="lbl" fill="#e2e8f0">poolConfig(pool)</text>
+                <g font-size="9" class="mono" fill="#cbd5e1">
+                  <text x="150" y="72" text-anchor="middle">{ concurrency,</text>
+                  <text x="150" y="90" text-anchor="middle">rateLimitFallbackSeconds,</text>
+                  <text x="150" y="108" text-anchor="middle">dailyHoldFallbackSeconds,</text>
+                  <text x="150" y="126" text-anchor="middle">dispatch: { tickMs, maxBatch,</text>
+                  <text x="150" y="144" text-anchor="middle">maxInFlight } }</text>
+                </g>
+                <text x="150" y="200" text-anchor="middle" font-size="9" fill="#64748b">one env-parse helper, keyed by pool id</text>
+              </svg>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+            <p><span class="lbl text-slate-400">Problem</span><br /><span class="mono text-xs">strategies.ts</span> has grown a per-provider family of ~3-line env-reader functions; the file is now mostly boilerplate and every provider adds ~8 more.</p>
+            <p><span class="lbl text-slate-400">Solution</span><br />One typed <span class="mono text-xs">poolConfig(pool)</span> record parsed once from env, indexed by pool id — the same list candidate 1 introduces.</p>
+          </div>
+
+          <ul class="text-sm grid sm:grid-cols-2 gap-x-8 gap-y-1 list-disc pl-5 marker:text-amber-500">
+            <li>interface shrinks: one config reader, not 40</li>
+            <li>leverage: the pool list is the single source of provider knobs</li>
+            <li>speculative until candidate 1 lands the pool list</li>
+          </ul>
+        </article>
+
+      </section>
+
+      <!-- ============================ TOP RECOMMENDATION ============================ -->
+      <section id="top-recommendation" class="rounded-2xl border-2 border-emerald-600 bg-white p-8 space-y-4">
+        <p class="lbl text-emerald-700">Top recommendation</p>
+        <h2 class="font-serif text-2xl">Start with candidate 2 — unify <span class="mono text-xl">RateLimitHold</span> — then take candidate 1.</h2>
+        <p class="text-sm text-slate-700 max-w-3xl">
+          Candidate 2 is the smallest move that passes the deletion test cleanly: five byte-identical
+          schemas and five six-method services collapse into one table with a <span class="mono text-xs">strategyName</span>
+          discriminator that already exists, behind one interface that becomes the whole test surface
+          for holds. It is one migration and carries little risk. It also lays the seam that candidate 1
+          builds on — once the hold is one module, the dispatch tick and the RPD-resume sweep are the
+          only per-provider copies left, and folding them into a config-driven Provider Pool module
+          turns "53 files to add SambaNova" into "one config row." Candidates 3 and 4 are cleanup that
+          rides on that pool list; do them last.
+        </p>
+        <p class="text-xs text-slate-500">
+          One constraint for candidate 1's design: OpenRouter's hold is account-wide with a
+          <span class="mono">heldReason()</span> of <span class="mono">"daily" | "per-minute-cooldown"</span> and no model
+          parameter, while the others are per-model. The pool config needs a <span class="mono">scope: "account" | "model"</span>
+          field rather than assuming per-model everywhere.
+        </p>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-8 border-t border-slate-200">
+        No <span class="mono">CONTEXT.md</span> or <span class="mono">docs/adr/</span> in the repo — domain terms above are taken from
+        <span class="mono">AGENTS.md</span>, <span class="mono">DESIGN.md</span>, and the code. Consider seeding <span class="mono">CONTEXT.md</span> with
+        "Provider Pool" if candidate 1 proceeds.
+      </footer>
+
+    </main>
+  </body>
+</html>

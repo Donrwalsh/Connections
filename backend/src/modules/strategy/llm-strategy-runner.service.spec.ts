@@ -8,13 +8,10 @@ import { Puzzle } from "../game/entities/puzzle.entity";
 import { Guess, GuessResult } from "./entities/guess.entity";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
 import { LlmProposalStatus } from "./entities/llm-proposal.entity";
-import { OrchestratorService, type SolveAssistOutcome, type ChatMessage } from "./orchestrator.service";
+import { OrchestratorService, type SolveStepOutcome, type ChatMessage } from "./orchestrator.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
-import { GoogleRateLimitHoldService } from "./google-rate-limit-hold.service";
-import { GroqRateLimitHoldService } from "./groq-rate-limit-hold.service";
-import { OpenRouterRateLimitHoldService } from "./openrouter-rate-limit-hold.service";
-import { MistralRateLimitHoldService } from "./mistral-rate-limit-hold.service";
-import { SambaNovaRateLimitHoldService } from "./sambanova-rate-limit-hold.service";
+import { RateLimitHoldService } from "./rate-limit-hold.service";
+import { parseAnswer } from "answer-grammar";
 import {
   DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
   DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS,
@@ -40,17 +37,14 @@ describe("LlmStrategyRunner", () => {
   };
   let mockSolvePromptRepo: { createQueryBuilder: jest.Mock };
   let mockOrchestratorService: {
-    solveAssist: jest.Mock<Promise<SolveAssistOutcome>, unknown[]>;
+    requestSolveStep: jest.Mock<Promise<SolveStepOutcome>, unknown[]>;
   };
   let mockSupportedModelService: { getContextWindow: jest.Mock };
-  let mockRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
-  let mockGroqRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
-  let mockMistralRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
-  let mockSambaNovaRpdHold: { isHeld: jest.Mock; hold: jest.Mock };
-  let mockOpenRouterHold: {
+  let mockRateLimitHold: {
     isHeld: jest.Mock;
     hold: jest.Mock;
     heldReason: jest.Mock;
+    heldModels: jest.Mock;
     nextResetAt: jest.Mock;
     clearExpired: jest.Mock;
   };
@@ -106,33 +100,18 @@ describe("LlmStrategyRunner", () => {
       }),
     };
     mockOrchestratorService = {
-      solveAssist: jest.fn(),
+      requestSolveStep: jest.fn(),
     };
     mockSupportedModelService = {
       getContextWindow: jest.fn().mockResolvedValue(null),
     };
-    mockRpdHold = {
-      isHeld: jest.fn().mockResolvedValue(false),
-      hold: jest.fn().mockResolvedValue(undefined),
-    };
-    mockGroqRpdHold = {
-      isHeld: jest.fn().mockResolvedValue(false),
-      hold: jest.fn().mockResolvedValue(undefined),
-    };
-    mockMistralRpdHold = {
-      isHeld: jest.fn().mockResolvedValue(false),
-      hold: jest.fn().mockResolvedValue(undefined),
-    };
-    mockSambaNovaRpdHold = {
-      isHeld: jest.fn().mockResolvedValue(false),
-      hold: jest.fn().mockResolvedValue(undefined),
-    };
-    mockOpenRouterHold = {
+    mockRateLimitHold = {
       isHeld: jest.fn().mockResolvedValue(false),
       hold: jest.fn().mockResolvedValue(undefined),
       heldReason: jest.fn().mockResolvedValue(null),
+      heldModels: jest.fn().mockResolvedValue([]),
       nextResetAt: jest.fn().mockResolvedValue(null),
-      clearExpired: jest.fn().mockResolvedValue(false),
+      clearExpired: jest.fn().mockResolvedValue({ clearedModels: [], clearedAccountWide: false }),
     };
     mockManager = {
       insert: jest.fn().mockImplementation((entity: string, data?: unknown[]) => {
@@ -159,11 +138,7 @@ describe("LlmStrategyRunner", () => {
         { provide: getRepositoryToken(SolvePrompt), useValue: mockSolvePromptRepo },
         { provide: OrchestratorService, useValue: mockOrchestratorService },
         { provide: SupportedModelService, useValue: mockSupportedModelService },
-        { provide: GoogleRateLimitHoldService, useValue: mockRpdHold },
-        { provide: GroqRateLimitHoldService, useValue: mockGroqRpdHold },
-        { provide: OpenRouterRateLimitHoldService, useValue: mockOpenRouterHold },
-        { provide: MistralRateLimitHoldService, useValue: mockMistralRpdHold },
-        { provide: SambaNovaRateLimitHoldService, useValue: mockSambaNovaRpdHold },
+        { provide: RateLimitHoldService, useValue: mockRateLimitHold },
       ],
     }).compile();
 
@@ -176,20 +151,36 @@ describe("LlmStrategyRunner", () => {
   });
 
   describe("runLlmStrategy", () => {
+    // The orchestrator now runs the full structured parse itself (see
+    // answer-step.ts / answer-grammar) before this service ever sees a
+    // response — so the fake orchestrator here must do the same, using the
+    // real parseAnswer, rather than the runner re-deriving these fields.
+    // `groups` is used verbatim as `data.groups` (the malformed-response
+    // gate) and, same as the real answer-grammar's `proposalWords` fallback,
+    // as the proposalWords source whenever `response`'s own "### GROUPS"
+    // block parses to nothing (e.g. the default "test reasoning" fixture,
+    // which has no GROUPS/ANSWER sections at all).
     const makeAssistResponse = (
       groups: string[][],
       response: string = "test reasoning",
-    ): SolveAssistOutcome => ({
-      ok: true,
-      data: {
-        response,
-        groups,
-        model: "mistral",
-        latencyMs: 500,
-      },
-    });
+    ): SolveStepOutcome => {
+      const parsed = parseAnswer(response);
+      const proposalWords = parsed.proposalWords.length > 0 ? parsed.proposalWords : groups;
+      return {
+        ok: true,
+        data: {
+          response,
+          groups,
+          proposalWords,
+          categoryByGroup: Object.fromEntries(parsed.categoryByGroup),
+          textIssues: parsed.textIssues,
+          model: "mistral",
+          latencyMs: 500,
+        },
+      };
+    };
 
-    const malformed = (): SolveAssistOutcome => ({
+    const malformed = (): SolveStepOutcome => ({
       ok: false,
       error: { error: "bad response", code: "invalid_group" },
     });
@@ -199,10 +190,10 @@ describe("LlmStrategyRunner", () => {
     // the run finishes returns the same, fully-mutated array for every
     // call index. To assert what was actually sent *at* a given call, this
     // snapshots the array's contents synchronously as each call happens.
-    const captureMessages = (outcomes: SolveAssistOutcome[]) => {
+    const captureMessages = (outcomes: SolveStepOutcome[]) => {
       const snapshots: ChatMessage[][] = [];
       let i = 0;
-      mockOrchestratorService.solveAssist.mockImplementation(async (...args: unknown[]) => {
+      mockOrchestratorService.requestSolveStep.mockImplementation(async (...args: unknown[]) => {
         const messages = args[0] as ChatMessage[];
         snapshots.push(messages.map((m) => ({ ...m })));
         return outcomes[i++];
@@ -225,7 +216,7 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-openai");
 
       expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 5 });
-      expect(mockOrchestratorService.solveAssist).not.toHaveBeenCalled();
+      expect(mockOrchestratorService.requestSolveStep).not.toHaveBeenCalled();
       expect(mockDataSource.transaction).not.toHaveBeenCalled();
     });
 
@@ -233,14 +224,14 @@ describe("LlmStrategyRunner", () => {
       // Each response proposes just one group, so the run needs a second
       // orchestrator call (with an INITIAL prompt, since nothing failed) to
       // pick up the remaining words.
-      mockOrchestratorService.solveAssist
+      mockOrchestratorService.requestSolveStep
         .mockResolvedValueOnce(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]))
         .mockResolvedValueOnce(makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]));
 
       const result = await runner.runLlmStrategy(100, "llm-openai");
 
       expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(2);
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(2);
 
       // Guesses
       const inserted = mockManager.insert.mock.calls
@@ -314,7 +305,7 @@ describe("LlmStrategyRunner", () => {
         "grape is small, honey is sticky)\n\n" +
         "### ANSWER\nEGGPLANT, FIG, GRAPE, HONEY";
 
-      mockOrchestratorService.solveAssist
+      mockOrchestratorService.requestSolveStep
         .mockResolvedValueOnce(
           makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]], responseOne),
         )
@@ -358,10 +349,10 @@ describe("LlmStrategyRunner", () => {
       const response =
         "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n\n" +
         "### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]], response),
       );
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
       );
 
@@ -381,10 +372,10 @@ describe("LlmStrategyRunner", () => {
         "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY\n\n" +
         "#### Group 2\nCategory: Misc\nWords: EGGPLANT, FIG, GRAPE, HONEY\n\n" +
         "### ANSWER\nEGGPLANT, FIG, GRAPE, HONEY";
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]], response),
       );
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]),
       );
 
@@ -416,10 +407,10 @@ describe("LlmStrategyRunner", () => {
       const response =
         "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY\n\n" +
         "### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]], response),
       );
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
       );
 
@@ -443,10 +434,10 @@ describe("LlmStrategyRunner", () => {
         "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n\n" +
         "#### Group 2\nCategory: Misc\n\n" +
         "### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]], response),
       );
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
       );
 
@@ -465,10 +456,10 @@ describe("LlmStrategyRunner", () => {
       // parsedGroupWords was wrongly treated as "nothing to check" instead
       // of "this response's one heading never panned out").
       const response = "### GROUPS\n#### Group 1\nCategory: Fruits\n\n### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]], response),
       );
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
       );
 
@@ -488,10 +479,10 @@ describe("LlmStrategyRunner", () => {
       const response =
         "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n\n" +
         "### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]], response),
       );
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
       );
 
@@ -508,7 +499,7 @@ describe("LlmStrategyRunner", () => {
       // skipped exactly as it is today (silently, no guess produced), but
       // now the prompt gets flagged. The run only finishes once the second
       // call proposes both real groups correctly.
-      mockOrchestratorService.solveAssist
+      mockOrchestratorService.requestSolveStep
         .mockResolvedValueOnce(makeAssistResponse([["OCEAN", "BANANA", "CHERRY", "DATE"]]))
         .mockResolvedValueOnce(
           makeAssistResponse([
@@ -541,7 +532,7 @@ describe("LlmStrategyRunner", () => {
       // (APPLE is missing from the now-shrunk availableWords), but this is
       // an expected, boring case and must NOT get wordNotOnList. Call 3
       // finishes the run by proposing group 2 correctly.
-      mockOrchestratorService.solveAssist
+      mockOrchestratorService.requestSolveStep
         .mockResolvedValueOnce(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]))
         .mockResolvedValueOnce(makeAssistResponse([["APPLE", "EGGPLANT", "FIG", "GRAPE"]]))
         .mockResolvedValueOnce(makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]));
@@ -570,10 +561,10 @@ describe("LlmStrategyRunner", () => {
           availableWords: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
         }),
       );
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([["APPLE", "EGGPLANT", "FIG", "GRAPE"]]),
       );
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
       );
 
@@ -590,7 +581,7 @@ describe("LlmStrategyRunner", () => {
         "### GROUPS\n#### Group 1\nCategory: Fruits\n" +
         "Words: OCEAN, BANANA, CHERRY, DATE (a hallucinated word here)\n\n" +
         "### ANSWER\nOCEAN, BANANA, CHERRY, DATE";
-      mockOrchestratorService.solveAssist
+      mockOrchestratorService.requestSolveStep
         .mockResolvedValueOnce(makeAssistResponse([["OCEAN", "BANANA", "CHERRY", "DATE"]], response))
         .mockResolvedValueOnce(
           makeAssistResponse([
@@ -626,7 +617,7 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-openai");
 
       expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 3 });
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(2);
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(2);
 
       // First call: user message only, using the INITIAL prompt format
       expect(snapshots[0]).toHaveLength(1);
@@ -641,9 +632,50 @@ describe("LlmStrategyRunner", () => {
       expect(snapshots[1][2].content).toContain("Feedback on Previous Guess:");
     });
 
+    it("should persist promptText on success rows as the transcript through the user turn, for both INITIAL and RETRY prompts", async () => {
+      // Same INITIAL -> RETRY scenario as the prior test, but asserting the
+      // promptText column this task adds instead of the messages sent.
+      const snapshots = captureMessages([
+        makeAssistResponse([["APPLE", "EGGPLANT", "CHERRY", "FIG"]]),
+        makeAssistResponse([
+          ["APPLE", "BANANA", "CHERRY", "DATE"],
+          ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        ]),
+      ]);
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows).toHaveLength(2);
+
+      // INITIAL row: transcript through this call's user turn only -- the
+      // assistant reply that arrives this same iteration is the *next*
+      // row's concern.
+      expect(promptRows[0]).toEqual(
+        expect.objectContaining({
+          promptType: "initialSolve",
+          promptText: `[User]\n${snapshots[0][0].content}`,
+        }),
+      );
+
+      // RETRY row: full transcript up through this call's RETRY user turn --
+      // the prior user/assistant pair plus the new feedback prompt.
+      expect(promptRows[1]).toEqual(
+        expect.objectContaining({
+          promptType: "retry",
+          promptText:
+            `[User]\n${snapshots[1][0].content}\n\n` +
+            `[Assistant]\n${snapshots[1][1].content}\n\n` +
+            `[User]\n${snapshots[1][2].content}`,
+        }),
+      );
+    });
+
     it("should consult the Ollama provider for the llm-ollama strategy", async () => {
       mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-ollama" }));
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([
           ["APPLE", "BANANA", "CHERRY", "DATE"],
           ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
@@ -652,8 +684,8 @@ describe("LlmStrategyRunner", () => {
 
       await runner.runLlmStrategy(100, "llm-ollama", 0, "mistral");
 
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledWith(
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(1);
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledWith(
         expect.any(Array),
         "mistral",
         "ollama",
@@ -663,7 +695,7 @@ describe("LlmStrategyRunner", () => {
 
     it("should consult the Google provider for the llm-google strategy", async () => {
       mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-google" }));
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([
           ["APPLE", "BANANA", "CHERRY", "DATE"],
           ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
@@ -672,8 +704,8 @@ describe("LlmStrategyRunner", () => {
 
       await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
 
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledWith(
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(1);
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledWith(
         expect.any(Array),
         "gemini-3.6-flash",
         "google",
@@ -682,7 +714,7 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should pass the requested model and the openai provider for llm-openai", async () => {
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([
           ["APPLE", "BANANA", "CHERRY", "DATE"],
           ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
@@ -695,7 +727,7 @@ describe("LlmStrategyRunner", () => {
       // this value at creation time — here just confirm the runner passes it
       // through to the orchestrator call rather than leaving it for the
       // response-based fallback.
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledWith(
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledWith(
         expect.any(Array),
         "gpt-4.1-nano-2025-04-14",
         "openai",
@@ -703,10 +735,10 @@ describe("LlmStrategyRunner", () => {
       );
     });
 
-    it("should look up and thread the model's contextWindow through to solveAssist", async () => {
+    it("should look up and thread the model's contextWindow through to requestSolveStep", async () => {
       mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-ollama" }));
       mockSupportedModelService.getContextWindow.mockResolvedValueOnce(131072);
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([
           ["APPLE", "BANANA", "CHERRY", "DATE"],
           ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
@@ -719,7 +751,7 @@ describe("LlmStrategyRunner", () => {
         "llm-ollama",
         "mistral-nemo",
       );
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledWith(
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledWith(
         expect.any(Array),
         "mistral-nemo",
         "ollama",
@@ -730,7 +762,7 @@ describe("LlmStrategyRunner", () => {
     it("should correct the run's stored contextWindow to the actual (possibly capped) value from the response", async () => {
       mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-ollama" }));
       mockSupportedModelService.getContextWindow.mockResolvedValueOnce(131072);
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce({
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce({
         ok: true,
         data: {
           response: "test reasoning",
@@ -738,6 +770,12 @@ describe("LlmStrategyRunner", () => {
             ["APPLE", "BANANA", "CHERRY", "DATE"],
             ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
           ],
+          proposalWords: [
+            ["APPLE", "BANANA", "CHERRY", "DATE"],
+            ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+          ],
+          categoryByGroup: {},
+          textIssues: [],
           model: "mistral-nemo",
           latencyMs: 500,
           contextWindow: 8192,
@@ -756,7 +794,7 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should not look up a contextWindow when no model is given", async () => {
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([
           ["APPLE", "BANANA", "CHERRY", "DATE"],
           ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
@@ -799,7 +837,7 @@ describe("LlmStrategyRunner", () => {
         // GameService's puzzle evaluation never returns GuessResult.DUPLICATE
         // itself — duplicates are detected upstream by the orchestrator and
         // reported via the duplicate_group error code.
-        mockOrchestratorService.solveAssist.mockResolvedValue({
+        mockOrchestratorService.requestSolveStep.mockResolvedValue({
           ok: false,
           error: { error: "duplicate group", code: "duplicate_group" },
         });
@@ -807,7 +845,7 @@ describe("LlmStrategyRunner", () => {
         const result = await runner.runLlmStrategy(100, "llm-openai");
 
         expect(result).toEqual({ status: StrategyRunStatus.DUPLICATE, guessCount: 0 });
-        expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(3);
+        expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(3);
         // Every failed call now gets its own CALL_ERROR SolvePrompt row —
         // previously a duplicate_group failure left no trace at all.
         const promptRows = mockManager.insert.mock.calls
@@ -829,7 +867,7 @@ describe("LlmStrategyRunner", () => {
       process.env.LLM_MAX_FAILED_GUESSES = "2";
       try {
         // Both guesses cross the two answer groups, so neither is a one-away
-        mockOrchestratorService.solveAssist
+        mockOrchestratorService.requestSolveStep
           .mockResolvedValueOnce(
             makeAssistResponse([["APPLE", "EGGPLANT", "CHERRY", "FIG"], ["BANANA", "DATE", "GRAPE", "HONEY"]]),
           )
@@ -862,7 +900,7 @@ describe("LlmStrategyRunner", () => {
       process.env.LLM_MAX_FAILED_GUESSES = "2";
       try {
         // First guess is 3 words of an answer group -> one-away
-        mockOrchestratorService.solveAssist
+        mockOrchestratorService.requestSolveStep
           .mockResolvedValueOnce(
             makeAssistResponse([["APPLE", "BANANA", "CHERRY", "EGGPLANT"], ["DATE", "FIG", "GRAPE", "HONEY"]]),
           )
@@ -891,15 +929,23 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should treat a success with no groups as malformed", async () => {
-      mockOrchestratorService.solveAssist.mockResolvedValue({
+      mockOrchestratorService.requestSolveStep.mockResolvedValue({
         ok: true,
-        data: { response: "I don't know", groups: [], model: "mistral", latencyMs: 0 },
+        data: {
+          response: "I don't know",
+          groups: [],
+          proposalWords: [],
+          categoryByGroup: {},
+          textIssues: [],
+          model: "mistral",
+          latencyMs: 0,
+        },
       });
 
       const result = await runner.runLlmStrategy(100, "llm-openai");
 
       expect(result).toEqual({ status: StrategyRunStatus.MALFORMED_RESPONSE, guessCount: 0 });
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(3);
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(3);
 
       // A SolvePrompt row is still recorded for every 'ok' response, even a
       // malformed one, but no Guess/LlmProposal rows are created since there
@@ -917,7 +963,7 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should terminate with 'malformedResponse' after consecutive invalid responses", async () => {
-      mockOrchestratorService.solveAssist
+      mockOrchestratorService.requestSolveStep
         .mockResolvedValueOnce(malformed())
         .mockResolvedValueOnce(malformed())
         .mockResolvedValueOnce(malformed());
@@ -925,7 +971,7 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-openai");
 
       expect(result).toEqual({ status: StrategyRunStatus.MALFORMED_RESPONSE, guessCount: 0 });
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(3);
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(3);
       const promptRows = mockManager.insert.mock.calls
         .filter((call) => call[0] === "SolvePrompt")
         .flatMap((call) => call[1] as Array<Record<string, unknown>>);
@@ -942,7 +988,7 @@ describe("LlmStrategyRunner", () => {
       jest
         .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
         .mockResolvedValue(undefined);
-      mockOrchestratorService.solveAssist
+      mockOrchestratorService.requestSolveStep
         .mockResolvedValueOnce({
           ok: false,
           error: { error: "model is loading", code: "model_error" },
@@ -953,7 +999,7 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-openai");
 
       expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(3);
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(3);
       expect(mockManager.save).not.toHaveBeenCalledWith(
         StrategyRun,
         expect.objectContaining({ status: StrategyRunStatus.ERROR }),
@@ -966,7 +1012,7 @@ describe("LlmStrategyRunner", () => {
         .mockResolvedValue(undefined);
       process.env.LLM_MAX_MODEL_ERRORS = "2";
       try {
-        mockOrchestratorService.solveAssist.mockResolvedValue({
+        mockOrchestratorService.requestSolveStep.mockResolvedValue({
           ok: false,
           error: { error: "ollama is down", code: "model_error" },
         });
@@ -974,7 +1020,7 @@ describe("LlmStrategyRunner", () => {
         const result = await runner.runLlmStrategy(100, "llm-openai");
 
         expect(result).toEqual({ status: StrategyRunStatus.ERROR, guessCount: 0 });
-        expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(2);
+        expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(2);
         const promptRows = mockManager.insert.mock.calls
           .filter((call) => call[0] === "SolvePrompt")
           .flatMap((call) => call[1] as Array<Record<string, unknown>>);
@@ -995,7 +1041,7 @@ describe("LlmStrategyRunner", () => {
       // rather than retrying into real (unmocked) exponential backoff delays.
       process.env.LLM_MAX_MODEL_ERRORS = "1";
       try {
-        mockOrchestratorService.solveAssist.mockResolvedValue({
+        mockOrchestratorService.requestSolveStep.mockResolvedValue({
           ok: false,
           error: {
             error: "model down",
@@ -1026,12 +1072,64 @@ describe("LlmStrategyRunner", () => {
       }
     });
 
+    it("should persist promptText on a CALL_ERROR row as the pre-pop transcript, for both INITIAL and RETRY prompts", async () => {
+      // Three calls: (1) an INITIAL call that errors outright, (2) a
+      // successful INITIAL call whose guess fails and sets up a RETRY
+      // prompt, (3) a RETRY call that errors. LLM_MAX_DUPLICATE_GUESSES=1
+      // (tripped only by call 3's duplicate_group code) stops the run after
+      // exactly these three calls without terminating early on call 1's
+      // model_error, which the default maxModelErrors tolerates.
+      process.env.LLM_MAX_DUPLICATE_GUESSES = "1";
+      try {
+        const snapshots = captureMessages([
+          { ok: false, error: { error: "model down", code: "model_error" } },
+          makeAssistResponse([["APPLE", "EGGPLANT", "CHERRY", "FIG"]]),
+          { ok: false, error: { error: "duplicate", code: "duplicate_group" } },
+        ]);
+
+        await runner.runLlmStrategy(100, "llm-openai");
+
+        const promptRows = mockManager.insert.mock.calls
+          .filter((call) => call[0] === "SolvePrompt")
+          .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+        expect(promptRows).toHaveLength(3);
+
+        // Row 0: INITIAL CALL_ERROR -- transcript is just this call's own
+        // user turn (messages was empty before it).
+        expect(promptRows[0]).toEqual(
+          expect.objectContaining({
+            promptType: "initialSolve",
+            status: "callError",
+            promptText: `[User]\n${snapshots[0][0].content}`,
+          }),
+        );
+
+        // Row 2: RETRY CALL_ERROR -- the pre-pop transcript through this
+        // call's RETRY user turn (call 2's user/assistant pair plus the new
+        // retry prompt), captured before the runner's messages.pop() removes
+        // that turn from in-memory history for the next attempt. This is
+        // the *actual* prompt sent for this attempt, not a re-derived one.
+        expect(promptRows[2]).toEqual(
+          expect.objectContaining({
+            promptType: "retry",
+            status: "callError",
+            promptText:
+              `[User]\n${snapshots[2][0].content}\n\n` +
+              `[Assistant]\n${snapshots[2][1].content}\n\n` +
+              `[User]\n${snapshots[2][2].content}`,
+          }),
+        );
+      } finally {
+        delete process.env.LLM_MAX_DUPLICATE_GUESSES;
+      }
+    });
+
     it("should wait the server-specified retryAfterSeconds and retry, without counting a rate_limited hit as a failure", async () => {
       const delaySpy = jest
         .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
         .mockResolvedValue(undefined);
 
-      mockOrchestratorService.solveAssist
+      mockOrchestratorService.requestSolveStep
         .mockResolvedValueOnce({
           ok: false,
           error: { error: "rate limited", code: "rate_limited", retryAfterSeconds: 3.86 },
@@ -1058,12 +1156,12 @@ describe("LlmStrategyRunner", () => {
       // never feeds that counter, regardless of count.
       const RATE_LIMIT_HITS = 8;
       for (let i = 0; i < RATE_LIMIT_HITS; i++) {
-        mockOrchestratorService.solveAssist.mockResolvedValueOnce({
+        mockOrchestratorService.requestSolveStep.mockResolvedValueOnce({
           ok: false,
           error: { error: "rate limited", code: "rate_limited", retryAfterSeconds: 1 },
         });
       }
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([
           ["APPLE", "BANANA", "CHERRY", "DATE"],
           ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
@@ -1072,7 +1170,7 @@ describe("LlmStrategyRunner", () => {
 
       const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
 
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(RATE_LIMIT_HITS + 1);
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(RATE_LIMIT_HITS + 1);
       expect(result.status).not.toBe(StrategyRunStatus.ERROR);
     });
 
@@ -1083,7 +1181,7 @@ describe("LlmStrategyRunner", () => {
         .mockResolvedValue(undefined);
 
       try {
-        mockOrchestratorService.solveAssist
+        mockOrchestratorService.requestSolveStep
           .mockResolvedValueOnce({
             ok: false,
             error: { error: "rate limited", code: "rate_limited" },
@@ -1114,7 +1212,7 @@ describe("LlmStrategyRunner", () => {
       // model-error streak back to 0 nor itself count toward the 5, so the
       // run should still terminate on the 5th model_error (the 6th call
       // overall).
-      mockOrchestratorService.solveAssist
+      mockOrchestratorService.requestSolveStep
         .mockResolvedValueOnce({ ok: false, error: { error: "down", code: "model_error" } })
         .mockResolvedValueOnce({ ok: false, error: { error: "down", code: "model_error" } })
         .mockResolvedValueOnce({
@@ -1128,7 +1226,7 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
 
       expect(result).toEqual({ status: StrategyRunStatus.ERROR, guessCount: 0 });
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(6);
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(6);
 
       // The rate_limited hit pre-empts that iteration's model-error backoff
       // wait via the run loop's `else if` — so the delay sequence is the
@@ -1145,14 +1243,14 @@ describe("LlmStrategyRunner", () => {
         .mockResolvedValue(undefined);
       process.env.LLM_MAX_MODEL_ERRORS = "3";
       try {
-        mockOrchestratorService.solveAssist.mockResolvedValue({
+        mockOrchestratorService.requestSolveStep.mockResolvedValue({
           ok: false,
           error: { error: "model down", code: "model_error", statusCode: 502 },
         });
 
         await runner.runLlmStrategy(100, "llm-openai");
 
-        expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(3);
+        expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(3);
 
         const promptRows = mockManager.insert.mock.calls
           .filter((call) => call[0] === "SolvePrompt")
@@ -1170,11 +1268,14 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should persist requestBody/responseId/responseHeaders/responseBody on the successful row", async () => {
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce({
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce({
         ok: true,
         data: {
           response: "### ANSWER\nAPPLE, BANANA, CHERRY, DATE",
           groups: [["APPLE", "BANANA", "CHERRY", "DATE"]],
+          proposalWords: [["APPLE", "BANANA", "CHERRY", "DATE"]],
+          categoryByGroup: {},
+          textIssues: [],
           model: "mistral",
           latencyMs: 500,
           requestBody: { model: "mistral" },
@@ -1183,7 +1284,7 @@ describe("LlmStrategyRunner", () => {
           responseBody: { id: "resp_789" },
         },
       });
-      mockOrchestratorService.solveAssist.mockResolvedValueOnce(
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
       );
 
@@ -1208,7 +1309,7 @@ describe("LlmStrategyRunner", () => {
         .mockResolvedValue(undefined);
       process.env.LLM_MAX_MODEL_ERRORS = "2";
       try {
-        mockOrchestratorService.solveAssist
+        mockOrchestratorService.requestSolveStep
           .mockResolvedValueOnce({
             ok: false,
             error: {
@@ -1239,7 +1340,7 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("parks a held google run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {
-      mockRpdHold.isHeld.mockResolvedValue(true);
+      mockRateLimitHold.isHeld.mockResolvedValue(true);
       mockStrategyRunRepo.findOne.mockResolvedValue(
         makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" }),
       );
@@ -1248,9 +1349,9 @@ describe("LlmStrategyRunner", () => {
 
       const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
 
-      expect(mockOrchestratorService.solveAssist).not.toHaveBeenCalled();
+      expect(mockOrchestratorService.requestSolveStep).not.toHaveBeenCalled();
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockRpdHold.hold).not.toHaveBeenCalled();
+      expect(mockRateLimitHold.hold).not.toHaveBeenCalled();
     });
 
     it("records a hold and parks the run on a rate_limited_daily failure, touching no failure counter", async () => {
@@ -1259,7 +1360,7 @@ describe("LlmStrategyRunner", () => {
       );
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist.mockResolvedValue({
+      mockOrchestratorService.requestSolveStep.mockResolvedValue({
         ok: false,
         error: { error: "Google daily quota exhausted", code: "rate_limited_daily" },
       });
@@ -1267,8 +1368,11 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
 
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockRpdHold.hold).toHaveBeenCalledWith("llm-google", "gemini-3.6-flash");
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-google", {
+        modelName: "gemini-3.6-flash",
+        resetInSeconds: expect.any(Number),
+      });
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(1);
     });
 
     it("never ends a run in ERROR on a rate_limited_daily hit", async () => {
@@ -1277,7 +1381,7 @@ describe("LlmStrategyRunner", () => {
       );
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist.mockResolvedValue({
+      mockOrchestratorService.requestSolveStep.mockResolvedValue({
         ok: false,
         error: { error: "quota", code: "rate_limited_daily" },
       });
@@ -1287,11 +1391,11 @@ describe("LlmStrategyRunner", () => {
       // Parked, not errored — and parked on the very first hit, so no
       // counter had a chance to roll toward ERROR in the first place.
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(1);
     });
 
     it("parks a held groq run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {
-      mockGroqRpdHold.isHeld.mockResolvedValue(true);
+      mockRateLimitHold.isHeld.mockResolvedValue(true);
       mockStrategyRunRepo.findOne.mockResolvedValue(
         makeRun({ strategyName: "llm-groq", modelName: "openai/gpt-oss-20b" }),
       );
@@ -1300,9 +1404,9 @@ describe("LlmStrategyRunner", () => {
 
       const result = await runner.runLlmStrategy(100, "llm-groq", 0, "openai/gpt-oss-20b");
 
-      expect(mockOrchestratorService.solveAssist).not.toHaveBeenCalled();
+      expect(mockOrchestratorService.requestSolveStep).not.toHaveBeenCalled();
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockGroqRpdHold.hold).not.toHaveBeenCalled();
+      expect(mockRateLimitHold.hold).not.toHaveBeenCalled();
     });
 
     it("records a Groq hold using dailyResetSeconds and parks the run, touching no failure counter", async () => {
@@ -1311,7 +1415,7 @@ describe("LlmStrategyRunner", () => {
       );
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist.mockResolvedValue({
+      mockOrchestratorService.requestSolveStep.mockResolvedValue({
         ok: false,
         error: { error: "Groq daily quota exhausted", code: "rate_limited_daily", dailyResetSeconds: 3600 },
       });
@@ -1319,8 +1423,11 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-groq", 0, "openai/gpt-oss-20b");
 
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockGroqRpdHold.hold).toHaveBeenCalledWith("llm-groq", "openai/gpt-oss-20b", 3600);
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-groq", {
+        modelName: "openai/gpt-oss-20b",
+        resetInSeconds: 3600,
+      });
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(1);
     });
 
     it("falls back to the configured constant when a Groq daily hit carries no dailyResetSeconds", async () => {
@@ -1329,18 +1436,17 @@ describe("LlmStrategyRunner", () => {
       );
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist.mockResolvedValue({
+      mockOrchestratorService.requestSolveStep.mockResolvedValue({
         ok: false,
         error: { error: "quota", code: "rate_limited_daily" },
       });
 
       await runner.runLlmStrategy(100, "llm-groq", 0, "openai/gpt-oss-20b");
 
-      expect(mockGroqRpdHold.hold).toHaveBeenCalledWith(
-        "llm-groq",
-        "openai/gpt-oss-20b",
-        DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
-      );
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-groq", {
+        modelName: "openai/gpt-oss-20b",
+        resetInSeconds: DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
+      });
     });
 
     it("never ends a Groq run in ERROR on a rate_limited_daily hit", async () => {
@@ -1349,7 +1455,7 @@ describe("LlmStrategyRunner", () => {
       );
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist.mockResolvedValue({
+      mockOrchestratorService.requestSolveStep.mockResolvedValue({
         ok: false,
         error: { error: "quota", code: "rate_limited_daily" },
       });
@@ -1357,7 +1463,7 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-groq", 0, "openai/gpt-oss-20b");
 
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(1);
     });
 
     it("waits the Groq-specific fallback (not Google's) on a per-minute rate_limited hit with no retryAfterSeconds", async () => {
@@ -1369,7 +1475,7 @@ describe("LlmStrategyRunner", () => {
       );
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist
+      mockOrchestratorService.requestSolveStep
         .mockResolvedValueOnce({ ok: false, error: { error: "rate limited", code: "rate_limited" } })
         .mockResolvedValueOnce(
           makeAssistResponse([
@@ -1384,7 +1490,7 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("parks a held sambanova run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {
-      mockSambaNovaRpdHold.isHeld.mockResolvedValue(true);
+      mockRateLimitHold.isHeld.mockResolvedValue(true);
       mockStrategyRunRepo.findOne.mockResolvedValue(
         makeRun({ strategyName: "llm-sambanova", modelName: "DeepSeek-V3.1" }),
       );
@@ -1393,9 +1499,9 @@ describe("LlmStrategyRunner", () => {
 
       const result = await runner.runLlmStrategy(100, "llm-sambanova", 0, "DeepSeek-V3.1");
 
-      expect(mockOrchestratorService.solveAssist).not.toHaveBeenCalled();
+      expect(mockOrchestratorService.requestSolveStep).not.toHaveBeenCalled();
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockSambaNovaRpdHold.hold).not.toHaveBeenCalled();
+      expect(mockRateLimitHold.hold).not.toHaveBeenCalled();
     });
 
     it("records a per-model SambaNova hold using dailyResetSeconds and parks the run", async () => {
@@ -1404,7 +1510,7 @@ describe("LlmStrategyRunner", () => {
       );
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist.mockResolvedValue({
+      mockOrchestratorService.requestSolveStep.mockResolvedValue({
         ok: false,
         error: {
           error: "SambaNova daily quota exhausted",
@@ -1416,7 +1522,10 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-sambanova", 0, "DeepSeek-V3.1");
 
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockSambaNovaRpdHold.hold).toHaveBeenCalledWith("llm-sambanova", "DeepSeek-V3.1", 7200);
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-sambanova", {
+        modelName: "DeepSeek-V3.1",
+        resetInSeconds: 7200,
+      });
     });
 
     it("falls back to the configured constant when a SambaNova daily hit carries no dailyResetSeconds", async () => {
@@ -1425,18 +1534,17 @@ describe("LlmStrategyRunner", () => {
       );
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist.mockResolvedValue({
+      mockOrchestratorService.requestSolveStep.mockResolvedValue({
         ok: false,
         error: { error: "quota", code: "rate_limited_daily" },
       });
 
       await runner.runLlmStrategy(100, "llm-sambanova", 0, "DeepSeek-V3.1");
 
-      expect(mockSambaNovaRpdHold.hold).toHaveBeenCalledWith(
-        "llm-sambanova",
-        "DeepSeek-V3.1",
-        DEFAULT_LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS,
-      );
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-sambanova", {
+        modelName: "DeepSeek-V3.1",
+        resetInSeconds: DEFAULT_LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS,
+      });
     });
 
     it("does not write a hold on a sambanova per-minute rate_limited hit, and keeps retrying", async () => {
@@ -1448,7 +1556,7 @@ describe("LlmStrategyRunner", () => {
       );
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist
+      mockOrchestratorService.requestSolveStep
         .mockResolvedValueOnce({ ok: false, error: { error: "rate limited", code: "rate_limited" } })
         .mockResolvedValueOnce(
           makeAssistResponse([
@@ -1459,7 +1567,7 @@ describe("LlmStrategyRunner", () => {
 
       const result = await runner.runLlmStrategy(100, "llm-sambanova", 0, "DeepSeek-V3.1");
 
-      expect(mockSambaNovaRpdHold.hold).not.toHaveBeenCalled();
+      expect(mockRateLimitHold.hold).not.toHaveBeenCalled();
       expect(result.status).not.toBe(StrategyRunStatus.ERROR);
       expect(delaySpy).toHaveBeenCalledWith(DEFAULT_LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS * 1000);
     });
@@ -1470,7 +1578,7 @@ describe("LlmStrategyRunner", () => {
       );
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist.mockResolvedValue({
+      mockOrchestratorService.requestSolveStep.mockResolvedValue({
         ok: false,
         error: { error: "quota", code: "rate_limited_daily" },
       });
@@ -1481,7 +1589,7 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("parks a daily-held openrouter run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {
-      mockOpenRouterHold.heldReason.mockResolvedValue("daily");
+      mockRateLimitHold.heldReason.mockResolvedValue("daily");
       mockStrategyRunRepo.findOne.mockResolvedValue(
         makeRun({ strategyName: "llm-openrouter", modelName: "z-ai/glm-5.2:free" }),
       );
@@ -1490,19 +1598,19 @@ describe("LlmStrategyRunner", () => {
 
       const result = await runner.runLlmStrategy(100, "llm-openrouter", 0, "z-ai/glm-5.2:free");
 
-      expect(mockOrchestratorService.solveAssist).not.toHaveBeenCalled();
+      expect(mockOrchestratorService.requestSolveStep).not.toHaveBeenCalled();
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockOpenRouterHold.hold).not.toHaveBeenCalled();
+      expect(mockRateLimitHold.hold).not.toHaveBeenCalled();
     });
 
     it("does NOT park an openrouter run for a per-minute-cooldown hold — it proceeds", async () => {
-      mockOpenRouterHold.heldReason.mockResolvedValue("per-minute-cooldown");
+      mockRateLimitHold.heldReason.mockResolvedValue("per-minute-cooldown");
       mockStrategyRunRepo.findOne.mockResolvedValue(
         makeRun({ strategyName: "llm-openrouter", modelName: "z-ai/glm-5.2:free" }),
       );
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist.mockResolvedValue(
+      mockOrchestratorService.requestSolveStep.mockResolvedValue(
         makeAssistResponse([
           ["APPLE", "BANANA", "CHERRY", "DATE"],
           ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
@@ -1511,7 +1619,7 @@ describe("LlmStrategyRunner", () => {
 
       const result = await runner.runLlmStrategy(100, "llm-openrouter", 0, "z-ai/glm-5.2:free");
 
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalled();
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalled();
       expect(result.status).not.toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
     });
 
@@ -1521,7 +1629,7 @@ describe("LlmStrategyRunner", () => {
       );
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist.mockResolvedValue({
+      mockOrchestratorService.requestSolveStep.mockResolvedValue({
         ok: false,
         error: { error: "OpenRouter daily quota exhausted", code: "rate_limited_daily", dailyResetSeconds: 7200 },
       });
@@ -1529,7 +1637,10 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-openrouter", 0, "z-ai/glm-5.2:free");
 
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockOpenRouterHold.hold).toHaveBeenCalledWith("daily", 7200);
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-openrouter", {
+        reason: "daily",
+        resetInSeconds: 7200,
+      });
     });
 
     it("falls back to secondsUntilNextUtcMidnight when a daily hit carries no dailyResetSeconds", async () => {
@@ -1538,17 +1649,18 @@ describe("LlmStrategyRunner", () => {
       );
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist.mockResolvedValue({
+      mockOrchestratorService.requestSolveStep.mockResolvedValue({
         ok: false,
         error: { error: "quota", code: "rate_limited_daily" },
       });
 
       await runner.runLlmStrategy(100, "llm-openrouter", 0, "z-ai/glm-5.2:free");
 
-      const [reason, seconds] = mockOpenRouterHold.hold.mock.calls[0];
-      expect(reason).toBe("daily");
-      expect(seconds).toBeGreaterThan(0);
-      expect(seconds).toBeLessThanOrEqual(86_400);
+      const [strategy, opts] = mockRateLimitHold.hold.mock.calls[0];
+      expect(strategy).toBe("llm-openrouter");
+      expect(opts.reason).toBe("daily");
+      expect(opts.resetInSeconds).toBeGreaterThan(0);
+      expect(opts.resetInSeconds).toBeLessThanOrEqual(86_400);
     });
 
     it("writes a per-minute-cooldown hold on an openrouter per-minute rate_limited hit, and keeps retrying (not a failure)", async () => {
@@ -1560,7 +1672,7 @@ describe("LlmStrategyRunner", () => {
       );
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist
+      mockOrchestratorService.requestSolveStep
         .mockResolvedValueOnce({ ok: false, error: { error: "rate limited", code: "rate_limited" } })
         .mockResolvedValueOnce(
           makeAssistResponse([
@@ -1571,10 +1683,10 @@ describe("LlmStrategyRunner", () => {
 
       const result = await runner.runLlmStrategy(100, "llm-openrouter", 0, "z-ai/glm-5.2:free");
 
-      expect(mockOpenRouterHold.hold).toHaveBeenCalledWith(
-        "per-minute-cooldown",
-        DEFAULT_OPENROUTER_DISPATCH_RPM_COOLDOWN_MS / 1000,
-      );
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-openrouter", {
+        reason: "per-minute-cooldown",
+        resetInSeconds: DEFAULT_OPENROUTER_DISPATCH_RPM_COOLDOWN_MS / 1000,
+      });
       expect(result.status).not.toBe(StrategyRunStatus.ERROR);
     });
 
@@ -1584,7 +1696,7 @@ describe("LlmStrategyRunner", () => {
       );
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist.mockResolvedValue({
+      mockOrchestratorService.requestSolveStep.mockResolvedValue({
         ok: false,
         error: { error: "quota", code: "rate_limited_daily" },
       });
@@ -1602,16 +1714,16 @@ describe("LlmStrategyRunner", () => {
       makeRun({ strategyName: "llm-mistral", modelName: "mistral-small-latest" });
 
     it("parks a held mistral run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {
-      mockMistralRpdHold.isHeld.mockResolvedValue(true);
+      mockRateLimitHold.isHeld.mockResolvedValue(true);
       mockStrategyRunRepo.findOne.mockResolvedValue(mistralRun());
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
 
       const result = await runner.runLlmStrategy(100, "llm-mistral", 0, "mistral-small-latest");
 
-      expect(mockOrchestratorService.solveAssist).not.toHaveBeenCalled();
+      expect(mockOrchestratorService.requestSolveStep).not.toHaveBeenCalled();
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockMistralRpdHold.hold).not.toHaveBeenCalled();
+      expect(mockRateLimitHold.hold).not.toHaveBeenCalled();
     });
 
     it("below the attempt threshold: waits and retries a mistral rate_limited hit, no failure, no hold", async () => {
@@ -1623,7 +1735,7 @@ describe("LlmStrategyRunner", () => {
       mockGuessRepo.find.mockResolvedValue([]);
       // 2 hits stay under DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS (4),
       // then the run solves normally.
-      mockOrchestratorService.solveAssist
+      mockOrchestratorService.requestSolveStep
         .mockResolvedValueOnce({ ok: false, error: { error: "rate limited", code: "rate_limited" } })
         .mockResolvedValueOnce({ ok: false, error: { error: "rate limited", code: "rate_limited" } })
         .mockResolvedValueOnce(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]))
@@ -1631,7 +1743,7 @@ describe("LlmStrategyRunner", () => {
 
       const result = await runner.runLlmStrategy(100, "llm-mistral", 0, "mistral-small-latest");
 
-      expect(mockMistralRpdHold.hold).not.toHaveBeenCalled();
+      expect(mockRateLimitHold.hold).not.toHaveBeenCalled();
       expect(result.status).not.toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
     });
 
@@ -1642,7 +1754,7 @@ describe("LlmStrategyRunner", () => {
       mockStrategyRunRepo.findOne.mockResolvedValue(mistralRun());
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist.mockResolvedValue({
+      mockOrchestratorService.requestSolveStep.mockResolvedValue({
         ok: false,
         error: { error: "rate limited", code: "rate_limited" },
       });
@@ -1650,12 +1762,11 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-mistral", 0, "mistral-small-latest");
 
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockMistralRpdHold.hold).toHaveBeenCalledWith(
-        "llm-mistral",
-        "mistral-small-latest",
-        DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
-      );
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-mistral", {
+        modelName: "mistral-small-latest",
+        resetInSeconds: DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
+      });
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(
         DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS,
       );
     });
@@ -1664,7 +1775,7 @@ describe("LlmStrategyRunner", () => {
       mockStrategyRunRepo.findOne.mockResolvedValue(mistralRun());
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist.mockResolvedValue({
+      mockOrchestratorService.requestSolveStep.mockResolvedValue({
         ok: false,
         error: { error: "Mistral monthly quota exhausted", code: "rate_limited_daily" },
       });
@@ -1672,13 +1783,12 @@ describe("LlmStrategyRunner", () => {
       const result = await runner.runLlmStrategy(100, "llm-mistral", 0, "mistral-small-latest");
 
       expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
-      expect(mockMistralRpdHold.hold).toHaveBeenCalledTimes(1);
-      expect(mockMistralRpdHold.hold).toHaveBeenCalledWith(
-        "llm-mistral",
-        "mistral-small-latest",
-        DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
-      );
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(1);
+      expect(mockRateLimitHold.hold).toHaveBeenCalledTimes(1);
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-mistral", {
+        modelName: "mistral-small-latest",
+        resetInSeconds: DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
+      });
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(1);
     });
 
     it("a successful mistral call resets the 429 streak so a later lone hit does not park", async () => {
@@ -1688,7 +1798,7 @@ describe("LlmStrategyRunner", () => {
       mockStrategyRunRepo.findOne.mockResolvedValue(mistralRun());
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist
+      mockOrchestratorService.requestSolveStep
         .mockResolvedValueOnce({ ok: false, error: { error: "rate limited", code: "rate_limited" } })
         .mockResolvedValueOnce({ ok: false, error: { error: "rate limited", code: "rate_limited" } })
         .mockResolvedValueOnce({ ok: false, error: { error: "rate limited", code: "rate_limited" } })
@@ -1698,7 +1808,7 @@ describe("LlmStrategyRunner", () => {
 
       const result = await runner.runLlmStrategy(100, "llm-mistral", 0, "mistral-small-latest");
 
-      expect(mockMistralRpdHold.hold).not.toHaveBeenCalled();
+      expect(mockRateLimitHold.hold).not.toHaveBeenCalled();
       expect(result.status).not.toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
     });
 
@@ -1709,7 +1819,7 @@ describe("LlmStrategyRunner", () => {
       mockStrategyRunRepo.findOne.mockResolvedValue(mistralRun());
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist.mockResolvedValue({
+      mockOrchestratorService.requestSolveStep.mockResolvedValue({
         ok: false,
         error: { error: "rate limited", code: "rate_limited" },
       });
@@ -1727,7 +1837,7 @@ describe("LlmStrategyRunner", () => {
       mockStrategyRunRepo.findOne.mockResolvedValue(mistralRun());
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist
+      mockOrchestratorService.requestSolveStep
         .mockResolvedValueOnce({ ok: false, error: { error: "rate limited", code: "rate_limited" } })
         .mockResolvedValueOnce(
           makeAssistResponse([
@@ -1747,7 +1857,7 @@ describe("LlmStrategyRunner", () => {
       mockStrategyRunRepo.findOne.mockResolvedValue(parking);
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockOrchestratorService.solveAssist
+      mockOrchestratorService.requestSolveStep
         // A wrong group: one failed guess, run stays RUNNING.
         .mockResolvedValueOnce(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "EGGPLANT"]]))
         // A correct group: one solved group, availableWords halves.
@@ -1763,8 +1873,11 @@ describe("LlmStrategyRunner", () => {
       expect(parked.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
       // The two guesses already made are kept, not thrown away.
       expect(parked.guessCount).toBe(2);
-      expect(mockRpdHold.hold).toHaveBeenCalledTimes(1);
-      expect(mockRpdHold.hold).toHaveBeenCalledWith("llm-google", "gemini-3.6-flash");
+      expect(mockRateLimitHold.hold).toHaveBeenCalledTimes(1);
+      expect(mockRateLimitHold.hold).toHaveBeenCalledWith("llm-google", {
+        modelName: "gemini-3.6-flash",
+        resetInSeconds: expect.any(Number),
+      });
       // The solved group is gone from the persisted run — that reduced word
       // set is what the resume below has to pick up from.
       expect(parking.availableWords).toEqual(["EGGPLANT", "FIG", "GRAPE", "HONEY"]);
@@ -1791,12 +1904,12 @@ describe("LlmStrategyRunner", () => {
       });
       mockStrategyRunRepo.findOne.mockResolvedValue(resuming);
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
-      mockRpdHold.isHeld.mockResolvedValue(false);
+      mockRateLimitHold.isHeld.mockResolvedValue(false);
       mockGuessRepo.find.mockResolvedValue([
         { words: ["APPLE", "BANANA", "CHERRY", "EGGPLANT"], result: GuessResult.FAILURE },
         { words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: GuessResult.SUCCESS },
       ]);
-      mockOrchestratorService.solveAssist
+      mockOrchestratorService.requestSolveStep
         // Unusable output — non-terminal, so the loop must go round again.
         // Without the parked-status normalization it would break here.
         .mockResolvedValueOnce(makeAssistResponse([]))
@@ -1804,7 +1917,7 @@ describe("LlmStrategyRunner", () => {
 
       const resumed = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
 
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(2);
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(2);
       expect(resumed.status).toBe(StrategyRunStatus.COMPLETED);
       // Two flushed guesses plus the solving one.
       expect(resumed.guessCount).toBe(3);
@@ -1823,15 +1936,15 @@ describe("LlmStrategyRunner", () => {
       mockStrategyRunRepo.findOne.mockResolvedValue(resuming);
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
       mockGuessRepo.find.mockResolvedValue([]);
-      mockRpdHold.isHeld.mockResolvedValue(false);
-      mockOrchestratorService.solveAssist
+      mockRateLimitHold.isHeld.mockResolvedValue(false);
+      mockOrchestratorService.requestSolveStep
         .mockResolvedValueOnce(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]))
         .mockResolvedValueOnce(makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]));
 
       const result = await runner.runLlmStrategy(100, "llm-google", 0, "gemini-3.6-flash");
 
       expect(result.status).toBe(StrategyRunStatus.COMPLETED);
-      expect(mockOrchestratorService.solveAssist).toHaveBeenCalledTimes(2);
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(2);
     });
 
     it("rewrites the one-off comma word so the LLM round trip still matches", async () => {

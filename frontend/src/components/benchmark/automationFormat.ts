@@ -2,7 +2,7 @@ import { formatTimestamp } from "../../data/benchmark/metrics";
 import type { AutomationLegDisplay } from "../../data/benchmark/types";
 
 /** Builds the "Auto-run: ... · Next: ..." line shared by the mini
- * FreeTierBudgetWidget, CategoryJudgingWidget, and GoogleDispatchWidget —
+ * FreeTierBudgetWidget, CategoryJudgingWidget, and PoolDispatchWidget —
  * one shared format so all three daily-automation legs read consistently on
  * the page. */
 export function formatAutomationLine(leg: AutomationLegDisplay): string {

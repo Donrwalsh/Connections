@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { GuessChainVisualizer } from "../../components/benchmark/GuessChainVisualizer";
 import { ProviderPill } from "../../components/benchmark/ProviderPill";
 import { RunsTable } from "../../components/benchmark/RunsTable";
 import { StatusPill } from "../../components/benchmark/StatusPill";
 import { fetchPuzzleDate, fetchRunsForPuzzle, toRunRecord } from "../../data/benchmark/api";
+import { useResource } from "../../hooks/useResource";
 import { formatDateLabel } from "../../data/benchmark/mockData";
 import { isFailedStatus, puzzleStatusLabel, puzzleStatusTone } from "../../data/benchmark/runStatus";
 import { useStrategyMeta } from "../../data/benchmark/useStrategyMeta";
@@ -61,66 +62,34 @@ export function PuzzleRunsPage() {
   const resolvedKind = meta?.kind;
   const resolvedModelId = meta?.id;
 
-  const [runs, setRuns] = useState<RunRecord[] | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [date, setDate] = useState<string | null>(null);
-  // Bumped after a run is deleted (see GuessChainVisualizer's "Delete this
-  // run" button) to force the runs-list effect below to refetch — same
-  // refreshSignal convention FreeTierDispatchModal/FreeTierBudgetWidget use
-  // elsewhere in this codebase.
-  const [runsRefreshSignal, setRunsRefreshSignal] = useState(0);
+  // Non-critical — the page still works without it, just without the
+  // formatted date label and the "view puzzle" link.
+  const { data: date } = useResource(
+    ["puzzleDate", puzzleId],
+    (signal) => fetchPuzzleDate(puzzleId, signal),
+    { enabled: !!resolvedStrategyName && isValidPuzzleId },
+  );
 
-  useEffect(() => {
-    if (!resolvedStrategyName || !isValidPuzzleId) return;
+  const {
+    data: runs,
+    loading: isLoading,
+    error,
+    refetch: refetchRuns,
+  } = useResource(
+    ["runsForPuzzle", resolvedStrategyName, resolvedKind, resolvedModelId, puzzleId],
+    async (signal) => {
+      if (!resolvedStrategyName) return Promise.reject(new Error("Strategy not resolved"));
+      const items = await fetchRunsForPuzzle(resolvedStrategyName, puzzleId, signal);
+      // LLM rows are keyed by model, but the backend can only filter by
+      // strategy — narrow down to this model's own runs here.
+      const modelItems =
+        resolvedKind === "llm" ? items.filter((item) => item.modelName === resolvedModelId) : items;
+      return modelItems.map(toRunRecord);
+    },
+    { enabled: !!resolvedStrategyName && isValidPuzzleId },
+  );
 
-    const controller = new AbortController();
-    fetchPuzzleDate(puzzleId, controller.signal)
-      .then(setDate)
-      .catch(() => {
-        // Non-critical — the page still works without it, just without the
-        // formatted date label and the "view puzzle" link.
-      });
-
-    return () => controller.abort();
-  }, [resolvedStrategyName, puzzleId, isValidPuzzleId]);
-
-  useEffect(() => {
-    if (!resolvedStrategyName || !isValidPuzzleId) return;
-
-    setIsLoading(true);
-    setError(null);
-    setRuns(null);
-
-    const controller = new AbortController();
-    fetchRunsForPuzzle(resolvedStrategyName, puzzleId, controller.signal)
-      .then((items) => {
-        // LLM rows are keyed by model, but the backend can only filter by
-        // strategy — narrow down to this model's own runs here.
-        const modelItems =
-          resolvedKind === "llm"
-            ? items.filter((item) => item.modelName === resolvedModelId)
-            : items;
-        setRuns(modelItems.map(toRunRecord));
-        setIsLoading(false);
-      })
-      .catch((err: unknown) => {
-        if (err instanceof Error && err.name === "AbortError") return;
-        setError(err instanceof Error ? err.message : "Failed to load runs");
-        setIsLoading(false);
-      });
-
-    return () => controller.abort();
-  }, [
-    resolvedStrategyName,
-    resolvedKind,
-    resolvedModelId,
-    puzzleId,
-    isValidPuzzleId,
-    runsRefreshSignal,
-  ]);
-
-  const handleRunDeleted = () => setRunsRefreshSignal((n) => n + 1);
+  const handleRunDeleted = () => refetchRuns();
 
   if (!strategyId) {
     return (
@@ -200,7 +169,7 @@ export function PuzzleRunsPage() {
       </header>
 
       {isLoading ? <p className="bench-muted">Loading runs…</p> : null}
-      {error && !isLoading ? <p className="bench-error">{error}</p> : null}
+      {error && !isLoading ? <p className="bench-error">{error.message}</p> : null}
 
       {!isLoading && !error && runs && runs.length === 0 ? (
         <p className="bench-muted">{meta.name} hasn't been run for this puzzle yet.</p>

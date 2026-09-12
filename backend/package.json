@@ -20,6 +20,7 @@
     "migration:revert": "npm run typeorm -- migration:revert -d src/data-source.ts",
     "backfill:image-dates": "node dist/scripts/backfill-image-puzzle-dates.js",
     "backfill:issue-tags": "node dist/scripts/backfill-issue-tags.js",
+    "backfill:prompt-text": "node dist/scripts/backfill-prompt-text.js",
     "eval:categories": "tsx src/scripts/evaluate-categories.ts"
   },
   "dependencies": {
@@ -73,7 +74,7 @@
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
+      "^.+\\.ts$": "ts-jest"
     },
     "collectCoverageFrom": [
       "**/*.(t|j)s"

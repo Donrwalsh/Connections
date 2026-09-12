@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deepening 5 — Split strategy.service.ts</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .font-serif { font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .lbl { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+      .deep-fill { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      pre.code { background:#0f172a; color:#e2e8f0; padding:1rem 1.15rem; border-radius:.6rem; overflow-x:auto; font-size:12.5px; line-height:1.55; }
+      pre.code .c { color:#7dd3fc; } pre.code .k { color:#f0abfc; } pre.code .s { color:#86efac; }
+      table.t { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+      table.t th, table.t td { border: 1px solid #e2e8f0; padding: 7px 9px; text-align: left; vertical-align: top; }
+      table.t th { background: #f1f5f9; font-weight: 600; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900">
+    <main class="max-w-4xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="space-y-4">
+        <p class="lbl text-slate-400">Architecture deepening · candidate 5 of 8 (round 2, item 1)</p>
+        <h1 class="font-serif text-4xl">Split <span class="mono text-3xl">strategy.service.ts</span> along its four seams</h1>
+        <p class="text-slate-600 max-w-2xl">Own analysis, pre-grilling. Pure mechanical extraction — no schema, no behaviour change, no external contract.</p>
+      </header>
+
+      <!-- FRICTION -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The friction</h2>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">backend/src/modules/strategy/strategy.service.ts</span> is
+          <strong>1,696 lines</strong> in one class with 15 constructor dependencies (8 BullMQ queues, 6
+          repositories, <span class="mono text-xs">GameService</span>,
+          <span class="mono text-xs">StrategyRunStore</span>,
+          <span class="mono text-xs">SupportedModelService</span>). It carries four unrelated jobs.
+        </p>
+        <p class="text-sm text-slate-700">
+          The tell: the consumers do not overlap. A grep of every caller's method use:
+        </p>
+        <table class="t">
+          <thead><tr><th>Caller</th><th>Methods it uses</th><th>Job</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="mono text-xs">strategy.controller.ts</span></td>
+              <td><span class="mono text-xs">getLeaderboard, getRunHistory, getRunDetail, getRunDetailByRunId, getGuessDetail, getRunsForPuzzle, getRunsForPuzzleId, getRecentActivity</span></td>
+              <td>run-history read model</td>
+            </tr>
+            <tr>
+              <td><span class="mono text-xs">*-free-dispatch.service.ts</span> ×6</td>
+              <td><span class="mono text-xs">triggerStrategyRuns, countInFlightByModel, countTodayDispatchByModel, findUnrunPuzzleDatesForModel</span></td>
+              <td>dispatch support</td>
+            </tr>
+            <tr>
+              <td><span class="mono text-xs">dispatch.controller.ts</span></td>
+              <td><span class="mono text-xs">triggerStrategyRuns, findUnrunPuzzleDatesForModel</span> + <span class="mono text-xs">deleteRun, deleteErroredRuns, countErroredRuns</span></td>
+              <td>dispatch + maintenance</td>
+            </tr>
+            <tr>
+              <td><span class="mono text-xs">worker.ts</span></td>
+              <td><span class="mono text-xs">runDeterministicStrategy</span></td>
+              <td>deterministic solver</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="text-sm text-slate-700">
+          <strong>No locality:</strong> a change to <span class="mono text-xs">getLeaderboard</span> (~340
+          lines) and a change to the shuffle solver (<span class="mono text-xs">runDeterministicStrategy</span>
+          ~140 + <span class="mono text-xs">pickRandomGroup</span> + <span class="mono text-xs">combinatorics</span>)
+          land in the same file. Every dispatch service imports the whole 1,696-line class — and with it a
+          transitive dependency on 6 repos and <span class="mono text-xs">GameService</span> — to call two
+          methods. Understanding "how is the leaderboard built" means scrolling past dispatch routing and
+          a random-group generator.
+        </p>
+      </section>
+
+      <!-- DELETION TEST -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Deletion test</h2>
+        <p class="text-sm text-slate-700">
+          There is nothing to delete here — the friction is a <em>missing</em> cut, not a shallow module.
+          The relevant question is the inverse: does extracting each job leave a coherent deep module
+          behind? Yes. The read model is ~1,100 lines with one caller and a clear surface (controller DTOs
+          in, JSON out). Dispatch support is ~300 lines with one shape (name a strategy + model, get runs
+          queued / counted). The deterministic solver is ~200 lines that never touch a queue. Each has one
+          reason to change.
+        </p>
+      </section>
+
+      <!-- SHAPE -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The deepened shape</h2>
+        <table class="t">
+          <thead><tr><th>Module</th><th>Owns</th><th>Deps it keeps</th><th>Callers</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="mono text-xs">RunHistoryReadModel<br/>(strategy-read.service.ts)</td>
+              <td><span class="mono text-xs">getLeaderboard</span> + its 15s cache, <span class="mono text-xs">getRunHistory</span>, <span class="mono text-xs">getRunDetail*</span>, <span class="mono text-xs">getGuessDetail</span>, <span class="mono text-xs">getRunsForPuzzle*</span>, <span class="mono text-xs">getRecentActivity</span>, <span class="mono text-xs">buildRunDetail</span>, <span class="mono text-xs">mapRunDetail</span>, <span class="mono text-xs">toCategoryEvaluationDto</span></td>
+              <td>5 read-only repos, <span class="mono text-xs">GameService</span>, <span class="mono text-xs">reconstructSolvePrompts</span></td>
+              <td><span class="mono text-xs">strategy.controller.ts</span> only</td>
+            </tr>
+            <tr>
+              <td class="mono text-xs">StrategyDispatch<br/>(strategy-dispatch.service.ts)</td>
+              <td><span class="mono text-xs">triggerRun</span>, <span class="mono text-xs">triggerStrategyRuns</span>, <span class="mono text-xs">queueFor</span>, <span class="mono text-xs">findUnrunPuzzleDatesForModel</span>, <span class="mono text-xs">countInFlightByModel</span>, <span class="mono text-xs">countTodayDispatchByModel</span>, <span class="mono text-xs">countTodayLlmCalls</span></td>
+              <td>8 queues, <span class="mono text-xs">StrategyRun</span> repo, <span class="mono text-xs">SupportedModelService</span></td>
+              <td>6 dispatch services, <span class="mono text-xs">dispatch.controller.ts</span></td>
+            </tr>
+            <tr>
+              <td class="mono text-xs">DeterministicSolver<br/>(deterministic-solver.service.ts)</td>
+              <td><span class="mono text-xs">runDeterministicStrategy</span>, <span class="mono text-xs">pickRandomGroup</span>, <span class="mono text-xs">groupKey</span>, <span class="mono text-xs">combinationCount</span> (+ <span class="mono text-xs">combinatorics.ts</span>)</td>
+              <td><span class="mono text-xs">StrategyRunStore</span>, <span class="mono text-xs">GameService</span>, <span class="mono text-xs">Puzzle</span> repo</td>
+              <td><span class="mono text-xs">worker.ts</span> / <span class="mono text-xs">llm-job-handler.ts</span></td>
+            </tr>
+            <tr>
+              <td class="mono text-xs">(maintenance — fold into dispatch or leave)</td>
+              <td><span class="mono text-xs">deleteRun</span>, <span class="mono text-xs">deleteErroredRuns</span>, <span class="mono text-xs">countErroredRuns</span></td>
+              <td><span class="mono text-xs">StrategyRunStore</span></td>
+              <td><span class="mono text-xs">dispatch.controller.ts</span></td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">strategy.module.ts</span> registers all three as providers and exports
+          the two that leave the module. <span class="mono text-xs">StrategyService</span> as a name
+          disappears, or shrinks to a thin re-export during a transition.
+        </p>
+      </section>
+
+      <!-- BEHIND SEAM -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">What sits behind each seam</h2>
+        <ul class="text-sm space-y-1.5 list-disc pl-5 text-slate-700">
+          <li><strong>Read model:</strong> the leaderboard's 8-way <span class="mono text-xs">Promise.all</span>, the price-history join, the cache, DTO shaping, prompt reconstruction. Callers see <span class="mono text-xs">LeaderboardDto</span> etc. — never a repo.</li>
+          <li><strong>Dispatch:</strong> the <span class="mono text-xs">strategyName → queue</span> routing (candidate 3's target), trial-number fan-out, the "how many are in flight / ran today" counting queries the free-tier cycles pace against.</li>
+          <li><strong>Deterministic solver:</strong> the alphabetical / reverse / order / shuffle-smart / shuffle-foolish algorithms and the combination walk. No queue, no HTTP, no LLM.</li>
+        </ul>
+      </section>
+
+      <!-- TESTS -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Tests that improve</h2>
+        <ul class="text-sm space-y-1.5 list-disc pl-5 text-slate-700">
+          <li>The deterministic solver's spec stops needing 8 mocked queues and a <span class="mono text-xs">SupportedModelService</span> stub to test a sort.</li>
+          <li>The read model's spec is repos-in / DTOs-out — no BullMQ in the fixture, so no <span class="mono text-xs">--forceExit</span> open-handle fight for that suite.</li>
+          <li>The dispatch spec covers exactly the surface the free-tier cycles depend on, in isolation from leaderboard SQL.</li>
+          <li><strong>the interface is the test surface:</strong> each module's public methods are now a short, single-purpose list.</li>
+        </ul>
+      </section>
+
+      <!-- MIGRATION -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">Migration path</h2>
+        <ol class="text-sm space-y-2 list-decimal pl-5 text-slate-700">
+          <li>Extract <span class="mono text-xs">DeterministicSolver</span> first — smallest, one caller (<span class="mono text-xs">worker.ts</span>), zero queue deps. Move <span class="mono text-xs">combinatorics.ts</span> usage with it.</li>
+          <li>Extract <span class="mono text-xs">StrategyDispatch</span> — move the 7 dispatch methods + <span class="mono text-xs">queueFor</span> + the 8 queue injections. Update the 6 dispatch services and <span class="mono text-xs">dispatch.controller.ts</span> to inject the new type. This is the piece candidate 1's provider-pool work will build on, so doing it now keeps that change small.</li>
+          <li>What remains <em>is</em> the read model — rename the file, drop the now-unused queue injections, done.</li>
+          <li>Decide maintenance: <span class="mono text-xs">delete*</span> methods mutate runs, so they fit <span class="mono text-xs">StrategyDispatch</span> better than the read model; or a tiny fourth provider.</li>
+          <li>Each step compiles and ships on its own — the class is only ever split, never rewritten.</li>
+        </ol>
+      </section>
+
+      <!-- RISKS -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">Risks &amp; open questions</h2>
+        <div class="space-y-3 text-sm text-slate-700">
+          <p><strong class="text-slate-900">Shared private helpers.</strong> A few small helpers (date resolution via <span class="mono text-xs">gameService.resolveDateToPuzzleId</span>, <span class="mono text-xs">isLlmStrategy</span>, DTO mappers) are used across the jobs. Most already live elsewhere (<span class="mono text-xs">strategies.ts</span>, <span class="mono text-xs">GameService</span>); the DTO mappers move with the read model. Check for any that need to become a shared util rather than being duplicated.</p>
+          <p><strong class="text-slate-900">Circular-import risk via <span class="mono text-xs">strategy.dto.ts</span>.</strong> <span class="mono text-xs">dto/strategy.dto.ts</span> currently imports from <span class="mono text-xs">strategy.service.ts</span> (grep shows it). Splitting is a chance to reverse that — DTOs should not import a service. Straighten it during the extraction.</p>
+          <p><strong class="text-slate-900">Naming.</strong> "Read model" is precise but not in the codebase's vocabulary yet. If this proceeds, add the term to a <span class="mono text-xs">CONTEXT.md</span> (which doesn't exist yet) so future reviews use it.</p>
+          <p><strong class="text-slate-900">Do it before candidate 1.</strong> Carving the provider-pool dispatch module out of a focused 300-line <span class="mono text-xs">StrategyDispatch</span> is far cleaner than carving it out of the 1,696-line god class.</p>
+        </div>
+      </section>
+
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Recommendation</h2>
+        <p class="text-sm text-slate-700">
+          <strong>Strong, and the first thing to do</strong> across both rounds. It is the lowest-risk
+          change on the board — no data, no contract, no behaviour — and it makes candidates 1 and 3
+          smaller. The consumers already partition perfectly; the file just hasn't caught up.
+        </p>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-6 border-t border-slate-200">
+        Connections Lab · architecture deepening 5/8 · own analysis, pre-grilling · 2026-09-09
+      </footer>
+
+    </main>
+  </body>
+</html>

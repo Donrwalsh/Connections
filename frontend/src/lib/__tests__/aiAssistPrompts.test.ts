@@ -27,9 +27,10 @@ describe("buildAiAssistTurn", () => {
       "You are playing NYT Connections. The items below form 2 groups of four",
     );
     expect(turn.prompt).toContain("Items: HAIL, RAIN, SLEET, SNOW, BUCKS, HEAT, JAZZ, NETS");
-    expect(turn.prompt).toContain('a line containing only "ANSWER:"');
-    expect(turn.prompt).toContain("exactly 2 lines, each with four comma-separated items");
-    expect(turn.prompt).toContain("Output nothing after those lines.");
+    expect(turn.prompt).toContain("### GROUPS");
+    expect(turn.prompt).toContain("#### Group 1\nReasoning: <1-2 sentences>\nCategory:");
+    expect(turn.prompt).toContain("### ANSWER");
+    expect(turn.prompt).toContain("Output nothing after the last line of ### ANSWER.");
     expect(turn.prompt).toContain(
       "Use each item exactly once. Only use items from the list above — do not introduce new words.",
     );
@@ -101,7 +102,8 @@ describe("buildAiAssistTurn", () => {
     expect(turn.prompt).toContain(
       "The remaining items still to be grouped are: BUCKS, HEAT, JAZZ, NETS, forming 1 group(s) of four.",
     );
-    expect(turn.prompt).toContain('output "ANSWER:" followed by 1 lines of four comma-separated items');
+    expect(turn.prompt).toContain("#### Group 1\nReasoning: <1-2 sentences>\nCategory:");
+    expect(turn.prompt).toContain("### ANSWER");
   });
 
   it("omits the confirmed-groups line when none are locked in", () => {

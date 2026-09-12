@@ -5,7 +5,7 @@ import { app } from "./app.js";
 const PORT = Number(process.env.PORT ?? 3001);
 
 // Node's http.Server.requestTimeout defaults to 300000ms (5 min) and covers
-// the whole request lifetime, including a slow handler — so a solve-assist
+// the whole request lifetime, including a slow handler — so a solve-step
 // call to a slow local model gets its socket destroyed mid-generation and
 // the backend sees "fetch failed (UND_ERR_SOCKET: other side closed)". Raise
 // it past the backend's own ORCHESTRATOR_TIMEOUT_MS so the backend's abort is

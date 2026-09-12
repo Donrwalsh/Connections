@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useAdminAuth } from "../../auth/useAdminAuth";
 import { fetchRunDetail } from "../../data/benchmark/api";
+import { useResource } from "../../hooks/useResource";
 import { formatDuration } from "../../data/benchmark/metrics";
 import {
   categoryVerdictLabel,
@@ -13,7 +14,6 @@ import type {
   GuessRecord,
   LlmProposalRecord,
   SolvePromptRecord,
-  StrategyRunDetail,
 } from "../../data/benchmark/types";
 import { DeleteRunModal } from "./DeleteRunModal";
 import { StatusPill } from "./StatusPill";
@@ -35,30 +35,12 @@ export interface GuessChainVisualizerProps {
  * without the parent page owning the fetch/loading state. */
 export function GuessChainVisualizer({ runId, onDeleted }: GuessChainVisualizerProps) {
   const { isAdmin } = useAdminAuth();
-  const [detail, setDetail] = useState<StrategyRunDetail | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    data: detail,
+    loading: isLoading,
+    error,
+  } = useResource(["runDetail", runId], (signal) => fetchRunDetail(runId, signal));
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-
-  useEffect(() => {
-    setIsLoading(true);
-    setError(null);
-    setDetail(null);
-
-    const controller = new AbortController();
-    fetchRunDetail(runId, controller.signal)
-      .then((data) => {
-        setDetail(data);
-        setIsLoading(false);
-      })
-      .catch((err: unknown) => {
-        if (err instanceof Error && err.name === "AbortError") return;
-        setError(err instanceof Error ? err.message : "Failed to load run detail");
-        setIsLoading(false);
-      });
-
-    return () => controller.abort();
-  }, [runId]);
 
   return (
     <section className="bench-visualizer" aria-label={`Guess chain for run ${runId}`}>
@@ -79,7 +61,7 @@ export function GuessChainVisualizer({ runId, onDeleted }: GuessChainVisualizerP
       </div>
 
       {isLoading ? <p className="bench-muted">Loading guess chain…</p> : null}
-      {error && !isLoading ? <p className="bench-error">{error}</p> : null}
+      {error && !isLoading ? <p className="bench-error">{error.message}</p> : null}
 
       {detail && !isLoading && !error ? (
         detail.solvePrompts.length > 0 ? (

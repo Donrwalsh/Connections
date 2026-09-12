@@ -1,0 +1,17 @@
+# Repo-root .dockerignore — orchestrator/Dockerfile and backend/Dockerfile
+# both build from the repo root now (needed to reach the shared
+# packages/answer-grammar workspace package), so this keeps every other
+# top-level directory and dev artifact out of both build contexts.
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+.worktrees
+.claude/worktrees
+frontend
+docs
+npm-debug.log*
+*.md
+.env*
+!.env.sample

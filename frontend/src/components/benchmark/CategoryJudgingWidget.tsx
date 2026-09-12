@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
 import { fetchCategoryEvaluationCoverage } from "../../data/benchmark/api";
 import { formatAutomationLine } from "./automationFormat";
-import type { AutomationLegDisplay, CategoryEvaluationCoverage } from "../../data/benchmark/types";
+import { useResource } from "../../hooks/useResource";
+import type { AutomationLegDisplay } from "../../data/benchmark/types";
 
 // Matches the Recent Activity feed's poll cadence — a judge dispatch drains
 // the backlog over a minute or two, and this is the number that tells the
@@ -21,43 +21,17 @@ export interface CategoryJudgingWidgetProps {
  * `evaluate-categories` dispatch visibly drains it. `pending` is exactly
  * what the next dispatch would enqueue — the figure to size a dispatch by. */
 export function CategoryJudgingWidget({ automation }: CategoryJudgingWidgetProps = {}) {
-  const [coverage, setCoverage] = useState<CategoryEvaluationCoverage | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const controller = new AbortController();
-
-    const load = () => {
-      fetchCategoryEvaluationCoverage(controller.signal)
-        .then((next) => {
-          if (cancelled) return;
-          setCoverage(next);
-          setError(null);
-        })
-        .catch((err: unknown) => {
-          if (err instanceof Error && err.name === "AbortError") return;
-          if (!cancelled) {
-            setError(err instanceof Error ? err.message : "Failed to load judging coverage");
-          }
-        });
-    };
-
-    load();
-    const intervalId = setInterval(load, COVERAGE_POLL_MS);
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-      clearInterval(intervalId);
-    };
-  }, []);
+  const { data: coverage, error } = useResource(
+    ["categoryEvaluationCoverage"],
+    (signal) => fetchCategoryEvaluationCoverage(signal),
+    { keepPreviousData: true, refetchInterval: COVERAGE_POLL_MS },
+  );
 
   if (error) {
     return (
       <div className="bench-free-tier" role="status">
         <span className="bench-free-tier__title">{TITLE}</span>
-        <p className="bench-error">Couldn&apos;t load judging coverage: {error}</p>
+        <p className="bench-error">Couldn&apos;t load judging coverage: {error.message}</p>
       </div>
     );
   }

@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deepening 8 — Persist prompt text, retire reconstruction</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .font-serif { font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .lbl { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+      .deep-fill { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      pre.code { background:#0f172a; color:#e2e8f0; padding:1rem 1.15rem; border-radius:.6rem; overflow-x:auto; font-size:12.5px; line-height:1.55; }
+      pre.code .c { color:#7dd3fc; } pre.code .k { color:#f0abfc; } pre.code .s { color:#86efac; } pre.code .r { color:#fca5a5; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900">
+    <main class="max-w-4xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="space-y-4">
+        <p class="lbl text-slate-400">Architecture deepening · candidate 8 of 8 (round 2, item 4)</p>
+        <h1 class="font-serif text-4xl">Persist the prompt text; retire <span class="mono text-2xl">prompt-reconstruction.ts</span></h1>
+        <p class="text-slate-600 max-w-2xl">Own analysis, pre-grilling. Speculative — gated on one measurement.</p>
+      </header>
+
+      <!-- FRICTION -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The friction</h2>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">llm-strategy-runner.service.ts</span> builds each step's prompt at
+          lines 356–357 (<span class="mono text-xs">buildRetryPrompt(...)</span> /
+          <span class="mono text-xs">buildInitialPrompt(...)</span>) and sends it — but never stores it.
+          The <span class="mono text-xs">SolvePrompt</span> row keeps
+          <span class="mono text-xs">rawResponseText</span>, full
+          <span class="mono text-xs">requestBody</span> / <span class="mono text-xs">responseBody</span>
+          jsonb, headers, token counts, latency, temperature — everything except the prompt.
+        </p>
+        <p class="text-sm text-slate-700">
+          To show a run's chain in the UI, <span class="mono text-xs">prompt-reconstruction.ts</span> (177
+          lines) <strong>replays</strong> the run: it recomputes the initial word order, walks the stored
+          guesses to rebuild <span class="mono text-xs">availableWords</span> /
+          <span class="mono text-xs">lockedInGroups</span> / <span class="mono text-xs">lastFailedGuess</span>
+          at each step, and re-invokes <span class="mono text-xs">buildInitialPrompt</span> /
+          <span class="mono text-xs">buildRetryPrompt</span> with those. Its correctness is defined as
+          "produces exactly what the runner produced" — a second implementation of the runner's state
+          machine. Its docstring is ~40 lines of caveats: <span class="mono text-xs">CALL_ERROR</span>
+          rows that must not advance state or they "would corrupt every later step's reconstruction",
+          rows sharing a <span class="mono text-xs">promptNumber</span>, the full-transcript-per-step
+          concatenation.
+        </p>
+        <p class="text-sm text-slate-700">
+          This is the exact anti-pattern the review brief names: a pure function extracted for
+          testability, where the real bug risk is in <em>how faithfully it mirrors the caller</em>. There
+          is <strong>no locality</strong> — a change to <span class="mono text-xs">buildRetryPrompt</span>
+          or to the runner's state handling silently makes every historical run's displayed prompt wrong.
+        </p>
+      </section>
+
+      <!-- DELETION TEST -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Deletion test</h2>
+        <p class="text-sm text-slate-700">
+          Delete <span class="mono text-xs">prompt-reconstruction.ts</span>. What replaces it? A column
+          read. The runner already holds the exact string; writing it to the row it already
+          <span class="mono text-xs">INSERT</span>s removes the need to ever re-derive it.
+          <strong>Concentrates</strong> — from a 177-line replay module to a
+          <span class="mono text-xs">SELECT</span>.
+        </p>
+      </section>
+
+      <!-- ALREADY THERE -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">The data is arguably already persisted</h2>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">SolvePrompt.requestBody</span> (jsonb) is populated on every attempt
+          from <span class="mono text-xs">data.requestBody</span> — the provider request body, captured via
+          <span class="mono text-xs">include: { requestBody: true }</span>. That body <em>contains the
+          full <span class="mono text-xs">messages</span> array sent to the model</em>. So the transcript
+          is on the row already, just as a provider-shaped blob rather than the
+          <span class="mono text-xs">[User] / [Assistant]</span> format the UI wants. Two framings follow:
+        </p>
+        <ul class="text-sm space-y-1.5 list-disc pl-5 text-slate-700">
+          <li><strong>Cheapest:</strong> render the chain view from <span class="mono text-xs">requestBody.messages</span> when present; keep reconstruction only as the fallback for rows that predate <span class="mono text-xs">include: { requestBody: true }</span>.</li>
+          <li><strong>Cleanest:</strong> add a dedicated <span class="mono text-xs">promptText text</span> column the runner writes from the string it already built at line 356 — unambiguous, provider-independent, no jsonb spelunking. Reconstruction becomes a one-time backfill, then deletes.</li>
+        </ul>
+      </section>
+
+      <!-- SHAPE -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The deepened shape (cleanest framing)</h2>
+        <pre class="code"><span class="c">// solve-prompt.entity.ts</span>
+<span class="k">@Column</span>({ type: <span class="s">"text"</span>, nullable: <span class="k">true</span> })
+promptText: string | <span class="k">null</span>;   <span class="c">// the exact text sent this attempt; null only for pre-migration rows</span>
+
+<span class="c">// llm-strategy-runner.service.ts — it already has the value</span>
+<span class="k">const</span> prompt = isRetry
+  ? buildRetryPrompt(run.availableWords, state.lockedInGroups, state.lastFailedGuess, N)
+  : buildInitialPrompt(run.availableWords, N);
+<span class="c">// ...on every pendingPrompts.push({ ... }):</span>
+pendingPrompts.push({ ..., <span class="r">promptText: fullTranscriptSoFar + prompt</span> });
+
+<span class="c">// strategy read model (candidate 5) — chain view is now a projection</span>
+solvePrompts.map(p =&gt; ({ ...toDto(p), reconstructedPrompt: p.promptText }));</pre>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">buildInitialPrompt</span> / <span class="mono text-xs">buildRetryPrompt</span>
+          stay exactly as they are — they are the <em>builders</em>. What goes away is the second caller
+          that exists only to re-run them.
+        </p>
+      </section>
+
+      <!-- THE MEASUREMENT -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">The gating measurement</h2>
+        <p class="text-sm text-slate-700">
+          The runner sends the <em>entire</em> conversation on every call, so storing the full transcript
+          per step is roughly quadratic in run length: a run with <span class="mono text-xs">k</span>
+          steps stores ~<span class="mono text-xs">k²/2</span> prompt-lengths of text. Before committing,
+          measure a worst-case real run:
+        </p>
+        <pre class="code"><span class="c">-- bytes of transcript we'd store for the longest runs</span>
+<span class="k">SELECT</span> "strategyRunId",
+       count(*) <span class="k">AS</span> steps,
+       sum(length(coalesce("rawResponseText",<span class="s">''</span>))) <span class="k">AS</span> response_bytes
+<span class="k">FROM</span> "SolvePrompt"
+<span class="k">GROUP BY</span> "strategyRunId"
+<span class="k">ORDER BY</span> response_bytes <span class="k">DESC</span> <span class="k">LIMIT</span> 20;</pre>
+        <p class="text-sm text-slate-700">
+          If the worst case is a few hundred KB, store it and move on. If it's multi-MB, store only the
+          <em>step's own newly-built prompt</em> per row (linear) and let the read model concatenate for
+          display — still no replay of runner state, just string joins.
+        </p>
+      </section>
+
+      <!-- RISKS -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">Risks &amp; open questions</h2>
+        <div class="space-y-3 text-sm text-slate-700">
+          <p><strong class="text-slate-900">Historical rows.</strong> Runs solved before the column exists have no <span class="mono text-xs">promptText</span>. Options: keep <span class="mono text-xs">reconstructSolvePrompts</span> alive purely as the null-fallback (defeats the deletion), or run it once as a backfill script writing <span class="mono text-xs">promptText</span> into old rows, then delete it. The backfill inherits reconstruction's fidelity caveats — but only once, against frozen data.</p>
+          <p><strong class="text-slate-900">Store the step prompt or the full transcript?</strong> The quadratic concern. Linear (step-only) plus read-model concatenation is the safer default; full-transcript only if the measurement says it's cheap and the simpler read is worth it.</p>
+          <p><strong class="text-slate-900"><span class="mono text-xs">CALL_ERROR</span> rows.</strong> Today reconstruction gives them a "what would have been sent" prompt without advancing state. With a stored column, the runner writes the prompt it actually built for that attempt — which is more accurate, and removes the special case entirely.</p>
+          <p><strong class="text-slate-900">Depends on candidate 5.</strong> The read side of this lives in the run-history read model; do it after that split so the change lands in a focused file.</p>
+        </div>
+      </section>
+
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Recommendation</h2>
+        <p class="text-sm text-slate-700">
+          <strong>Speculative — run the query first.</strong> If worst-case transcript size is modest,
+          this is a clear win: a fragile 177-line replay module whose spec is "never drift from the
+          runner" becomes a column write and a read. If size is a problem, the linear variant still
+          retires the module for a bit more read-model code. Either way, sequence it last — after
+          candidate 5, and ideally after candidate 6/7 so the orchestrator side is settled.
+        </p>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-6 border-t border-slate-200">
+        Connections Lab · architecture deepening 8/8 · own analysis, pre-grilling · 2026-09-09
+      </footer>
+
+    </main>
+  </body>
+</html>

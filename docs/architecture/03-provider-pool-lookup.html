@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deepening 3 — Provider pool lookup, not ternaries</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .font-serif { font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .lbl { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+      pre.code { background:#0f172a; color:#e2e8f0; padding:1rem 1.15rem; border-radius:.6rem; overflow-x:auto; font-size:12.5px; line-height:1.5; }
+      pre.code .c { color:#7dd3fc; } pre.code .k { color:#f0abfc; } pre.code .s { color:#86efac; } pre.code .r { color:#fca5a5; }
+      table.t { border-collapse: collapse; width: 100%; font-size: 13px; }
+      table.t th, table.t td { border: 1px solid #e2e8f0; padding: 7px 10px; text-align: left; vertical-align: top; }
+      table.t th { background: #f1f5f9; font-weight: 600; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900">
+    <main class="max-w-4xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="space-y-4">
+        <p class="lbl text-slate-400">Architecture deepening · candidate 3 of 4</p>
+        <h1 class="font-serif text-4xl">Resolve provider behaviour through a pool lookup, not <span class="mono text-3xl">strategyName</span> ternaries</h1>
+        <p class="text-slate-600 max-w-2xl">Own analysis, pre-grilling. Rides on the config list from candidates 1–2; do it after them.</p>
+      </header>
+
+      <!-- FRICTION -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The friction</h2>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">llm-strategy-runner.service.ts</span> re-derives "which provider is
+          this" from <span class="mono text-xs">strategyName</span> four separate times in one method, and
+          carries six constructor-injected hold services to use at most one per run. Provider knowledge
+          <strong>leaks</strong> across the runner instead of sitting behind one seam.
+        </p>
+        <table class="t">
+          <thead><tr><th>Location</th><th>Shape</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><span class="mono text-xs">runLlmStrategy</span> ~209–222</td><td>7-branch <span class="mono text-xs">?:</span></td><td><span class="mono text-xs">strategyName → provider</span> string for the orchestrator call</td></tr>
+            <tr><td>~253–262</td><td>5-branch <span class="mono text-xs">?:</span></td><td><span class="mono text-xs">strategyName →</span> which of 4 <span class="mono text-xs">rpdHoldService</span> refs (or null)</td></tr>
+            <tr><td>~332–341</td><td>5-branch <span class="mono text-xs">?:</span></td><td><span class="mono text-xs">strategyName →</span> which <span class="mono text-xs">rateLimitFallbackSeconds()</span> fn</td></tr>
+            <tr><td>~495–542</td><td><span class="mono text-xs">if / else if</span> ladder</td><td>write the daily hold — a different call per provider (arg count, fallback fn, account vs model)</td></tr>
+            <tr><td>constructor ~195–202</td><td>6 <span class="mono text-xs">@Inject</span></td><td>every runner test mocks all six hold services</td></tr>
+            <tr><td><span class="mono text-xs">strategy.queue.ts</span> <span class="mono text-xs">queueForStrategy</span></td><td>7-branch <span class="mono text-xs">if</span>, 8 queue params</td><td><span class="mono text-xs">strategyName →</span> BullMQ queue</td></tr>
+            <tr><td><span class="mono text-xs">orchestrator.service.ts</span></td><td>7-member string union, repeated</td><td>the <span class="mono text-xs">provider</span> param type, duplicated from <span class="mono text-xs">provider.ts</span> and <span class="mono text-xs">types.ts</span></td></tr>
+            <tr><td><span class="mono text-xs">solver.ts</span> ~359–495</td><td>5 <span class="mono text-xs">if (provider === "…")</span> blocks</td><td>classify a 429 → <span class="mono text-xs">rate_limited | rate_limited_daily</span> + reset seconds</td></tr>
+          </tbody>
+        </table>
+        <p class="text-sm text-slate-700">
+          Each new provider adds a branch to all of these. They are physically far apart, so it is easy to
+          update four and miss the fifth — and nothing fails loudly when you do (the run just calls the
+          wrong fallback or the default OpenAI path).
+        </p>
+      </section>
+
+      <!-- BEFORE -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Before — the hold-writing ladder</h2>
+        <pre class="code"><span class="k">if</span> (outcome.error.code === <span class="s">"rate_limited_daily"</span> &amp;&amp; model) {
+  <span class="k">if</span> (strategyName === LLM_GOOGLE)      <span class="k">await</span> <span class="r">this.rpdHold</span>.hold(strategyName, model);
+  <span class="k">else if</span> (strategyName === LLM_GROQ)  <span class="k">await</span> <span class="r">this.groqRpdHold</span>.hold(strategyName, model,
+                                          outcome.error.dailyResetSeconds ?? <span class="r">llmGroqDailyHoldFallbackSeconds()</span>);
+  <span class="k">else if</span> (strategyName === LLM_SAMBANOVA) <span class="k">await</span> <span class="r">this.sambaNovaRpdHold</span>.hold(strategyName, model,
+                                          outcome.error.dailyResetSeconds ?? <span class="r">llmSambaNovaDailyHoldFallbackSeconds()</span>);
+}
+<span class="k">if</span> (outcome.error.code === <span class="s">"rate_limited_daily"</span> &amp;&amp; strategyName === LLM_OPENROUTER)
+  <span class="k">await</span> <span class="r">this.openRouterHold</span>.hold(<span class="s">"daily"</span>, outcome.error.dailyResetSeconds ?? <span class="r">secondsUntilNextUtcMidnight()</span>);
+<span class="c">// … + a per-minute-cooldown block, + a Mistral streak-heuristic block</span></pre>
+        <p class="text-sm text-slate-700">
+          Note Mistral is <em>absent</em> from the first ladder — its hold write is a fourth
+          <span class="mono text-xs">if</span> 40 lines lower, gated on a different (heuristic-derived)
+          code. That asymmetry is exactly the kind of bug this shape invites.
+        </p>
+      </section>
+
+      <!-- SHAPE -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The deepened shape</h2>
+        <p class="text-sm text-slate-700">
+          One lookup at the top of <span class="mono text-xs">runLlmStrategy</span>. The pool carries
+          everything the four ternaries and the ladder were deriving.
+        </p>
+        <pre class="code"><span class="k">const</span> pool = providerPool(strategyName);   <span class="c">// null ⇒ deterministic/shuffle, unchanged path</span>
+
+<span class="c">// orchestrator call</span>
+<span class="k">await</span> orchestrator.solveAssist(messages, model, pool.orchestratorProvider, contextWindow);
+
+<span class="c">// top gate</span>
+<span class="k">if</span> (pool.freeTier &amp;&amp; <span class="k">await</span> holds.isHeld(strategyName, pool.freeTier.holdScope === <span class="s">"model"</span> ? model : undefined)) { … }
+
+<span class="c">// fallback wait</span>
+<span class="k">const</span> waitSeconds = pool.freeTier?.rateLimitFallbackSeconds() ?? DEFAULT_FALLBACK;
+
+<span class="c">// write the daily hold — one call, pool decides the details</span>
+<span class="k">if</span> (effectiveCode === <span class="s">"rate_limited_daily"</span> &amp;&amp; pool.freeTier) {
+  <span class="k">await</span> pool.freeTier.writeDailyHold(holds, { strategyName, model, error: outcome.error });
+}</pre>
+        <p class="text-sm text-slate-700">
+          <span class="mono text-xs">queueForStrategy</span> becomes
+          <span class="mono text-xs">queues.get(providerPool(name)?.queues.runs ?? "strategy-runs")</span>.
+          The 7-member <span class="mono text-xs">provider</span> union in
+          <span class="mono text-xs">orchestrator.service.ts</span> becomes an import of
+          <span class="mono text-xs">ModelProvider</span> from one place.
+          <span class="mono text-xs">solver.ts</span>'s five 429 blocks stay as a
+          <span class="mono text-xs">Record&lt;ModelProvider, Classify429&gt;</span> map keyed by provider —
+          still five functions, but a table lookup instead of an <span class="mono text-xs">if</span> chain,
+          and TypeScript's exhaustiveness check now flags a missing provider.
+        </p>
+      </section>
+
+      <!-- BEHIND SEAM -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">What sits behind the seam</h2>
+        <p class="text-sm text-slate-700">
+          The runner no longer knows provider names. It knows "there is a pool, it has a free tier, the
+          free tier can gate a run and write a hold." Which hold service, which fallback constant, which
+          reset-seconds computation, per-model vs account scope, Mistral's streak heuristic — all behind
+          <span class="mono text-xs">pool.freeTier</span>. The <span class="mono text-xs">solver.ts</span>
+          classifier map is behind <span class="mono text-xs">classify429[provider]</span>.
+        </p>
+      </section>
+
+      <!-- TESTS -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Tests that survive, and improve</h2>
+        <ul class="text-sm space-y-1.5 list-disc pl-5 text-slate-700">
+          <li><span class="mono text-xs">llm-strategy-runner.service.spec.ts</span> injects one <span class="mono text-xs">ProviderPool</span> fake instead of six hold-service mocks — the interface is the test surface.</li>
+          <li>"Mistral parks after N consecutive 429s" and "OpenRouter writes an account hold at UTC-midnight fallback" become unit tests against the pool's <span class="mono text-xs">writeDailyHold</span> / <span class="mono text-xs">classifyExtra</span>, not integration tests threaded through the whole run loop.</li>
+          <li>A new provider needs no new runner test — it needs a config-row assertion.</li>
+          <li>The <span class="mono text-xs">solver.ts</span> classifier map gets a table-driven spec: one row per provider, same assertions.</li>
+        </ul>
+      </section>
+
+      <!-- RISKS -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">Risks &amp; open questions</h2>
+        <div class="space-y-3 text-sm text-slate-700">
+          <p><strong class="text-slate-900">Depends on candidates 1–2.</strong> Without the pool config list and the unified hold table, this just moves the ternaries into a factory. Sequence it last of the three.</p>
+          <p><strong class="text-slate-900">The null path must stay exact.</strong> <span class="mono text-xs">providerPool(name)</span> returns <span class="mono text-xs">null</span> for <span class="mono text-xs">alphabetical</span>, <span class="mono text-xs">shuffle-smart</span>, etc. Every call site needs the same "fall through to the shared queue / default provider / no gate" behaviour the ternaries' trailing <span class="mono text-xs">: "openai"</span> and <span class="mono text-xs">return defaultQueue</span> give today. Cover deterministic strategies explicitly.</p>
+          <p><strong class="text-slate-900"><span class="mono text-xs">writeDailyHold</span> as a function on a config object</strong> means the config module imports the hold service type — watch for a circular import between <span class="mono text-xs">provider-pool</span> and <span class="mono text-xs">strategy</span>. Keeping <span class="mono text-xs">writeDailyHold</span> as a pure descriptor (<span class="mono text-xs">{ scope, fallbackSeconds, resetFrom }</span>) that the runner interprets avoids the cycle; decide during grilling.</p>
+          <p><strong class="text-slate-900">Ollama has a pool but no free tier.</strong> <span class="mono text-xs">pool.freeTier</span> is <span class="mono text-xs">null</span> for it and for OpenAI — the gate and hold-write blocks must no-op, matching today's "not in any ternary" behaviour.</p>
+        </div>
+      </section>
+
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Recommendation</h2>
+        <p class="text-sm text-slate-700">
+          <strong>Worth exploring</strong>, as the finishing move after 1 and 2. On its own it is a
+          lateral change; on top of the pool config it is what makes "add a provider without touching the
+          runner or the classifier" true, and it lets TypeScript catch a forgotten branch.
+        </p>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-6 border-t border-slate-200">
+        Connections Lab · architecture deepening 3/4 · own analysis, pre-grilling · 2026-09-09
+      </footer>
+
+    </main>
+  </body>
+</html>

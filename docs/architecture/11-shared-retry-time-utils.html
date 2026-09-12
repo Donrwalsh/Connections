@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deepening 11 — Shared retry / backoff / time utilities</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .font-serif { font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .lbl { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+      .deep-fill { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      pre.code { background:#0f172a; color:#e2e8f0; padding:1rem 1.15rem; border-radius:.6rem; overflow-x:auto; font-size:12.5px; line-height:1.55; }
+      pre.code .c { color:#7dd3fc; } pre.code .k { color:#f0abfc; } pre.code .s { color:#86efac; }
+      table.t { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+      table.t th, table.t td { border: 1px solid #e2e8f0; padding: 7px 9px; text-align: left; vertical-align: top; }
+      table.t th { background: #f1f5f9; font-weight: 600; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900">
+    <main class="max-w-4xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="space-y-4">
+        <p class="lbl text-slate-400">Architecture deepening · candidate 11 of 11 (round 3, item 3)</p>
+        <h1 class="font-serif text-4xl">One home for retry / backoff / time helpers</h1>
+        <p class="text-slate-600 max-w-2xl">Own analysis, pre-grilling. Speculative — low leverage, real duplication. Fold in opportunistically.</p>
+      </header>
+
+      <!-- FRICTION -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The friction</h2>
+        <p class="text-sm text-slate-700">
+          Four small primitives — "sleep N ms", "exponential backoff with a ceiling", "is this HTTP
+          status retryable", "start of today in UTC" — are each written two-to-five times, and the copies
+          have <strong>diverged</strong>:
+        </p>
+        <table class="t">
+          <thead><tr><th>Primitive</th><th>Copies</th><th>How they differ</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="mono text-xs">delay(ms)</span></td>
+              <td><span class="mono text-xs">puzzle-ingestion.service.ts</span>, <span class="mono text-xs">llm-strategy-runner.service.ts</span> (verbatim <span class="mono text-xs">new Promise(r =&gt; setTimeout(r, ms))</span>)</td>
+              <td>identical — pure copy-paste</td>
+            </tr>
+            <tr>
+              <td>exponential backoff</td>
+              <td><span class="mono text-xs">puzzle-ingestion.computeBackoff</span>: <span class="mono text-xs">base·2^n + 0–20% jitter</span>, no cap<br /><span class="mono text-xs">runner.modelErrorBackoff</span>: <span class="mono text-xs">min(cap, base·2^(n-1))</span>, <strong>no jitter</strong><br /><span class="mono text-xs">*-rpd-resume.rearm</span>: <span class="mono text-xs">clamp(untilReset, 0, 15min)</span> — not exponential at all</td>
+              <td>three different policies; only one has jitter, only one has a cap</td>
+            </tr>
+            <tr>
+              <td><span class="mono text-xs">REARM_MAX_DELAY_MS = 15 * 60_000</span></td>
+              <td>copied verbatim into 4 <span class="mono text-xs">*-rpd-resume.service.ts</span> files</td>
+              <td>identical (candidate 1 collapses these 4 files anyway)</td>
+            </tr>
+            <tr>
+              <td>"is retryable"</td>
+              <td><span class="mono text-xs">puzzle-ingestion.isRetryableStatus</span>: <span class="mono text-xs">429 || &gt;=500</span><br /><span class="mono text-xs">orchestrator</span>'s <span class="mono text-xs">classifyModelCallError</span> has its own notion of retryability</td>
+              <td>overlapping concepts, no shared definition</td>
+            </tr>
+            <tr>
+              <td><span class="mono text-xs">startOfTodayUtc</span></td>
+              <td>defined in <span class="mono text-xs">strategies.ts</span> (a <em>config</em> file, line 601), used by <span class="mono text-xs">FreeTierUsageService</span> and <span class="mono text-xs">StrategyService</span></td>
+              <td>single-homed but misplaced — it is a time util, not a strategy knob</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="text-sm text-slate-700">
+          None of these is <em>painful</em> — each copy is a handful of lines and rarely touched. But a
+          policy change ("add jitter everywhere", "cap ingestion backoff", "switch daily reset off UTC")
+          is a multi-file hunt with no single place that defines the intent, and the current divergence
+          is almost certainly unintentional drift rather than deliberate per-call tuning.
+        </p>
+      </section>
+
+      <!-- DELETION TEST -->
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Deletion test</h2>
+        <p class="text-sm text-slate-700">
+          Delete the private <span class="mono text-xs">delay</span> / <span class="mono text-xs">computeBackoff</span> /
+          <span class="mono text-xs">isRetryableStatus</span> helpers. They <strong>concentrate</strong>
+          into one <span class="mono text-xs">common/</span> module the callers import. Marginal — the
+          concentration is real but the volume is tiny, which is why this is Speculative, not Strong.
+        </p>
+      </section>
+
+      <!-- SHAPE -->
+      <section class="space-y-4">
+        <h2 class="font-serif text-2xl">The deepened shape</h2>
+        <pre class="code"><span class="c">// backend/src/common/retry.ts</span>
+<span class="k">export const</span> delay = (ms: number) =&gt; <span class="k">new</span> Promise&lt;void&gt;((r) =&gt; setTimeout(r, ms));
+
+<span class="k">export function</span> backoffMs(attempt: number, o: {
+  baseMs: number; capMs?: number; jitter?: <span class="s">"none"</span> | <span class="s">"full"</span> | <span class="s">"20pct"</span>;
+}): number;   <span class="c">// one policy, options make the current three variants explicit choices</span>
+
+<span class="k">export const</span> isRetryableHttpStatus = (s?: number) =&gt; s === 429 || (s !== undefined &amp;&amp; s &gt;= 500);
+
+<span class="c">// backend/src/common/time.ts  — startOfTodayUtc moves here out of strategies.ts</span>
+<span class="k">export function</span> startOfTodayUtc(now?: Date): Date;
+<span class="k">export function</span> nextUtcMidnight(now?: Date): Date;   <span class="c">// unifies secondsUntilNextUtcMidnight + friends</span></pre>
+        <p class="text-sm text-slate-700">
+          Callers import instead of redefining. Each backoff site names its policy
+          (<span class="mono text-xs">{ baseMs, capMs, jitter: "20pct" }</span>) — so a divergence becomes
+          a visible, reviewed decision rather than an accident of which file it was copied from.
+        </p>
+      </section>
+
+      <!-- WINS / RISKS -->
+      <section class="grid md:grid-cols-2 gap-6">
+        <div class="space-y-2">
+          <h3 class="font-serif text-lg">Wins</h3>
+          <ul class="text-sm space-y-1 list-disc pl-5 text-slate-700">
+            <li>one backoff policy, tuned and tested once</li>
+            <li>divergence becomes explicit (an option value), not implicit</li>
+            <li><span class="mono text-xs">startOfTodayUtc</span> lands where a reader would look for it</li>
+            <li>tiny surface — trivial to test exhaustively</li>
+          </ul>
+        </div>
+        <div class="space-y-2">
+          <h3 class="font-serif text-lg">Risks</h3>
+          <ul class="text-sm space-y-1 list-disc pl-5 text-slate-700">
+            <li>low leverage — easy to over-invest relative to the payoff</li>
+            <li>a shared <span class="mono text-xs">backoffMs</span> that's too flexible is its own shallow module; keep the option set to the three real variants</li>
+            <li>don't unify <span class="mono text-xs">isRetryable</span> with the orchestrator's model-error classification — different domains that happen to rhyme</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="space-y-3">
+        <h2 class="font-serif text-2xl">Recommendation</h2>
+        <p class="text-sm text-slate-700">
+          <strong>Speculative.</strong> Not worth a dedicated effort. Do it opportunistically while each
+          file is already open for candidate 1 (<span class="mono text-xs">*-rpd-resume</span>),
+          candidate 5 (<span class="mono text-xs">llm-strategy-runner</span>), or any ingestion work —
+          extract the helper in that same change rather than scheduling a pass for it.
+        </p>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-6 border-t border-slate-200">
+        Connections Lab · architecture deepening 11/11 · own analysis, pre-grilling · 2026-09-09
+      </footer>
+
+    </main>
+  </body>
+</html>
