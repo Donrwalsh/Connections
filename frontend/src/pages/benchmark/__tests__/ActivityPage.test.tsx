@@ -120,19 +120,32 @@ const defaultAutomation: AutomationStatus = {
   sambaNovaBurn: { outcome: null, message: null },
 };
 
+/** Splits a flat legacy event list into the {runs, judgments} feed shape
+ * the endpoint now returns, so existing call sites keep passing an array. */
+function toFeed(events: RecentActivityEvent[]) {
+  return {
+    runs: events.filter((event) => event.kind === "run"),
+    judgments: events.filter((event) => event.kind === "judgment"),
+  };
+}
+
 function stubFetch({
   leaderboard = emptyLeaderboard,
   recentActivity = [],
+  recentActivityByProvider,
   coverage = { eligible: 0, judged: 0, pending: 0 },
   automation = defaultAutomation,
   googleDispatch = { active: false, startedAt: null },
 }: {
   leaderboard?: Leaderboard;
   recentActivity?: RecentActivityEvent[];
+  /** Optional per-`?provider=` override, keyed by the raw param value. */
+  recentActivityByProvider?: Record<string, RecentActivityEvent[]>;
   coverage?: { eligible: number; judged: number; pending: number };
   automation?: AutomationStatus;
   googleDispatch?: { active: boolean; startedAt: string | null };
-} = {}) {
+} = {}): { activityUrls: string[] } {
+  const activityUrls: string[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn((url: unknown) => {
@@ -144,7 +157,13 @@ function stubFetch({
         return Promise.resolve({ ok: true, json: async () => miniUsage });
       }
       if (href.includes("/strategy/activity/recent")) {
-        return Promise.resolve({ ok: true, json: async () => recentActivity });
+        activityUrls.push(href);
+        const provider = new URL(href, "http://localhost").searchParams.get("provider");
+        const events =
+          provider && recentActivityByProvider?.[provider]
+            ? recentActivityByProvider[provider]
+            : recentActivity;
+        return Promise.resolve({ ok: true, json: async () => toFeed(events) });
       }
       if (href.includes("/category-evaluation/coverage")) {
         return Promise.resolve({ ok: true, json: async () => coverage });
@@ -158,6 +177,7 @@ function stubFetch({
       return Promise.resolve({ ok: true, json: async () => leaderboard });
     }),
   );
+  return { activityUrls };
 }
 
 function renderActivity(initialEntry = "/activity") {
@@ -268,7 +288,7 @@ describe("ActivityPage", () => {
     expect(screen.queryByRole("heading", { name: "Enable Auto-Dispatch" })).not.toBeInTheDocument();
   });
 
-  it("renders the recent-activity table, one row per event, run and judgment kinds interleaved", async () => {
+  it("renders puzzle solves and category judgments as separate sections", async () => {
     stubFetch({
       recentActivity: [
         makeRunEvent({
@@ -291,36 +311,31 @@ describe("ActivityPage", () => {
     });
     renderActivity();
 
-    const table = await screen.findByRole("table", { name: /recent activity/i });
-    const headers = within(table)
-      .getAllByRole("columnheader")
-      .map((header) => header.textContent);
-    expect(headers).toEqual(["Activity", "Model", "Puzzle", "When", "Detail"]);
+    const solves = await screen.findByRole("table", { name: /puzzle solves/i });
+    const judgments = screen.getByRole("table", { name: /category judgments/i });
 
-    const rows = within(table).getAllByRole("link");
-    expect(rows[0]!.textContent).toContain("Run");
-    expect(rows[0]!.textContent).toContain("gpt-4.1-nano-2025-04-14");
-    expect(rows[0]!.textContent).toContain("Jan 1, 2024");
-    expect(rows[0]!.textContent).toContain("8:15 AM");
-    expect(rows[0]!.textContent).toContain("Completed");
+    const solveRows = within(solves).getAllByRole("link");
+    expect(solveRows).toHaveLength(1);
+    expect(solveRows[0]!.textContent).toContain("gpt-4.1-nano-2025-04-14");
+    expect(solveRows[0]!.textContent).toContain("Completed");
+    expect(within(solves).queryByText("Category: partial")).not.toBeInTheDocument();
 
-    expect(rows[1]!.textContent).toContain("Category judge");
-    expect(rows[1]!.textContent).toContain("Jan 2, 2024");
-    expect(rows[1]!.textContent).toContain("8:45 PM");
-    expect(rows[1]!.textContent).toContain("Category: partial");
+    const judgmentRows = within(judgments).getAllByRole("link");
+    expect(judgmentRows).toHaveLength(1);
+    expect(judgmentRows[0]!.textContent).toContain("Category: partial");
   });
 
-  it("shows a distinct pill for a failed judge call", async () => {
+  it("shows a distinct pill for a failed judge call in the judgments section", async () => {
     stubFetch({
       recentActivity: [makeJudgmentEvent({ id: 5, status: "callError", verdict: null })],
     });
     renderActivity();
 
-    const table = await screen.findByRole("table", { name: /recent activity/i });
+    const table = await screen.findByRole("table", { name: /category judgments/i });
     expect(within(table).getByText("Category: judge failed")).toBeInTheDocument();
   });
 
-  it("navigates to the puzzle-run page on click for both event kinds, keyed by model for LLM rows", async () => {
+  it("navigates to the puzzle-run page on click for a judgment row, keyed by model for LLM rows", async () => {
     const user = userEvent.setup();
     stubFetch({
       recentActivity: [
@@ -334,53 +349,56 @@ describe("ActivityPage", () => {
     });
     renderActivity();
 
-    const table = await screen.findByRole("table", { name: /recent activity/i });
+    const table = await screen.findByRole("table", { name: /category judgments/i });
     await user.click(within(table).getAllByRole("link")[0]!);
 
     expect(await screen.findByText("run-page")).toBeInTheDocument();
   });
 
-  it("shows an empty state when there is no recent activity", async () => {
+  it("shows a per-section empty state when there is no recent activity", async () => {
     stubFetch({ recentActivity: [] });
     renderActivity();
 
-    expect(await screen.findByText("No activity yet.")).toBeInTheDocument();
+    expect(await screen.findByText("No puzzle solves yet.")).toBeInTheDocument();
+    expect(screen.getByText("No category judgments yet.")).toBeInTheDocument();
   });
 
-  it("filters the recent-activity feed to the pools named in ?provider=", async () => {
-    stubFetch({
-      recentActivity: [
-        makeRunEvent({
-          id: 1,
-          strategyName: "llm-groq",
-          modelName: "openai/gpt-oss-20b",
-          occurredAt: "2024-01-01T08:15:00Z",
-        }),
-        makeRunEvent({
-          id: 2,
-          strategyName: "llm-openai",
-          modelName: "gpt-4.1-nano",
-          occurredAt: "2024-01-01T09:15:00Z",
-        }),
-      ],
+  it("requests the feed scoped to the pools in ?provider= and shows exactly what the server returns", async () => {
+    const { activityUrls } = stubFetch({
+      recentActivity: [makeRunEvent({ id: 99, strategyName: "llm-openai", modelName: "should-not-appear" })],
+      recentActivityByProvider: {
+        groq: [
+          makeRunEvent({
+            id: 1,
+            strategyName: "llm-groq",
+            modelName: "openai/gpt-oss-20b",
+            occurredAt: "2024-01-01T08:15:00Z",
+          }),
+        ],
+      },
     });
     renderActivity("/activity?provider=groq");
 
-    const table = await screen.findByRole("table", { name: /recent activity/i });
+    const table = await screen.findByRole("table", { name: /puzzle solves/i });
     const rows = within(table).getAllByRole("link");
     expect(rows).toHaveLength(1);
     expect(rows[0]!.textContent).toContain("openai/gpt-oss-20b");
+    expect(rows[0]!.textContent).not.toContain("should-not-appear");
+    expect(activityUrls.some((url) => url.includes("provider=groq"))).toBe(true);
   });
 
-  it("toggling a provider chip records the selection in the URL", async () => {
+  it("selecting a provider chip refetches the feed scoped to that pool", async () => {
     const user = userEvent.setup();
-    stubFetch({ recentActivity: [] });
+    const { activityUrls } = stubFetch({ recentActivity: [] });
     renderActivity();
 
-    await screen.findByText("No activity yet.");
+    await screen.findByText("No puzzle solves yet.");
     await user.click(screen.getByRole("button", { name: "Groq" }));
 
     expect(screen.getByRole("button", { name: "Groq" })).toHaveAttribute("aria-pressed", "true");
+    await vi.waitFor(() =>
+      expect(activityUrls.some((url) => url.includes("provider=groq"))).toBe(true),
+    );
   });
 
   it("polls the recent-activity endpoint on an interval", async () => {
@@ -391,7 +409,7 @@ describe("ActivityPage", () => {
         return Promise.resolve({ ok: true, json: async () => flagshipUsage });
       }
       if (href.includes("/strategy/activity/recent")) {
-        return Promise.resolve({ ok: true, json: async () => [] });
+        return Promise.resolve({ ok: true, json: async () => ({ runs: [], judgments: [] }) });
       }
       if (href.includes("/category-evaluation/coverage")) {
         return Promise.resolve({
@@ -530,10 +548,11 @@ describe("ActivityPage as a non-admin visitor", () => {
     expect(screen.queryByRole("button", { name: "Enable Auto-Dispatch" })).not.toBeInTheDocument();
   });
 
-  it("still shows Recent Activity", async () => {
+  it("still shows the Recent Activity sections", async () => {
     stubFetch({ recentActivity: [] });
     renderActivityAsViewer();
 
-    expect(await screen.findByText("No activity yet.")).toBeInTheDocument();
+    expect(await screen.findByText("No puzzle solves yet.")).toBeInTheDocument();
+    expect(screen.getByText("No category judgments yet.")).toBeInTheDocument();
   });
 });

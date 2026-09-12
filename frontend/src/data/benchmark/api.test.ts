@@ -5,6 +5,7 @@ import {
   deleteFailedJudgeCalls,
   fetchErroredRunCount,
   fetchFailedJudgeCallCount,
+  fetchRecentActivity,
   toRunRecord,
 } from "./api";
 import type { StrategyRunListItem } from "./types";
@@ -75,6 +76,36 @@ function stubFetchError(status: number, message: string) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("fetchRecentActivity", () => {
+  const feed = { runs: [], judgments: [] };
+
+  it("GETs /strategy/activity/recent with no provider param when no pools are selected", async () => {
+    const calls = stubFetch(feed);
+
+    const result = await fetchRecentActivity();
+
+    expect(result).toEqual(feed);
+    expect(calls[0].url).toContain("/strategy/activity/recent");
+    expect(calls[0].url).not.toContain("provider=");
+  });
+
+  it("passes the selected pools as a comma-separated provider query param", async () => {
+    const calls = stubFetch(feed);
+
+    await fetchRecentActivity(undefined, ["groq", "openrouter"]);
+
+    expect(calls[0].url).toContain("provider=groq%2Copenrouter");
+  });
+
+  it("omits the provider param for an empty pool list", async () => {
+    const calls = stubFetch(feed);
+
+    await fetchRecentActivity(undefined, []);
+
+    expect(calls[0].url).not.toContain("provider=");
+  });
 });
 
 describe("maintenance-panel API", () => {

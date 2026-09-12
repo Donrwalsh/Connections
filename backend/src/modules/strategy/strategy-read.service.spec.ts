@@ -1757,6 +1757,8 @@ describe("RunHistoryReadModel", () => {
         innerJoin: jest.fn().mockReturnThis(),
         select: jest.fn().mockReturnThis(),
         addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
         limit: jest.fn().mockReturnThis(),
@@ -1821,6 +1823,32 @@ describe("RunHistoryReadModel", () => {
       expect(judgmentQb.limit).toHaveBeenCalledWith(100);
     });
 
+    it("returns runs and judgments as two separate lists rather than one merged feed", async () => {
+      mockActivityQueries(
+        [rawRun({ id: 1, occurredAt: new Date("2024-01-01T00:00:01Z") })],
+        [rawJudgment({ id: 2, occurredAt: new Date("2024-01-01T00:00:99Z") })],
+      );
+
+      const result = await service.getRecentActivity();
+
+      expect(result.runs.map((event) => event.id)).toEqual([1]);
+      expect(result.judgments.map((event) => event.id)).toEqual([2]);
+      expect(result.runs.every((event) => event.kind === "run")).toBe(true);
+      expect(result.judgments.every((event) => event.kind === "judgment")).toBe(true);
+    });
+
+    it("keeps each list at the newest 100 of its own kind, independent of the other's volume", async () => {
+      const runRows = Array.from({ length: 100 }, (_, i) =>
+        rawRun({ id: i + 1, occurredAt: new Date(2024, 0, 1, 0, 0, i) }),
+      );
+      mockActivityQueries(runRows, []);
+
+      const result = await service.getRecentActivity();
+
+      expect(result.runs).toHaveLength(100);
+      expect(result.judgments).toHaveLength(0);
+    });
+
     it("maps StrategyRun rows to run events", async () => {
       mockActivityQueries(
         [
@@ -1836,7 +1864,7 @@ describe("RunHistoryReadModel", () => {
 
       const result = await service.getRecentActivity();
 
-      expect(result).toEqual([
+      expect(result.runs).toEqual([
         {
           kind: "run",
           id: 2,
@@ -1856,7 +1884,7 @@ describe("RunHistoryReadModel", () => {
 
       const result = await service.getRecentActivity();
 
-      expect(result).toEqual([
+      expect(result.judgments).toEqual([
         {
           kind: "judgment",
           id: 7,
@@ -1879,7 +1907,9 @@ describe("RunHistoryReadModel", () => {
         [rawJudgment({ status: CategoryEvalStatus.CALL_ERROR, verdict: null })],
       );
 
-      const [event] = await service.getRecentActivity();
+      const {
+        judgments: [event],
+      } = await service.getRecentActivity();
 
       expect(event).toMatchObject({
         kind: "judgment",
@@ -1888,43 +1918,31 @@ describe("RunHistoryReadModel", () => {
       });
     });
 
-    it("merges runs and judgments into one feed ordered by event time, newest first", async () => {
-      mockActivityQueries(
-        [
-          rawRun({ id: 1, occurredAt: new Date("2024-01-01T00:00:03Z") }),
-          rawRun({ id: 2, occurredAt: new Date("2024-01-01T00:00:01Z") }),
-        ],
-        [
-          rawJudgment({ id: 1, occurredAt: new Date("2024-01-01T00:00:04Z") }),
-          rawJudgment({ id: 2, occurredAt: new Date("2024-01-01T00:00:02Z") }),
-        ],
-      );
+    it("does not constrain either source by strategyName when no pools are given", async () => {
+      const { runQb, judgmentQb } = mockActivityQueries([rawRun()], [rawJudgment()]);
 
-      const result = await service.getRecentActivity();
+      await service.getRecentActivity();
 
-      expect(result.map((event) => [event.kind, event.id])).toEqual([
-        ["judgment", 1],
-        ["run", 1],
-        ["judgment", 2],
-        ["run", 2],
-      ]);
+      expect(runQb.andWhere).not.toHaveBeenCalled();
+      expect(judgmentQb.andWhere).not.toHaveBeenCalled();
     });
 
-    it("applies the activity limit to the merged feed, not to each source alone", async () => {
-      const runRows = Array.from({ length: 100 }, (_, i) =>
-        rawRun({ id: i + 1, occurredAt: new Date(2024, 0, 1, 0, 0, i) }),
-      );
-      const judgmentRows = Array.from({ length: 100 }, (_, i) =>
-        rawJudgment({ id: i + 1, occurredAt: new Date(2024, 0, 2, 0, 0, i) }),
-      );
-      mockActivityQueries(runRows, judgmentRows);
+    it("constrains both sources to the given strategy names when pools are provided", async () => {
+      const { runQb, judgmentQb } = mockActivityQueries([rawRun()], [rawJudgment()]);
 
-      const result = await service.getRecentActivity();
+      await service.getRecentActivity(["llm-groq", "llm-openrouter"]);
 
-      expect(result).toHaveLength(100);
-      // Every judgment here is newer than every run, so the window is all
-      // judgments — proof the cap is applied after the merge, not before.
-      expect(result.every((event) => event.kind === "judgment")).toBe(true);
+      const names = ["llm-groq", "llm-openrouter"];
+      expect(runQb.andWhere).toHaveBeenCalledWith("run.strategyName IN (:...names)", { names });
+      expect(judgmentQb.andWhere).toHaveBeenCalledWith("run.strategyName IN (:...names)", { names });
+    });
+
+    it("returns empty lists (not the whole feed) when the given pools match nothing", async () => {
+      mockActivityQueries([], []);
+
+      const result = await service.getRecentActivity(["llm-groq"]);
+
+      expect(result).toEqual({ runs: [], judgments: [] });
     });
   });
 });

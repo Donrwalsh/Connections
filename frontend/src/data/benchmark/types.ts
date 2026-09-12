@@ -208,6 +208,16 @@ export interface RecentActivityJudgmentEvent extends RecentActivityEventBase {
 
 export type RecentActivityEvent = RecentActivityRunEvent | RecentActivityJudgmentEvent;
 
+/** GET /strategy/activity/recent's response: the two event kinds as
+ * independent newest-first lists (each capped at 100 server-side), which
+ * the Activity page renders as separate "Puzzle Solves" and "Category
+ * Judgments" sections. Both lists are scoped to the same provider-pool
+ * filter when one is active — see fetchRecentActivity. */
+export interface RecentActivityFeed {
+  runs: RecentActivityRunEvent[];
+  judgments: RecentActivityJudgmentEvent[];
+}
+
 /** One row from GET /strategy/models — the real allowlist of models a
  * strategy may dispatch runs against. Used to recognize a model the static
  * mock catalog (mockData.ts) doesn't know about, e.g. one added to the

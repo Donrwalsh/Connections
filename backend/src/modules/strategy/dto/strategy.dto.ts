@@ -276,13 +276,13 @@ export interface RunHistoryDto {
   meta: RunHistoryMetaDto;
 }
 
-// Events for GET /strategy/activity/recent — the Activity page's live feed,
-// one reverse-chronological stream across *every* strategy/model that mixes
-// two kinds of thing: a StrategyRun starting, and a CategoryEvaluation (the
-// LLM category-accuracy judge) landing a verdict. `occurredAt` is the run's
-// startedAt or the judgment's evaluatedAt; the feed sorts on it. Deliberately
-// slim (no guessCount/tokenCostUsd/rationale/diagnostics) since it is polled
-// repeatedly — the run page carries the detail.
+// Events for GET /strategy/activity/recent — the Activity page's live feed.
+// The two kinds are returned as separate lists (see RecentActivityFeedDto),
+// each its own newest-first window, rather than one interleaved stream —
+// the page renders puzzle solves and category-judge verdicts as distinct
+// sections. `occurredAt` is the run's startedAt or the judgment's
+// evaluatedAt. Deliberately slim (no guessCount/tokenCostUsd/rationale/
+// diagnostics) since it is polled repeatedly — the run page carries detail.
 interface RecentActivityEventBaseDto {
   id: number;
   puzzleId: number;
@@ -311,6 +311,15 @@ export interface RecentActivityJudgmentEventDto extends RecentActivityEventBaseD
 export type RecentActivityEventDto =
   | RecentActivityRunEventDto
   | RecentActivityJudgmentEventDto;
+
+// GET /strategy/activity/recent's response: the two event kinds as
+// independent newest-first lists (each capped at RECENT_ACTIVITY_LIMIT),
+// optionally narrowed to one or more provider pools via the `provider`
+// query param — see StrategyController.getRecentActivity.
+export interface RecentActivityFeedDto {
+  runs: RecentActivityRunEventDto[];
+  judgments: RecentActivityJudgmentEventDto[];
+}
 
 // The full allowlist entry for one model — lets a caller (e.g. the
 // leaderboard's per-model run page) recognize a real model it doesn't
