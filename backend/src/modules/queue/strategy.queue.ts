@@ -110,17 +110,22 @@ export function queueForStrategy(
 /**
  * The LLM queue a judge job rides — the judge provider's own queue, so
  * category-evaluation jobs share that provider's worker concurrency and
- * rate budget with its solve runs (see the design doc).
+ * rate budget with its solve runs (see the design doc). Any provider pool
+ * can judge, not just openai/ollama/google — JUDGE_PROVIDER is validated at
+ * boot (see env.ts) and JUDGE_MODEL x JUDGE_PROVIDER consistency at dispatch
+ * time (see CategoryEvaluatorService.enqueuePending), so a pool missing from
+ * `runsQueueByPool` here means the provider-pool config itself is broken,
+ * not a bad env value — fail loud rather than silently default.
  */
 export function queueForJudgeProvider(
-  provider: "openai" | "ollama" | "google",
-  openAIQueue: Queue,
-  ollamaQueue: Queue,
-  googleQueue: Queue,
+  provider: ProviderPoolId,
+  runsQueueByPool: ReadonlyMap<ProviderPoolId, Queue>,
 ): Queue {
-  if (provider === "ollama") return ollamaQueue;
-  if (provider === "google") return googleQueue;
-  return openAIQueue;
+  const queue = runsQueueByPool.get(provider);
+  if (!queue) {
+    throw new Error(`No run queue registered for provider pool "${provider}"`);
+  }
+  return queue;
 }
 
 /** Deterministic job id so a re-enqueue of a still-pending evaluation collapses. */

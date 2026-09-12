@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { fetchMistralDispatchStatus, stopMistralDispatch } from "../../data/benchmark/api";
+import { fetchPoolDispatchStatus, stopPoolDispatch } from "../../data/benchmark/api";
 import type { AutomationLegDisplay } from "../../data/benchmark/types";
+import type { ProviderPool } from "../../data/benchmark/providerPools";
 import { formatAutomationLine } from "./automationFormat";
 import { useResource } from "../../hooks/useResource";
 import { StatusPill } from "./StatusPill";
@@ -8,27 +9,31 @@ import { StatusPill } from "./StatusPill";
 // Matches FreeTierBudgetWidget's own dispatch-status poll cadence.
 const DISPATCH_STATUS_POLL_MS = 30_000;
 
-const TITLE = "Mistral free tier";
-
-export interface MistralDispatchWidgetProps {
-  /** The daily-automation Mistral-burn leg — see AutomationStatus. */
+export interface PoolDispatchWidgetProps {
+  /** The provider pool this widget dispatches — drives the title, which
+   * endpoint it polls, and (only for the one account-budget pool,
+   * openrouter) the calls/budget line. */
+  pool: ProviderPool;
+  /** The daily-automation burn leg for this pool — see AutomationStatus. */
   automation?: AutomationLegDisplay | null;
 }
 
-/** Activity-page widget: whether the Mistral free-dispatch cycle
- * (MistralFreeDispatchService) is currently running, plus (via `automation`)
- * when the daily-automation chain last tried to start it and when it will
- * try again. Unlike the OpenAI tiers there's no token budget to show a
- * progress bar against — Mistral's constraints (a global 1 req/sec cap plus
- * per-pool tokens-per-minute and tokens-per-month limits) are enforced by
- * Mistral itself, so this only ever shows active/inactive. */
-export function MistralDispatchWidget({ automation }: MistralDispatchWidgetProps = {}) {
+/** Activity-page widget: whether `pool`'s free-daily-quota dispatch cycle
+ * (the backend's unified FreeDispatchService) is currently running, plus
+ * (via `automation`) when the daily-automation chain last tried to start it
+ * and when it will try again. Replaces the five near-identical
+ * <Provider>DispatchWidget components — the only real per-pool difference
+ * was the calls/budget line, which the status payload itself now carries
+ * (callsToday/dailyBudget present only for the account-budget pool). */
+export function PoolDispatchWidget({ pool, automation }: PoolDispatchWidgetProps) {
   const [isDisabling, setIsDisabling] = useState(false);
   const [disableError, setDisableError] = useState<string | null>(null);
 
+  const title = `${pool.label} daily quota`;
+
   const { data: status, error, refetch: refetchStatus } = useResource(
-    ["mistralDispatchStatus"],
-    (signal) => fetchMistralDispatchStatus(signal),
+    ["poolDispatchStatus", pool.id],
+    (signal) => fetchPoolDispatchStatus(pool.id, signal),
     { keepPreviousData: true, refetchInterval: DISPATCH_STATUS_POLL_MS },
   );
 
@@ -36,7 +41,7 @@ export function MistralDispatchWidget({ automation }: MistralDispatchWidgetProps
     setIsDisabling(true);
     setDisableError(null);
 
-    stopMistralDispatch()
+    stopPoolDispatch(pool.id)
       .then(() => refetchStatus())
       .catch((err: unknown) => {
         setDisableError(err instanceof Error ? err.message : "Failed to disable auto-dispatch");
@@ -47,8 +52,10 @@ export function MistralDispatchWidget({ automation }: MistralDispatchWidgetProps
   if (error) {
     return (
       <div className="bench-free-tier" role="status">
-        <span className="bench-free-tier__title">{TITLE}</span>
-        <p className="bench-error">Couldn&apos;t load Mistral dispatch status: {error.message}</p>
+        <span className="bench-free-tier__title">{title}</span>
+        <p className="bench-error">
+          Couldn&apos;t load {pool.label} dispatch status: {error.message}
+        </p>
       </div>
     );
   }
@@ -56,16 +63,16 @@ export function MistralDispatchWidget({ automation }: MistralDispatchWidgetProps
   if (!status) {
     return (
       <div className="bench-free-tier" role="status">
-        <span className="bench-free-tier__title">{TITLE}</span>
+        <span className="bench-free-tier__title">{title}</span>
         <p className="bench-muted">Loading…</p>
       </div>
     );
   }
 
   return (
-    <div className="bench-free-tier" role="status" aria-label="Mistral free tier dispatch">
+    <div className="bench-free-tier" role="status" aria-label={`${title} dispatch`}>
       <div className="bench-free-tier__head">
-        <span className="bench-free-tier__title">{TITLE}</span>
+        <span className="bench-free-tier__title">{title}</span>
         {status.active ? (
           <>
             <StatusPill label="Auto-dispatch active" tone="active" />
@@ -83,6 +90,11 @@ export function MistralDispatchWidget({ automation }: MistralDispatchWidgetProps
       <span className="bench-muted">
         {status.active ? "Dispatching trials against unrun puzzles." : "Not currently dispatching."}
       </span>
+      {status.dailyBudget !== undefined ? (
+        <span className="bench-muted">
+          {status.callsToday} / {status.dailyBudget} calls today
+        </span>
+      ) : null}
       {disableError ? <p className="bench-error">{disableError}</p> : null}
       {automation ? (
         <p className={automation.isError ? "bench-error" : "bench-muted"}>

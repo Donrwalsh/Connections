@@ -19,11 +19,8 @@ import {
   FreeTierDispatchService,
   FreeTierDispatchStatusDto,
 } from "../free-tier-dispatch/free-tier-dispatch.service";
-import { GoogleFreeDispatchService } from "../google-free-dispatch/google-free-dispatch.service";
-import { GroqFreeDispatchService } from "../groq-free-dispatch/groq-free-dispatch.service";
-import { OpenRouterFreeDispatchService } from "../openrouter-free-dispatch/openrouter-free-dispatch.service";
-import { MistralFreeDispatchService } from "../mistral-free-dispatch/mistral-free-dispatch.service";
-import { SambaNovaFreeDispatchService } from "../sambanova-free-dispatch/sambanova-free-dispatch.service";
+import { FreeDispatchService } from "../provider-pool/free-dispatch.service";
+import { FREE_TIER_POOLS, type ProviderPoolId } from "../provider-pool/provider-pool.config";
 import { FreeTierId } from "../strategy/free-tier-usage.service";
 import { AUTOMATIC_STRATEGIES, LLM_STRATEGIES, STRATEGY_SET, isLlmStrategy } from "../../strategies";
 import { DispatchAuthGuard } from "./dispatch-auth.guard";
@@ -51,14 +48,7 @@ export class DispatchController {
     @Inject(GameService) private readonly gameService: GameService,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
     @Inject(FreeTierDispatchService) private readonly freeTierDispatchService: FreeTierDispatchService,
-    @Inject(GoogleFreeDispatchService) private readonly googleFreeDispatchService: GoogleFreeDispatchService,
-    @Inject(GroqFreeDispatchService) private readonly groqFreeDispatchService: GroqFreeDispatchService,
-    @Inject(OpenRouterFreeDispatchService)
-    private readonly openRouterFreeDispatchService: OpenRouterFreeDispatchService,
-    @Inject(MistralFreeDispatchService)
-    private readonly mistralFreeDispatchService: MistralFreeDispatchService,
-    @Inject(SambaNovaFreeDispatchService)
-    private readonly sambaNovaFreeDispatchService: SambaNovaFreeDispatchService,
+    @Inject(FreeDispatchService) private readonly freeDispatchService: FreeDispatchService,
     @Inject(ModelMetadataRefreshService)
     private readonly modelMetadataRefreshService: ModelMetadataRefreshService,
   ) {}
@@ -306,84 +296,37 @@ export class DispatchController {
     return this.freeTierDispatchService.getStatus(tier as FreeTierId);
   }
 
-  // Read-only Google free-daily-quota dispatch status — see
-  // GoogleFreeDispatchService. No token threshold like the OpenAI tiers:
-  // active/startedAt only. Not password-gated, same as the free-tier status
-  // route above — it enqueues nothing.
-  @Get("google")
-  async getGoogleDispatchStatus() {
-    return this.googleFreeDispatchService.getStatus();
+  // Read-only free-daily-quota dispatch status for one provider pool — see
+  // FreeDispatchService. No token threshold like the OpenAI tiers:
+  // active/startedAt only, plus callsToday/dailyBudget for the one
+  // account-budget pool (openrouter). Not password-gated, same as the
+  // free-tier status route above — it enqueues nothing.
+  @Get("pool/:poolId")
+  @ApiParam({ name: "poolId", type: String, example: "groq" })
+  async getPoolDispatchStatus(@Param("poolId") poolId: string) {
+    return this.freeDispatchService.getStatus(this.resolveFreeTierPoolId(poolId));
   }
 
-  // Deactivates the Google free-daily-quota dispatch cycle so it stops
+  // Deactivates poolId's free-daily-quota dispatch cycle so it stops
   // scheduling further ticks — a no-op (not an error) if it wasn't running.
-  // Simpler than stopFreeTierDispatch above: there's only one Google cycle,
-  // not per-tier, so no tier param and no 'both' fan-out.
-  @Delete("google")
-  async stopGoogleDispatch() {
-    return this.googleFreeDispatchService.stop();
+  @Delete("pool/:poolId")
+  @ApiParam({ name: "poolId", type: String, example: "groq" })
+  async stopPoolDispatch(@Param("poolId") poolId: string) {
+    return this.freeDispatchService.stop(this.resolveFreeTierPoolId(poolId));
   }
 
-  // Read-only Groq free-daily-quota dispatch status — see
-  // GroqFreeDispatchService. Same shape as the Google route: no token
-  // threshold, active/startedAt only.
-  @Get("groq")
-  async getGroqDispatchStatus() {
-    return this.groqFreeDispatchService.getStatus();
-  }
-
-  // Deactivates the Groq free-daily-quota dispatch cycle so it stops
-  // scheduling further ticks — a no-op (not an error) if it wasn't running.
-  @Delete("groq")
-  async stopGroqDispatch() {
-    return this.groqFreeDispatchService.stop();
-  }
-
-  // Read-only OpenRouter free-daily-budget dispatch status — see
-  // OpenRouterFreeDispatchService. Includes callsToday / dailyBudget since
-  // OpenRouter's spend is a single countable account-wide number.
-  @Get("openrouter")
-  async getOpenRouterDispatchStatus() {
-    return this.openRouterFreeDispatchService.getStatus();
-  }
-
-  // Deactivates the OpenRouter free-daily-budget dispatch cycle — a no-op
-  // (not an error) if it wasn't running.
-  @Delete("openrouter")
-  async stopOpenRouterDispatch() {
-    return this.openRouterFreeDispatchService.stop();
-  }
-
-  // Read-only Mistral free-dispatch status — see MistralFreeDispatchService.
-  // Same shape as the Groq route: no token threshold, active/startedAt only.
-  // Mistral's constraints (1 req/sec, per-pool TPM, per-pool monthly tokens)
-  // are enforced by Mistral itself and surface only as 429s.
-  @Get("mistral")
-  async getMistralDispatchStatus() {
-    return this.mistralFreeDispatchService.getStatus();
-  }
-
-  // Deactivates the Mistral free-dispatch cycle so it stops scheduling
-  // further ticks — a no-op (not an error) if it wasn't running.
-  @Delete("mistral")
-  async stopMistralDispatch() {
-    return this.mistralFreeDispatchService.stop();
-  }
-
-  // Read-only SambaNova free-tier dispatch status — see
-  // SambaNovaFreeDispatchService. Same shape as the Groq/Mistral routes
-  // (active/startedAt only); SambaNova's per-model 20 rpm / 20 rpd / 200K
-  // tpd caps are enforced by SambaNova and surface only as 429s.
-  @Get("sambanova")
-  async getSambaNovaDispatchStatus() {
-    return this.sambaNovaFreeDispatchService.getStatus();
-  }
-
-  // Deactivates the SambaNova free-tier dispatch cycle — a no-op (not an
-  // error) if it wasn't running.
-  @Delete("sambanova")
-  async stopSambaNovaDispatch() {
-    return this.sambaNovaFreeDispatchService.stop();
+  // `poolId` is user input (a route param) — reject anything that isn't one
+  // of the pools FreeDispatchService actually knows how to dispatch (a pool
+  // with no freeTier config, like openai/ollama, is rejected the same way as
+  // an unrecognized id: neither is a valid dispatch target).
+  private resolveFreeTierPoolId(poolId: string): ProviderPoolId {
+    const pool = FREE_TIER_POOLS.find((p) => p.id === poolId);
+    if (!pool) {
+      throw new BadRequestException(
+        `Unknown or non-free-tier pool '${poolId}'. Expected one of: ${FREE_TIER_POOLS.map((p) => p.id).join(", ")}.`,
+      );
+    }
+    return pool.id;
   }
 
   // How many strategy runs are currently in the 'error' status. Read-only,

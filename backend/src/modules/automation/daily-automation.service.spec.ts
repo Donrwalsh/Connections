@@ -5,26 +5,32 @@ import { DailyAutomationService } from "./daily-automation.service";
 import { AutomationRunLog } from "./entities/automation-run-log.entity";
 import { CategoryEvaluatorService } from "../strategy/category-evaluator.service";
 import { FreeTierDispatchService } from "../free-tier-dispatch/free-tier-dispatch.service";
-import { GoogleFreeDispatchService } from "../google-free-dispatch/google-free-dispatch.service";
-import { GroqFreeDispatchService } from "../groq-free-dispatch/groq-free-dispatch.service";
-import { OpenRouterFreeDispatchService } from "../openrouter-free-dispatch/openrouter-free-dispatch.service";
-import { MistralFreeDispatchService } from "../mistral-free-dispatch/mistral-free-dispatch.service";
-import { SambaNovaFreeDispatchService } from "../sambanova-free-dispatch/sambanova-free-dispatch.service";
+import { FreeDispatchService } from "../provider-pool/free-dispatch.service";
+import type { ProviderPoolId } from "../provider-pool/provider-pool.config";
 import { ModelMetadataRefreshService } from "../supported-model/model-metadata-refresh.service";
+
+const BURN_LABEL: Record<ProviderPoolId, string> = {
+  google: "googleBurn",
+  groq: "groqBurn",
+  openrouter: "openRouterBurn",
+  mistral: "mistralBurn",
+  sambanova: "sambaNovaBurn",
+  openai: "openaiBurn",
+  ollama: "ollamaBurn",
+};
 
 describe("DailyAutomationService", () => {
   let service: DailyAutomationService;
   let mockRunLogRepo: { upsert: jest.Mock; update: jest.Mock; findOne: jest.Mock };
   let mockCategoryEvaluatorService: { enqueuePending: jest.Mock };
   let mockFreeTierDispatchService: { getStatus: jest.Mock; start: jest.Mock };
-  let mockGoogleFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
-  let mockGroqFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
-  let mockOpenRouterFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
-  let mockMistralFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
-  let mockSambaNovaFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
+  let mockFreeDispatchService: { getStatus: jest.Mock; start: jest.Mock };
   let mockModelMetadataRefreshService: { refreshAll: jest.Mock };
 
   const todayStamp = () => new Date().toISOString().slice(0, 10);
+
+  const defaultPoolStatus = () => ({ active: false, startedAt: null });
+  const defaultPoolStart = () => ({ status: { active: true, startedAt: new Date() }, outcome: "started" });
 
   beforeEach(async () => {
     mockRunLogRepo = {
@@ -39,34 +45,9 @@ describe("DailyAutomationService", () => {
       getStatus: jest.fn().mockResolvedValue({ tier: "mini", active: false, thresholdPercent: null, startedAt: null }),
       start: jest.fn().mockResolvedValue({ tier: "mini", active: true, thresholdPercent: 80, startedAt: new Date() }),
     };
-    mockGoogleFreeDispatchService = {
-      getStatus: jest.fn().mockResolvedValue({ active: false, startedAt: null }),
-      start: jest.fn().mockResolvedValue({ status: { active: true, startedAt: new Date() }, outcome: "started" }),
-    };
-    mockGroqFreeDispatchService = {
-      getStatus: jest.fn().mockResolvedValue({ active: false, startedAt: null }),
-      start: jest.fn().mockResolvedValue({ status: { active: true, startedAt: new Date() }, outcome: "started" }),
-    };
-    mockOpenRouterFreeDispatchService = {
-      getStatus: jest
-        .fn()
-        .mockResolvedValue({ active: false, startedAt: null, callsToday: 0, dailyBudget: 50 }),
-      start: jest.fn().mockResolvedValue({
-        status: { active: true, startedAt: new Date(), callsToday: 0, dailyBudget: 50 },
-        outcome: "started",
-      }),
-    };
-    mockMistralFreeDispatchService = {
-      getStatus: jest.fn().mockResolvedValue({ active: false, startedAt: null }),
-      start: jest
-        .fn()
-        .mockResolvedValue({ status: { active: true, startedAt: new Date() }, outcome: "started" }),
-    };
-    mockSambaNovaFreeDispatchService = {
-      getStatus: jest.fn().mockResolvedValue({ active: false, startedAt: null }),
-      start: jest
-        .fn()
-        .mockResolvedValue({ status: { active: true, startedAt: new Date() }, outcome: "started" }),
+    mockFreeDispatchService = {
+      getStatus: jest.fn().mockImplementation(async () => defaultPoolStatus()),
+      start: jest.fn().mockImplementation(async () => defaultPoolStart()),
     };
     mockModelMetadataRefreshService = {
       refreshAll: jest.fn().mockResolvedValue({ updated: 3, skipped: 1, errored: 0 }),
@@ -78,11 +59,7 @@ describe("DailyAutomationService", () => {
         { provide: getRepositoryToken(AutomationRunLog), useValue: mockRunLogRepo },
         { provide: CategoryEvaluatorService, useValue: mockCategoryEvaluatorService },
         { provide: FreeTierDispatchService, useValue: mockFreeTierDispatchService },
-        { provide: GoogleFreeDispatchService, useValue: mockGoogleFreeDispatchService },
-        { provide: GroqFreeDispatchService, useValue: mockGroqFreeDispatchService },
-        { provide: OpenRouterFreeDispatchService, useValue: mockOpenRouterFreeDispatchService },
-        { provide: MistralFreeDispatchService, useValue: mockMistralFreeDispatchService },
-        { provide: SambaNovaFreeDispatchService, useValue: mockSambaNovaFreeDispatchService },
+        { provide: FreeDispatchService, useValue: mockFreeDispatchService },
         { provide: ModelMetadataRefreshService, useValue: mockModelMetadataRefreshService },
       ],
     }).compile();
@@ -116,28 +93,9 @@ describe("DailyAutomationService", () => {
         order.push("miniBurn");
         return { tier: "mini", active: true, thresholdPercent: 80, startedAt: new Date() };
       });
-      mockGoogleFreeDispatchService.start.mockImplementation(async () => {
-        order.push("googleBurn");
-        return { status: { active: true, startedAt: new Date() }, outcome: "started" };
-      });
-      mockGroqFreeDispatchService.start.mockImplementation(async () => {
-        order.push("groqBurn");
-        return { status: { active: true, startedAt: new Date() }, outcome: "started" };
-      });
-      mockOpenRouterFreeDispatchService.start.mockImplementation(async () => {
-        order.push("openRouterBurn");
-        return {
-          status: { active: true, startedAt: new Date(), callsToday: 0, dailyBudget: 50 },
-          outcome: "started",
-        };
-      });
-      mockMistralFreeDispatchService.start.mockImplementation(async () => {
-        order.push("mistralBurn");
-        return { status: { active: true, startedAt: new Date() }, outcome: "started" };
-      });
-      mockSambaNovaFreeDispatchService.start.mockImplementation(async () => {
-        order.push("sambaNovaBurn");
-        return { status: { active: true, startedAt: new Date() }, outcome: "started" };
+      mockFreeDispatchService.start.mockImplementation(async (poolId: ProviderPoolId) => {
+        order.push(BURN_LABEL[poolId]);
+        return defaultPoolStart();
       });
 
       await service.run();
@@ -174,9 +132,9 @@ describe("DailyAutomationService", () => {
       );
       expect(mockCategoryEvaluatorService.enqueuePending).toHaveBeenCalled();
       expect(mockFreeTierDispatchService.start).toHaveBeenCalled();
-      expect(mockGoogleFreeDispatchService.start).toHaveBeenCalled();
-      expect(mockGroqFreeDispatchService.start).toHaveBeenCalled();
-      expect(mockOpenRouterFreeDispatchService.start).toHaveBeenCalled();
+      expect(mockFreeDispatchService.start).toHaveBeenCalledWith("google");
+      expect(mockFreeDispatchService.start).toHaveBeenCalledWith("groq");
+      expect(mockFreeDispatchService.start).toHaveBeenCalledWith("openrouter");
     });
 
     it("records the judge leg's enqueued count on success", async () => {
@@ -198,9 +156,9 @@ describe("DailyAutomationService", () => {
         { judgeEnqueued: null, judgeError: "db down" },
       );
       expect(mockFreeTierDispatchService.start).toHaveBeenCalled();
-      expect(mockGoogleFreeDispatchService.start).toHaveBeenCalled();
-      expect(mockGroqFreeDispatchService.start).toHaveBeenCalled();
-      expect(mockOpenRouterFreeDispatchService.start).toHaveBeenCalled();
+      expect(mockFreeDispatchService.start).toHaveBeenCalledWith("google");
+      expect(mockFreeDispatchService.start).toHaveBeenCalledWith("groq");
+      expect(mockFreeDispatchService.start).toHaveBeenCalledWith("openrouter");
     });
 
     it("skips the judge leg but still runs every other leg when skipJudgeLeg is set", async () => {
@@ -213,9 +171,9 @@ describe("DailyAutomationService", () => {
       );
       expect(mockModelMetadataRefreshService.refreshAll).toHaveBeenCalled();
       expect(mockFreeTierDispatchService.start).toHaveBeenCalled();
-      expect(mockGoogleFreeDispatchService.start).toHaveBeenCalled();
-      expect(mockGroqFreeDispatchService.start).toHaveBeenCalled();
-      expect(mockOpenRouterFreeDispatchService.start).toHaveBeenCalled();
+      expect(mockFreeDispatchService.start).toHaveBeenCalledWith("google");
+      expect(mockFreeDispatchService.start).toHaveBeenCalledWith("groq");
+      expect(mockFreeDispatchService.start).toHaveBeenCalledWith("openrouter");
     });
 
     it("runs the judge leg when skipJudgeLeg is absent or false", async () => {
@@ -260,13 +218,13 @@ describe("DailyAutomationService", () => {
         { date: todayStamp() },
         { miniBurnOutcome: "error", miniBurnMessage: "boom" },
       );
-      expect(mockGoogleFreeDispatchService.start).toHaveBeenCalled();
+      expect(mockFreeDispatchService.start).toHaveBeenCalledWith("google");
     });
 
     it("starts the Google burn when no cycle is already running", async () => {
       await service.run();
 
-      expect(mockGoogleFreeDispatchService.start).toHaveBeenCalled();
+      expect(mockFreeDispatchService.start).toHaveBeenCalledWith("google");
       expect(mockRunLogRepo.update).toHaveBeenCalledWith(
         { date: todayStamp() },
         { googleBurnOutcome: "started", googleBurnMessage: "started" },
@@ -274,10 +232,11 @@ describe("DailyAutomationService", () => {
     });
 
     it("records alreadyExhausted for the Google leg from start()'s own outcome", async () => {
-      mockGoogleFreeDispatchService.start.mockResolvedValueOnce({
-        status: { active: false, startedAt: null },
-        outcome: "alreadyExhausted",
-      });
+      mockFreeDispatchService.start.mockImplementation(async (poolId: ProviderPoolId) =>
+        poolId === "google"
+          ? { status: { active: false, startedAt: null }, outcome: "alreadyExhausted" }
+          : defaultPoolStart(),
+      );
 
       await service.run();
 
@@ -288,11 +247,13 @@ describe("DailyAutomationService", () => {
     });
 
     it("records alreadyActive for the Google leg without calling start, when a cycle is already running", async () => {
-      mockGoogleFreeDispatchService.getStatus.mockResolvedValueOnce({ active: true, startedAt: new Date() });
+      mockFreeDispatchService.getStatus.mockImplementation(async (poolId: ProviderPoolId) =>
+        poolId === "google" ? { active: true, startedAt: new Date() } : defaultPoolStatus(),
+      );
 
       await service.run();
 
-      expect(mockGoogleFreeDispatchService.start).not.toHaveBeenCalled();
+      expect(mockFreeDispatchService.start).not.toHaveBeenCalledWith("google");
       expect(mockRunLogRepo.update).toHaveBeenCalledWith(
         { date: todayStamp() },
         { googleBurnOutcome: "alreadyActive", googleBurnMessage: "already running" },
@@ -302,7 +263,7 @@ describe("DailyAutomationService", () => {
     it("starts the Groq burn when no cycle is already running", async () => {
       await service.run();
 
-      expect(mockGroqFreeDispatchService.start).toHaveBeenCalled();
+      expect(mockFreeDispatchService.start).toHaveBeenCalledWith("groq");
       expect(mockRunLogRepo.update).toHaveBeenCalledWith(
         { date: todayStamp() },
         { groqBurnOutcome: "started", groqBurnMessage: "started" },
@@ -310,10 +271,11 @@ describe("DailyAutomationService", () => {
     });
 
     it("records alreadyExhausted for the Groq leg from start()'s own outcome", async () => {
-      mockGroqFreeDispatchService.start.mockResolvedValueOnce({
-        status: { active: false, startedAt: null },
-        outcome: "alreadyExhausted",
-      });
+      mockFreeDispatchService.start.mockImplementation(async (poolId: ProviderPoolId) =>
+        poolId === "groq"
+          ? { status: { active: false, startedAt: null }, outcome: "alreadyExhausted" }
+          : defaultPoolStart(),
+      );
 
       await service.run();
 
@@ -324,11 +286,13 @@ describe("DailyAutomationService", () => {
     });
 
     it("records alreadyActive for the Groq leg without calling start, when a cycle is already running", async () => {
-      mockGroqFreeDispatchService.getStatus.mockResolvedValueOnce({ active: true, startedAt: new Date() });
+      mockFreeDispatchService.getStatus.mockImplementation(async (poolId: ProviderPoolId) =>
+        poolId === "groq" ? { active: true, startedAt: new Date() } : defaultPoolStatus(),
+      );
 
       await service.run();
 
-      expect(mockGroqFreeDispatchService.start).not.toHaveBeenCalled();
+      expect(mockFreeDispatchService.start).not.toHaveBeenCalledWith("groq");
       expect(mockRunLogRepo.update).toHaveBeenCalledWith(
         { date: todayStamp() },
         { groqBurnOutcome: "alreadyActive", groqBurnMessage: "already running" },
@@ -336,7 +300,10 @@ describe("DailyAutomationService", () => {
     });
 
     it("records a Groq leg failure without throwing, and still lets the other legs run", async () => {
-      mockGroqFreeDispatchService.start.mockRejectedValueOnce(new Error("groq down"));
+      mockFreeDispatchService.start.mockImplementation(async (poolId: ProviderPoolId) => {
+        if (poolId === "groq") throw new Error("groq down");
+        return defaultPoolStart();
+      });
 
       await expect(service.run()).resolves.toBeUndefined();
 
@@ -349,7 +316,7 @@ describe("DailyAutomationService", () => {
     it("starts the OpenRouter burn when no cycle is already running", async () => {
       await service.run();
 
-      expect(mockOpenRouterFreeDispatchService.start).toHaveBeenCalled();
+      expect(mockFreeDispatchService.start).toHaveBeenCalledWith("openrouter");
       expect(mockRunLogRepo.update).toHaveBeenCalledWith(
         { date: todayStamp() },
         { openRouterBurnOutcome: "started", openRouterBurnMessage: "started" },
@@ -357,10 +324,14 @@ describe("DailyAutomationService", () => {
     });
 
     it("records alreadyExhausted for the OpenRouter leg from start()'s own outcome", async () => {
-      mockOpenRouterFreeDispatchService.start.mockResolvedValueOnce({
-        status: { active: false, startedAt: null, callsToday: 50, dailyBudget: 50 },
-        outcome: "alreadyExhausted",
-      });
+      mockFreeDispatchService.start.mockImplementation(async (poolId: ProviderPoolId) =>
+        poolId === "openrouter"
+          ? {
+              status: { active: false, startedAt: null, callsToday: 50, dailyBudget: 50 },
+              outcome: "alreadyExhausted",
+            }
+          : defaultPoolStart(),
+      );
 
       await service.run();
 
@@ -374,16 +345,15 @@ describe("DailyAutomationService", () => {
     });
 
     it("records alreadyActive for the OpenRouter leg without calling start", async () => {
-      mockOpenRouterFreeDispatchService.getStatus.mockResolvedValueOnce({
-        active: true,
-        startedAt: new Date(),
-        callsToday: 5,
-        dailyBudget: 50,
-      });
+      mockFreeDispatchService.getStatus.mockImplementation(async (poolId: ProviderPoolId) =>
+        poolId === "openrouter"
+          ? { active: true, startedAt: new Date(), callsToday: 5, dailyBudget: 50 }
+          : defaultPoolStatus(),
+      );
 
       await service.run();
 
-      expect(mockOpenRouterFreeDispatchService.start).not.toHaveBeenCalled();
+      expect(mockFreeDispatchService.start).not.toHaveBeenCalledWith("openrouter");
       expect(mockRunLogRepo.update).toHaveBeenCalledWith(
         { date: todayStamp() },
         { openRouterBurnOutcome: "alreadyActive", openRouterBurnMessage: "already running" },
@@ -391,7 +361,10 @@ describe("DailyAutomationService", () => {
     });
 
     it("records an OpenRouter leg failure without throwing, and still lets the other legs run", async () => {
-      mockOpenRouterFreeDispatchService.start.mockRejectedValueOnce(new Error("openrouter down"));
+      mockFreeDispatchService.start.mockImplementation(async (poolId: ProviderPoolId) => {
+        if (poolId === "openrouter") throw new Error("openrouter down");
+        return defaultPoolStart();
+      });
 
       await expect(service.run()).resolves.toBeUndefined();
 
@@ -404,7 +377,7 @@ describe("DailyAutomationService", () => {
     it("starts the Mistral burn when no cycle is already running", async () => {
       await service.run();
 
-      expect(mockMistralFreeDispatchService.start).toHaveBeenCalled();
+      expect(mockFreeDispatchService.start).toHaveBeenCalledWith("mistral");
       expect(mockRunLogRepo.update).toHaveBeenCalledWith(
         { date: todayStamp() },
         { mistralBurnOutcome: "started", mistralBurnMessage: "started" },
@@ -412,10 +385,11 @@ describe("DailyAutomationService", () => {
     });
 
     it("records alreadyExhausted for the Mistral leg from start()'s own outcome", async () => {
-      mockMistralFreeDispatchService.start.mockResolvedValueOnce({
-        status: { active: false, startedAt: null },
-        outcome: "alreadyExhausted",
-      });
+      mockFreeDispatchService.start.mockImplementation(async (poolId: ProviderPoolId) =>
+        poolId === "mistral"
+          ? { status: { active: false, startedAt: null }, outcome: "alreadyExhausted" }
+          : defaultPoolStart(),
+      );
 
       await service.run();
 
@@ -429,14 +403,13 @@ describe("DailyAutomationService", () => {
     });
 
     it("records alreadyActive for the Mistral leg without calling start", async () => {
-      mockMistralFreeDispatchService.getStatus.mockResolvedValueOnce({
-        active: true,
-        startedAt: new Date(),
-      });
+      mockFreeDispatchService.getStatus.mockImplementation(async (poolId: ProviderPoolId) =>
+        poolId === "mistral" ? { active: true, startedAt: new Date() } : defaultPoolStatus(),
+      );
 
       await service.run();
 
-      expect(mockMistralFreeDispatchService.start).not.toHaveBeenCalled();
+      expect(mockFreeDispatchService.start).not.toHaveBeenCalledWith("mistral");
       expect(mockRunLogRepo.update).toHaveBeenCalledWith(
         { date: todayStamp() },
         { mistralBurnOutcome: "alreadyActive", mistralBurnMessage: "already running" },
@@ -444,7 +417,10 @@ describe("DailyAutomationService", () => {
     });
 
     it("records a Mistral leg failure without throwing, and still lets the other legs run", async () => {
-      mockMistralFreeDispatchService.start.mockRejectedValueOnce(new Error("mistral down"));
+      mockFreeDispatchService.start.mockImplementation(async (poolId: ProviderPoolId) => {
+        if (poolId === "mistral") throw new Error("mistral down");
+        return defaultPoolStart();
+      });
 
       await expect(service.run()).resolves.toBeUndefined();
 
@@ -457,7 +433,7 @@ describe("DailyAutomationService", () => {
     it("starts the SambaNova burn when no cycle is already running", async () => {
       await service.run();
 
-      expect(mockSambaNovaFreeDispatchService.start).toHaveBeenCalled();
+      expect(mockFreeDispatchService.start).toHaveBeenCalledWith("sambanova");
       expect(mockRunLogRepo.update).toHaveBeenCalledWith(
         { date: todayStamp() },
         { sambaNovaBurnOutcome: "started", sambaNovaBurnMessage: "started" },
@@ -465,10 +441,11 @@ describe("DailyAutomationService", () => {
     });
 
     it("records alreadyExhausted for the SambaNova leg from start()'s own outcome", async () => {
-      mockSambaNovaFreeDispatchService.start.mockResolvedValueOnce({
-        status: { active: false, startedAt: null },
-        outcome: "alreadyExhausted",
-      });
+      mockFreeDispatchService.start.mockImplementation(async (poolId: ProviderPoolId) =>
+        poolId === "sambanova"
+          ? { status: { active: false, startedAt: null }, outcome: "alreadyExhausted" }
+          : defaultPoolStart(),
+      );
 
       await service.run();
 
@@ -482,14 +459,13 @@ describe("DailyAutomationService", () => {
     });
 
     it("records alreadyActive for the SambaNova leg without calling start", async () => {
-      mockSambaNovaFreeDispatchService.getStatus.mockResolvedValueOnce({
-        active: true,
-        startedAt: new Date(),
-      });
+      mockFreeDispatchService.getStatus.mockImplementation(async (poolId: ProviderPoolId) =>
+        poolId === "sambanova" ? { active: true, startedAt: new Date() } : defaultPoolStatus(),
+      );
 
       await service.run();
 
-      expect(mockSambaNovaFreeDispatchService.start).not.toHaveBeenCalled();
+      expect(mockFreeDispatchService.start).not.toHaveBeenCalledWith("sambanova");
       expect(mockRunLogRepo.update).toHaveBeenCalledWith(
         { date: todayStamp() },
         { sambaNovaBurnOutcome: "alreadyActive", sambaNovaBurnMessage: "already running" },
@@ -497,7 +473,10 @@ describe("DailyAutomationService", () => {
     });
 
     it("records a SambaNova leg failure without throwing, and still lets the other legs run", async () => {
-      mockSambaNovaFreeDispatchService.start.mockRejectedValueOnce(new Error("sambanova down"));
+      mockFreeDispatchService.start.mockImplementation(async (poolId: ProviderPoolId) => {
+        if (poolId === "sambanova") throw new Error("sambanova down");
+        return defaultPoolStart();
+      });
 
       await expect(service.run()).resolves.toBeUndefined();
 
