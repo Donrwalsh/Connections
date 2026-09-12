@@ -65,7 +65,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', or 'llm-ollama'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or an LLM provider strategy ('llm-openai', 'llm-ollama', 'llm-google', 'llm-groq', 'llm-openrouter', 'llm-mistral', 'llm-sambanova')",
     example: "alphabetical",
   })
   @ApiParam({
@@ -89,7 +89,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', or 'llm-ollama'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or an LLM provider strategy ('llm-openai', 'llm-ollama', 'llm-google', 'llm-groq', 'llm-openrouter', 'llm-mistral', 'llm-sambanova')",
     example: "alphabetical",
   })
   @ApiParam({
@@ -126,7 +126,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', or 'llm-ollama'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or an LLM provider strategy ('llm-openai', 'llm-ollama', 'llm-google', 'llm-groq', 'llm-openrouter', 'llm-mistral', 'llm-sambanova')",
     example: "llm-openai",
   })
   @ApiParam({
@@ -153,7 +153,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', or 'llm-ollama'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or an LLM provider strategy ('llm-openai', 'llm-ollama', 'llm-google', 'llm-groq', 'llm-openrouter', 'llm-mistral', 'llm-sambanova')",
     example: "alphabetical",
   })
   @ApiQuery({
@@ -248,7 +248,7 @@ export class StrategyController {
     name: "strategyName",
     type: String,
     description:
-      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', 'llm-openai', or 'llm-ollama'",
+      "Strategy identifier: 'alphabetical', 'reverse-alphabetical', 'order', 'reverse-order', 'shuffle-smart', 'shuffle-foolish', or an LLM provider strategy ('llm-openai', 'llm-ollama', 'llm-google', 'llm-groq', 'llm-openrouter', 'llm-mistral', 'llm-sambanova')",
     example: "alphabetical",
   })
   @ApiParam({

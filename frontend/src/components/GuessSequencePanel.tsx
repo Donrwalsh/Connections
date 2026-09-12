@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchRunDetailByStrategyDate, fetchRunsForStrategyDate } from "../data/benchmark/api";
+import {
+  PROVIDER_POOLS,
+  poolFromStrategyName,
+  providerPoolLabel,
+} from "../data/benchmark/providerPools";
 import { useResource } from "../hooks/useResource";
 import { useResources } from "../hooks/useResources";
 import type { GuessResultValue, StrategyRunDetail, StrategyRunListItem } from "../data/benchmark/types";
@@ -12,17 +17,30 @@ interface GuessSequencePanelProps {
   onToggle: () => void;
 }
 
-const STRATEGIES = [
+// The deterministic + shuffle strategies always get a toggle button. Their
+// names are stable, so this half stays a local literal; only the provider
+// half below is derived.
+const BASE_STRATEGIES: { id: string; label: string }[] = [
   { id: "alphabetical", label: "Alphabetical" },
   { id: "reverse-alphabetical", label: "Rev-Alphabetical" },
   { id: "order", label: "Order" },
   { id: "reverse-order", label: "Rev-Order" },
   { id: "shuffle-smart", label: "Shuffle-Smart" },
   { id: "shuffle-foolish", label: "Shuffle-Foolish" },
-  { id: "llm-openai", label: "LLM · OpenAI" },
-  { id: "llm-ollama", label: "LLM · Ollama" },
-  { id: "llm-google", label: "LLM · Google" },
 ];
+
+// One toggle per LLM provider pool, in PROVIDER_POOLS order, derived so a
+// provider added to providerPools.ts (and wired up in the backend) shows up
+// here automatically instead of silently going missing. Unlike the base
+// strategies, a provider button only renders once its run list has loaded
+// with at least one run for the current puzzle — see the map() below.
+const PROVIDER_STRATEGIES: { id: string; label: string }[] = PROVIDER_POOLS.map(
+  (pool) => ({ id: pool.strategyName, label: `LLM · ${pool.label}` }),
+);
+
+const STRATEGIES = [...BASE_STRATEGIES, ...PROVIDER_STRATEGIES];
+
+const PROVIDER_STRATEGY_IDS = new Set(PROVIDER_STRATEGIES.map((strat) => strat.id));
 
 const STRATEGY_IDS = STRATEGIES.map((strat) => strat.id);
 
@@ -42,8 +60,11 @@ export function GuessSequencePanel({
   >({});
 
   // Fetch strategy run lists on mount (or date change), regardless of isOpen
-  // state. The list is deliberately slim (no guess arrays) so six strategies
-  // load in a single parallel round of small requests.
+  // state. The list is deliberately slim (no guess arrays) so every strategy
+  // — the base set plus each provider pool — loads in a single parallel round
+  // of small requests. The provider lists are fetched even though most will
+  // come back empty: the panel needs them to decide which provider toggles to
+  // show.
   const strategyResults = useResources(
     date,
     STRATEGY_IDS,
@@ -57,6 +78,19 @@ export function GuessSequencePanel({
     setDetailCache({});
     setActiveRunId(null);
   }, [date]);
+
+  // A provider tab can only be selected while its button is showing, but if
+  // the date then changes to a puzzle that provider never attempted, its
+  // button disappears and the panel would strand on a tab with no toggle.
+  // Fall back to the first base strategy once we know the active provider has
+  // no runs for this puzzle.
+  useEffect(() => {
+    if (!PROVIDER_STRATEGY_IDS.has(activeStrategy)) return;
+    const runs = strategyResults[activeStrategy]?.data;
+    if (runs && runs.length === 0) {
+      setActiveStrategy(BASE_STRATEGIES[0].id);
+    }
+  }, [activeStrategy, strategyResults]);
 
   const currentRuns = strategyResults[activeStrategy]?.data ?? [];
   const selectedRun =
@@ -116,8 +150,14 @@ export function GuessSequencePanel({
     <section className="guess-sequence">
       <div className="guess-sequence__header-actions">
         {STRATEGIES.map((strat) => {
-          const isActive = isOpen && activeStrategy === strat.id;
           const runs = strategyResults[strat.id]?.data;
+          // Provider toggles only appear once their run list has resolved with
+          // at least one run for this puzzle; the base deterministic/shuffle
+          // strategies always get a button.
+          if (PROVIDER_STRATEGY_IDS.has(strat.id) && !(runs && runs.length > 0)) {
+            return null;
+          }
+          const isActive = isOpen && activeStrategy === strat.id;
           const isLoading = strategyResults[strat.id]?.loading;
           const stepCount = runs ? averageGuesses(runs) : null;
 
@@ -269,9 +309,8 @@ function formatResult(result: GuessResultValue): string {
 }
 
 function formatStrategyName(strategyName: string): string {
-  if (strategyName === "llm-openai") return "LLM · OpenAI";
-  if (strategyName === "llm-ollama") return "LLM · Ollama";
-  if (strategyName === "llm-google") return "LLM · Google";
+  const pool = poolFromStrategyName(strategyName);
+  if (pool) return `LLM · ${providerPoolLabel(pool)}`;
   return strategyName
     .split("-")
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
