@@ -53,7 +53,7 @@ describe("describeLeaderboardRow", () => {
 
     const { name } = describeLeaderboardRow(row);
 
-    expect(name).toBe("LLM · gpt-4.1-nano-2025-04-14");
+    expect(name).toBe("gpt-4.1-nano-2025-04-14");
   });
 
   it("labels the provider correctly for an Ollama row", () => {

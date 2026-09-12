@@ -106,6 +106,13 @@ export function formatDateLabel(date: string): string {
   return `${MONTHS[(month ?? 1) - 1]} ${day}, ${year}`;
 }
 
+/** Shorthand mm/dd/yy rendering of the same calendar-day identity as
+ * {@link formatDateLabel}, for narrow layouts where the long form wraps. */
+export function formatDateLabelShort(date: string): string {
+  const [year, month, day] = date.split("-").map(Number);
+  return `${String(month ?? 1).padStart(2, "0")}/${String(day ?? 1).padStart(2, "0")}/${String(year).slice(-2)}`;
+}
+
 export function getStrategyMeta(strategyId: string): StrategyMeta | undefined {
   return STRATEGY_DEFS.find((candidate) => candidate.id === strategyId);
 }
@@ -132,7 +139,10 @@ export function describeLeaderboardRow(row: LeaderboardRow): { name: string; des
     const pool = poolFromStrategyName(row.strategyName);
     const providerLabel = pool ? providerPoolLabel(pool) : "LLM";
     return {
-      name: meta?.name ?? `LLM · ${row.modelName}`,
+      // Strip the static catalog's "LLM · " prefix — the leaderboard already
+      // has a provider pill and an "LLM Strategies" section heading, so
+      // repeating "LLM" a third time in every row name was just noise.
+      name: (meta?.name ?? row.modelName ?? row.id).replace(/^LLM · /, ""),
       description: formatModelStatsDescription(
         providerLabel,
         row.modelName ?? row.id,

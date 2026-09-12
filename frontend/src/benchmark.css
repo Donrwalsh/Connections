@@ -24,6 +24,29 @@
   margin: 0;
 }
 
+.bench-page__section-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.bench-page__section-chevron {
+  flex-shrink: 0;
+  color: var(--text);
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+}
+
+.bench-page__section-toggle[aria-expanded="false"] .bench-page__section-chevron {
+  transform: rotate(0deg);
+}
+
 /* Hero stub. */
 .bench-hero__title {
   font-size: 2rem;
@@ -250,6 +273,39 @@
   min-width: 40rem;
 }
 
+/* Columns that only earn their space on large screens — hidden by default,
+ * restored at the breakpoint instead of relying on the wrap's horizontal
+ * scroll to fit them. */
+.bench-col--lg-only {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  .bench-col--lg-only {
+    display: block;
+  }
+}
+
+/* RecentActivityTable opts out of the 40rem floor above: it's already down
+ * to 4 narrow columns (Puzzle/Model/When/Detail all short values), so it
+ * should shrink with the viewport instead of forcing horizontal scroll. */
+.bench-table-wrap--fluid .bench-table {
+  min-width: 0;
+}
+
+/* overflow-x: auto above also computes overflow-y to auto (any non-visible
+ * value on one axis forces the other off 'visible' too), which makes this
+ * wrap — not the page — the scrolling ancestor a sticky descendant sticks
+ * within. That's fine for the 40rem-floor tables, which actually scroll
+ * horizontally, but it silently breaks StrategyTable's sticky column
+ * header, which needs to stick to the page as you scroll. A --fluid table
+ * is built to never need horizontal scroll in the first place, so drop
+ * overflow entirely here rather than just overflow-y, to be rid of both
+ * halves of that coupling. */
+.bench-table-wrap--fluid {
+  overflow: visible;
+}
+
 .bench-table__caption {
   text-align: left;
   font-size: 0.8rem;
@@ -286,9 +342,10 @@
   outline-offset: -1px;
 }
 
-/* The accent-border "leading/selected" treatment — the only pattern DESIGN.md
- * allows for marking the top row or the currently-selected run. */
-.bench-row--leading > td:first-child,
+/* The accent-border "selected" treatment — the only pattern DESIGN.md allows
+ * for marking the currently-selected run. StrategyTable's top-ranked row
+ * still carries the bench-row--leading class (LeaderboardPage's tests key
+ * off it), it just no longer renders a bar for it. */
 .bench-row--selected > td:first-child {
   border-left: 2px solid var(--accent-border);
 }
@@ -297,16 +354,159 @@
   background-color: var(--code-bg);
 }
 
+/* StrategyTable: a CSS-grid table instead of a native <table>. Each row lays
+ * out its own independent grid rather than sharing tracks with the others,
+ * so column widths are fixed per variant (not content-sized) to keep them
+ * aligned from row to row — see .bench-grid--llm/.bench-grid--deterministic.
+ * That per-row independence is what lets a row's last item declare
+ * `grid-column: 1 / -1` and wrap onto a second line still inside that same
+ * row, which a native table's single-line rows can't do (see
+ * .bench-progress-band). */
+.bench-grid-header,
+.bench-grid-row {
+  display: grid;
+  column-gap: 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.bench-grid-header {
+  /* Sticks just below the site nav bar (also sticky — see header.css's
+   * .site-header, 4rem min-height + 1px border = 4.0625rem) so the column
+   * labels stay visible while scrolling through a long row list. */
+  position: sticky;
+  top: 4.0625rem;
+  z-index: 10;
+  padding: 0.4rem 0.6rem;
+  background-color: var(--bg);
+}
+
+.bench-grid-header > [role="columnheader"] {
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text);
+}
+
+.bench-grid-row {
+  padding: 0.5rem 0.6rem;
+  row-gap: 0.4rem;
+}
+
+.bench-grid--llm {
+  grid-template-columns: minmax(0, 1fr) 4.5rem 4.5rem 4.5rem;
+}
+
+@media (min-width: 900px) {
+  .bench-grid--llm {
+    grid-template-columns: minmax(0, 1fr) 4.5rem 4.5rem 4.5rem 4.5rem 11rem;
+  }
+}
+
+.bench-grid--deterministic {
+  grid-template-columns: minmax(0, 1fr) 5rem 5rem 6rem;
+}
+
+@media (min-width: 900px) {
+  .bench-grid--deterministic {
+    grid-template-columns: minmax(0, 1fr) 5rem 5rem 6rem 11rem;
+  }
+}
+
+/* The Progress readout. Below 900px there's no dedicated column for it (see
+ * the grid templates above), so it spans every column, which pushes it onto
+ * a new line within the row's own grid — a full-width band underneath the
+ * values above it, still inside the same row. At 900px+ a real column opens
+ * up (its header is the "Progress" columnheader, .bench-col--lg-only like
+ * Avg issues), so it drops the span and the band-only chrome (the inline
+ * "Progress" label, the tight label-to-count spacing) that only makes sense
+ * when there's no column header doing that job. */
+.bench-progress-band {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  /* Pulls the band up so its first line (the puzzle count) lands on the
+   * provider badge's line instead of starting fresh below it — see the
+   * measured alignment note on .bench-progress-band__row. Reset at 900px+,
+   * where Progress becomes its own column and this band sits inside it
+   * like any other cell instead of overlapping the row above. */
+  margin-top: -2.06rem;
+}
+
+@media (min-width: 900px) {
+  .bench-progress-band {
+    grid-column: auto;
+    margin-top: 0;
+  }
+}
+
+.bench-progress-band__row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.bench-progress-band__label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text);
+}
+
+@media (min-width: 900px) {
+  .bench-progress-band__label {
+    display: none;
+  }
+}
+
+/* Narrow (band) layout only: badges sit under the puzzle count, aligned to
+ * the row's right edge rather than trailing the label on the left. */
+.bench-badges--float-end {
+  align-self: flex-end;
+}
+
+@media (min-width: 900px) {
+  .bench-badges--float-end {
+    align-self: flex-start;
+  }
+}
+
 .bench-mono {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   color: var(--text-h);
 }
 
-.bench-strategy-name-row {
+.bench-date-short {
+  display: none;
+}
+
+.bench-when {
   display: flex;
-  align-items: center;
-  gap: 0.4rem;
+  flex-direction: column;
+}
+
+@media (max-width: 640px) {
+  .bench-date-full {
+    display: none;
+  }
+  .bench-date-short {
+    display: inline;
+  }
+}
+
+/* Name above the provider badge instead of side by side — used by
+ * RecentActivityTable's Model column and StrategyTable's Strategy column, so
+ * both stay narrow enough to fit their tables without forcing a horizontal
+ * scroll. */
+.bench-model-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
 }
 
 .bench-strategy-name {
@@ -316,7 +516,6 @@
 }
 
 .bench-strategy-desc {
-  display: block;
   font-size: 0.8rem;
   color: var(--text);
 }
@@ -337,12 +536,6 @@
   display: block;
   font-size: 0.8rem;
   color: var(--text);
-}
-
-.bench-progress {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 0.25rem;
 }
 
 .bench-badges {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useAdminAuth } from "../../auth/useAdminAuth";
@@ -246,29 +246,63 @@ export function ActivityPage() {
 
       {!isLoadingActivity && !recentActivityError ? (
         <>
-          <section className="bench-page__section" aria-label="Puzzle solves">
-            <div className="bench-page__section-head">
-              <h3 className="bench-page__section-title">Puzzle Solves</h3>
-            </div>
+          <CollapsibleSection title="Puzzle Solves" ariaLabel="Puzzle solves">
             <RecentActivityTable
               events={solveEvents}
               caption="Puzzle solves"
               emptyLabel="No puzzle solves yet."
             />
-          </section>
+          </CollapsibleSection>
 
-          <section className="bench-page__section" aria-label="Category judgments">
-            <div className="bench-page__section-head">
-              <h3 className="bench-page__section-title">Category Judgments</h3>
-            </div>
+          <CollapsibleSection title="Category Judgments" ariaLabel="Category judgments">
             <RecentActivityTable
               events={judgmentEvents}
               caption="Category judgments"
               emptyLabel="No category judgments yet."
             />
-          </section>
+          </CollapsibleSection>
         </>
       ) : null}
     </div>
+  );
+}
+
+/** A section whose body can be hidden behind its own title, toggled by a
+ * chevron beside the heading. Defaults open; state lives per-mount, not
+ * persisted — collapsing is a viewing convenience, not a saved preference. */
+function CollapsibleSection({
+  title,
+  ariaLabel,
+  children,
+}: {
+  title: string;
+  ariaLabel: string;
+  children: ReactNode;
+}) {
+  const [isOpen, setIsOpen] = useState(true);
+
+  return (
+    <section className="bench-page__section" aria-label={ariaLabel}>
+      <div className="bench-page__section-head">
+        <button
+          type="button"
+          className="bench-page__section-toggle"
+          onClick={() => setIsOpen((open) => !open)}
+          aria-expanded={isOpen}
+        >
+          <svg
+            className="bench-page__section-chevron"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" strokeWidth="2" />
+          </svg>
+          <h3 className="bench-page__section-title">{title}</h3>
+        </button>
+      </div>
+      {isOpen ? children : null}
+    </section>
   );
 }

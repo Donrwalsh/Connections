@@ -131,6 +131,34 @@ export function formatTimestamp(iso: string): string {
   });
 }
 
+/** Date-only half of {@link formatTimestamp}, for layouts that stack the
+ * date and time on separate rows instead of one combined string. */
+export function formatTimestampDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+/** Shorthand mm/dd/yy variant of {@link formatTimestampDate}, for narrow
+ * layouts where the long form wraps. Still the viewer's local timezone. */
+export function formatTimestampDateShort(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit",
+  });
+}
+
+/** Time-only half of {@link formatTimestamp}. */
+export function formatTimestampTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 /** USD token-cost formatter for LLM run rows: most runs cost fractions of a
  * cent, so anything under a cent gets 4 decimal places instead of rounding
  * away to "$0.00". */

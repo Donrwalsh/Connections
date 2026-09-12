@@ -1,6 +1,10 @@
 import { useNavigate } from "react-router-dom";
-import { formatDateLabel, humanizeStrategyName } from "../../data/benchmark/mockData";
-import { formatTimestamp } from "../../data/benchmark/metrics";
+import { formatDateLabel, formatDateLabelShort, humanizeStrategyName } from "../../data/benchmark/mockData";
+import {
+  formatTimestampDate,
+  formatTimestampDateShort,
+  formatTimestampTime,
+} from "../../data/benchmark/metrics";
 import {
   categoryVerdictLabel,
   categoryVerdictTone,
@@ -37,76 +41,83 @@ export function RecentActivityTable({
   const navigate = useNavigate();
 
   return (
-    <table className="bench-table">
-      <caption className="bench-table__caption">
-        {caption} · {events.length}
-      </caption>
-      <thead>
-        <tr>
-          <th scope="col">Activity</th>
-          <th scope="col">Model</th>
-          <th scope="col">Puzzle</th>
-          <th scope="col">When</th>
-          <th scope="col">Detail</th>
-        </tr>
-      </thead>
-      <tbody>
-        {events.map((event) => {
-          const routeId = event.modelName ?? event.strategyName;
-          const modelLabel = event.modelName ?? humanizeStrategyName(event.strategyName);
-          const goToRun = () => navigate(`/leaderboard/${encodeURIComponent(routeId)}/${event.puzzleId}`);
+    <div className="bench-table-wrap bench-table-wrap--fluid">
+      <table className="bench-table">
+        <caption className="bench-table__caption">
+          {caption} · {events.length}
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Puzzle</th>
+            <th scope="col">Model</th>
+            <th scope="col">When</th>
+            <th scope="col">Detail</th>
+          </tr>
+        </thead>
+        <tbody>
+          {events.map((event) => {
+            const routeId = event.modelName ?? event.strategyName;
+            const modelLabel = event.modelName ?? humanizeStrategyName(event.strategyName);
+            const goToRun = () => navigate(`/leaderboard/${encodeURIComponent(routeId)}/${event.puzzleId}`);
 
-          return (
-            <tr
-              key={`${event.kind}-${event.id}`}
-              className="bench-row"
-              role="link"
-              tabIndex={0}
-              onClick={goToRun}
-              onKeyDown={(keyEvent) => {
-                if (keyEvent.key === "Enter" || keyEvent.key === " ") {
-                  keyEvent.preventDefault();
-                  goToRun();
+            return (
+              <tr
+                key={`${event.kind}-${event.id}`}
+                className="bench-row"
+                role="link"
+                tabIndex={0}
+                onClick={goToRun}
+                onKeyDown={(keyEvent) => {
+                  if (keyEvent.key === "Enter" || keyEvent.key === " ") {
+                    keyEvent.preventDefault();
+                    goToRun();
+                  }
+                }}
+                aria-label={
+                  event.kind === "run"
+                    ? `View run for puzzle #${event.puzzleId}`
+                    : `View category judgment for puzzle #${event.puzzleId}`
                 }
-              }}
-              aria-label={
-                event.kind === "run"
-                  ? `View run for puzzle #${event.puzzleId}`
-                  : `View category judgment for puzzle #${event.puzzleId}`
-              }
-            >
-              <td className="bench-muted">
-                {event.kind === "run" ? "Run" : "Category judge"}
-              </td>
-              <td className="bench-mono">
-                <span className="bench-strategy-name-row">
-                  {modelLabel}
-                  <ProviderPill strategyName={event.strategyName} />
-                </span>
-              </td>
-              <td className="bench-mono">{formatDateLabel(event.puzzleDate)}</td>
-              <td className="bench-mono">{formatTimestamp(event.occurredAt)}</td>
-              <td>
-                {event.kind === "run" ? (
-                  <StatusPill label={runStatusLabel(event.status)} tone={runStatusTone(event.status)} />
-                ) : (
-                  <StatusPill
-                    label={categoryVerdictLabel(event.verdict)}
-                    tone={categoryVerdictTone(event.verdict)}
-                  />
-                )}
+              >
+                <td className="bench-mono">
+                  <span className="bench-date-full">{formatDateLabel(event.puzzleDate)}</span>
+                  <span className="bench-date-short">{formatDateLabelShort(event.puzzleDate)}</span>
+                </td>
+                <td className="bench-mono">
+                  <span className="bench-model-stack">
+                    {modelLabel}
+                    <ProviderPill strategyName={event.strategyName} />
+                  </span>
+                </td>
+                <td className="bench-mono">
+                  <div className="bench-when">
+                    <span className="bench-date-full">{formatTimestampDate(event.occurredAt)}</span>
+                    <span className="bench-date-short">{formatTimestampDateShort(event.occurredAt)}</span>
+                    <span className="bench-when__time">{formatTimestampTime(event.occurredAt)}</span>
+                  </div>
+                </td>
+                <td>
+                  {event.kind === "run" ? (
+                    <StatusPill label={runStatusLabel(event.status)} tone={runStatusTone(event.status)} />
+                  ) : (
+                    <StatusPill
+                      label={categoryVerdictLabel(event.verdict)}
+                      tone={categoryVerdictTone(event.verdict)}
+                    />
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+          {events.length === 0 ? (
+            <tr>
+              <td colSpan={4} className="bench-muted">
+                {emptyLabel}
               </td>
             </tr>
-          );
-        })}
-        {events.length === 0 ? (
-          <tr>
-            <td colSpan={5} className="bench-muted">
-              {emptyLabel}
-            </td>
-          </tr>
-        ) : null}
-      </tbody>
-    </table>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
   );
 }

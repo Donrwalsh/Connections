@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   formatDuration,
@@ -40,40 +41,58 @@ function formatRange(
 
 /** Leaderboard table of aggregated strategy/model rows (see LeaderboardRow).
  * The leading (top-ranked) row per the active metric gets the accent
- * "leading" treatment. Rows navigate to /leaderboard/:id. */
+ * "leading" treatment. Rows navigate to /leaderboard/:id.
+ *
+ * Built on CSS Grid rather than a native <table>: the Progress readout
+ * (puzzles covered + queue/active/failed badges) needs to run as a full-width
+ * band underneath a row's other values, still inside that same row rather
+ * than a separate sibling row. A native table can't do that (a cell can only
+ * span columns within its own row's single line), but a grid item declaring
+ * `grid-column: 1 / -1` naturally wraps to a second line within its own
+ * row's grid once the preceding cells have filled the first — see
+ * .bench-progress-band. Because each row lays out its own independent grid
+ * (not one grid shared across rows), column widths are fixed per variant
+ * (see .bench-grid--llm/.bench-grid--deterministic in benchmark.css) rather
+ * than content-sized, so they still line up from row to row. ARIA roles
+ * (table/row/columnheader) stand in for the table semantics the native
+ * elements used to provide for free. */
 export function StrategyTable({ rows, metricKey, variant }: StrategyTableProps) {
   const navigate = useNavigate();
   const metric = getMetricDefinition(metricKey);
   const sorted = sortStrategiesByMetric(rows, metricKey);
   const isDeterministic = variant === "deterministic";
+  const captionId = useId();
+  const gridClass = isDeterministic ? "bench-grid--deterministic" : "bench-grid--llm";
 
   return (
-    <div className="bench-table-wrap">
-    <table className="bench-table">
-      <caption className="bench-table__caption">
+    <div className="bench-table-wrap bench-table-wrap--fluid">
+      <p id={captionId} className="bench-table__caption">
         {variant === "llm" ? "LLM strategies" : "Deterministic & shuffle strategies"} ·{" "}
         {metric.label} — {metric.higherIsBetter ? "best first" : "fewest guesses first"}
-      </caption>
-      <thead>
-        <tr>
-          <th scope="col">Strategy</th>
-          {variant === "llm" ? <th scope="col">Success rate</th> : null}
-          <th scope="col">{variant === "llm" ? "Avg duration" : "Avg speed"}</th>
+      </p>
+      <div className="bench-table" role="table" aria-labelledby={captionId}>
+        <div className={`bench-grid-header ${gridClass}`} role="row">
+          <div role="columnheader">Strategy</div>
+          {variant === "llm" ? <div role="columnheader">Success rate</div> : null}
+          <div role="columnheader">{variant === "llm" ? "Avg duration" : "Avg speed"}</div>
           {isDeterministic ? (
             <>
-              <th scope="col">Avg guesses</th>
-              <th scope="col">Range</th>
+              <div role="columnheader">Avg guesses</div>
+              <div role="columnheader">Range</div>
             </>
           ) : (
             <>
-              <th scope="col">Avg issues</th>
-              <th scope="col">Category IQ</th>
+              <div role="columnheader" className="bench-col--lg-only">
+                Avg issues
+              </div>
+              <div role="columnheader">Category IQ</div>
             </>
           )}
-          <th scope="col">Progress</th>
-        </tr>
-      </thead>
-      <tbody>
+          <div role="columnheader" className="bench-col--lg-only">
+            Progress
+          </div>
+        </div>
+
         {sorted.map((row, index) => {
           const { name, description } = describeLeaderboardRow(row);
           const { progress } = row;
@@ -90,9 +109,9 @@ export function StrategyTable({ rows, metricKey, variant }: StrategyTableProps) 
           const durationDisplay =
             row.avgDurationMs === null ? "—" : formatDuration(row.avgDurationMs);
           return (
-            <tr
+            <div
               key={row.id}
-              className={index === 0 ? "bench-row bench-row--leading" : "bench-row"}
+              className={`bench-grid-row ${gridClass} ${index === 0 ? "bench-row bench-row--leading" : "bench-row"}`}
               onClick={() => navigate(`/leaderboard/${encodeURIComponent(row.id)}`)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === " ") {
@@ -104,37 +123,37 @@ export function StrategyTable({ rows, metricKey, variant }: StrategyTableProps) 
               tabIndex={0}
               aria-label={`View ${name} details`}
             >
-              <td>
-                <span className="bench-strategy-name-row">
+              <div>
+                <span className="bench-model-stack">
                   <span className="bench-strategy-name">{name}</span>
                   {variant === "llm" ? <ProviderPill strategyName={row.strategyName} /> : null}
                 </span>
-                <span className="bench-strategy-desc">{description}</span>
-              </td>
-              {variant === "llm" ? <td className="bench-mono">{successRateDisplay}</td> : null}
+                <span className="bench-strategy-desc bench-col--lg-only">{description}</span>
+              </div>
+              {variant === "llm" ? <div className="bench-mono">{successRateDisplay}</div> : null}
               {variant === "llm" ? (
-                <td className="bench-mono">{durationDisplay}</td>
+                <div className="bench-mono">{durationDisplay}</div>
               ) : (
-                <td>
+                <div>
                   <span className="bench-mono bench-metric-value">{speedDisplay}</span>
                   <span className="bench-metric-unit">solves/hr</span>
-                </td>
+                </div>
               )}
               {isDeterministic ? (
                 <>
-                  <td className="bench-mono">
+                  <div className="bench-mono">
                     {row.avgGuessesToSolve === null ? "—" : formatGuessCount(row.avgGuessesToSolve)}
-                  </td>
-                  <td className="bench-mono">
+                  </div>
+                  <div className="bench-mono">
                     {formatRange(row.minGuesses, row.maxGuesses, formatGuessCount)}
-                  </td>
+                  </div>
                 </>
               ) : (
                 <>
-                  <td className="bench-mono">
+                  <div className="bench-mono bench-col--lg-only">
                     {row.avgIssues === null ? "—" : row.avgIssues.toFixed(1)}
-                  </td>
-                  <td
+                  </div>
+                  <div
                     className="bench-mono"
                     title={
                       row.categoryEvaluated === 0
@@ -145,35 +164,35 @@ export function StrategyTable({ rows, metricKey, variant }: StrategyTableProps) 
                     {row.categoryAccuracy === null
                       ? "—"
                       : formatSuccessRate(row.categoryAccuracy)}
-                  </td>
+                  </div>
                 </>
               )}
-              <td>
-                <span className="bench-progress">
+              <div className="bench-progress-band">
+                <div className="bench-progress-band__row">
+                  <span className="bench-progress-band__label">Progress</span>
                   <span className="bench-mono">
                     {row.puzzlesCovered.toLocaleString()} of {row.totalPuzzles.toLocaleString()} puzzles
                   </span>
-                  <span className="bench-badges">
-                    {queueBadges.map((badge) =>
-                      badge.count > 0 ? (
-                        <StatusPill
-                          key={badge.label}
-                          label={`${badge.label} ${badge.count.toLocaleString()}`}
-                          tone={badge.tone}
-                        />
-                      ) : null,
-                    )}
-                    {queueBadges.every((badge) => badge.count === 0) ? (
-                      <span className="bench-muted">all finished</span>
-                    ) : null}
-                  </span>
+                </div>
+                <span className="bench-badges bench-badges--float-end">
+                  {queueBadges.map((badge) =>
+                    badge.count > 0 ? (
+                      <StatusPill
+                        key={badge.label}
+                        label={`${badge.label} ${badge.count.toLocaleString()}`}
+                        tone={badge.tone}
+                      />
+                    ) : null,
+                  )}
+                  {queueBadges.every((badge) => badge.count === 0) ? (
+                    <span className="bench-muted">all finished</span>
+                  ) : null}
                 </span>
-              </td>
-            </tr>
+              </div>
+            </div>
           );
         })}
-      </tbody>
-    </table>
+      </div>
     </div>
   );
 }
