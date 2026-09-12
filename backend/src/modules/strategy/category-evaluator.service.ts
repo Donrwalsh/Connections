@@ -14,8 +14,10 @@ import { StrategyRun } from "./entities/strategy-run.entity";
 import { GuessResult } from "./entities/guess.entity";
 import { OrchestratorService } from "./orchestrator.service";
 import { Queue } from "bullmq";
-import { LLM_OPENAI_QUEUE, LLM_OLLAMA_QUEUE, LLM_GOOGLE_QUEUE } from "../queue/queue.module";
+import { RUNS_QUEUE_BY_POOL } from "../queue/queue.module";
 import { queueForJudgeProvider, categoryEvalJobId } from "../queue/strategy.queue";
+import { providerPoolById, type ProviderPoolId } from "../provider-pool/provider-pool.config";
+import { SupportedModelService } from "../supported-model/supported-model.service";
 
 // Bump only when buildJudgePrompt (orchestrator) changes materially, so a
 // later re-judge pass can find rows produced by an older prompt. Nothing
@@ -76,9 +78,10 @@ export class CategoryEvaluatorService {
     private readonly strategyRunRepo: Repository<StrategyRun>,
     @Inject(OrchestratorService)
     private readonly orchestrator: OrchestratorService,
-    @Inject(LLM_OPENAI_QUEUE) private readonly llmOpenAIQueue: Queue,
-    @Inject(LLM_OLLAMA_QUEUE) private readonly llmOllamaQueue: Queue,
-    @Inject(LLM_GOOGLE_QUEUE) private readonly llmGoogleQueue: Queue,
+    @Inject(RUNS_QUEUE_BY_POOL)
+    private readonly runsQueueByPool: ReadonlyMap<ProviderPoolId, Queue>,
+    @Inject(SupportedModelService)
+    private readonly supportedModelService: SupportedModelService,
   ) {}
 
   private readonly DEFAULT_LIMIT = 50;
@@ -89,11 +92,23 @@ export class CategoryEvaluatorService {
    * used proposal, newest LlmProposal.id first, up to `limit`. Jobs land on
    * the judge provider's LLM queue (deterministic jobId so a re-enqueue of a
    * still-pending job collapses). Returns what was queued.
+   *
+   * Throws if JUDGE_MODEL isn't actually a supported model for
+   * JUDGE_PROVIDER — env.ts only validates JUDGE_PROVIDER is one of the known
+   * pools, not that the two env vars agree with each other, so a mismatch
+   * (e.g. JUDGE_PROVIDER=groq with the OpenAI-only default JUDGE_MODEL) would
+   * otherwise surface as a callError on every single judge call instead of
+   * failing here, once, at dispatch time.
    */
   async enqueuePending(opts: { limit?: number; force?: boolean } = {}): Promise<{
     enqueued: number;
     llmProposalIds: number[];
   }> {
+    await this.supportedModelService.assertSupported(
+      providerPoolById(this.judgeProvider).strategyName,
+      this.judgeModel,
+    );
+
     const raw = Number(opts.limit);
     const limit = Number.isFinite(raw)
       ? Math.min(this.MAX_LIMIT, Math.max(1, Math.floor(raw)))
@@ -119,12 +134,7 @@ export class CategoryEvaluatorService {
       .select("proposal.id", "id")
       .getRawMany<{ id: number }>();
 
-    const queue = queueForJudgeProvider(
-      this.judgeProvider,
-      this.llmOpenAIQueue,
-      this.llmOllamaQueue,
-      this.llmGoogleQueue,
-    );
+    const queue = queueForJudgeProvider(this.judgeProvider, this.runsQueueByPool);
 
     const llmProposalIds = rows.map((r) => Number(r.id));
     for (const id of llmProposalIds) {

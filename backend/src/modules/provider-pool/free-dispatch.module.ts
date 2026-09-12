@@ -8,10 +8,11 @@ import { DispatchState } from "./entities/dispatch-state.entity";
 import { FreeDispatchService } from "./free-dispatch.service";
 
 /**
- * The unified free-tier dispatch service. The per-provider
- * `<p>-free-dispatch` modules import this and expose a thin shim so existing
- * consumers (the dispatch controller, daily automation) keep resolving
- * `<P>FreeDispatchService` unchanged until doc 10 collapses them.
+ * The unified free-tier dispatch service — both of its consumers
+ * (DispatchModule's `/dispatch/pool/:poolId` route, AutomationModule's daily
+ * burn legs) import this module directly and call `start`/`stop`/`getStatus`
+ * with an explicit poolId. The five per-provider `<p>-free-dispatch` shim
+ * modules this replaced are deleted (see docs/architecture/10).
  */
 @Module({
   imports: [

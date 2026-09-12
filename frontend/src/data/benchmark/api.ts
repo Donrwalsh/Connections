@@ -16,11 +16,7 @@ import type {
   FreeTierDispatchStatus,
   FreeTierId,
   FreeTierUsage,
-  GoogleDispatchStatus,
-  GroqDispatchStatus,
-  OpenRouterDispatchStatus,
-  MistralDispatchStatus,
-  SambaNovaDispatchStatus,
+  PoolDispatchStatus,
   Leaderboard,
   RecentActivityEvent,
   RunHistory,
@@ -32,6 +28,7 @@ import type {
   StrategyRunListItem,
   SupportedModelRecord,
 } from "./types";
+import type { ProviderPoolId } from "./providerPools";
 import { computeDurationMs } from "./metrics";
 
 export const apiUrl = (path: string) => `${import.meta.env.VITE_API_URL}${path}`;
@@ -271,79 +268,29 @@ export function stopBothFreeTierDispatch(
 
 /** Today's daily-automation run — see AutomationStatus. Backs the
  * "Auto-run: ... · Next: ..." line on the mini FreeTierBudgetWidget,
- * CategoryJudgingWidget, and GoogleDispatchWidget. */
+ * CategoryJudgingWidget, and each PoolDispatchWidget mount. */
 export function fetchAutomationStatus(signal?: AbortSignal): Promise<AutomationStatus> {
   return fetchJson("/automation/status", signal);
 }
 
-/** Whether the Google free-daily-quota dispatch cycle is currently running —
- * see GoogleDispatchStatus. Backs GoogleDispatchWidget's active/inactive
- * indicator, polled the same way fetchFreeTierDispatchStatus is. */
-export function fetchGoogleDispatchStatus(signal?: AbortSignal): Promise<GoogleDispatchStatus> {
-  return fetchJson("/dispatch/google", signal);
+/** Whether a provider pool's free-daily-quota dispatch cycle is currently
+ * running — see PoolDispatchStatus. Backs PoolDispatchWidget's
+ * active/inactive indicator, polled the same way fetchFreeTierDispatchStatus
+ * is. */
+export function fetchPoolDispatchStatus(
+  poolId: ProviderPoolId,
+  signal?: AbortSignal,
+): Promise<PoolDispatchStatus> {
+  return fetchJson(`/dispatch/pool/${poolId}`, signal);
 }
 
-/** Stops the Google dispatch cycle — a no-op (not an error) if it wasn't
+/** Stops a pool's dispatch cycle — a no-op (not an error) if it wasn't
  * running. No password body, same as stopFreeTierDispatch. */
-export function stopGoogleDispatch(signal?: AbortSignal): Promise<GoogleDispatchStatus> {
-  return fetchJson("/dispatch/google", signal, { method: "DELETE" });
-}
-
-/** Whether the Groq free-daily-quota dispatch cycle is currently running —
- * see GroqDispatchStatus. Backs GroqDispatchWidget's active/inactive
- * indicator, polled the same way fetchGoogleDispatchStatus is. */
-export function fetchGroqDispatchStatus(signal?: AbortSignal): Promise<GroqDispatchStatus> {
-  return fetchJson("/dispatch/groq", signal);
-}
-
-/** Stops the Groq dispatch cycle — a no-op (not an error) if it wasn't
- * running. No password body, same as stopGoogleDispatch. */
-export function stopGroqDispatch(signal?: AbortSignal): Promise<GroqDispatchStatus> {
-  return fetchJson("/dispatch/groq", signal, { method: "DELETE" });
-}
-
-/** Whether the OpenRouter free-daily-budget dispatch cycle is running —
- * see OpenRouterDispatchStatus. Polled the same way fetchGroqDispatchStatus
- * is. */
-export function fetchOpenRouterDispatchStatus(
+export function stopPoolDispatch(
+  poolId: ProviderPoolId,
   signal?: AbortSignal,
-): Promise<OpenRouterDispatchStatus> {
-  return fetchJson("/dispatch/openrouter", signal);
-}
-
-/** Stops the OpenRouter dispatch cycle — a no-op (not an error) if it
- * wasn't running. */
-export function stopOpenRouterDispatch(
-  signal?: AbortSignal,
-): Promise<OpenRouterDispatchStatus> {
-  return fetchJson("/dispatch/openrouter", signal, { method: "DELETE" });
-}
-
-/** Whether the Mistral free-dispatch cycle is currently running — see
- * MistralDispatchStatus. Polled the same way fetchGroqDispatchStatus is. */
-export function fetchMistralDispatchStatus(signal?: AbortSignal): Promise<MistralDispatchStatus> {
-  return fetchJson("/dispatch/mistral", signal);
-}
-
-/** Stops the Mistral dispatch cycle — a no-op (not an error) if it wasn't
- * running. */
-export function stopMistralDispatch(signal?: AbortSignal): Promise<MistralDispatchStatus> {
-  return fetchJson("/dispatch/mistral", signal, { method: "DELETE" });
-}
-
-/** Whether the SambaNova free-tier dispatch cycle is currently running —
- * see SambaNovaDispatchStatus. Polled the same way fetchGroqDispatchStatus
- * is. */
-export function fetchSambaNovaDispatchStatus(
-  signal?: AbortSignal,
-): Promise<SambaNovaDispatchStatus> {
-  return fetchJson("/dispatch/sambanova", signal);
-}
-
-/** Stops the SambaNova dispatch cycle — a no-op (not an error) if it wasn't
- * running. */
-export function stopSambaNovaDispatch(signal?: AbortSignal): Promise<SambaNovaDispatchStatus> {
-  return fetchJson("/dispatch/sambanova", signal, { method: "DELETE" });
+): Promise<PoolDispatchStatus> {
+  return fetchJson(`/dispatch/pool/${poolId}`, signal, { method: "DELETE" });
 }
 
 const DETAIL_PAGE_SIZE = 200;

@@ -5,11 +5,8 @@ import type { QueryDeepPartialEntity } from "typeorm/query-builder/QueryPartialE
 import { AutomationRunLog } from "./entities/automation-run-log.entity";
 import { CategoryEvaluatorService } from "../strategy/category-evaluator.service";
 import { FreeTierDispatchService } from "../free-tier-dispatch/free-tier-dispatch.service";
-import { GoogleFreeDispatchService } from "../google-free-dispatch/google-free-dispatch.service";
-import { GroqFreeDispatchService } from "../groq-free-dispatch/groq-free-dispatch.service";
-import { OpenRouterFreeDispatchService } from "../openrouter-free-dispatch/openrouter-free-dispatch.service";
-import { MistralFreeDispatchService } from "../mistral-free-dispatch/mistral-free-dispatch.service";
-import { SambaNovaFreeDispatchService } from "../sambanova-free-dispatch/sambanova-free-dispatch.service";
+import { FreeDispatchService } from "../provider-pool/free-dispatch.service";
+import type { ProviderPoolId } from "../provider-pool/provider-pool.config";
 import { ModelMetadataRefreshService } from "../supported-model/model-metadata-refresh.service";
 
 /** One free-tier burn leg: the dispatch service to start, the
@@ -66,17 +63,10 @@ function todayUtcDateStamp(): string {
  *  - miniBurn: starts a FreeTierDispatchService "mini" cycle at an 80%
  *    ceiling, leaving the other 15% (of the 95% overall safety cap) as
  *    headroom for the judge leg's spend;
- *  - googleBurn: starts GoogleFreeDispatchService's cycle, which runs until
- *    every Google model is RPD-held;
- *  - groqBurn: starts GroqFreeDispatchService's cycle, which runs until
- *    every Groq model is RPD-held.
- *  - openRouterBurn: starts OpenRouterFreeDispatchService's cycle, which
- *    runs until the account-wide daily-call budget is spent or the account
- *    is held.
- *  - mistralBurn: starts MistralFreeDispatchService's cycle, which runs
- *    until every Mistral model is held.
- *  - sambaNovaBurn: starts SambaNovaFreeDispatchService's cycle, which runs
- *    until every SambaNova model is held.
+ *  - googleBurn/groqBurn/openRouterBurn/mistralBurn/sambaNovaBurn: each
+ *    starts the unified FreeDispatchService's cycle for that pool — runs
+ *    until every model is RPD-held (google/groq/mistral/sambanova) or the
+ *    account-wide daily-call budget is spent or held (openrouter).
  *
  * Each leg checks the relevant service's live status first rather than
  * relying on a thrown exception's message text to distinguish "already
@@ -94,16 +84,8 @@ export class DailyAutomationService {
     private readonly categoryEvaluatorService: CategoryEvaluatorService,
     @Inject(FreeTierDispatchService)
     private readonly freeTierDispatchService: FreeTierDispatchService,
-    @Inject(GoogleFreeDispatchService)
-    private readonly googleFreeDispatchService: GoogleFreeDispatchService,
-    @Inject(GroqFreeDispatchService)
-    private readonly groqFreeDispatchService: GroqFreeDispatchService,
-    @Inject(OpenRouterFreeDispatchService)
-    private readonly openRouterFreeDispatchService: OpenRouterFreeDispatchService,
-    @Inject(MistralFreeDispatchService)
-    private readonly mistralFreeDispatchService: MistralFreeDispatchService,
-    @Inject(SambaNovaFreeDispatchService)
-    private readonly sambaNovaFreeDispatchService: SambaNovaFreeDispatchService,
+    @Inject(FreeDispatchService)
+    private readonly freeDispatchService: FreeDispatchService,
     @Inject(ModelMetadataRefreshService)
     private readonly modelMetadataRefreshService: ModelMetadataRefreshService,
   ) {}
@@ -111,41 +93,52 @@ export class DailyAutomationService {
   private get burnLegs(): BurnLeg[] {
     return [
       {
-        service: this.googleFreeDispatchService,
+        service: this.poolService("google"),
         logKey: "google",
         outcomeColumn: "googleBurnOutcome",
         messageColumn: "googleBurnMessage",
         exhaustedMessage: "every Google model is currently RPD-held",
       },
       {
-        service: this.groqFreeDispatchService,
+        service: this.poolService("groq"),
         logKey: "groq",
         outcomeColumn: "groqBurnOutcome",
         messageColumn: "groqBurnMessage",
         exhaustedMessage: "every Groq model is currently RPD-held",
       },
       {
-        service: this.openRouterFreeDispatchService,
+        service: this.poolService("openrouter"),
         logKey: "openrouter",
         outcomeColumn: "openRouterBurnOutcome",
         messageColumn: "openRouterBurnMessage",
         exhaustedMessage: "OpenRouter daily budget spent or account held",
       },
       {
-        service: this.mistralFreeDispatchService,
+        service: this.poolService("mistral"),
         logKey: "mistral",
         outcomeColumn: "mistralBurnOutcome",
         messageColumn: "mistralBurnMessage",
         exhaustedMessage: "every Mistral model is currently held",
       },
       {
-        service: this.sambaNovaFreeDispatchService,
+        service: this.poolService("sambanova"),
         logKey: "sambanova",
         outcomeColumn: "sambaNovaBurnOutcome",
         messageColumn: "sambaNovaBurnMessage",
         exhaustedMessage: "every SambaNova model is currently held",
       },
     ];
+  }
+
+  /** Binds the unified FreeDispatchService to one pool id, in the shape
+   * BurnLeg expects — the AutomationRunLog column pair stays named per
+   * provider (a separate, deferred deepening; see docs/architecture/10), so
+   * this only collapses which *service* each leg calls, not the columns. */
+  private poolService(poolId: ProviderPoolId): BurnLeg["service"] {
+    return {
+      getStatus: () => this.freeDispatchService.getStatus(poolId),
+      start: () => this.freeDispatchService.start(poolId),
+    };
   }
 
   async run(options: { skipJudgeLeg?: boolean } = {}): Promise<void> {
