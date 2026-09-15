@@ -222,7 +222,7 @@ describe("LeaderboardPage", () => {
     renderLeaderboard();
 
     const table = await screen.findByRole("table");
-    expect(firstRowIn(table).textContent).toContain("1,174 of 1,174 puzzles");
+    expect(firstRowIn(table).textContent).toContain("1,174 of 1,174");
     expect(within(table).getByText("Queued 1,500")).toBeInTheDocument();
   });
 
