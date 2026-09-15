@@ -115,6 +115,17 @@ export function GuessSequencePanel({
 
   useEffect(() => {
     if (!fetchedDetail || !selectedRun) return;
+    // fetchedDetail can still hold the *previous* selected run's data for one
+    // render after switching (useResource clears it a render later than
+    // selectedRun updates) — caching it under the new selectedRun.id here
+    // would permanently poison that run's cache slot with the wrong run's
+    // guesses. Only cache once the fetch actually resolved for this run.
+    if (
+      fetchedDetail.strategyName !== selectedRun.strategyName ||
+      fetchedDetail.trialNumber !== selectedRun.trialNumber
+    ) {
+      return;
+    }
     const id = selectedRun.id;
     setDetailCache((prev) => (prev[id] === fetchedDetail ? prev : { ...prev, [id]: fetchedDetail }));
   }, [fetchedDetail, selectedRun]);

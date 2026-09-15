@@ -694,6 +694,137 @@ describe("GuessSequencePanel Component", () => {
     expect(await screen.findByText("Duplicate")).toBeInTheDocument();
   });
 
+  it("differentiates between two different models under the same provider", async () => {
+    const llmRuns = [
+      {
+        id: 51,
+        strategyName: "llm-mistral",
+        trialNumber: 1,
+        status: "completed",
+        modelName: "ministral-8b-latest",
+        contextWindow: 32000,
+        startedAt: "2024-01-15T00:00:00Z",
+        finishedAt: "2024-01-15T00:05:00Z",
+        guessCount: 2,
+      },
+      {
+        id: 52,
+        strategyName: "llm-mistral",
+        trialNumber: 2,
+        status: "completed",
+        modelName: "ministral-3b-latest",
+        contextWindow: 32000,
+        startedAt: "2024-01-15T00:00:00Z",
+        finishedAt: "2024-01-15T00:05:00Z",
+        guessCount: 1,
+      },
+    ];
+    const llmDetails: Record<number, unknown> = {
+      1: {
+        ...llmRuns[0],
+        meta: { total: 2, page: 1, limit: 200 },
+        guesses: [
+          {
+            sequenceNumber: 1,
+            words: ["APPLE", "BANANA", "CHERRY", "DATE"],
+            result: "success",
+            guessedAt: "2024-01-15T00:00:00Z",
+          },
+          {
+            sequenceNumber: 2,
+            words: ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+            result: "success",
+            guessedAt: "2024-01-15T00:00:00Z",
+          },
+        ],
+      },
+      2: {
+        ...llmRuns[1],
+        meta: { total: 1, page: 1, limit: 200 },
+        guesses: [
+          {
+            sequenceNumber: 1,
+            words: ["ICE", "JAM", "KIWI", "LEMON"],
+            result: "success",
+            guessedAt: "2024-01-15T00:00:00Z",
+          },
+        ],
+      },
+    };
+
+    // Real fetch() rejects an in-flight request when its AbortSignal fires —
+    // unlike a plain Promise.resolve() mock, which ignores the signal
+    // entirely and resolves anyway. Honoring the signal here (a macrotask
+    // delay so React's synchronous effect-flush runs first, exactly like the
+    // browser event loop) is what actually exercises the abort race between
+    // GuessSequencePanel's detail-cache-sync effect and useResource's own
+    // fetch-clearing effect.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown, init?: RequestInit) => {
+        const urlStr = String(url);
+        const strategyId =
+          urlStr.match(/\/strategy\/([^/]+)\//)?.[1] ?? "alphabetical";
+        if (urlStr.includes("/run/")) {
+          const trialNumber = Number(urlStr.match(/\/run\/(\d+)/)?.[1] ?? 1);
+          const signal = init?.signal;
+          return new Promise((resolve, reject) => {
+            if (signal?.aborted) {
+              reject(new DOMException("Aborted", "AbortError"));
+              return;
+            }
+            const timer = setTimeout(() => {
+              resolve({ ok: true, json: async () => llmDetails[trialNumber] });
+            }, 10);
+            signal?.addEventListener("abort", () => {
+              clearTimeout(timer);
+              reject(new DOMException("Aborted", "AbortError"));
+            });
+          });
+        }
+        if (strategyId !== "llm-mistral") {
+          return Promise.resolve({ ok: true, json: async () => [] });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => llmRuns,
+        });
+      }),
+    );
+
+    renderWithRouter(
+      <GuessSequencePanel
+        date="2024-01-15"
+        puzzleId={100}
+        isOpen={true}
+        onToggle={() => {}}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Show LLM · Mistral/ }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Strategy: LLM · Mistral · Model: ministral-8b-latest (32,000 ctx) · Trial #1 · Status: completed · 2 guesses",
+      ),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("EGGPLANT, FIG, GRAPE, HONEY")).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Trial #2/ }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Strategy: LLM · Mistral · Model: ministral-3b-latest (32,000 ctx) · Trial #2 · Status: completed · 1 guess",
+      ),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("ICE, JAM, KIWI, LEMON")).toBeInTheDocument();
+    expect(screen.queryByText("EGGPLANT, FIG, GRAPE, HONEY")).not.toBeInTheDocument();
+  });
+
   it("shows a message when a strategy has no runs yet", async () => {
     vi.stubGlobal(
       "fetch",
