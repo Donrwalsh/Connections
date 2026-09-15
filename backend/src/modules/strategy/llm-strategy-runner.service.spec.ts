@@ -13,15 +13,13 @@ import { SupportedModelService } from "../supported-model/supported-model.servic
 import { RateLimitHoldService } from "./rate-limit-hold.service";
 import { parseAnswer } from "answer-grammar";
 import {
+  DEFAULT_RATE_LIMIT_FALLBACK_SECONDS,
   DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
-  DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS,
   DEFAULT_OPENROUTER_DISPATCH_RPM_COOLDOWN_MS,
   DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
   DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS,
-  DEFAULT_LLM_MISTRAL_RATE_LIMIT_FALLBACK_SECONDS,
   DEFAULT_LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS,
-  DEFAULT_LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS,
-} from "../../strategies";
+} from "../provider-pool/pool-knobs";
 
 describe("LlmStrategyRunner", () => {
   let runner: LlmStrategyRunner;
@@ -1486,7 +1484,7 @@ describe("LlmStrategyRunner", () => {
 
       await runner.runLlmStrategy(100, "llm-groq", 0, "openai/gpt-oss-20b");
 
-      expect(delaySpy).toHaveBeenCalledWith(DEFAULT_LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS * 1000);
+      expect(delaySpy).toHaveBeenCalledWith(DEFAULT_RATE_LIMIT_FALLBACK_SECONDS * 1000);
     });
 
     it("parks a held sambanova run at RATE_LIMITED_DAILY without calling the orchestrator", async () => {
@@ -1569,7 +1567,7 @@ describe("LlmStrategyRunner", () => {
 
       expect(mockRateLimitHold.hold).not.toHaveBeenCalled();
       expect(result.status).not.toBe(StrategyRunStatus.ERROR);
-      expect(delaySpy).toHaveBeenCalledWith(DEFAULT_LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS * 1000);
+      expect(delaySpy).toHaveBeenCalledWith(DEFAULT_RATE_LIMIT_FALLBACK_SECONDS * 1000);
     });
 
     it("never ends a sambanova run in ERROR on a rate_limited_daily hit", async () => {
@@ -1848,7 +1846,7 @@ describe("LlmStrategyRunner", () => {
 
       await runner.runLlmStrategy(100, "llm-mistral", 0, "mistral-small-latest");
 
-      expect(delaySpy).toHaveBeenCalledWith(DEFAULT_LLM_MISTRAL_RATE_LIMIT_FALLBACK_SECONDS * 1000);
+      expect(delaySpy).toHaveBeenCalledWith(DEFAULT_RATE_LIMIT_FALLBACK_SECONDS * 1000);
     });
 
     it("parks mid-solve keeping the progress already made, then resumes from the flushed guesses", async () => {

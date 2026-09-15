@@ -8,10 +8,13 @@ import {
   llmMaxFailedGuesses,
   llmMaxMalformedResponses,
   llmMaxModelErrors,
-  llmGoogleRateLimitFallbackSeconds,
   llmTemperature,
 } from "../../strategies";
-import { providerPool, type FreeTierConfig } from "../provider-pool/provider-pool.config";
+import {
+  providerPool,
+  providerPoolById,
+  type FreeTierConfig,
+} from "../provider-pool/provider-pool.config";
 import { Guess, GuessResult, GuessSource } from "./entities/guess.entity";
 import { LlmProposal, LlmProposalStatus } from "./entities/llm-proposal.entity";
 import {
@@ -289,7 +292,8 @@ export class LlmStrategyRunner {
     // A pool uses its own configured fallback; non-pool strategies keep the
     // historical default (the old ternary's final branch was Google's).
     const rateLimitFallbackSeconds =
-      freeTier?.rateLimitFallbackSeconds() ?? llmGoogleRateLimitFallbackSeconds();
+      freeTier?.rateLimitFallbackSeconds() ??
+      providerPoolById("google").freeTier!.rateLimitFallbackSeconds();
 
     // Conversation history for the AI Assist prompt flow.
     const messages: ChatMessage[] = [];

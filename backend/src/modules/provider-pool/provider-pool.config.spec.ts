@@ -2,27 +2,6 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 
 import {
-  llmGoogleRateLimitFallbackSeconds,
-  llmGroqDailyHoldFallbackSeconds,
-  llmGroqRateLimitFallbackSeconds,
-  llmMistralRateLimitFallbackSeconds,
-  llmOpenRouterRateLimitFallbackSeconds,
-  llmSambaNovaDailyHoldFallbackSeconds,
-  llmSambaNovaRateLimitFallbackSeconds,
-  mistralModelHoldFallbackSeconds,
-  mistralPersistentRateLimitAttempts,
-  mistralPersistentRateLimitElapsedMs,
-  openRouterCallsPerTrialEstimate,
-  openRouterDispatchMaxBatch,
-  openRouterDispatchMaxInFlight,
-  openRouterDispatchRpmCooldownSeconds,
-  openRouterDispatchTickMs,
-  openRouterFreeDailyBudget,
-  sambaNovaDispatchMaxBatch,
-  sambaNovaDispatchMaxInFlight,
-  sambaNovaDispatchTickMs,
-} from "../../strategies";
-import {
   FREE_TIER_POOLS,
   PROVIDER_POOLS,
   providerPool,
@@ -187,46 +166,78 @@ describe("per-pool concrete configuration", () => {
   });
 });
 
-describe("knob accessors are wired to the right provider", () => {
-  // Guards against copy-paste errors like pointing groq's row at google's fn.
+describe("knobs read the right env var", () => {
+  // Guards against copy-paste errors like pointing groq's row at google's
+  // env var, now that each knob is an inline closure rather than a named,
+  // reference-comparable function.
+  const withEnv = (name: string, value: string, fn: () => void) => {
+    const prior = process.env[name];
+    process.env[name] = value;
+    try {
+      fn();
+    } finally {
+      if (prior === undefined) delete process.env[name];
+      else process.env[name] = prior;
+    }
+  };
+
   it.each([
-    ["google", "rateLimitFallbackSeconds", llmGoogleRateLimitFallbackSeconds],
-    ["groq", "rateLimitFallbackSeconds", llmGroqRateLimitFallbackSeconds],
-    ["groq", "dailyHoldFallbackSeconds", llmGroqDailyHoldFallbackSeconds],
-    ["openrouter", "rateLimitFallbackSeconds", llmOpenRouterRateLimitFallbackSeconds],
-    ["mistral", "rateLimitFallbackSeconds", llmMistralRateLimitFallbackSeconds],
-    ["mistral", "dailyHoldFallbackSeconds", mistralModelHoldFallbackSeconds],
-    ["sambanova", "rateLimitFallbackSeconds", llmSambaNovaRateLimitFallbackSeconds],
-    ["sambanova", "dailyHoldFallbackSeconds", llmSambaNovaDailyHoldFallbackSeconds],
-  ] as const)("%s.%s", (id, key, fn) => {
-    expect(byId(id).freeTier![key]).toBe(fn);
+    ["google", () => byId("google").freeTier!.rateLimitFallbackSeconds(), "LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS"],
+    ["groq", () => byId("groq").freeTier!.rateLimitFallbackSeconds(), "LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS"],
+    ["groq", () => byId("groq").freeTier!.dailyHoldFallbackSeconds(), "LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS"],
+    [
+      "openrouter",
+      () => byId("openrouter").freeTier!.rateLimitFallbackSeconds(),
+      "LLM_OPENROUTER_RATE_LIMIT_FALLBACK_SECONDS",
+    ],
+    ["mistral", () => byId("mistral").freeTier!.rateLimitFallbackSeconds(), "LLM_MISTRAL_RATE_LIMIT_FALLBACK_SECONDS"],
+    ["mistral", () => byId("mistral").freeTier!.dailyHoldFallbackSeconds(), "MISTRAL_MODEL_HOLD_FALLBACK_SECONDS"],
+    [
+      "sambanova",
+      () => byId("sambanova").freeTier!.rateLimitFallbackSeconds(),
+      "LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS",
+    ],
+    [
+      "sambanova",
+      () => byId("sambanova").freeTier!.dailyHoldFallbackSeconds(),
+      "LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS",
+    ],
+  ] as const)("%s: reads its own env var, not a neighbor's", (_id, read, envVar) => {
+    withEnv(envVar, "999999", () => {
+      expect(read()).toBe(999999);
+    });
   });
 
-  it("mistral streak park points at the mistral persistent-rate-limit knobs", () => {
+  it("mistral streak park reads MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS / _ELAPSED_SECONDS", () => {
     const park = byId("mistral").freeTier!.persistentRateLimitPark!;
-    expect(park.attempts).toBe(mistralPersistentRateLimitAttempts);
-    expect(park.elapsedMs).toBe(mistralPersistentRateLimitElapsedMs);
+    withEnv("MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS", "9", () => {
+      expect(park.attempts()).toBe(9);
+    });
+    withEnv("MISTRAL_PERSISTENT_RATE_LIMIT_ELAPSED_SECONDS", "42", () => {
+      expect(park.elapsedMs()).toBe(42_000);
+    });
   });
 
-  it("openrouter account-budget dispatch points at the openrouter knobs", () => {
+  it("openrouter account-budget dispatch reads the OPENROUTER_* env vars", () => {
     const dispatch = byId("openrouter").freeTier!.dispatch;
     if (dispatch.stop !== "account-budget") throw new Error("expected account-budget");
-    expect(dispatch.budget).toBe(openRouterFreeDailyBudget);
-    expect(dispatch.callsPerTrial).toBe(openRouterCallsPerTrialEstimate);
-    expect(dispatch.rpmCooldownSeconds).toBe(openRouterDispatchRpmCooldownSeconds);
-    expect(dispatch.tickMs).toBe(openRouterDispatchTickMs);
-    expect(dispatch.maxBatch).toBe(openRouterDispatchMaxBatch);
-    expect(dispatch.maxInFlight).toBe(openRouterDispatchMaxInFlight);
+    withEnv("OPENROUTER_FREE_DAILY_BUDGET", "777", () => expect(dispatch.budget()).toBe(777));
+    withEnv("OPENROUTER_CALLS_PER_TRIAL_ESTIMATE", "8", () => expect(dispatch.callsPerTrial()).toBe(8));
+    withEnv("OPENROUTER_DISPATCH_RPM_COOLDOWN_MS", "5000", () => expect(dispatch.rpmCooldownSeconds()).toBe(5));
+    withEnv("OPENROUTER_DISPATCH_TICK_MS", "9999", () => expect(dispatch.tickMs()).toBe(9999));
+    withEnv("OPENROUTER_DISPATCH_MAX_BATCH", "11", () => expect(dispatch.maxBatch()).toBe(11));
+    withEnv("OPENROUTER_DISPATCH_MAX_IN_FLIGHT", "12", () => expect(dispatch.maxInFlight()).toBe(12));
   });
 
-  it("sambanova dedicated pacing points at the sambanova knobs", () => {
+  it("sambanova dedicated pacing reads the SAMBANOVA_DISPATCH_* env vars", () => {
     const dispatch = byId("sambanova").freeTier!.dispatch;
     if (dispatch.stop !== "until-held" || dispatch.pacing === "shared") {
       throw new Error("expected dedicated pacing");
     }
-    expect(dispatch.pacing.tickMs).toBe(sambaNovaDispatchTickMs);
-    expect(dispatch.pacing.maxBatch).toBe(sambaNovaDispatchMaxBatch);
-    expect(dispatch.pacing.maxInFlight).toBe(sambaNovaDispatchMaxInFlight);
+    const pacing = dispatch.pacing;
+    withEnv("SAMBANOVA_DISPATCH_TICK_MS", "2222", () => expect(pacing.tickMs()).toBe(2222));
+    withEnv("SAMBANOVA_DISPATCH_MAX_BATCH", "13", () => expect(pacing.maxBatch()).toBe(13));
+    withEnv("SAMBANOVA_DISPATCH_MAX_IN_FLIGHT", "14", () => expect(pacing.maxInFlight()).toBe(14));
   });
 });
 
