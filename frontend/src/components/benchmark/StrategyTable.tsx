@@ -101,6 +101,11 @@ export function StrategyTable({ rows, metricKey, variant }: StrategyTableProps) 
             { label: "Active", count: progress.active, tone: "active" },
             { label: "Failed", count: progress.failed, tone: "failed" },
           ];
+          const isComplete = row.totalPuzzles > 0 && row.puzzlesCovered >= row.totalPuzzles;
+          const completionPct =
+            row.totalPuzzles > 0
+              ? `${((row.puzzlesCovered / row.totalPuzzles) * 100).toFixed(2)}%`
+              : "0%";
           const speed = metricValue(row, "speed");
           const successRateDisplay = row.successRate === null ? "—" : formatSuccessRate(row.successRate);
           // Unitless here — the "solves/hr" caption below the value supplies
@@ -170,24 +175,29 @@ export function StrategyTable({ rows, metricKey, variant }: StrategyTableProps) 
               <div className="bench-progress-band">
                 <div className="bench-progress-band__row">
                   <span className="bench-progress-band__label">Progress</span>
-                  <span className="bench-mono">
-                    {row.puzzlesCovered.toLocaleString()} of {row.totalPuzzles.toLocaleString()} puzzles
+                  <span className={`bench-mono${isComplete ? " bench-progress-complete" : ""}`}>
+                    {row.puzzlesCovered.toLocaleString()} of {row.totalPuzzles.toLocaleString()}
+                    {isComplete ? null : (
+                      <>
+                        {" "}
+                        <span className="bench-muted">({completionPct})</span>
+                      </>
+                    )}
                   </span>
                 </div>
-                <span className="bench-badges bench-badges--float-end">
-                  {queueBadges.map((badge) =>
-                    badge.count > 0 ? (
-                      <StatusPill
-                        key={badge.label}
-                        label={`${badge.label} ${badge.count.toLocaleString()}`}
-                        tone={badge.tone}
-                      />
-                    ) : null,
-                  )}
-                  {queueBadges.every((badge) => badge.count === 0) ? (
-                    <span className="bench-muted">all finished</span>
-                  ) : null}
-                </span>
+                {queueBadges.some((badge) => badge.count > 0) ? (
+                  <span className="bench-badges bench-badges--float-end">
+                    {queueBadges.map((badge) =>
+                      badge.count > 0 ? (
+                        <StatusPill
+                          key={badge.label}
+                          label={`${badge.label} ${badge.count.toLocaleString()}`}
+                          tone={badge.tone}
+                        />
+                      ) : null,
+                    )}
+                  </span>
+                ) : null}
               </div>
             </div>
           );
