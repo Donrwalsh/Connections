@@ -114,7 +114,9 @@ export const SolveStepResponseSchema = AssistResponseSchema.extend({
     .record(z.string(), z.string())
     .describe("Group number (as a string key) -> its extracted Category: text"),
   textIssues: z
-    .array(z.enum(["parentheticalStripped", "groupCountOff", "unclassified"]))
+    .array(
+      z.enum(["parentheticalStripped", "groupCountOff", "unclassified", "multipleProposals"]),
+    )
     .describe("Text-parsing issues found in the response, from the shared answer-grammar parser"),
   latencyMs: z.number().optional(),
   // The context window actually used for this call — see
