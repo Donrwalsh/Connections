@@ -189,6 +189,7 @@ describe("RunHistoryReadModel", () => {
         select: jest.fn().mockReturnThis(),
         addSelect: jest.fn().mockReturnThis(),
         groupBy: jest.fn().mockReturnThis(),
+        addGroupBy: jest.fn().mockReturnThis(),
         getRawMany: jest.fn().mockResolvedValue([]),
       }),
     };
@@ -1440,9 +1441,28 @@ describe("RunHistoryReadModel", () => {
         select: jest.fn().mockReturnThis(),
         addSelect: jest.fn().mockReturnThis(),
         groupBy: jest.fn().mockReturnThis(),
+        addGroupBy: jest.fn().mockReturnThis(),
         getRawMany: jest.fn().mockResolvedValue([
-          { strategyRunId: 1, correct: "3", partial: "1", lucky: "0" },
-          { strategyRunId: 2, correct: "1", partial: "0", lucky: "2" },
+          {
+            strategyRunId: 1,
+            judgeModel: "gpt-4.1-nano",
+            judgeProvider: "openai",
+            correct: "3",
+            partial: "1",
+            lucky: "0",
+            promptTokens: "0",
+            completionTokens: "0",
+          },
+          {
+            strategyRunId: 2,
+            judgeModel: "gpt-4.1-nano",
+            judgeProvider: "openai",
+            correct: "1",
+            partial: "0",
+            lucky: "2",
+            promptTokens: "0",
+            completionTokens: "0",
+          },
         ]),
       });
 
@@ -1471,6 +1491,67 @@ describe("RunHistoryReadModel", () => {
       const board = await service.getLeaderboard();
       expect(board.deterministic[0].categoryAccuracy).toBeNull();
       expect(board.deterministic[0].categoryEvaluated).toBe(0);
+    });
+
+    it("attributes category-judge token cost to the judge model's own leaderboard row, not the solving run's model", async () => {
+      // gpt-4o solves the puzzle; gpt-4.1-nano only judges it (never solves
+      // anything itself) — its judge spend must still show up as its own
+      // leaderboard row, not get folded into gpt-4o's cost or dropped.
+      mockStrategyRunRepo.find.mockResolvedValueOnce([
+        {
+          id: 1,
+          strategyName: "llm-openai",
+          modelName: "gpt-4o",
+          status: StrategyRunStatus.COMPLETED,
+          puzzleId: 1,
+          startedAt: new Date("2026-01-01T00:00:00Z"),
+          finishedAt: new Date("2026-01-01T00:00:30Z"),
+        },
+      ]);
+      mockGuessCounts([]);
+      mockPuzzleRepo.count.mockResolvedValueOnce(10);
+      mockCategoryEvaluationRepo.createQueryBuilder.mockReturnValueOnce({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        addGroupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          {
+            strategyRunId: 1,
+            judgeModel: "gpt-4.1-nano",
+            judgeProvider: "openai",
+            correct: "1",
+            partial: "0",
+            lucky: "0",
+            promptTokens: "1000000",
+            completionTokens: "500000",
+          },
+        ]),
+      });
+      // Only gpt-4.1-nano (the judge model) has a price row — gpt-4o (the
+      // solving model) deliberately has none, so its cost staying null
+      // proves the judge spend didn't get misattributed to it.
+      mockSupportedModelService.findPriceHistory.mockResolvedValueOnce([
+        {
+          strategyName: "llm-openai",
+          modelName: "gpt-4.1-nano",
+          createdAt: new Date("2025-01-01T00:00:00Z"),
+          inputCostPerMillionTokens: 0.1,
+          outputCostPerMillionTokens: 0.4,
+        },
+      ]);
+
+      const result = await service.getLeaderboard();
+
+      // 1M prompt tokens * $0.1/M + 0.5M completion tokens * $0.4/M = $0.30.
+      const judgeRow = result.llm.find((r) => r.id === "gpt-4.1-nano");
+      expect(judgeRow).toBeDefined();
+      expect(judgeRow!.totalCostUsd).toBeCloseTo(0.3);
+      // It never solved a puzzle itself — only judged one.
+      expect(judgeRow!.puzzlesCovered).toBe(0);
+
+      const solveRow = result.llm.find((r) => r.id === "gpt-4o")!;
+      expect(solveRow.totalCostUsd).toBeNull();
     });
   });
 

@@ -125,6 +125,28 @@ function priceAsOf(history: PriceHistoryEntry[] | undefined, at: Date): ModelRat
   return rate;
 }
 
+function createLeaderboardAccumulator(
+  strategyName: string,
+  modelName: string | null,
+): LeaderboardAccumulator {
+  return {
+    strategyName,
+    modelName,
+    puzzleIds: new Set(),
+    completed: 0,
+    active: 0,
+    failed: 0,
+    lostRuns: 0,
+    guessCounts: [],
+    durationsMs: [],
+    costsUsd: [],
+    issueCounts: [],
+    catCorrect: 0,
+    catPartial: 0,
+    catLucky: 0,
+  };
+}
+
 interface LeaderboardAccumulator {
   strategyName: string;
   modelName: string | null;
@@ -284,18 +306,37 @@ export class RunHistoryReadModel {
           latencyMs: string | null;
           issueCount: string | null;
         }>(),
-      // Per-run verdict tallies from the LLM category judge. Grouped in SQL
-      // the same way the token/issue query above is — a run with no
-      // CategoryEvaluation rows simply has no entry here. verdict is null on
-      // a callError row, so none of the three FILTERed counts include it.
+      // Per-run verdict tallies from the LLM category judge, plus the judge
+      // call's own token spend — grouped by judgeModel/judgeProvider too
+      // (not just strategyRunId) so that spend can be attributed to the
+      // judge model's own leaderboard row below, since the judge is
+      // frequently a different model than the one that solved the puzzle.
+      // A run with no CategoryEvaluation rows simply has no entry here.
+      // verdict is null on a callError row, so none of the three FILTERed
+      // counts include it (its token columns are also typically null).
       this.categoryEvaluationRepo
         .createQueryBuilder("ce")
         .select("ce.strategyRunId", "strategyRunId")
+        .addSelect("ce.judgeModel", "judgeModel")
+        .addSelect("ce.judgeProvider", "judgeProvider")
         .addSelect("COUNT(*) FILTER (WHERE ce.verdict = 'correct')", "correct")
         .addSelect("COUNT(*) FILTER (WHERE ce.verdict = 'partial')", "partial")
         .addSelect("COUNT(*) FILTER (WHERE ce.verdict = 'lucky')", "lucky")
+        .addSelect("SUM(ce.promptTokens)", "promptTokens")
+        .addSelect("SUM(ce.completionTokens)", "completionTokens")
         .groupBy("ce.strategyRunId")
-        .getRawMany<{ strategyRunId: number; correct: string; partial: string; lucky: string }>(),
+        .addGroupBy("ce.judgeModel")
+        .addGroupBy("ce.judgeProvider")
+        .getRawMany<{
+          strategyRunId: number;
+          judgeModel: string;
+          judgeProvider: string;
+          correct: string;
+          partial: string;
+          lucky: string;
+          promptTokens: string | null;
+          completionTokens: string | null;
+        }>(),
       this.supportedModelService.findPriceHistory(),
       this.supportedModelService.findAll(),
       this.queuedCountsByKey(),
@@ -326,12 +367,40 @@ export class RunHistoryReadModel {
       }
     }
 
+    // A run can now yield more than one categoryRows entry (grouped by
+    // judgeModel/judgeProvider too), so verdict counts accumulate instead of
+    // overwriting — categoryByRun still ends up keyed by run, summed across
+    // whichever judge model(s) evaluated it.
     const categoryByRun = new Map<number, { correct: number; partial: number; lucky: number }>();
+    // Judge-call token spend per run, kept separate from categoryByRun since
+    // it's consumed below to attribute cost onto the judge model's own
+    // leaderboard row rather than the verdict tallies.
+    const judgeSpendRows: Array<{
+      strategyRunId: number;
+      judgeModel: string;
+      judgeProvider: string;
+      promptTokens: number;
+      completionTokens: number;
+    }> = [];
     for (const row of categoryRows) {
-      categoryByRun.set(Number(row.strategyRunId), {
-        correct: Number(row.correct ?? 0),
-        partial: Number(row.partial ?? 0),
-        lucky: Number(row.lucky ?? 0),
+      const strategyRunId = Number(row.strategyRunId);
+      const correct = Number(row.correct ?? 0);
+      const partial = Number(row.partial ?? 0);
+      const lucky = Number(row.lucky ?? 0);
+      const existing = categoryByRun.get(strategyRunId);
+      if (existing) {
+        existing.correct += correct;
+        existing.partial += partial;
+        existing.lucky += lucky;
+      } else {
+        categoryByRun.set(strategyRunId, { correct, partial, lucky });
+      }
+      judgeSpendRows.push({
+        strategyRunId,
+        judgeModel: row.judgeModel,
+        judgeProvider: row.judgeProvider,
+        promptTokens: Number(row.promptTokens ?? 0),
+        completionTokens: Number(row.completionTokens ?? 0),
       });
     }
 
@@ -352,29 +421,18 @@ export class RunHistoryReadModel {
     }
 
     const aggregates = new Map<string, LeaderboardAccumulator>();
+    // Needed below to price each run's judge-call spend as of when the run
+    // actually happened (priceAsOf), the same way solve cost is priced.
+    const startedAtByRun = new Map<number, Date>();
     for (const run of runs) {
       const key = leaderboardKey(run.strategyName, run.modelName);
       let acc = aggregates.get(key);
       if (!acc) {
-        acc = {
-          strategyName: run.strategyName,
-          modelName: run.modelName,
-          puzzleIds: new Set(),
-          completed: 0,
-          active: 0,
-          failed: 0,
-          lostRuns: 0,
-          guessCounts: [],
-          durationsMs: [],
-          costsUsd: [],
-          issueCounts: [],
-          catCorrect: 0,
-          catPartial: 0,
-          catLucky: 0,
-        };
+        acc = createLeaderboardAccumulator(run.strategyName, run.modelName);
         aggregates.set(key, acc);
       }
 
+      startedAtByRun.set(run.id, run.startedAt);
       acc.puzzleIds.add(run.puzzleId);
 
       // An evaluation belongs to its run regardless of that run's final
@@ -452,6 +510,30 @@ export class RunHistoryReadModel {
           acc.issueCounts.push(issueCountByRun.get(run.id) ?? 0);
         }
       }
+    }
+
+    // Judge-call spend is attributed to the *judge* model's own leaderboard
+    // row, not the solving run's row — the judge (JUDGE_MODEL/JUDGE_PROVIDER)
+    // is frequently a different model than the one that solved the puzzle.
+    // The target row is keyed the same way a dispatched run's row is
+    // (`llm-${provider}` / model), and is created on demand here since a
+    // judge-only model that's never itself dispatched as a solver otherwise
+    // has no row at all.
+    for (const spend of judgeSpendRows) {
+      if (spend.promptTokens === 0 && spend.completionTokens === 0) continue;
+      const startedAt = startedAtByRun.get(spend.strategyRunId);
+      if (!startedAt) continue;
+      const judgeStrategyName = `llm-${spend.judgeProvider}`;
+      const key = leaderboardKey(judgeStrategyName, spend.judgeModel);
+      const rate = priceAsOf(priceHistoryByModel.get(key), startedAt);
+      if (!rate) continue;
+
+      let acc = aggregates.get(key);
+      if (!acc) {
+        acc = createLeaderboardAccumulator(judgeStrategyName, spend.judgeModel);
+        aggregates.set(key, acc);
+      }
+      acc.costsUsd.push(computeTokenCostUsd(spend.promptTokens, spend.completionTokens, rate));
     }
 
     const rows: LeaderboardRowDto[] = [...aggregates.values()].map((acc) => {
