@@ -24,34 +24,29 @@ import {
   LLM_OPENAI,
   LLM_OPENROUTER,
   LLM_SAMBANOVA,
-  llmGoogleConcurrency,
-  llmGroqConcurrency,
-  llmMistralConcurrency,
-  llmOllamaConcurrency,
-  llmOpenAIConcurrency,
-  llmOpenRouterConcurrency,
-  llmSambaNovaConcurrency,
-  llmGoogleRateLimitFallbackSeconds,
-  llmGroqDailyHoldFallbackSeconds,
-  llmGroqRateLimitFallbackSeconds,
-  llmMistralRateLimitFallbackSeconds,
-  llmOpenRouterRateLimitFallbackSeconds,
-  llmSambaNovaDailyHoldFallbackSeconds,
-  llmSambaNovaRateLimitFallbackSeconds,
-  mistralModelHoldFallbackSeconds,
-  mistralPersistentRateLimitAttempts,
-  mistralPersistentRateLimitElapsedMs,
-  openRouterCallsPerTrialEstimate,
-  openRouterDispatchMaxBatch,
-  openRouterDispatchMaxInFlight,
-  openRouterDispatchRpmCooldownSeconds,
-  openRouterDispatchTickMs,
-  openRouterFreeDailyBudget,
-  sambaNovaDispatchMaxBatch,
-  sambaNovaDispatchMaxInFlight,
-  sambaNovaDispatchTickMs,
 } from "../../strategies";
 import { nextPacificMidnight, secondsUntilNextUtcMidnight } from "../strategy/rate-limit-reset-time";
+import {
+  DEFAULT_CONCURRENCY,
+  DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
+  DEFAULT_LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS,
+  DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS,
+  DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS,
+  DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ELAPSED_SECONDS,
+  DEFAULT_OPENROUTER_CALLS_PER_TRIAL_ESTIMATE,
+  DEFAULT_OPENROUTER_DISPATCH_MAX_BATCH,
+  DEFAULT_OPENROUTER_DISPATCH_MAX_IN_FLIGHT,
+  DEFAULT_OPENROUTER_DISPATCH_RPM_COOLDOWN_MS,
+  DEFAULT_OPENROUTER_DISPATCH_TICK_MS,
+  DEFAULT_OPENROUTER_FREE_DAILY_BUDGET,
+  DEFAULT_RATE_LIMIT_FALLBACK_SECONDS,
+  DEFAULT_SAMBANOVA_DISPATCH_MAX_BATCH,
+  DEFAULT_SAMBANOVA_DISPATCH_MAX_IN_FLIGHT,
+  DEFAULT_SAMBANOVA_DISPATCH_TICK_MS,
+  intEnv,
+  msEnvAsSeconds,
+  secondsEnvAsMs,
+} from "./pool-knobs";
 
 /** Pool ids — identical to the orchestrator's `ModelProvider` union and to the
  * frontend `ProviderPoolId`. Kept in sync by the parity tests. */
@@ -159,7 +154,7 @@ export const PROVIDER_POOLS: ProviderPool[] = [
     label: "Google",
     strategyName: LLM_GOOGLE,
     orchestratorProvider: "google",
-    concurrency: llmGoogleConcurrency,
+    concurrency: () => intEnv("LLM_GOOGLE_CONCURRENCY", DEFAULT_CONCURRENCY),
     queues: {
       runs: "llm-google-runs",
       freeDispatch: "google-free-dispatch",
@@ -170,7 +165,8 @@ export const PROVIDER_POOLS: ProviderPool[] = [
       // 00:01 America/Los_Angeles — Google's free-tier RPD resets on Pacific midnight.
       resetSchedule: { kind: "fixed-cron", pattern: "1 0 * * *", tz: "America/Los_Angeles" },
       dispatch: { stop: "until-held", pacing: "shared" },
-      rateLimitFallbackSeconds: llmGoogleRateLimitFallbackSeconds,
+      rateLimitFallbackSeconds: () =>
+        intEnv("LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS", DEFAULT_RATE_LIMIT_FALLBACK_SECONDS),
       dailyHoldFallbackSeconds: () =>
         Math.max(0, Math.round((nextPacificMidnight().getTime() - Date.now()) / 1000)),
     },
@@ -180,7 +176,7 @@ export const PROVIDER_POOLS: ProviderPool[] = [
     label: "Groq",
     strategyName: LLM_GROQ,
     orchestratorProvider: "groq",
-    concurrency: llmGroqConcurrency,
+    concurrency: () => intEnv("LLM_GROQ_CONCURRENCY", DEFAULT_CONCURRENCY),
     queues: {
       runs: "llm-groq-runs",
       freeDispatch: "groq-free-dispatch",
@@ -190,8 +186,10 @@ export const PROVIDER_POOLS: ProviderPool[] = [
       holdScope: "model",
       resetSchedule: { kind: "self-rearm", maxDelayMs: SELF_REARM_MAX_DELAY_MS },
       dispatch: { stop: "until-held", pacing: "shared" },
-      rateLimitFallbackSeconds: llmGroqRateLimitFallbackSeconds,
-      dailyHoldFallbackSeconds: llmGroqDailyHoldFallbackSeconds,
+      rateLimitFallbackSeconds: () =>
+        intEnv("LLM_GROQ_RATE_LIMIT_FALLBACK_SECONDS", DEFAULT_RATE_LIMIT_FALLBACK_SECONDS),
+      dailyHoldFallbackSeconds: () =>
+        intEnv("LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS", DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS),
     },
   },
   {
@@ -199,7 +197,7 @@ export const PROVIDER_POOLS: ProviderPool[] = [
     label: "OpenRouter",
     strategyName: LLM_OPENROUTER,
     orchestratorProvider: "openrouter",
-    concurrency: llmOpenRouterConcurrency,
+    concurrency: () => intEnv("LLM_OPENROUTER_CONCURRENCY", DEFAULT_CONCURRENCY),
     queues: {
       runs: "llm-openrouter-runs",
       freeDispatch: "openrouter-free-dispatch",
@@ -211,14 +209,18 @@ export const PROVIDER_POOLS: ProviderPool[] = [
       resetSchedule: { kind: "fixed-cron", pattern: "5 0 * * *", tz: "UTC" },
       dispatch: {
         stop: "account-budget",
-        budget: openRouterFreeDailyBudget,
-        callsPerTrial: openRouterCallsPerTrialEstimate,
-        rpmCooldownSeconds: openRouterDispatchRpmCooldownSeconds,
-        tickMs: openRouterDispatchTickMs,
-        maxBatch: openRouterDispatchMaxBatch,
-        maxInFlight: openRouterDispatchMaxInFlight,
+        budget: () => intEnv("OPENROUTER_FREE_DAILY_BUDGET", DEFAULT_OPENROUTER_FREE_DAILY_BUDGET),
+        callsPerTrial: () =>
+          intEnv("OPENROUTER_CALLS_PER_TRIAL_ESTIMATE", DEFAULT_OPENROUTER_CALLS_PER_TRIAL_ESTIMATE),
+        rpmCooldownSeconds: () =>
+          msEnvAsSeconds("OPENROUTER_DISPATCH_RPM_COOLDOWN_MS", DEFAULT_OPENROUTER_DISPATCH_RPM_COOLDOWN_MS),
+        tickMs: () => intEnv("OPENROUTER_DISPATCH_TICK_MS", DEFAULT_OPENROUTER_DISPATCH_TICK_MS),
+        maxBatch: () => intEnv("OPENROUTER_DISPATCH_MAX_BATCH", DEFAULT_OPENROUTER_DISPATCH_MAX_BATCH),
+        maxInFlight: () =>
+          intEnv("OPENROUTER_DISPATCH_MAX_IN_FLIGHT", DEFAULT_OPENROUTER_DISPATCH_MAX_IN_FLIGHT),
       },
-      rateLimitFallbackSeconds: llmOpenRouterRateLimitFallbackSeconds,
+      rateLimitFallbackSeconds: () =>
+        intEnv("LLM_OPENROUTER_RATE_LIMIT_FALLBACK_SECONDS", DEFAULT_RATE_LIMIT_FALLBACK_SECONDS),
       // OpenRouter emits no dailyResetSeconds hint; its free allowance resets on UTC midnight.
       dailyHoldFallbackSeconds: secondsUntilNextUtcMidnight,
     },
@@ -228,7 +230,7 @@ export const PROVIDER_POOLS: ProviderPool[] = [
     label: "Mistral",
     strategyName: LLM_MISTRAL,
     orchestratorProvider: "mistral",
-    concurrency: llmMistralConcurrency,
+    concurrency: () => intEnv("LLM_MISTRAL_CONCURRENCY", DEFAULT_CONCURRENCY),
     queues: {
       runs: "llm-mistral-runs",
       freeDispatch: "mistral-free-dispatch",
@@ -238,11 +240,18 @@ export const PROVIDER_POOLS: ProviderPool[] = [
       holdScope: "model",
       resetSchedule: { kind: "self-rearm", maxDelayMs: SELF_REARM_MAX_DELAY_MS },
       dispatch: { stop: "until-held", pacing: "shared" },
-      rateLimitFallbackSeconds: llmMistralRateLimitFallbackSeconds,
-      dailyHoldFallbackSeconds: mistralModelHoldFallbackSeconds,
+      rateLimitFallbackSeconds: () =>
+        intEnv("LLM_MISTRAL_RATE_LIMIT_FALLBACK_SECONDS", DEFAULT_RATE_LIMIT_FALLBACK_SECONDS),
+      dailyHoldFallbackSeconds: () =>
+        intEnv("MISTRAL_MODEL_HOLD_FALLBACK_SECONDS", DEFAULT_MISTRAL_MODEL_HOLD_FALLBACK_SECONDS),
       persistentRateLimitPark: {
-        attempts: mistralPersistentRateLimitAttempts,
-        elapsedMs: mistralPersistentRateLimitElapsedMs,
+        attempts: () =>
+          intEnv("MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS", DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ATTEMPTS),
+        elapsedMs: () =>
+          secondsEnvAsMs(
+            "MISTRAL_PERSISTENT_RATE_LIMIT_ELAPSED_SECONDS",
+            DEFAULT_MISTRAL_PERSISTENT_RATE_LIMIT_ELAPSED_SECONDS,
+          ),
       },
     },
   },
@@ -251,7 +260,7 @@ export const PROVIDER_POOLS: ProviderPool[] = [
     label: "SambaNova",
     strategyName: LLM_SAMBANOVA,
     orchestratorProvider: "sambanova",
-    concurrency: llmSambaNovaConcurrency,
+    concurrency: () => intEnv("LLM_SAMBANOVA_CONCURRENCY", DEFAULT_CONCURRENCY),
     queues: {
       runs: "llm-sambanova-runs",
       freeDispatch: "sambanova-free-dispatch",
@@ -263,13 +272,16 @@ export const PROVIDER_POOLS: ProviderPool[] = [
       dispatch: {
         stop: "until-held",
         pacing: {
-          tickMs: sambaNovaDispatchTickMs,
-          maxBatch: sambaNovaDispatchMaxBatch,
-          maxInFlight: sambaNovaDispatchMaxInFlight,
+          tickMs: () => intEnv("SAMBANOVA_DISPATCH_TICK_MS", DEFAULT_SAMBANOVA_DISPATCH_TICK_MS),
+          maxBatch: () => intEnv("SAMBANOVA_DISPATCH_MAX_BATCH", DEFAULT_SAMBANOVA_DISPATCH_MAX_BATCH),
+          maxInFlight: () =>
+            intEnv("SAMBANOVA_DISPATCH_MAX_IN_FLIGHT", DEFAULT_SAMBANOVA_DISPATCH_MAX_IN_FLIGHT),
         },
       },
-      rateLimitFallbackSeconds: llmSambaNovaRateLimitFallbackSeconds,
-      dailyHoldFallbackSeconds: llmSambaNovaDailyHoldFallbackSeconds,
+      rateLimitFallbackSeconds: () =>
+        intEnv("LLM_SAMBANOVA_RATE_LIMIT_FALLBACK_SECONDS", DEFAULT_RATE_LIMIT_FALLBACK_SECONDS),
+      dailyHoldFallbackSeconds: () =>
+        intEnv("LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS", DEFAULT_LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS),
     },
   },
   {
@@ -277,7 +289,7 @@ export const PROVIDER_POOLS: ProviderPool[] = [
     label: "OpenAI",
     strategyName: LLM_OPENAI,
     orchestratorProvider: "openai",
-    concurrency: llmOpenAIConcurrency,
+    concurrency: () => intEnv("LLM_OPENAI_CONCURRENCY", DEFAULT_CONCURRENCY),
     queues: { runs: "llm-openai-runs" },
     freeTier: null,
   },
@@ -286,7 +298,7 @@ export const PROVIDER_POOLS: ProviderPool[] = [
     label: "Ollama",
     strategyName: LLM_OLLAMA,
     orchestratorProvider: "ollama",
-    concurrency: llmOllamaConcurrency,
+    concurrency: () => intEnv("LLM_OLLAMA_CONCURRENCY", DEFAULT_CONCURRENCY),
     queues: { runs: "llm-ollama-runs" },
     freeTier: null,
   },
