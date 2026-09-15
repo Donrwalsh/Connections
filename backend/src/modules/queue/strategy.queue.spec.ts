@@ -14,6 +14,7 @@ import {
   categoryEvalJobId,
   queueForJudgeProvider,
   queueForStrategy,
+  runStrategyJobId,
 } from "./strategy.queue";
 
 const openai = { name: "openai" } as never;
@@ -73,5 +74,18 @@ describe("queueForJudgeProvider", () => {
 describe("categoryEvalJobId", () => {
   it("is deterministic per proposal", () => {
     expect(categoryEvalJobId(42)).toBe("cat-eval-42");
+  });
+});
+
+describe("runStrategyJobId", () => {
+  it("includes the model so two models on the same puzzle+strategy+trial never collide", () => {
+    expect(runStrategyJobId(100, "llm-ollama", "qwen2.5:14b", 1)).toBe(
+      "run-100-llm-ollama-qwen2.5:14b-1",
+    );
+    expect(runStrategyJobId(100, "llm-ollama", "llama3", 1)).toBe("run-100-llm-ollama-llama3-1");
+  });
+
+  it("uses a fixed placeholder when there is no model", () => {
+    expect(runStrategyJobId(100, "order", null, 0)).toBe("run-100-order-none-0");
   });
 });

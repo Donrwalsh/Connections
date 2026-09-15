@@ -176,7 +176,7 @@ describe("Provider pool dispatch (e2e)", () => {
     ).toBeNull();
 
     // Re-dispatched onto the real runs queue under a resume-stamped id.
-    const job = await llmGroqQueue.getJob(`run-${puzzleId}-llm-groq-0-resume-e2e-sweep`);
+    const job = await llmGroqQueue.getJob(`run-${puzzleId}-llm-groq-${GROQ_MODEL}-0-resume-e2e-sweep`);
     expect(job).toBeDefined();
   }, 30000);
 });

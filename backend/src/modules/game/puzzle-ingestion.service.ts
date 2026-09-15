@@ -292,7 +292,7 @@ export class PuzzleIngestionService {
       strategyTrialNumbers(strategyName).map((trialNumber) => ({
         name: "run-strategy",
         data: { puzzleId, strategyName, date, trialNumber, model: null },
-        opts: { jobId: runStrategyJobId(puzzleId, strategyName, trialNumber) },
+        opts: { jobId: runStrategyJobId(puzzleId, strategyName, null, trialNumber) },
       })),
     );
 
