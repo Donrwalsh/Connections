@@ -11,7 +11,7 @@ import { LlmProposalStatus } from "./entities/llm-proposal.entity";
 import { OrchestratorService, type SolveStepOutcome, type ChatMessage } from "./orchestrator.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import { RateLimitHoldService } from "./rate-limit-hold.service";
-import { parseAnswer } from "answer-grammar";
+import { formatCompactAnswer, parseAnswer } from "answer-grammar";
 import {
   DEFAULT_RATE_LIMIT_FALLBACK_SECONDS,
   DEFAULT_LLM_GROQ_DAILY_HOLD_FALLBACK_SECONDS,
@@ -599,6 +599,45 @@ describe("LlmStrategyRunner", () => {
         }),
       );
       expect((promptRows[0].issueTags as string[])).toHaveLength(2);
+    });
+
+    it("should trim conversation history to the registered proposal when a response contains multiple full answer attempts", async () => {
+      const multiProposalResponse =
+        "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n\n" +
+        "### ANSWER\nAPPLE, BANANA, CHERRY, DATE\n\n" +
+        "Wait, let me reconsider.\n\n" +
+        "### GROUPS\n#### Group 1\nCategory: Snacks\nWords: WRONG, WORDS, HERE, NOPE\n\n" +
+        "### ANSWER\nWRONG, WORDS, HERE, NOPE";
+
+      const snapshots = captureMessages([
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]], multiProposalResponse),
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      ]);
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(2);
+
+      // Second call's snapshot carries the first call's assistant turn —
+      // that's the one that should be trimmed.
+      expect(snapshots[1]).toHaveLength(3);
+      expect(snapshots[1][1].role).toBe("assistant");
+      expect(snapshots[1][1].content).toBe(
+        formatCompactAnswer([["APPLE", "BANANA", "CHERRY", "DATE"]], new Map([[1, "Fruits"]])),
+      );
+      expect(snapshots[1][1].content).not.toContain("Wait, let me reconsider.");
+      expect(snapshots[1][1].content).not.toContain("WRONG");
+
+      // The DB row still keeps the full original response untouched.
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(
+        expect.objectContaining({
+          issueTags: ["multipleProposals"],
+          rawResponseText: multiProposalResponse,
+        }),
+      );
     });
 
     it("should send conversation history with prior guesses as RETRY prompts", async () => {

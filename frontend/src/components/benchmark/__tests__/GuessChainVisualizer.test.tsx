@@ -179,6 +179,17 @@ describe("GuessChainVisualizer", () => {
     expect(await screen.findByText("Hallucinated word")).toBeInTheDocument();
   });
 
+  it("flags a step with a multipleProposals issue tag", async () => {
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [{ ...llmDetail.solvePrompts[0]!, issueTags: ["multipleProposals"] }],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Multiple proposals")).toBeInTheDocument();
+  });
+
   it("does not render an issue badge for a step with no issue tags", async () => {
     stubFetch(llmDetail);
 

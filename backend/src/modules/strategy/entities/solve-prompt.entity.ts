@@ -38,6 +38,7 @@ export const SolvePromptIssueTag = {
   GROUP_COUNT_OFF: "groupCountOff",
   WORD_NOT_ON_LIST: "wordNotOnList",
   UNCLASSIFIED: "unclassified",
+  MULTIPLE_PROPOSALS: "multipleProposals",
 } as const;
 
 export type SolvePromptIssueTagValue =
