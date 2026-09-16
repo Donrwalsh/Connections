@@ -247,6 +247,57 @@ describe("GuessChainVisualizer", () => {
     expect(screen.queryByText("No candidate groups parsed.")).not.toBeInTheDocument();
   });
 
+  it("includes a reasoning-token count in the callError summary when the failed call still spent reasoning tokens", async () => {
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [
+        {
+          ...llmDetail.solvePrompts[0]!,
+          status: "callError",
+          rawResponseText: null,
+          proposals: [],
+          errorName: "AI_APICallError",
+          errorMessage: "Rate limit exceeded",
+          statusCode: 429,
+          isRetryable: true,
+          reasoningTokens: 16000,
+        },
+      ],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Rate limit exceeded")).toBeInTheDocument();
+    expect(
+      screen.getByText("AI_APICallError · HTTP 429 · retryable · 16,000 reasoning tokens"),
+    ).toBeInTheDocument();
+  });
+
+  it("omits the reasoning-token count from the callError summary when reasoningTokens is null or zero", async () => {
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [
+        {
+          ...llmDetail.solvePrompts[0]!,
+          status: "callError",
+          rawResponseText: null,
+          proposals: [],
+          errorName: "AI_APICallError",
+          errorMessage: "Rate limit exceeded",
+          statusCode: 429,
+          isRetryable: true,
+          reasoningTokens: null,
+        },
+      ],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Rate limit exceeded")).toBeInTheDocument();
+    expect(screen.getByText("AI_APICallError · HTTP 429 · retryable")).toBeInTheDocument();
+    expect(screen.queryByText(/reasoning tokens/)).not.toBeInTheDocument();
+  });
+
   it("skips the raw request/response disclosures when a callError row has no detail captured", async () => {
     stubFetch({
       ...llmDetail,

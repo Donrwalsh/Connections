@@ -22,13 +22,16 @@ import { CategoryEvaluation } from "../modules/strategy/entities/category-evalua
  * runs display correctly in the new per-step reasoning-token UI.
  *
  * Idempotent at the row level: a row is only touched when it currently has
- * at least one null token column; once touched, all four columns are
- * recomputed from responseBody and rewritten together (not gated
- * per-column). That's safe here — not merely re-running without harm, but
- * actually a no-op in every normal case — because both the live capture
- * path and this backfill derive their values from the exact same raw
- * responseBody JSON, so a re-run always recomputes byte-identical values
- * for columns that were already correct.
+ * at least one null token column, and even then each of the four columns is
+ * gated independently — an already-non-null column is never overwritten by
+ * a recomputed value, only a currently-null column gets filled in. If a
+ * recomputed value disagrees with an existing non-null column, the row is
+ * left alone for that column and the disagreement is logged (even in
+ * --dry-run) rather than silently picking a side.
+ *
+ * Requires the 1802000000000-add-reasoning-tokens migration to have already
+ * run: both the row-selection query and the update reference the
+ * reasoningTokens column, which doesn't exist before that migration.
  *
  * Local dev (from backend/):
  *   npx tsx src/scripts/backfill-token-usage.ts --dry-run
@@ -89,21 +92,58 @@ export function parseUsageFromResponseBody(responseBody: unknown): ParsedUsage |
   return null;
 }
 
-async function backfillTable<T extends { id: number; responseBody: unknown }>(
+export interface TokenRow {
+  id: number;
+  responseBody: unknown;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  reasoningTokens: number | null;
+}
+
+const TOKEN_COLUMNS = [
+  "promptTokens",
+  "completionTokens",
+  "totalTokens",
+  "reasoningTokens",
+] as const;
+
+// Not generic over the caller's concrete entity type: TypeORM's
+// FindOptionsWhere<T>/FindOptionsSelect<T> are homomorphic mapped types over
+// `keyof T`, and TypeScript won't structurally check an object literal
+// against a mapped type whose type parameter is still an unresolved generic
+// (even one constrained with `T extends TokenRow`) — that's what forced the
+// original `as never` casts. Typing `entity`'s constructor signature as
+// `new () => TokenRow` sidesteps this entirely: SolvePrompt and
+// CategoryEvaluation both structurally satisfy TokenRow (each has strictly
+// more fields), so passing the real classes in still type-checks, and
+// `dataSource.getRepository` then infers a concrete `Repository<TokenRow>`
+// with no generic left to fail to resolve. TypeORM resolves entity metadata
+// from the actual runtime constructor regardless of how it's statically
+// typed here, so this is a type-level simplification only — no behavior
+// change.
+export async function backfillTable(
   dataSource: DataSource,
-  entity: new () => T,
+  entity: new () => TokenRow,
   label: string,
   dryRun: boolean,
 ): Promise<void> {
   const repo = dataSource.getRepository(entity);
   const rows = await repo.find({
     where: [
-      { promptTokens: IsNull() } as never,
-      { completionTokens: IsNull() } as never,
-      { totalTokens: IsNull() } as never,
-      { reasoningTokens: IsNull() } as never,
+      { promptTokens: IsNull() },
+      { completionTokens: IsNull() },
+      { totalTokens: IsNull() },
+      { reasoningTokens: IsNull() },
     ],
-    select: { id: true, responseBody: true } as never,
+    select: {
+      id: true,
+      responseBody: true,
+      promptTokens: true,
+      completionTokens: true,
+      totalTokens: true,
+      reasoningTokens: true,
+    },
   });
   logger.log(`[${label}] Found ${rows.length} row(s) with at least one null token column.`);
 
@@ -112,17 +152,41 @@ async function backfillTable<T extends { id: number; responseBody: unknown }>(
     const parsed = parseUsageFromResponseBody(row.responseBody);
     if (!parsed) continue;
 
+    // Per-column: an already-non-null value always wins over the recomputed
+    // one. Only a currently-null column gets filled from `parsed`. When both
+    // sides are non-null and disagree, keep the stored value but surface the
+    // disagreement — this is exactly the kind of regression a --dry-run run
+    // is meant to catch before it ever reaches a real write.
+    let changed = false;
+    const next: Record<(typeof TOKEN_COLUMNS)[number], number | null> = {
+      promptTokens: row.promptTokens,
+      completionTokens: row.completionTokens,
+      totalTokens: row.totalTokens,
+      reasoningTokens: row.reasoningTokens,
+    };
+    for (const column of TOKEN_COLUMNS) {
+      const existing = row[column];
+      const recomputed = parsed[column];
+      if (existing !== null && recomputed !== null && existing !== recomputed) {
+        logger.warn(
+          `[${label}] Row ${row.id}: stored ${column}=${existing} disagrees with recomputed ${column}=${recomputed}. Keeping stored value.`,
+        );
+        continue;
+      }
+      if (existing === null && recomputed !== null) {
+        next[column] = recomputed;
+        changed = true;
+      }
+    }
+
+    if (!changed) continue;
+
     if (dryRun) {
       updatedCount++;
       continue;
     }
 
-    await repo.update(row.id, {
-      promptTokens: parsed.promptTokens,
-      completionTokens: parsed.completionTokens,
-      totalTokens: parsed.totalTokens,
-      reasoningTokens: parsed.reasoningTokens,
-    } as never);
+    await repo.update(row.id, next);
     updatedCount++;
   }
 
