@@ -286,6 +286,38 @@ describe("LlmStrategyRunner", () => {
       );
     });
 
+    it("should persist reasoningTokens on a successful row", async () => {
+      mockOrchestratorService.requestSolveStep
+        .mockResolvedValueOnce({
+          ok: true,
+          data: {
+            response: "test reasoning",
+            groups: [["APPLE", "BANANA", "CHERRY", "DATE"]],
+            proposalWords: [["APPLE", "BANANA", "CHERRY", "DATE"]],
+            categoryByGroup: {},
+            textIssues: [],
+            model: "gpt-5-nano",
+            latencyMs: 500,
+            usage: { promptTokens: 200, completionTokens: 500, totalTokens: 700, reasoningTokens: 400 },
+          },
+        })
+        .mockResolvedValueOnce(makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]));
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(
+        expect.objectContaining({
+          promptTokens: 200,
+          completionTokens: 500,
+          totalTokens: 700,
+          reasoningTokens: 400,
+        }),
+      );
+    });
+
     it("should strip a trailing parenthetical from a Words: line and flag the prompt", async () => {
       // Mirrors a real Mistral response: explanatory asides glued onto the
       // Words: line instead of kept in the scratchpad. Group 1's aside has
@@ -898,6 +930,32 @@ describe("LlmStrategyRunner", () => {
       } finally {
         delete process.env.LLM_MAX_DUPLICATE_GUESSES;
       }
+    });
+
+    it("should capture usage on a callError row instead of leaving tokens null", async () => {
+      mockOrchestratorService.requestSolveStep.mockResolvedValue({
+        ok: false,
+        error: {
+          error: "Model produced a malformed response: ...",
+          code: "invalid_group",
+          usage: { promptTokens: 2100, completionTokens: 16000, totalTokens: 18100, reasoningTokens: 15900 },
+        },
+      });
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      const errorRow = promptRows.find((row) => row.status === "callError");
+      expect(errorRow).toEqual(
+        expect.objectContaining({
+          promptTokens: 2100,
+          completionTokens: 16000,
+          totalTokens: 18100,
+          reasoningTokens: 15900,
+        }),
+      );
     });
 
     it("should terminate with 'failed' once the failed-guess limit is hit", async () => {
