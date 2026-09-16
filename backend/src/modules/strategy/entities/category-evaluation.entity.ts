@@ -140,6 +140,12 @@ export class CategoryEvaluation {
   @Column({ type: "int", nullable: true })
   totalTokens: number | null;
 
+  // Subset of completionTokens spent on the model's internal reasoning —
+  // see SolvePrompt.reasoningTokens for the full explanation. Additive
+  // information only, never added into totalTokens or used in cap/cost math.
+  @Column({ type: "int", nullable: true })
+  reasoningTokens: number | null;
+
   @Column({ type: "int", nullable: true })
   latencyMs: number | null;
 

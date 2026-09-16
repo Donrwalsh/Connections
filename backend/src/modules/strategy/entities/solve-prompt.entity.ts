@@ -152,6 +152,17 @@ export class SolvePrompt {
   @Column({ type: "int", nullable: true })
   totalTokens: number | null;
 
+  // Subset of completionTokens spent on the model's internal reasoning
+  // (OpenAI's completion_tokens_details.reasoning_tokens / the Responses
+  // API's output_tokens_details.reasoning_tokens) — additive information
+  // only, never added into totalTokens or used in cap/cost math, since
+  // OpenAI already bills it as ordinary output tokens and completionTokens
+  // already includes it. Lets a reasoning-heavy failed call (billed tokens,
+  // no usable output) be seen on its own instead of only inferred after the
+  // fact — see docs/superpowers/plans/2026-09-16-free-tier-token-accounting.md.
+  @Column({ type: "int", nullable: true })
+  reasoningTokens: number | null;
+
   @Column({ type: "int", nullable: true })
   latencyMs: number | null;
 
