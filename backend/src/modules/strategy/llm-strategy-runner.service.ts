@@ -31,6 +31,7 @@ import { RateLimitHoldService } from "./rate-limit-hold.service";
 import { firstCombination } from "./combinatorics";
 import { formatCompactAnswer, GROUP_SIZE } from "answer-grammar";
 import { applyOneOffWordFixups } from "./normalize-puzzle-word";
+import { findCaseInsensitiveGroupMatch } from "./case-insensitive-match";
 
 const MODEL_ERROR_RETRY_BASE_DELAY_MS = 1000;
 const MODEL_ERROR_RETRY_MAX_DELAY_MS = 300000;
@@ -666,25 +667,44 @@ export class LlmStrategyRunner {
     const originalPuzzleWords = new Set(
       puzzle.answerGroups.flatMap((group) => group.members.map((member) => member.word)),
     );
+    const answerGroupWords = puzzle.answerGroups.map((group) => group.members.map((member) => member.word));
 
     for (const currentProposal of proposalEntries) {
-      const guessWords = currentProposal.words!;
+      let guessWords = currentProposal.words!;
 
       // A word missing from run.availableWords is either already solved by
       // an earlier guess in this loop (expected, boring — every word in
-      // state.lockedInGroups is still a real puzzle word) or was never part
-      // of the puzzle at all (a genuine model hallucination). Both skip the
-      // proposal the same way today; only the second is worth flagging.
+      // state.lockedInGroups is still a real puzzle word), the right words
+      // in the wrong case (tolerated below, not a hallucination), or a
+      // genuine model hallucination.
       const isWordMissingFromAvailable = guessWords.some((w) => !run.availableWords.includes(w));
       if (isWordMissingFromAvailable) {
-        const hasHallucinatedWord = guessWords.some((w) => !originalPuzzleWords.has(w));
-        if (hasHallucinatedWord) {
+        const caseInsensitiveMatch = findCaseInsensitiveGroupMatch(guessWords, answerGroupWords);
+        const isCaseMismatchStillAvailable =
+          caseInsensitiveMatch?.every((w) => run.availableWords.includes(w)) ?? false;
+
+        if (caseInsensitiveMatch && isCaseMismatchStillAvailable) {
+          // Normalize to canonical casing right here, before guessWords is
+          // used to build the Guess or filter run.availableWords below —
+          // both of those compare case-sensitively against canonical-case
+          // data, so carrying the model's raw casing any further would
+          // corrupt run state even though the guess itself succeeds.
+          guessWords = caseInsensitiveMatch;
+          currentProposal.words = guessWords;
           const issueTags = currentProposal.solvePrompt!.issueTags;
-          if (!issueTags.includes(SolvePromptIssueTag.WORD_NOT_ON_LIST)) {
-            issueTags.push(SolvePromptIssueTag.WORD_NOT_ON_LIST);
+          if (!issueTags.includes(SolvePromptIssueTag.CASE_MISMATCH)) {
+            issueTags.push(SolvePromptIssueTag.CASE_MISMATCH);
           }
+        } else {
+          const hasHallucinatedWord = guessWords.some((w) => !originalPuzzleWords.has(w));
+          if (hasHallucinatedWord) {
+            const issueTags = currentProposal.solvePrompt!.issueTags;
+            if (!issueTags.includes(SolvePromptIssueTag.WORD_NOT_ON_LIST)) {
+              issueTags.push(SolvePromptIssueTag.WORD_NOT_ON_LIST);
+            }
+          }
+          continue;
         }
-        continue;
       }
 
       state.guessCount++;
