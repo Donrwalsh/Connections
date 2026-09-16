@@ -3,6 +3,7 @@ import { Logger } from "@nestjs/common";
 import { DataSource, In } from "typeorm";
 import { StrategyRun } from "../modules/strategy/entities/strategy-run.entity";
 import { LlmProposal, LlmProposalStatus } from "../modules/strategy/entities/llm-proposal.entity";
+import { Guess } from "../modules/strategy/entities/guess.entity";
 import { Puzzle } from "../modules/game/entities/puzzle.entity";
 import { findCaseInsensitiveGroupMatch } from "../modules/strategy/case-insensitive-match";
 
@@ -14,9 +15,13 @@ import { findCaseInsensitiveGroupMatch } from "../modules/strategy/case-insensit
  * wordNotOnList even though every word really was on the puzzle. The live
  * code no longer does this (see case-insensitive-match.ts) — but existing
  * runs recorded under the old behavior are unreliable, so this deletes them
- * outright (cascading to their Guess/SolvePrompt/LlmProposal rows via the
- * existing onDelete: CASCADE FKs) rather than trying to patch their
- * recorded outcome in place. Deleting a StrategyRun makes its
+ * outright rather than trying to patch their recorded outcome in place.
+ * SolvePrompt and LlmProposal rows cascade automatically via their
+ * onDelete: CASCADE FKs, but Guess.strategyRunId is onDelete: SET NULL
+ * (guess.entity.ts) — a StrategyRun delete alone would leave that run's
+ * Guess rows behind as orphans instead of removing them, so this script
+ * deletes the affected Guess rows explicitly, in the same transaction as
+ * the StrategyRun delete. Deleting a StrategyRun makes its
  * (puzzleId, strategyName, trialNumber) eligible for a fresh dispatch under
  * the fixed code (see strategy-dispatch.service.ts's "no StrategyRun row at
  * all" query) — redispatch itself is a separate, manual step.
@@ -134,10 +139,20 @@ async function main() {
       return;
     }
 
-    const result = await strategyRunRepo.delete({ id: In([...affectedRunIds]) });
-    logger.log(
-      `Deleted ${result.affected ?? 0} StrategyRun row(s) (cascades to their Guess/SolvePrompt/LlmProposal rows).`,
-    );
+    const runIds = [...affectedRunIds];
+    await dataSource.transaction(async (manager) => {
+      // Guess.strategyRunId is onDelete: SET NULL (guess.entity.ts), unlike
+      // SolvePrompt/LlmProposal which are CASCADE — deleting Guess rows
+      // explicitly first (in the same transaction as the StrategyRun
+      // delete) avoids leaving them behind as orphaned, undeletable dead
+      // rows once their strategyRunId is nulled out.
+      const guessResult = await manager.delete(Guess, { strategyRunId: In(runIds) });
+      const runResult = await manager.delete(StrategyRun, { id: In(runIds) });
+      logger.log(
+        `Deleted ${runResult.affected ?? 0} StrategyRun row(s), ${guessResult.affected ?? 0} Guess row(s) explicitly, ` +
+          `and their SolvePrompt/LlmProposal rows via cascade.`,
+      );
+    });
   } finally {
     await appContext.close();
   }
