@@ -128,6 +128,7 @@ export const SolveStepResponseSchema = AssistResponseSchema.extend({
       promptTokens: z.number().optional(),
       completionTokens: z.number().optional(),
       totalTokens: z.number().optional(),
+      reasoningTokens: z.number().optional(),
     })
     .optional(),
   requestBody: z.unknown().optional(),
@@ -168,6 +169,7 @@ export const JudgeCategoryResponseSchema = z.object({
       promptTokens: z.number().optional(),
       completionTokens: z.number().optional(),
       totalTokens: z.number().optional(),
+      reasoningTokens: z.number().optional(),
     })
     .optional(),
   requestBody: z.unknown().optional(),

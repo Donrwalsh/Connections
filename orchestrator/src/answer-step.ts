@@ -26,6 +26,7 @@ export interface AnswerStepResult {
     promptTokens?: number;
     completionTokens?: number;
     totalTokens?: number;
+    reasoningTokens?: number;
   };
   requestBody?: unknown;
   responseId?: string;
@@ -113,6 +114,7 @@ export async function runAnswerStep(
           promptTokens: u.inputTokens,
           completionTokens: u.outputTokens,
           totalTokens: u.totalTokens,
+          reasoningTokens: u.outputTokenDetails?.reasoningTokens,
         };
       }
     }

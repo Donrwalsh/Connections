@@ -75,6 +75,29 @@ describe("runAnswerStep", () => {
     expect(result.latencyMs).toEqual(expect.any(Number));
   });
 
+  it("captures reasoningTokens alongside the rest of usage on a successful call", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
+      response: { modelId: "gpt-5-nano", id: "resp_456" },
+      request: { body: {} },
+      usage: {
+        inputTokens: 200,
+        outputTokens: 500,
+        totalTokens: 700,
+        outputTokenDetails: { textTokens: 100, reasoningTokens: 400 },
+      },
+    });
+
+    const result = await runAnswerStep(MESSAGES);
+
+    expect(result.usage).toEqual({
+      promptTokens: 200,
+      completionTokens: 500,
+      totalTokens: 700,
+      reasoningTokens: 400,
+    });
+  });
+
   it("skips requesting request/response body detail entirely when captureTelemetry is false", async () => {
     generateTextMock.mockResolvedValueOnce({
       text: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",

@@ -20,7 +20,12 @@ export interface JudgeCategoryResult {
   rationale: string;
   model: string;
   latencyMs: number;
-  usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number };
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+    reasoningTokens?: number;
+  };
   requestBody?: unknown;
   responseId?: string;
   responseHeaders?: Record<string, string>;
@@ -95,6 +100,7 @@ export async function judgeCategory(
         promptTokens: u.inputTokens,
         completionTokens: u.outputTokens,
         totalTokens: u.totalTokens,
+        reasoningTokens: u.outputTokenDetails?.reasoningTokens,
       };
     }
 
