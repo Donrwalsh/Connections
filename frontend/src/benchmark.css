@@ -225,39 +225,6 @@
   font-size: 0.8rem;
 }
 
-/* Metric selector — pill group on desktop, native select on narrow screens. */
-.bench-metric-selector__pills {
-  display: flex;
-  gap: 0.25rem;
-}
-
-.bench-metric-btn {
-  border: 1px solid var(--border);
-  background: transparent;
-  border-radius: 999px;
-  padding: 0.3rem 0.75rem;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-.bench-metric-btn--selected {
-  border-color: var(--accent-border);
-  color: var(--accent);
-}
-
-.bench-metric-selector__select {
-  display: none;
-}
-
-@media (max-width: 640px) {
-  .bench-metric-selector__pills {
-    display: none;
-  }
-  .bench-metric-selector__select {
-    display: block;
-  }
-}
-
 /* Tables (leaderboard + puzzle breakdown + runs). */
 .bench-table-wrap {
   overflow-x: auto;

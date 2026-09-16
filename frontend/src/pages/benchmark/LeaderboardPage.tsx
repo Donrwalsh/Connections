@@ -1,24 +1,24 @@
-import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { HeroHeader } from "../../components/benchmark/HeroHeader";
-import { MetricSelector } from "../../components/benchmark/MetricSelector";
 import { ProviderFilter } from "../../components/benchmark/ProviderFilter";
 import { StatusStrip } from "../../components/benchmark/StatusStrip";
 import { StrategyTable } from "../../components/benchmark/StrategyTable";
 import { fetchLeaderboard } from "../../data/benchmark/api";
-import type { LeaderboardMetricKey } from "../../data/benchmark/metrics";
+import { useLeaderboardSort } from "../../hooks/useLeaderboardSort";
 import { poolFromStrategyName, selectedProviderPools } from "../../data/benchmark/providerPools";
 
 /** Homepage of the benchmark area: two DB-driven leaderboard tables (LLM
  * strategies above deterministic/shuffle strategies — see StrategyTable's
- * `variant`) sharing one configurable sort metric. A strategy or model only
- * gets a row once it has an actual run — see GET /strategy/leaderboard.
- * Rows navigate to /leaderboard/:id. A `?provider=` filter (see
- * ProviderFilter) narrows the LLM table to selected provider pools and
- * hides the deterministic table, which has no pool. */
+ * `variant`), each with its own independent column-header sort (see
+ * useLeaderboardSort) since the two tables display different columns. A
+ * strategy or model only gets a row once it has an actual run — see GET
+ * /strategy/leaderboard. Rows navigate to /leaderboard/:id. A `?provider=`
+ * filter (see ProviderFilter) narrows the LLM table to selected provider
+ * pools and hides the deterministic table, which has no pool. */
 export function LeaderboardPage() {
-  const [metricKey, setMetricKey] = useState<LeaderboardMetricKey>("successRate");
+  const llmSort = useLeaderboardSort("successRate");
+  const deterministicSort = useLeaderboardSort("avgGuesses");
   const [searchParams] = useSearchParams();
   const selectedPools = selectedProviderPools(searchParams);
   const isFiltered = selectedPools.size > 0;
@@ -59,7 +59,6 @@ export function LeaderboardPage() {
           <section className="bench-page__section" aria-label="LLM leaderboard">
             <div className="bench-page__section-head">
               <h2 className="bench-page__section-title">LLM Strategies</h2>
-              <MetricSelector value={metricKey} onChange={setMetricKey} />
             </div>
             <ProviderFilter />
             {llmRows.length === 0 ? (
@@ -67,7 +66,13 @@ export function LeaderboardPage() {
                 {isFiltered ? "No LLM runs for the selected providers." : "No LLM runs yet."}
               </p>
             ) : (
-              <StrategyTable rows={llmRows} metricKey={metricKey} variant="llm" />
+              <StrategyTable
+                rows={llmRows}
+                variant="llm"
+                sortBy={llmSort.sortBy}
+                sortDir={llmSort.sortDir}
+                onSortChange={llmSort.onSortChange}
+              />
             )}
           </section>
 
@@ -84,8 +89,10 @@ export function LeaderboardPage() {
               ) : (
                 <StrategyTable
                   rows={leaderboard.deterministic}
-                  metricKey={metricKey}
                   variant="deterministic"
+                  sortBy={deterministicSort.sortBy}
+                  sortDir={deterministicSort.sortDir}
+                  onSortChange={deterministicSort.onSortChange}
                 />
               )}
             </section>

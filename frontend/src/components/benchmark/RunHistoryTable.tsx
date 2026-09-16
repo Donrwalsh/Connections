@@ -14,6 +14,7 @@ import type {
   RunStatus,
 } from "../../data/benchmark/types";
 import { RunStatusFilter } from "./RunStatusFilter";
+import { SortHeaderButton } from "./SortHeaderButton";
 import { StatusPill } from "./StatusPill";
 import { VerdictSquares } from "./VerdictSquares";
 
@@ -78,24 +79,16 @@ export function RunHistoryTable({
       <caption className="bench-table__caption">Runs · {rows.length} on this page</caption>
       <thead>
         <tr>
-          {sortableColumns.map((column) => {
-            const isActive = sortBy === column.key;
-            return (
-              <th scope="col" key={column.key}>
-                <button
-                  type="button"
-                  className="bench-sort-btn"
-                  onClick={() => onSortChange(column.key)}
-                  aria-label={`Sort by ${column.label}${
-                    isActive ? `, ${sortDir === "asc" ? "ascending" : "descending"}` : ""
-                  }`}
-                >
-                  {column.label}
-                  {isActive ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
-                </button>
-              </th>
-            );
-          })}
+          {sortableColumns.map((column) => (
+            <th scope="col" key={column.key}>
+              <SortHeaderButton
+                label={column.label}
+                isActive={sortBy === column.key}
+                dir={sortDir}
+                onClick={() => onSortChange(column.key)}
+              />
+            </th>
+          ))}
           <th scope="col">
             <RunStatusFilter value={status} onChange={onStatusChange} />
           </th>

@@ -1,92 +1,94 @@
-// Configurable-metric logic for the benchmark UI: which metrics the
-// leaderboard can sort by, how to read a value off a strategy row, and how to
-// format/sort the results. Kept framework-free so it is unit-testable without
-// rendering.
+// Column-header sort logic for the leaderboard tables: which columns each
+// table can sort by, how to read a value off a strategy row for a given
+// column, and how to sort by it in either direction. Kept framework-free so
+// it is unit-testable without rendering.
 
 import type { LeaderboardRow } from "./types";
 
-export type LeaderboardMetricKey = "avgGuesses" | "successRate" | "speed" | "categoryAccuracy";
+/** Every column either StrategyTable variant can sort by. "duration" (raw
+ * avgDurationMs, lower is better) backs the LLM table's "Avg duration"
+ * column; "speed" (a derived solves/hr rate, higher is better) backs the
+ * deterministic table's "Avg speed" column instead — kept as two separate
+ * keys, rather than one shared "speed" key across both, so a column's
+ * asc/desc arrow always matches the literal direction of the value that
+ * column actually displays. */
+export type LeaderboardSortKey =
+  | "avgGuesses"
+  | "successRate"
+  | "duration"
+  | "speed"
+  | "categoryAccuracy"
+  | "range"
+  | "progress";
 
-export interface MetricDefinition {
-  key: LeaderboardMetricKey;
-  label: string;
-  description: string;
-  higherIsBetter: boolean;
-  format: (value: number) => string;
+export type LeaderboardSortDir = "asc" | "desc";
+
+/** Whether a larger value is "best" for a column — used only to pick the
+ * direction a freshly-clicked column starts in; a second click on the same
+ * column flips it regardless (see useLeaderboardSort). */
+const HIGHER_IS_BETTER: Record<LeaderboardSortKey, boolean> = {
+  avgGuesses: false,
+  successRate: true,
+  duration: false,
+  speed: true,
+  categoryAccuracy: true,
+  range: false,
+  progress: true,
+};
+
+export function defaultSortDir(key: LeaderboardSortKey): LeaderboardSortDir {
+  return HIGHER_IS_BETTER[key] ? "desc" : "asc";
 }
 
-export const LEADERBOARD_METRICS: MetricDefinition[] = [
-  {
-    key: "avgGuesses",
-    label: "Avg guesses",
-    description: "Mean guesses to solve across completed runs — fewer is better",
-    higherIsBetter: false,
-    format: (value) => (Number.isInteger(value) ? String(value) : value.toFixed(1)),
-  },
-  {
-    key: "successRate",
-    label: "Success rate",
-    description: "Share of finished runs that solved the puzzle",
-    higherIsBetter: true,
-    format: (value) => `${Math.round(value)}%`,
-  },
-  {
-    key: "speed",
-    label: "Speed",
-    description: "Solves per hour, derived from average solve duration",
-    higherIsBetter: true,
-    format: (value) => `${Math.round(value).toLocaleString()}/hr`,
-  },
-  {
-    key: "categoryAccuracy",
-    label: "Category IQ",
-    description: "Share of evaluated successful guesses where the model named the real connection",
-    higherIsBetter: true,
-    format: (value) => formatSuccessRate(value),
-  },
-];
-
-export function getMetricDefinition(key: LeaderboardMetricKey): MetricDefinition {
-  return LEADERBOARD_METRICS.find((metric) => metric.key === key) ?? LEADERBOARD_METRICS[0]!;
-}
-
-/** Any row shape with the four metric-source fields the leaderboard sorts
- * by (see the live LeaderboardRow in types.ts) — the metric helpers below
- * don't need to know the concrete row type, just that it has these. */
-export interface MetricSource {
+/** Row shape with every field a leaderboard sort column can read from (see
+ * the live LeaderboardRow in types.ts) — the helpers below don't need to
+ * know the concrete row type, just that it has these. */
+export interface LeaderboardSortSource {
   avgGuessesToSolve: number | null;
   successRate: number | null;
   avgDurationMs: number | null;
   categoryAccuracy: number | null;
+  maxGuesses: number | null;
+  puzzlesCovered: number;
 }
 
-export function metricValue(strategy: MetricSource, key: LeaderboardMetricKey): number | null {
+export function leaderboardSortValue(
+  strategy: LeaderboardSortSource,
+  key: LeaderboardSortKey,
+): number | null {
   switch (key) {
     case "avgGuesses":
       return strategy.avgGuessesToSolve;
     case "successRate":
       return strategy.successRate;
+    case "duration":
+      return strategy.avgDurationMs;
     case "speed":
       return strategy.avgDurationMs === null ? null : 3_600_000 / strategy.avgDurationMs;
     case "categoryAccuracy":
       return strategy.categoryAccuracy;
+    case "range":
+      return strategy.maxGuesses;
+    case "progress":
+      return strategy.puzzlesCovered;
   }
 }
 
-/** Sorts leaderboard rows by metric; best first, nulls last. */
-export function sortStrategiesByMetric<T extends MetricSource>(
-  strategies: T[],
-  key: LeaderboardMetricKey,
+/** Sorts leaderboard rows by a column in the given direction; nulls always
+ * sort last regardless of direction. */
+export function sortLeaderboardRows<T extends LeaderboardSortSource>(
+  rows: T[],
+  key: LeaderboardSortKey,
+  dir: LeaderboardSortDir,
 ): T[] {
-  const metric = getMetricDefinition(key);
-  return [...strategies].sort((a, b) => {
-    const aValue = metricValue(a, key);
-    const bValue = metricValue(b, key);
+  return [...rows].sort((a, b) => {
+    const aValue = leaderboardSortValue(a, key);
+    const bValue = leaderboardSortValue(b, key);
     if (aValue === null && bValue === null) return 0;
     if (aValue === null) return 1;
     if (bValue === null) return -1;
     const diff = aValue - bValue;
-    return metric.higherIsBetter ? -diff : diff;
+    return dir === "asc" ? diff : -diff;
   });
 }
 

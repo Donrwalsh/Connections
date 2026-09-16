@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useParams } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { LeaderboardRow } from "../../../data/benchmark/types";
 import { StrategyTable } from "../StrategyTable";
 
@@ -52,7 +52,9 @@ describe("StrategyTable — Category IQ column", () => {
             categoryAccuracy: 60,
           }),
         ]}
-        metricKey="successRate"
+        sortBy="successRate"
+        sortDir="desc"
+        onSortChange={vi.fn()}
         variant="llm"
       />,
     );
@@ -77,7 +79,9 @@ describe("StrategyTable — Category IQ column", () => {
             categoryAccuracy: null,
           }),
         ]}
-        metricKey="successRate"
+        sortBy="successRate"
+        sortDir="desc"
+        onSortChange={vi.fn()}
         variant="llm"
       />,
     );
@@ -90,7 +94,9 @@ describe("StrategyTable — Category IQ column", () => {
     renderTable(
       <StrategyTable
         rows={[makeRow()]}
-        metricKey="successRate"
+        sortBy="avgGuesses"
+        sortDir="asc"
+        onSortChange={vi.fn()}
         variant="deterministic"
       />,
     );
@@ -98,6 +104,89 @@ describe("StrategyTable — Category IQ column", () => {
     expect(
       screen.queryByRole("columnheader", { name: "Category IQ" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("StrategyTable — header-click sorting", () => {
+  it("shows an ascending/descending arrow only on the active column, and toggles onClick", async () => {
+    const user = userEvent.setup();
+    const onSortChange = vi.fn();
+    renderTable(
+      <StrategyTable
+        rows={[makeRow()]}
+        sortBy="avgGuesses"
+        sortDir="asc"
+        onSortChange={onSortChange}
+        variant="deterministic"
+      />,
+    );
+
+    const activeButton = screen.getByRole("button", { name: "Sort by Avg guesses, ascending" });
+    expect(activeButton).toHaveTextContent("Avg guesses ↑");
+    expect(screen.getByRole("button", { name: "Sort by Range" })).toHaveTextContent("Range");
+
+    await user.click(screen.getByRole("button", { name: "Sort by Range" }));
+    expect(onSortChange).toHaveBeenCalledWith("range");
+
+    await user.click(activeButton);
+    expect(onSortChange).toHaveBeenCalledWith("avgGuesses");
+  });
+
+  it("sorts rows by the given column and direction", () => {
+    renderTable(
+      <StrategyTable
+        rows={[
+          makeRow({ id: "a", strategyName: "a", avgGuessesToSolve: 30 }),
+          makeRow({ id: "b", strategyName: "b", avgGuessesToSolve: 5 }),
+        ]}
+        sortBy="avgGuesses"
+        sortDir="asc"
+        onSortChange={vi.fn()}
+        variant="deterministic"
+      />,
+    );
+
+    const [first, second] = screen.getAllByRole("link");
+    expect(first).toHaveTextContent("B");
+    expect(second).toHaveTextContent("A");
+  });
+
+  it("sorts the Range column by its upper (max guesses) value", () => {
+    renderTable(
+      <StrategyTable
+        rows={[
+          makeRow({ id: "a", strategyName: "a", maxGuesses: 40 }),
+          makeRow({ id: "b", strategyName: "b", maxGuesses: 8 }),
+        ]}
+        sortBy="range"
+        sortDir="asc"
+        onSortChange={vi.fn()}
+        variant="deterministic"
+      />,
+    );
+
+    const [first, second] = screen.getAllByRole("link");
+    expect(first).toHaveTextContent("B");
+    expect(second).toHaveTextContent("A");
+  });
+
+  it("sorts the Progress column by puzzles covered", () => {
+    renderTable(
+      <StrategyTable
+        rows={[
+          makeRow({ id: "a", strategyName: "a", puzzlesCovered: 2, totalPuzzles: 100 }),
+          makeRow({ id: "b", strategyName: "b", puzzlesCovered: 90, totalPuzzles: 100 }),
+        ]}
+        sortBy="progress"
+        sortDir="desc"
+        onSortChange={vi.fn()}
+        variant="deterministic"
+      />,
+    );
+
+    const [first, second] = screen.getAllByRole("link");
+    expect(first).toHaveTextContent("B");
+    expect(second).toHaveTextContent("A");
   });
 });
 
@@ -113,7 +202,9 @@ describe("StrategyTable — provider pool badge", () => {
             kind: "llm",
           }),
         ]}
-        metricKey="successRate"
+        sortBy="successRate"
+        sortDir="desc"
+        onSortChange={vi.fn()}
         variant="llm"
       />,
     );
@@ -123,7 +214,15 @@ describe("StrategyTable — provider pool badge", () => {
   });
 
   it("shows no pool badge on a deterministic row", () => {
-    renderTable(<StrategyTable rows={[makeRow()]} metricKey="successRate" variant="deterministic" />);
+    renderTable(
+      <StrategyTable
+        rows={[makeRow()]}
+        sortBy="avgGuesses"
+        sortDir="asc"
+        onSortChange={vi.fn()}
+        variant="deterministic"
+      />,
+    );
 
     const row = screen.getByRole("link");
     expect(within(row).queryByText("Groq")).not.toBeInTheDocument();
@@ -159,7 +258,9 @@ describe("StrategyTable — routing a model id containing a slash", () => {
                     kind: "llm",
                   }),
                 ]}
-                metricKey="successRate"
+                sortBy="successRate"
+                sortDir="desc"
+                onSortChange={vi.fn()}
                 variant="llm"
               />
             }
