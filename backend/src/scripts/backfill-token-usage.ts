@@ -21,8 +21,14 @@ import { CategoryEvaluation } from "../modules/strategy/entities/category-evalua
  * same gap for that one field, and this backfill is what makes historical
  * runs display correctly in the new per-step reasoning-token UI.
  *
- * Idempotent: only ever writes a row whose own fields are actually null
- * where the parsed data has a value, so re-running is always safe.
+ * Idempotent at the row level: a row is only touched when it currently has
+ * at least one null token column; once touched, all four columns are
+ * recomputed from responseBody and rewritten together (not gated
+ * per-column). That's safe here — not merely re-running without harm, but
+ * actually a no-op in every normal case — because both the live capture
+ * path and this backfill derive their values from the exact same raw
+ * responseBody JSON, so a re-run always recomputes byte-identical values
+ * for columns that were already correct.
  *
  * Local dev (from backend/):
  *   npx tsx src/scripts/backfill-token-usage.ts --dry-run
