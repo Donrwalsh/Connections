@@ -1,6 +1,10 @@
 export const GROUP_SIZE = 4;
 
-export type AnswerTextIssue = "parentheticalStripped" | "groupCountOff" | "unclassified";
+export type AnswerTextIssue =
+  | "parentheticalStripped"
+  | "groupCountOff"
+  | "unclassified"
+  | "multipleProposals";
 
 export interface ParsedAnswer {
   // The "### ANSWER" block's own lines, one group per line — the model's
@@ -87,6 +91,14 @@ export function parseAnswer(responseText: string): ParsedAnswer {
   const parsedGroupWords: string[][] = [];
   const issues = new Set<AnswerTextIssue>();
   const wrongCountGroupNumbers = new Set<number>();
+
+  // More than one "### ANSWER" marker means the model produced more than
+  // one full attempt in the same response (a draft it reconsidered, or a
+  // stray repeat) — only the first is ever parsed into groups/proposalWords
+  // below, so this just names that shape rather than changing it.
+  if (responseText.split(/###?\s*ANSWER:?/i).length > 2) {
+    issues.add("multipleProposals");
+  }
   // Highest "Group N" heading number the response itself mentioned — the
   // catch-all below checks against this, never against the puzzle's
   // total remaining group count. The model normally addresses just one
@@ -179,4 +191,39 @@ export function parseAnswer(responseText: string): ParsedAnswer {
   }
 
   return { groups, proposalWords, categoryByGroup, textIssues: Array.from(issues) };
+}
+
+/**
+ * Rebuilds a minimal "### GROUPS" / "### ANSWER" block from already-parsed
+ * proposal data (the same proposalWords/categoryByGroup that drove the
+ * actual submitted guesses) rather than from raw model text. Used to
+ * replace a response flagged `multipleProposals` in conversation history —
+ * the model's own verbose multi-attempt reply is swapped for a compact
+ * restatement of just the proposal that was actually registered, so later
+ * turns don't keep re-sending every earlier draft. `proposalWords` may be
+ * sparse (a hole for a group number that failed to parse); holes are
+ * skipped rather than rendered as empty groups.
+ */
+export function formatCompactAnswer(
+  proposalWords: string[][],
+  categoryByGroup: Map<number, string>,
+): string {
+  const groupNumbers = proposalWords
+    .map((words, index) => (words ? index + 1 : null))
+    .filter((groupNum): groupNum is number => groupNum !== null);
+
+  const groupsSection = groupNumbers
+    .map((groupNum) => {
+      const words = proposalWords[groupNum - 1];
+      const category = categoryByGroup.get(groupNum);
+      const categoryLine = category ? `Category: ${category}\n` : "";
+      return `Group ${groupNum}\n${categoryLine}Words: ${words.join(", ")}`;
+    })
+    .join("\n\n");
+
+  const answerSection = groupNumbers
+    .map((groupNum) => proposalWords[groupNum - 1].join(", "))
+    .join("\n");
+
+  return `### GROUPS\n${groupsSection}\n\n### ANSWER\n${answerSection}`;
 }

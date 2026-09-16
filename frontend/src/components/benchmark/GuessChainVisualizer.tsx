@@ -331,6 +331,8 @@ function issueTagLabel(tag: string): string {
       return "Hallucinated word";
     case "unclassified":
       return "Unclassified issue";
+    case "multipleProposals":
+      return "Multiple proposals";
     default:
       return tag;
   }
@@ -346,6 +348,8 @@ function issueTagTitle(tag: string): string {
       return "The model proposed a word that was never part of this puzzle.";
     case "unclassified":
       return "A group went missing from the response for a reason not yet covered by a named check.";
+    case "multipleProposals":
+      return "This response contained more than one full answer attempt — only the first is what was actually registered. Later prompts include just that proposal, not the full response, to keep the conversation from ballooning.";
     default:
       return "Unrecognized issue tag.";
   }

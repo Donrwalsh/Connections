@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseAnswer } from "./parse-answer";
+import { formatCompactAnswer, parseAnswer } from "./parse-answer";
 
 describe("parseAnswer", () => {
   it("parses a clean response into groups, proposalWords and categories", () => {
@@ -148,5 +148,76 @@ describe("parseAnswer", () => {
 
     expect(result.groups).toEqual([]);
     expect(result.proposalWords).toEqual([]);
+  });
+
+  it("flags multipleProposals when the response contains more than one ### ANSWER block", () => {
+    const response =
+      "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n\n" +
+      "### ANSWER\nAPPLE, BANANA, CHERRY, DATE\n\n" +
+      "Actually, let me reconsider.\n\n" +
+      "### GROUPS\n#### Group 1\nCategory: Colors\nWords: RED, BLUE, GREEN, YELLOW\n\n" +
+      "### ANSWER\nRED, BLUE, GREEN, YELLOW";
+    const result = parseAnswer(response);
+
+    expect(result.textIssues).toEqual(["multipleProposals"]);
+  });
+
+  it("does not flag multipleProposals for a single ### ANSWER block", () => {
+    const response =
+      "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n\n" +
+      "### ANSWER\nAPPLE, BANANA, CHERRY, DATE";
+    const result = parseAnswer(response);
+
+    expect(result.textIssues).toEqual([]);
+  });
+});
+
+describe("formatCompactAnswer", () => {
+  it("rebuilds a compact GROUPS/ANSWER block from the parsed proposal data", () => {
+    const proposalWords = [
+      ["APPLE", "BANANA", "CHERRY", "DATE"],
+      ["RED", "BLUE", "GREEN", "YELLOW"],
+    ];
+    const categoryByGroup = new Map([
+      [1, "Fruits"],
+      [2, "Colors"],
+    ]);
+
+    const compact = formatCompactAnswer(proposalWords, categoryByGroup);
+
+    expect(compact).toBe(
+      "### GROUPS\n" +
+        "Group 1\n" +
+        "Category: Fruits\n" +
+        "Words: APPLE, BANANA, CHERRY, DATE\n\n" +
+        "Group 2\n" +
+        "Category: Colors\n" +
+        "Words: RED, BLUE, GREEN, YELLOW\n\n" +
+        "### ANSWER\n" +
+        "APPLE, BANANA, CHERRY, DATE\n" +
+        "RED, BLUE, GREEN, YELLOW",
+    );
+  });
+
+  it("skips a sparse hole in proposalWords rather than rendering an empty group", () => {
+    const proposalWords = [undefined as unknown as string[], ["RED", "BLUE", "GREEN", "YELLOW"]];
+    const categoryByGroup = new Map([[2, "Colors"]]);
+
+    const compact = formatCompactAnswer(proposalWords, categoryByGroup);
+
+    expect(compact).toBe(
+      "### GROUPS\nGroup 2\nCategory: Colors\nWords: RED, BLUE, GREEN, YELLOW\n\n### ANSWER\nRED, BLUE, GREEN, YELLOW",
+    );
+  });
+
+  it("omits the Category line when a group number has no known category", () => {
+    const proposalWords = [["APPLE", "BANANA", "CHERRY", "DATE"]];
+    const categoryByGroup = new Map<number, string>();
+
+    const compact = formatCompactAnswer(proposalWords, categoryByGroup);
+
+    expect(compact).toBe(
+      "### GROUPS\nGroup 1\nWords: APPLE, BANANA, CHERRY, DATE\n\n### ANSWER\nAPPLE, BANANA, CHERRY, DATE",
+    );
   });
 });

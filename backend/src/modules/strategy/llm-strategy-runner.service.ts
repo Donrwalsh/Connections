@@ -29,7 +29,7 @@ import { SupportedModelService } from "../supported-model/supported-model.servic
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { RateLimitHoldService } from "./rate-limit-hold.service";
 import { firstCombination } from "./combinatorics";
-import { GROUP_SIZE } from "answer-grammar";
+import { formatCompactAnswer, GROUP_SIZE } from "answer-grammar";
 import { applyOneOffWordFixups } from "./normalize-puzzle-word";
 
 const MODEL_ERROR_RETRY_BASE_DELAY_MS = 1000;
@@ -363,9 +363,6 @@ export class LlmStrategyRunner {
           run.contextWindow = data.contextWindow;
         }
 
-        // Append the assistant response to conversation history.
-        messages.push({ role: "assistant", content: data.response });
-
         // Create a SolvePrompt row for this LLM call.
         const currentPrompt: Partial<SolvePrompt> = {
           strategyRunId: run.id,
@@ -387,6 +384,15 @@ export class LlmStrategyRunner {
           responseBody: this.toJsonbResponseBody(data.responseBody),
         };
         pendingPrompts.push(currentPrompt);
+
+        // What actually gets echoed back into conversation history — the
+        // full response, unless it contained more than one full answer
+        // attempt (SolvePromptIssueTag.MULTIPLE_PROPOSALS), in which case
+        // it's replaced with a compact restatement of just the proposal
+        // that was actually registered (see below), so a verbose or
+        // self-revising response doesn't keep ballooning every later
+        // prompt's size.
+        let assistantContent = data.response;
 
         const groups = data.groups;
         if (groups.length === 0) {
@@ -413,6 +419,10 @@ export class LlmStrategyRunner {
           // pendingPrompts, so mutating it here still reflects at flush time.
           currentPrompt.issueTags = textIssues;
 
+          if (textIssues.includes(SolvePromptIssueTag.MULTIPLE_PROPOSALS)) {
+            assistantContent = formatCompactAnswer(proposalWords, categoryMap);
+          }
+
           const proposalEntries = this.buildProposalEntries(
             proposalWords,
             categoryMap,
@@ -432,6 +442,9 @@ export class LlmStrategyRunner {
             maxFailedGuesses,
           );
         }
+
+        // Append the assistant response to conversation history.
+        messages.push({ role: "assistant", content: assistantContent });
       } else {
         // The prompt was already pushed as a user turn before this call; the
         // call failed with no assistant reply, so drop it rather than let
