@@ -140,7 +140,11 @@ function PromptStep({ prompt }: { prompt: SolvePromptRecord }) {
           <summary>
             Raw response
             {prompt.completionTokens !== null
-              ? ` (${prompt.completionTokens.toLocaleString()} tokens)`
+              ? ` (${prompt.completionTokens.toLocaleString()} tokens${
+                  prompt.reasoningTokens !== null && prompt.reasoningTokens > 0
+                    ? `, ${prompt.reasoningTokens.toLocaleString()} reasoning`
+                    : ""
+                })`
               : ""}
           </summary>
           <pre className="bench-step__pre">{prompt.rawResponseText}</pre>
@@ -239,6 +243,10 @@ function ProposalRow({ proposal }: { proposal: LlmProposalRecord }) {
                   `${proposal.categoryEvaluation.judgeProvider}/${proposal.categoryEvaluation.judgeModel}`,
                   proposal.categoryEvaluation.totalTokens !== null
                     ? `${proposal.categoryEvaluation.totalTokens} tok`
+                    : null,
+                  proposal.categoryEvaluation.reasoningTokens !== null &&
+                  proposal.categoryEvaluation.reasoningTokens > 0
+                    ? `${proposal.categoryEvaluation.reasoningTokens} reasoning`
                     : null,
                   proposal.categoryEvaluation.latencyMs !== null
                     ? formatDuration(proposal.categoryEvaluation.latencyMs)
