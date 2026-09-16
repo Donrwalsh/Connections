@@ -202,6 +202,32 @@ describe("runAnswerStep", () => {
     await expect(runAnswerStep(MESSAGES)).rejects.toMatchObject({ code: "invalid_group" });
   });
 
+  it("attaches the already-billed usage to the invalid_group SolveError instead of dropping it", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "I don't know the answer",
+      response: { modelId: "gpt-5-nano", id: "resp_999" },
+      request: { body: {} },
+      usage: {
+        inputTokens: 2100,
+        outputTokens: 16000,
+        totalTokens: 18100,
+        outputTokenDetails: { textTokens: 100, reasoningTokens: 15900 },
+      },
+    });
+
+    await expect(runAnswerStep(MESSAGES)).rejects.toMatchObject({
+      code: "invalid_group",
+      details: {
+        usage: {
+          promptTokens: 2100,
+          completionTokens: 16000,
+          totalTokens: 18100,
+          reasoningTokens: 15900,
+        },
+      },
+    });
+  });
+
   it("surfaces APICallError detail instead of discarding it", async () => {
     const { APICallError } = await import("ai");
     generateTextMock.mockRejectedValueOnce(

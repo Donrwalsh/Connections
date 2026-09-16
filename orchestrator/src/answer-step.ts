@@ -133,7 +133,7 @@ export async function runAnswerStep(
     throw new SolveError(
       "invalid_group",
       'Model response contained no parseable group proposals or "ANSWER:" section',
-      { model: modelId, latencyMs, requestBody, responseId, responseHeaders, responseBody },
+      { model: modelId, latencyMs, requestBody, responseId, responseHeaders, responseBody, usage },
     );
   }
 
