@@ -434,6 +434,7 @@ describe("RunHistoryReadModel", () => {
           promptTokens: 10,
           completionTokens: 20,
           totalTokens: 30,
+          reasoningTokens: 5,
           latencyMs: 500,
           temperature: 0.2,
           createdAt: new Date("2024-01-02T00:00:00Z"),
@@ -474,6 +475,7 @@ describe("RunHistoryReadModel", () => {
       expect(result.solvePrompts[0]!.reconstructedPrompt).toBe(
         "[User]\nsolve for APPLE etc\n\n[Assistant]\nraw",
       );
+      expect(result.solvePrompts[0]!.reasoningTokens).toBe(5);
     });
 
     it("should attach the categoryEvaluation DTO to a used proposal that has one, and null to proposals without", async () => {
@@ -518,6 +520,7 @@ describe("RunHistoryReadModel", () => {
           promptTokens: 10,
           completionTokens: 20,
           totalTokens: 30,
+          reasoningTokens: 5,
           latencyMs: 500,
           temperature: 0.2,
           createdAt: new Date("2024-01-02T00:00:00Z"),
@@ -559,6 +562,7 @@ describe("RunHistoryReadModel", () => {
           promptTokens: 10,
           completionTokens: 2,
           totalTokens: 12,
+          reasoningTokens: 3,
           latencyMs: 5,
           statusCode: null,
           errorName: null,
@@ -586,6 +590,7 @@ describe("RunHistoryReadModel", () => {
         promptTokens: 10,
         completionTokens: 2,
         totalTokens: 12,
+        reasoningTokens: 3,
         latencyMs: 5,
         statusCode: null,
         errorName: null,

@@ -38,6 +38,7 @@ export interface CategoryEvaluationDto {
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
+  reasoningTokens: number | null;
   latencyMs: number | null;
   statusCode: number | null;
   errorName: string | null;
@@ -75,6 +76,7 @@ export interface SolvePromptDto {
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
+  reasoningTokens: number | null;
   latencyMs: number | null;
   temperature: number | null;
   createdAt: Date;
