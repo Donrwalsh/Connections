@@ -176,6 +176,14 @@ export function FreeTierBudgetWidget({ tier, spentUsd, refreshSignal, automation
       <span className="bench-muted bench-free-tier__remaining">
         {usage.remainingTokens.toLocaleString()} tokens remaining today
       </span>
+      {usage.reasoningTokensUsedToday > 0 ? (
+        <span
+          className="bench-muted bench-free-tier__reasoning"
+          title="Tokens spent on model reasoning today, already included in the used-tokens figure above — shown separately since it's the spend most likely to come from a failed reasoning-heavy call."
+        >
+          {usage.reasoningTokensUsedToday.toLocaleString()} of which reasoning
+        </span>
+      ) : null}
       {automation ? (
         <p className={automation.isError ? "bench-error" : "bench-muted"}>
           {formatAutomationLine(automation)}

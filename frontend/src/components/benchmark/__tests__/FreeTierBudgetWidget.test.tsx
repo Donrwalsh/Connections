@@ -357,4 +357,22 @@ describe("FreeTierBudgetWidget", () => {
     await screen.findByText("238,000 tokens remaining today");
     expect(screen.queryByText(/Auto-run:/)).not.toBeInTheDocument();
   });
+
+  it("shows today's reasoning-token figure when reasoningTokensUsedToday is nonzero", async () => {
+    stubFetch({ ...flagshipUsage, reasoningTokensUsedToday: 4_500 });
+
+    render(<FreeTierBudgetWidget tier="flagship" />);
+
+    await screen.findByText("238,000 tokens remaining today");
+    expect(screen.getByText("4,500 of which reasoning")).toBeInTheDocument();
+  });
+
+  it("omits the reasoning-token line when reasoningTokensUsedToday is zero", async () => {
+    stubFetch(flagshipUsage);
+
+    render(<FreeTierBudgetWidget tier="flagship" />);
+
+    await screen.findByText("238,000 tokens remaining today");
+    expect(screen.queryByText(/of which reasoning/)).not.toBeInTheDocument();
+  });
 });
