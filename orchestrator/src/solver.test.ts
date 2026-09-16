@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { APICallError, RetryError } from "ai";
+import { APICallError, NoObjectGeneratedError, RetryError } from "ai";
 import { classifyModelCallError, SolveError } from "./solver.js";
 
 // The real 429 body captured from a live burst against Google AI Studio's
@@ -102,6 +102,32 @@ describe("classifyModelCallError", () => {
     const result = classifyModelCallError(err, "openai", { model: "gpt-4.1-nano" });
 
     expect(result.code).toBe("model_error");
+  });
+
+  it("attaches usage from a NoObjectGeneratedError so a billed-but-malformed judge call still records its tokens", () => {
+    const err = new NoObjectGeneratedError({
+      message: "No object generated: response did not match schema.",
+      text: "not json",
+      response: { id: "resp_555", timestamp: new Date(), modelId: "gpt-5-nano" },
+      usage: {
+        inputTokens: 90,
+        outputTokens: 12000,
+        totalTokens: 12090,
+        inputTokenDetails: { noCacheTokens: 90, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        outputTokenDetails: { textTokens: 40, reasoningTokens: 11960 },
+      },
+      finishReason: "stop",
+    });
+
+    const result = classifyModelCallError(err, "openai", { model: "gpt-5-nano" });
+
+    expect(result.code).toBe("invalid_group");
+    expect(result.details.usage).toEqual({
+      promptTokens: 90,
+      completionTokens: 12000,
+      totalTokens: 12090,
+      reasoningTokens: 11960,
+    });
   });
 
   it("classifies a Google 429 with neither PerMinute nor PerDay as model_error", () => {

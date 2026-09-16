@@ -511,10 +511,19 @@ export function classifyModelCallError(
     err instanceof TypeValidationError ||
     err instanceof JSONParseError
   ) {
+    const usage =
+      err instanceof NoObjectGeneratedError && err.usage
+        ? {
+            promptTokens: err.usage.inputTokens,
+            completionTokens: err.usage.outputTokens,
+            totalTokens: err.usage.totalTokens,
+            reasoningTokens: err.usage.outputTokenDetails?.reasoningTokens,
+          }
+        : undefined;
     return new SolveError(
       "invalid_group",
       `Model produced a malformed response: ${message}`,
-      details,
+      { ...details, usage },
     );
   }
 
