@@ -153,6 +153,47 @@ describe("CategoryEvaluatorService.evaluateProposal", () => {
     );
   });
 
+  it("persists reasoningTokens on a judged row", async () => {
+    orchestrator.judgeCategory.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        verdict: "correct",
+        rationale: "Same connection.",
+        model: "gpt-5-nano",
+        latencyMs: 300,
+        usage: { promptTokens: 80, completionTokens: 300, totalTokens: 380, reasoningTokens: 270 },
+      },
+    });
+
+    const res = await service.evaluateProposal(55);
+
+    expect(res.outcome).toBe("judged");
+    expect(catEvalRepo.save).toHaveBeenCalledWith(expect.objectContaining({ reasoningTokens: 270 }));
+  });
+
+  it("captures usage on a judge callError row instead of leaving tokens null", async () => {
+    orchestrator.judgeCategory.mockResolvedValueOnce({
+      ok: false,
+      error: {
+        error: "Model produced a malformed response: ...",
+        code: "invalid_group",
+        usage: { promptTokens: 90, completionTokens: 12000, totalTokens: 12090, reasoningTokens: 11960 },
+      },
+    });
+
+    const res = await service.evaluateProposal(55);
+
+    expect(res.outcome).toBe("callError");
+    expect(catEvalRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptTokens: 90,
+        completionTokens: 12000,
+        totalTokens: 12090,
+        reasoningTokens: 11960,
+      }),
+    );
+  });
+
   it("skips (no judge call, no row) when a row already exists and force is not set", async () => {
     catEvalRepo.findOne.mockResolvedValue({ id: 1 });
     const res = await service.evaluateProposal(55);
