@@ -442,4 +442,57 @@ describe("GuessChainVisualizer", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /12345/ })).toBeInTheDocument();
   });
+
+  it("shows a 'Manually retry' button only when the run's status is 'error' for an admin session", async () => {
+    stubFetch({ ...plainDetail, status: "error" });
+
+    renderAsAdmin(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByRole("button", { name: "Manually retry" })).toBeInTheDocument();
+  });
+
+  it("does not show the manually-retry button for a non-error status", async () => {
+    stubFetch({ ...plainDetail, status: "completed" });
+
+    renderAsAdmin(<GuessChainVisualizer runId={12345} />);
+
+    await screen.findByText("APPLE, BANANA, CHERRY, DATE");
+    expect(screen.queryByRole("button", { name: "Manually retry" })).not.toBeInTheDocument();
+  });
+
+  it("does not show the manually-retry button for a non-admin visitor, even on an errored run", async () => {
+    stubFetch({ ...plainDetail, status: "error" });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    await screen.findByText("APPLE, BANANA, CHERRY, DATE");
+    expect(screen.queryByRole("button", { name: "Manually retry" })).not.toBeInTheDocument();
+  });
+
+  it("opens the retry-run modal when the manually-retry button is clicked", async () => {
+    const user = userEvent.setup();
+    stubFetch({ ...plainDetail, status: "error" });
+
+    renderAsAdmin(<GuessChainVisualizer runId={12345} />);
+
+    await user.click(await screen.findByRole("button", { name: "Manually retry" }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Manually retry run #12345/ })).toBeInTheDocument();
+  });
+
+  it("shows a 'Manually retried' badge on a step produced by a manual retry, and not on other steps", async () => {
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [
+        { ...llmDetail.solvePrompts[0]!, manualRetry: false },
+        { ...llmDetail.solvePrompts[0]!, id: 2, promptNumber: 2, manualRetry: true },
+      ],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Manually retried")).toBeInTheDocument();
+    expect(screen.getAllByText("Manually retried")).toHaveLength(1);
+  });
 });

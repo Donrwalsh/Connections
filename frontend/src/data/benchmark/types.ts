@@ -511,6 +511,14 @@ export interface DeleteRunResult {
   deletedCategoryEvaluations: number;
 }
 
+/** Response from POST /dispatch/run/:runId/retry — the run's new status
+ * (always "running" on success; the request rejects otherwise). */
+export interface RetryRunResult {
+  message: string;
+  runId: number;
+  status: string;
+}
+
 /** GET /dispatch/runs/errored — how many strategy runs are in the 'error'
  * status right now. The figure the maintenance panel's "delete errored
  * runs" button acts on. */
