@@ -21,7 +21,8 @@
     "backfill:image-dates": "node dist/scripts/backfill-image-puzzle-dates.js",
     "backfill:issue-tags": "node dist/scripts/backfill-issue-tags.js",
     "backfill:prompt-text": "node dist/scripts/backfill-prompt-text.js",
-    "eval:categories": "tsx src/scripts/evaluate-categories.ts"
+    "eval:categories": "tsx src/scripts/evaluate-categories.ts",
+    "purge:case-mismatch-runs": "tsx src/scripts/purge-case-mismatch-runs.ts"
   },
   "dependencies": {
     "@bull-board/api": "^8.4.0",
