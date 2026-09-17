@@ -12,6 +12,12 @@ export interface RunStrategyJobData {
   // before enqueueing (StrategyDispatch/PuzzleIngestionService) — null/absent
   // for non-LLM strategies, which don't have a model at all.
   model?: string | null;
+  // Set only when this job was enqueued by StrategyDispatch.retryRun to
+  // resume a run stuck in 'error' — threaded through to
+  // LlmStrategyRunner.runLlmStrategy so every SolvePrompt row this
+  // execution creates gets manualRetry stamped (see solve-prompt.entity.ts).
+  // Absent/false for an ordinary dispatch.
+  manualRetry?: boolean;
 }
 
 export interface LlmJobDeps {
@@ -43,7 +49,8 @@ export async function handleLlmJob(
     return result;
   }
 
-  const { puzzleId, strategyName, date, trialNumber, model } = job.data as RunStrategyJobData;
+  const { puzzleId, strategyName, date, trialNumber, model, manualRetry } =
+    job.data as RunStrategyJobData;
   if (strategyName !== deps.expectedStrategy) {
     throw new Error(
       `Strategy '${strategyName}' dispatched to the '${deps.expectedStrategy}' queue for puzzle ${puzzleId}; expected '${deps.expectedStrategy}'`,
@@ -57,6 +64,7 @@ export async function handleLlmJob(
     strategyName,
     trialNumber,
     model ?? undefined,
+    manualRetry ?? false,
   );
   deps.logger.log(
     `finished job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName} trial=${trialNumber} status=${result.status}`,

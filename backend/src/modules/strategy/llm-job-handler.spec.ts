@@ -52,8 +52,34 @@ describe("handleLlmJob", () => {
       logger,
     });
 
-    expect(runner.runLlmStrategy).toHaveBeenCalledWith(1, "llm-openai", 1, "gpt-4.1-nano");
+    expect(runner.runLlmStrategy).toHaveBeenCalledWith(1, "llm-openai", 1, "gpt-4.1-nano", false);
     expect(evaluator.evaluateProposal).not.toHaveBeenCalled();
+  });
+
+  it("passes manualRetry through to the strategy runner when the job data sets it", async () => {
+    const runner = { runLlmStrategy: jest.fn().mockResolvedValue({ status: "running" }) };
+    const evaluator = { evaluateProposal: jest.fn() };
+    const job = {
+      id: "j4",
+      name: "run-strategy",
+      data: {
+        puzzleId: 1,
+        strategyName: "llm-openai",
+        date: "2024-01-01",
+        trialNumber: 1,
+        model: "gpt-4.1-nano",
+        manualRetry: true,
+      },
+    };
+
+    await handleLlmJob(job as never, {
+      llmStrategyRunner: runner as never,
+      categoryEvaluatorService: evaluator as never,
+      expectedStrategy: "llm-openai",
+      logger,
+    });
+
+    expect(runner.runLlmStrategy).toHaveBeenCalledWith(1, "llm-openai", 1, "gpt-4.1-nano", true);
   });
 
   it("throws when a run-strategy job's strategy doesn't match the queue", async () => {
