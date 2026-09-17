@@ -710,6 +710,38 @@ describe("LlmStrategyRunner", () => {
       );
     });
 
+    it("stamps manualRetry true on a success row when the run is a manual retry", async () => {
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
+        makeAssistResponse([
+          ["APPLE", "BANANA", "CHERRY", "DATE"],
+          ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        ]),
+      );
+
+      await runner.runLlmStrategy(100, "llm-openai", 0, undefined, true);
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(expect.objectContaining({ manualRetry: true }));
+    });
+
+    it("leaves manualRetry false on a success row for an ordinary (non-retried) run", async () => {
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
+        makeAssistResponse([
+          ["APPLE", "BANANA", "CHERRY", "DATE"],
+          ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        ]),
+      );
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(expect.objectContaining({ manualRetry: false }));
+    });
+
     it("should consult the Ollama provider for the llm-ollama strategy", async () => {
       mockStrategyRunRepo.findOne.mockResolvedValueOnce(
         makeRun({ strategyName: "llm-ollama", modelName: "mistral" }),
@@ -1114,6 +1146,27 @@ describe("LlmStrategyRunner", () => {
             errorMessage: "model down",
             isRetryable: true,
           }),
+        );
+      } finally {
+        delete process.env.LLM_MAX_MODEL_ERRORS;
+      }
+    });
+
+    it("stamps manualRetry true on a CALL_ERROR row when the run is a manual retry", async () => {
+      process.env.LLM_MAX_MODEL_ERRORS = "1";
+      try {
+        mockOrchestratorService.requestSolveStep.mockResolvedValue({
+          ok: false,
+          error: { error: "model down", code: "model_error", statusCode: 502 },
+        });
+
+        await runner.runLlmStrategy(100, "llm-openai", 0, undefined, true);
+
+        const promptRows = mockManager.insert.mock.calls
+          .filter((call) => call[0] === "SolvePrompt")
+          .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+        expect(promptRows[0]).toEqual(
+          expect.objectContaining({ status: "callError", manualRetry: true }),
         );
       } finally {
         delete process.env.LLM_MAX_MODEL_ERRORS;
