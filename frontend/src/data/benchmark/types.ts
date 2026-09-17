@@ -256,6 +256,7 @@ export interface FreeTierUsage {
   usedTokens: number;
   dailyLimitTokens: number;
   remainingTokens: number;
+  reasoningTokensUsedToday: number;
   models: string[];
 }
 
@@ -428,6 +429,7 @@ export interface CategoryEvaluationRecord {
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
+  reasoningTokens: number | null;
   latencyMs: number | null;
   statusCode: number | null;
   errorName: string | null;
@@ -471,6 +473,7 @@ export interface SolvePromptRecord {
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
+  reasoningTokens: number | null;
   latencyMs: number | null;
   temperature: number | null;
   createdAt: string;

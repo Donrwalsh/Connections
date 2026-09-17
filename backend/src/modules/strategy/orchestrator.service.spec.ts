@@ -539,6 +539,34 @@ describe("OrchestratorService", () => {
     });
   });
 
+  it("extracts usage (including reasoningTokens) from the orchestrator's error details", async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockResponse({
+        ok: false,
+        status: 400,
+        body: {
+          error: "Model produced a malformed response",
+          code: "invalid_group",
+          details: {
+            usage: { promptTokens: 2100, completionTokens: 16000, totalTokens: 18100, reasoningTokens: 15900 },
+          },
+        },
+      }),
+    );
+
+    const outcome = await service.requestSolveStep([{ role: "user", content: "hi" }]);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.error.usage).toEqual({
+        promptTokens: 2100,
+        completionTokens: 16000,
+        totalTokens: 18100,
+        reasoningTokens: 15900,
+      });
+    }
+  });
+
   describe("judgeCategory", () => {
     it("POSTs categories to /judge-category and maps the success body", async () => {
       const fetchMock = jest.spyOn(global, "fetch").mockResolvedValue(

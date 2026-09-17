@@ -24,22 +24,30 @@ describe("FreeTierUsageService", () => {
   let mockCategoryEvaluationRepo: { createQueryBuilder: jest.Mock };
   let mockSupportedModelService: { findModelNamesByFreeTier: jest.Mock };
 
-  function makeQb(totalTokens: string | null) {
+  function makeQb(totalTokens: string | null, reasoningTokens: string | null = "0") {
     return {
       innerJoin: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       select: jest.fn().mockReturnThis(),
-      getRawOne: jest.fn().mockResolvedValue(totalTokens === null ? undefined : { totalTokens }),
+      addSelect: jest.fn().mockReturnThis(),
+      getRawOne: jest
+        .fn()
+        .mockResolvedValue(totalTokens === null ? undefined : { totalTokens, reasoningTokens }),
     };
   }
 
   // Stubs both token sums getUsage runs: SolvePrompt (solve-step tokens) and
   // CategoryEvaluation (category-judge call tokens). judgeTokens defaults to
   // "0" so the pre-existing SolvePrompt-only assertions are unaffected.
-  function mockUsageQuery(promptTokens: string | null, judgeTokens: string | null = "0") {
-    const prompt = makeQb(promptTokens);
-    const judge = makeQb(judgeTokens);
+  function mockUsageQuery(
+    promptTokens: string | null,
+    judgeTokens: string | null = "0",
+    promptReasoningTokens: string | null = "0",
+    judgeReasoningTokens: string | null = "0",
+  ) {
+    const prompt = makeQb(promptTokens, promptReasoningTokens);
+    const judge = makeQb(judgeTokens, judgeReasoningTokens);
     mockSolvePromptRepo.createQueryBuilder.mockReturnValue(prompt);
     mockCategoryEvaluationRepo.createQueryBuilder.mockReturnValue(judge);
     return { prompt, judge };
@@ -98,6 +106,7 @@ describe("FreeTierUsageService", () => {
         usedTokens: 62340,
         dailyLimitTokens: 250_000,
         remainingTokens: 187_660,
+        reasoningTokensUsedToday: 0,
         models: FLAGSHIP_MODELS,
       });
     });
@@ -109,6 +118,30 @@ describe("FreeTierUsageService", () => {
 
       expect(result.usedTokens).toBe(300_000);
       expect(result.remainingTokens).toBe(0);
+    });
+
+    it("sums reasoningTokens across both sources for the same today window as usedTokens", async () => {
+      mockUsageQuery("62340", "10000", "40000", "6000");
+
+      const result = await service.getFlagshipUsage();
+
+      expect(result.reasoningTokensUsedToday).toBe(46_000);
+    });
+
+    it("returns zero reasoningTokensUsedToday when no rows match", async () => {
+      mockUsageQuery(null, null);
+
+      const result = await service.getFlagshipUsage();
+
+      expect(result.reasoningTokensUsedToday).toBe(0);
+    });
+
+    it("returns zero reasoningTokensUsedToday when the tier has no models configured", async () => {
+      mockSupportedModelService.findModelNamesByFreeTier.mockResolvedValueOnce([]);
+
+      const result = await service.getFlagshipUsage();
+
+      expect(result.reasoningTokensUsedToday).toBe(0);
     });
   });
 
@@ -204,6 +237,7 @@ describe("FreeTierUsageService", () => {
       usedTokens: 0,
       dailyLimitTokens: 250_000,
       remainingTokens: 250_000,
+      reasoningTokensUsedToday: 0,
       models: [],
     });
     expect(mockSolvePromptRepo.createQueryBuilder).not.toHaveBeenCalled();

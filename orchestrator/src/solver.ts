@@ -32,6 +32,17 @@ export interface SolveErrorDetails {
   // GroqRateLimitHoldService on the backend, which uses this value directly
   // as `heldAt + dailyResetSeconds` rather than computing a shared boundary.
   dailyResetSeconds?: number;
+  // Tokens the AI SDK reported for this call, when a `SolveError` is thrown
+  // *after* a call that still billed tokens (e.g. the call succeeded but its
+  // output failed downstream validation) — see answer-step.ts's invalid_group
+  // throw and classifyModelCallError's NoObjectGeneratedError branch. Absent
+  // when the call itself failed outright (no tokens were ever billed).
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+    reasoningTokens?: number;
+  };
 }
 
 /**
@@ -500,10 +511,19 @@ export function classifyModelCallError(
     err instanceof TypeValidationError ||
     err instanceof JSONParseError
   ) {
+    const usage =
+      err instanceof NoObjectGeneratedError && err.usage
+        ? {
+            promptTokens: err.usage.inputTokens,
+            completionTokens: err.usage.outputTokens,
+            totalTokens: err.usage.totalTokens,
+            reasoningTokens: err.usage.outputTokenDetails?.reasoningTokens,
+          }
+        : undefined;
     return new SolveError(
       "invalid_group",
       `Model produced a malformed response: ${message}`,
-      details,
+      { ...details, usage },
     );
   }
 

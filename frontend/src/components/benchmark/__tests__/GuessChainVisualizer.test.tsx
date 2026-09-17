@@ -49,6 +49,7 @@ const llmDetail: StrategyRunDetail = {
       promptTokens: 100,
       completionTokens: 50,
       totalTokens: 150,
+      reasoningTokens: null,
       latencyMs: 1200,
       temperature: 0.2,
       createdAt: "2025-01-01T00:00:00Z",
@@ -246,6 +247,57 @@ describe("GuessChainVisualizer", () => {
     expect(screen.queryByText("No candidate groups parsed.")).not.toBeInTheDocument();
   });
 
+  it("includes a reasoning-token count in the callError summary when the failed call still spent reasoning tokens", async () => {
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [
+        {
+          ...llmDetail.solvePrompts[0]!,
+          status: "callError",
+          rawResponseText: null,
+          proposals: [],
+          errorName: "AI_APICallError",
+          errorMessage: "Rate limit exceeded",
+          statusCode: 429,
+          isRetryable: true,
+          reasoningTokens: 16000,
+        },
+      ],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Rate limit exceeded")).toBeInTheDocument();
+    expect(
+      screen.getByText("AI_APICallError · HTTP 429 · retryable · 16,000 reasoning tokens"),
+    ).toBeInTheDocument();
+  });
+
+  it("omits the reasoning-token count from the callError summary when reasoningTokens is null or zero", async () => {
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [
+        {
+          ...llmDetail.solvePrompts[0]!,
+          status: "callError",
+          rawResponseText: null,
+          proposals: [],
+          errorName: "AI_APICallError",
+          errorMessage: "Rate limit exceeded",
+          statusCode: 429,
+          isRetryable: true,
+          reasoningTokens: null,
+        },
+      ],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Rate limit exceeded")).toBeInTheDocument();
+    expect(screen.getByText("AI_APICallError · HTTP 429 · retryable")).toBeInTheDocument();
+    expect(screen.queryByText(/reasoning tokens/)).not.toBeInTheDocument();
+  });
+
   it("skips the raw request/response disclosures when a callError row has no detail captured", async () => {
     stubFetch({
       ...llmDetail,
@@ -289,6 +341,7 @@ describe("GuessChainVisualizer", () => {
                 promptTokens: 90,
                 completionTokens: 8,
                 totalTokens: 98,
+                reasoningTokens: null,
                 latencyMs: 30,
                 statusCode: null,
                 errorName: null,
@@ -345,6 +398,7 @@ describe("GuessChainVisualizer", () => {
                 promptTokens: null,
                 completionTokens: null,
                 totalTokens: null,
+                reasoningTokens: null,
                 latencyMs: null,
                 statusCode: 502,
                 errorName: "APICallError",

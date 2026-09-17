@@ -140,7 +140,11 @@ function PromptStep({ prompt }: { prompt: SolvePromptRecord }) {
           <summary>
             Raw response
             {prompt.completionTokens !== null
-              ? ` (${prompt.completionTokens.toLocaleString()} tokens)`
+              ? ` (${prompt.completionTokens.toLocaleString()} tokens${
+                  prompt.reasoningTokens !== null && prompt.reasoningTokens > 0
+                    ? `, ${prompt.reasoningTokens.toLocaleString()} reasoning`
+                    : ""
+                })`
               : ""}
           </summary>
           <pre className="bench-step__pre">{prompt.rawResponseText}</pre>
@@ -172,6 +176,9 @@ function CallErrorDetail({ prompt }: { prompt: SolvePromptRecord }) {
     prompt.errorName,
     prompt.statusCode !== null ? `HTTP ${prompt.statusCode}` : null,
     prompt.isRetryable !== null ? (prompt.isRetryable ? "retryable" : "not retryable") : null,
+    prompt.reasoningTokens !== null && prompt.reasoningTokens > 0
+      ? `${prompt.reasoningTokens.toLocaleString()} reasoning tokens`
+      : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -238,7 +245,11 @@ function ProposalRow({ proposal }: { proposal: LlmProposalRecord }) {
                 {[
                   `${proposal.categoryEvaluation.judgeProvider}/${proposal.categoryEvaluation.judgeModel}`,
                   proposal.categoryEvaluation.totalTokens !== null
-                    ? `${proposal.categoryEvaluation.totalTokens} tok`
+                    ? `${proposal.categoryEvaluation.totalTokens.toLocaleString()} tok`
+                    : null,
+                  proposal.categoryEvaluation.reasoningTokens !== null &&
+                  proposal.categoryEvaluation.reasoningTokens > 0
+                    ? `${proposal.categoryEvaluation.reasoningTokens.toLocaleString()} reasoning`
                     : null,
                   proposal.categoryEvaluation.latencyMs !== null
                     ? formatDuration(proposal.categoryEvaluation.latencyMs)

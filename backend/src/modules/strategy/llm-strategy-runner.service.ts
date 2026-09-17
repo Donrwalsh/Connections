@@ -24,7 +24,7 @@ import {
   SolvePromptIssueTag,
 } from "./entities/solve-prompt.entity";
 import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/strategy-run.entity";
-import { OrchestratorService, type ChatMessage, type SolveErrorCode } from "./orchestrator.service";
+import { OrchestratorService, type ChatMessage, type SolveErrorCode, type SolveUsage } from "./orchestrator.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { RateLimitHoldService } from "./rate-limit-hold.service";
@@ -377,6 +377,7 @@ export class LlmStrategyRunner {
           promptTokens: data.usage?.promptTokens ?? null,
           completionTokens: data.usage?.completionTokens ?? null,
           totalTokens: data.usage?.totalTokens ?? null,
+          reasoningTokens: data.usage?.reasoningTokens ?? null,
           latencyMs: data.latencyMs,
           requestBody: data.requestBody ?? null,
           responseId: data.responseId ?? null,
@@ -465,6 +466,7 @@ export class LlmStrategyRunner {
             errorName: outcome.error.errorName,
             errorMessage: outcome.error.error,
             isRetryable: outcome.error.isRetryable,
+            usage: outcome.error.usage,
           }),
         );
 
@@ -556,6 +558,7 @@ export class LlmStrategyRunner {
       errorName?: string;
       errorMessage?: string;
       isRetryable?: boolean;
+      usage?: SolveUsage;
     },
   ): Partial<SolvePrompt> {
     return {
@@ -573,6 +576,10 @@ export class LlmStrategyRunner {
       errorName: attempt.errorName ?? null,
       errorMessage: attempt.errorMessage ?? null,
       isRetryable: attempt.isRetryable ?? null,
+      promptTokens: attempt.usage?.promptTokens ?? null,
+      completionTokens: attempt.usage?.completionTokens ?? null,
+      totalTokens: attempt.usage?.totalTokens ?? null,
+      reasoningTokens: attempt.usage?.reasoningTokens ?? null,
     };
   }
 

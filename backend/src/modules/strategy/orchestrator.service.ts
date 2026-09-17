@@ -8,6 +8,7 @@ export interface SolveUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  reasoningTokens?: number;
 }
 
 export interface ChatMessage {
@@ -55,6 +56,10 @@ export interface SolveStepFailure {
   // is "rate_limited_daily" for a Groq call. See the orchestrator's
   // SolveErrorDetails.dailyResetSeconds.
   dailyResetSeconds?: number;
+  // Tokens the model call billed before its output failed downstream
+  // validation — absent when the call itself failed outright (no tokens
+  // billed). See SolveErrorDetails.usage on the orchestrator side.
+  usage?: SolveUsage;
 }
 
 export type SolveStepOutcome =
@@ -251,6 +256,7 @@ export class OrchestratorService {
     | "isRetryable"
     | "retryAfterSeconds"
     | "dailyResetSeconds"
+    | "usage"
   > {
     if (!details) return {};
     return {
@@ -263,6 +269,7 @@ export class OrchestratorService {
       isRetryable: details.isRetryable as boolean | undefined,
       retryAfterSeconds: details.retryAfterSeconds as number | undefined,
       dailyResetSeconds: details.dailyResetSeconds as number | undefined,
+      usage: details.usage as SolveUsage | undefined,
     };
   }
 

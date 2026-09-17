@@ -54,6 +54,29 @@ describe("judgeCategory", () => {
     expect(typeof result.latencyMs).toBe("number");
   });
 
+  it("captures reasoningTokens alongside the rest of usage", async () => {
+    generateObjectMock.mockResolvedValue({
+      object: { verdict: "correct", rationale: "Same connection, different wording." },
+      response: { id: "resp_789", headers: {}, body: {} },
+      request: { body: {} },
+      usage: {
+        inputTokens: 80,
+        outputTokens: 300,
+        totalTokens: 380,
+        outputTokenDetails: { textTokens: 30, reasoningTokens: 270 },
+      },
+    });
+
+    const result = await judgeCategory("wordplay", "wordplay");
+
+    expect(result.usage).toEqual({
+      promptTokens: 80,
+      completionTokens: 300,
+      totalTokens: 380,
+      reasoningTokens: 270,
+    });
+  });
+
   it("classifies a model-call failure into a SolveError", async () => {
     generateObjectMock.mockRejectedValueOnce(new Error("boom"));
     await expect(judgeCategory("A", "B", "gpt-4.1-nano", "openai")).rejects.toMatchObject({

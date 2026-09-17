@@ -12,6 +12,7 @@ const flagshipUsage: FreeTierUsage = {
   usedTokens: 12_000,
   dailyLimitTokens: 250_000,
   remainingTokens: 238_000,
+  reasoningTokensUsedToday: 0,
   models: ["gpt-5.4", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1", "gpt-4o", "o1", "o3"],
 };
 
@@ -21,6 +22,7 @@ const miniUsage: FreeTierUsage = {
   usedTokens: 500_000,
   dailyLimitTokens: 2_500_000,
   remainingTokens: 2_000_000,
+  reasoningTokensUsedToday: 0,
   models: [
     "gpt-5.4-mini",
     "gpt-5.4-nano",
