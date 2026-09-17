@@ -335,7 +335,7 @@ describe("StrategyDispatch", () => {
           trialNumber: 0,
           model: "z-ai/glm-5.2:free",
         },
-        { jobId: "run-100-llm-openrouter-z-ai/glm-5.2:free-0" },
+        { jobId: "run-100-llm-openrouter-z-ai/glm-5.2_free-0" },
       );
       expect(mockQueue.add).not.toHaveBeenCalled();
       expect(mockGroqQueue.add).not.toHaveBeenCalled();
@@ -651,7 +651,7 @@ describe("StrategyDispatch", () => {
         1,
         "run-strategy",
         expect.objectContaining({ trialNumber: 1, model: "qwen2.5:14b" }),
-        { jobId: "run-100-llm-ollama-qwen2.5:14b-1" },
+        { jobId: "run-100-llm-ollama-qwen2.5_14b-1" },
       );
       expect(mockOllamaQueue.add).toHaveBeenNthCalledWith(
         2,

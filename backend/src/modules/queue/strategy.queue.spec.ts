@@ -80,9 +80,18 @@ describe("categoryEvalJobId", () => {
 describe("runStrategyJobId", () => {
   it("includes the model so two models on the same puzzle+strategy+trial never collide", () => {
     expect(runStrategyJobId(100, "llm-ollama", "qwen2.5:14b", 1)).toBe(
-      "run-100-llm-ollama-qwen2.5:14b-1",
+      "run-100-llm-ollama-qwen2.5_14b-1",
     );
     expect(runStrategyJobId(100, "llm-ollama", "llama3", 1)).toBe("run-100-llm-ollama-llama3-1");
+  });
+
+  it("strips colons from the model so BullMQ's custom-jobId validation never rejects the add", () => {
+    // BullMQ throws "Custom Id cannot contain :" for any jobId with a colon
+    // that doesn't split into exactly 3 parts — colon-tagged model names
+    // (Ollama tags, OpenRouter free-tier ids) would otherwise trip this.
+    expect(runStrategyJobId(100, "llm-openrouter", "z-ai/glm-5.2:free", 0)).toBe(
+      "run-100-llm-openrouter-z-ai/glm-5.2_free-0",
+    );
   });
 
   it("uses a fixed placeholder when there is no model", () => {
