@@ -466,6 +466,7 @@ export interface SolvePromptRecord {
   id: number;
   promptNumber: number;
   promptType: SolvePromptTypeValue;
+  manualRetry: boolean;
   status: SolvePromptStatusValue;
   rawResponseText: string | null;
   promptTokens: number | null;

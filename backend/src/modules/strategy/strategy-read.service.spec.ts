@@ -476,6 +476,37 @@ describe("RunHistoryReadModel", () => {
       );
     });
 
+    it("should surface manualRetry on a solve-prompt row produced by a manual retry", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ id: 7, strategyName: "llm-openai", availableWords: [] }),
+      );
+      mockGuessRepo.count.mockResolvedValueOnce(0);
+      mockGuessRepo.find.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      mockSolvePromptRepo.find.mockResolvedValueOnce([
+        {
+          id: 502,
+          strategyRunId: 7,
+          promptNumber: 1,
+          promptType: "initialSolve",
+          status: "parsed",
+          manualRetry: true,
+          rawResponseText: "raw",
+          promptText: "[User]\nprompt\n\n[Assistant]\nraw",
+          promptTokens: 10,
+          completionTokens: 20,
+          totalTokens: 30,
+          latencyMs: 500,
+          temperature: 0.2,
+          createdAt: new Date("2024-01-02T00:00:00Z"),
+        },
+      ]);
+      mockLlmProposalRepo.find.mockResolvedValueOnce([]);
+
+      const result = await service.getRunDetailByRunId(7);
+
+      expect(result.solvePrompts[0]!.manualRetry).toBe(true);
+    });
+
     it("should attach the categoryEvaluation DTO to a used proposal that has one, and null to proposals without", async () => {
       mockStrategyRunRepo.findOne.mockResolvedValueOnce(
         makeRun({ id: 7, strategyName: "llm-openai", availableWords: [] }),

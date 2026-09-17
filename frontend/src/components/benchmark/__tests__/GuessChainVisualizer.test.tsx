@@ -44,6 +44,7 @@ const llmDetail: StrategyRunDetail = {
       id: 1,
       promptNumber: 1,
       promptType: "initialSolve",
+      manualRetry: false,
       status: "parsed",
       rawResponseText: "### ANSWER\nAPPLE, BANANA, CHERRY, DATE",
       promptTokens: 100,
