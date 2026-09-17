@@ -136,7 +136,7 @@ export class RpdResumeService {
           model: run.modelName,
         },
         {
-          jobId: `${runStrategyJobId(run.puzzleId, run.strategyName, run.trialNumber)}-resume-${stamp}`,
+          jobId: `${runStrategyJobId(run.puzzleId, run.strategyName, run.modelName, run.trialNumber)}-resume-${stamp}`,
         },
       );
 
@@ -226,7 +226,7 @@ export class RpdResumeService {
             model: run.modelName,
           },
           {
-            jobId: `${runStrategyJobId(run.puzzleId, run.strategyName, run.trialNumber)}-resume-${stamp}`,
+            jobId: `${runStrategyJobId(run.puzzleId, run.strategyName, run.modelName, run.trialNumber)}-resume-${stamp}`,
           },
         );
         run.status = StrategyRunStatus.RUNNING;

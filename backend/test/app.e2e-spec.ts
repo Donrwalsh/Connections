@@ -459,7 +459,7 @@ describe("App (e2e)", () => {
     });
 
     for (const trialNumber of [1, 2, 3]) {
-      await llmOpenAIQueue.remove(`run-${res.body.puzzleId}-llm-openai-${trialNumber}`);
+      await llmOpenAIQueue.remove(`run-${res.body.puzzleId}-llm-openai-gpt-4.1-nano-${trialNumber}`);
     }
   });
 
@@ -490,8 +490,43 @@ describe("App (e2e)", () => {
       .getRepository(Puzzle)
       .findOneByOrFail({ date: res.body.dates[0] });
     for (const trialNumber of [1, 2, 3, 4]) {
-      await llmOpenAIQueue.remove(`run-${puzzle.id}-llm-openai-${trialNumber}`);
+      await llmOpenAIQueue.remove(`run-${puzzle.id}-llm-openai-gpt-5-nano-${trialNumber}`);
     }
+  });
+
+  it("queues both models when two different models are dispatched concurrently against the same puzzle, before either drains", async () => {
+    // Regression for issue #43: no worker is attached in this e2e app (see
+    // beforeAll), so both jobs land on the real Redis-backed queue still
+    // "waiting" — exercising the actual Postgres advisory lock in
+    // triggerNextLlmTrial, not a mock. Before the fix, the second dispatch's
+    // job id collided with the first's and silently no-op'd.
+    const [resA, resB] = await Promise.all([
+      request(app.getHttpServer()).post(`/dispatch/model/gpt-4.1-nano/${TEST_DATE}`),
+      request(app.getHttpServer()).post(`/dispatch/model/gpt-5-nano/${TEST_DATE}`),
+    ]);
+
+    expect(resA.status).toBe(201);
+    expect(resB.status).toBe(201);
+    expect(resA.body.puzzleId).toBe(resB.body.puzzleId);
+
+    // Other fixtures in this suite seed real StrategyRun rows directly for
+    // llm-openai on this same shared puzzle, so the trial number isn't
+    // necessarily 1 here — find each dispatch's actual job by its data
+    // (puzzleId + model) rather than assuming one.
+    const puzzleId = resA.body.puzzleId as number;
+    const waiting = await llmOpenAIQueue.getJobs(["waiting"]);
+    const jobA = waiting.find(
+      (j) => j.data.puzzleId === puzzleId && j.data.model === "gpt-4.1-nano",
+    );
+    const jobB = waiting.find(
+      (j) => j.data.puzzleId === puzzleId && j.data.model === "gpt-5-nano",
+    );
+    expect(jobA).toBeDefined();
+    expect(jobB).toBeDefined();
+    expect(jobA!.id).not.toBe(jobB!.id);
+
+    await llmOpenAIQueue.remove(jobA!.id!);
+    await llmOpenAIQueue.remove(jobB!.id!);
   });
 
   it("POST /dispatch/model/:modelName/runs/:n rejects when fewer than n unrun dates exist", async () => {

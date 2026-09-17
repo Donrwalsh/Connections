@@ -86,6 +86,17 @@ export class StrategyRunStore {
     });
 
     if (existing) {
+      // Should be unreachable given triggerNextLlmTrial's advisory lock — the
+      // one exception is a job enqueued under the pre-issue-#43 job-id format
+      // still sitting in the queue across a deploy. Fail loud rather than
+      // silently run this job under the wrong model's name.
+      if (existing.modelName !== (model ?? null)) {
+        throw new Error(
+          `StrategyRun ${existing.id} (puzzle ${puzzleId}, strategy '${strategyName}', trial` +
+            ` ${trialNumber}) was created for model '${existing.modelName}', but this job is` +
+            ` for model '${model}'. Refusing to run the wrong model against an existing run.`,
+        );
+      }
       return { run: existing, puzzle };
     }
 

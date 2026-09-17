@@ -117,6 +117,21 @@ describe("StrategyRunStore", () => {
       expect(mockStrategyRunRepo.create).not.toHaveBeenCalled();
     });
 
+    it("should throw rather than silently reuse a run whose model doesn't match the incoming job", async () => {
+      // Guards against the trial-number allocation race (issue #43): if two
+      // different models ever end up racing to the same (puzzleId,
+      // strategyName, trialNumber), the second job to be processed must fail
+      // loudly instead of quietly running under the first job's model.
+      const existing = makeRun({ modelName: "model-a" });
+      mockPuzzleRepo.findOne.mockResolvedValueOnce(puzzle);
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(existing);
+
+      await expect(store.loadOrCreateRun(100, "llm-openai", 0, "model-b")).rejects.toThrow(
+        /was created for model 'model-a', but this job is for model 'model-b'/,
+      );
+      expect(mockStrategyRunRepo.create).not.toHaveBeenCalled();
+    });
+
     it("should throw NotFoundException when the puzzle does not exist", async () => {
       mockPuzzleRepo.findOne.mockResolvedValueOnce(null);
 
@@ -202,12 +217,12 @@ describe("StrategyRunStore", () => {
       );
     });
 
-    it("should not overwrite an existing run's modelName when resuming", async () => {
+    it("should not re-derive an existing run's modelName when resuming with the same model", async () => {
       const existing = makeRun({ modelName: "gpt-4.1-nano-2025-04-14" });
       mockPuzzleRepo.findOne.mockResolvedValueOnce(puzzle);
       mockStrategyRunRepo.findOne.mockResolvedValueOnce(existing);
 
-      const result = await store.loadOrCreateRun(100, "llm-openai", 0, "gpt-5-nano");
+      const result = await store.loadOrCreateRun(100, "llm-openai", 0, "gpt-4.1-nano-2025-04-14");
 
       expect(result.run).toBe(existing);
       expect(mockStrategyRunRepo.create).not.toHaveBeenCalled();

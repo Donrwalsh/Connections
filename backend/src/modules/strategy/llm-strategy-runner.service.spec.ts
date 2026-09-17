@@ -711,7 +711,9 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should consult the Ollama provider for the llm-ollama strategy", async () => {
-      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-ollama" }));
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm-ollama", modelName: "mistral" }),
+      );
       mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([
           ["APPLE", "BANANA", "CHERRY", "DATE"],
@@ -731,7 +733,9 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should consult the Google provider for the llm-google strategy", async () => {
-      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-google" }));
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" }),
+      );
       mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([
           ["APPLE", "BANANA", "CHERRY", "DATE"],
@@ -751,6 +755,9 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should pass the requested model and the openai provider for llm-openai", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm-openai", modelName: "gpt-4.1-nano-2025-04-14" }),
+      );
       mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([
           ["APPLE", "BANANA", "CHERRY", "DATE"],
@@ -773,7 +780,9 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should look up and thread the model's contextWindow through to requestSolveStep", async () => {
-      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-ollama" }));
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm-ollama", modelName: "mistral-nemo" }),
+      );
       mockSupportedModelService.getContextWindow.mockResolvedValueOnce(131072);
       mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([
@@ -797,7 +806,9 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should correct the run's stored contextWindow to the actual (possibly capped) value from the response", async () => {
-      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-ollama" }));
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm-ollama", modelName: "mistral-nemo" }),
+      );
       mockSupportedModelService.getContextWindow.mockResolvedValueOnce(131072);
       mockOrchestratorService.requestSolveStep.mockResolvedValueOnce({
         ok: true,
@@ -1162,6 +1173,9 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should wait the server-specified retryAfterSeconds and retry, without counting a rate_limited hit as a failure", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" }),
+      );
       const delaySpy = jest
         .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
         .mockResolvedValue(undefined);
@@ -1185,6 +1199,9 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should never terminate the run for repeated rate_limited hits, however many occur", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" }),
+      );
       jest
         .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
         .mockResolvedValue(undefined);
@@ -1212,6 +1229,9 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should fall back to llmGoogleRateLimitFallbackSeconds when retryAfterSeconds is absent", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" }),
+      );
       process.env.LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS = "45";
       const delaySpy = jest
         .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
@@ -1239,6 +1259,9 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should not reset or advance consecutiveModelErrors on an interleaved rate_limited hit, still reaching the error threshold on schedule", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" }),
+      );
       const delaySpy = jest
         .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
         .mockResolvedValue(undefined);

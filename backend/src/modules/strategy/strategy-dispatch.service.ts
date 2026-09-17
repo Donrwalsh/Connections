@@ -10,8 +10,8 @@ import {
   LLM_MISTRAL_QUEUE,
   LLM_SAMBANOVA_QUEUE,
 } from "../queue/queue.module";
-import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
+import { DataSource, Repository } from "typeorm";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
@@ -41,6 +41,7 @@ const QUEUE_PAGE_SIZE = 1000;
 @Injectable()
 export class StrategyDispatch {
   constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
     @Inject(STRATEGY_QUEUE) private queue: Queue,
     @Inject(LLM_OPENAI_QUEUE) private readonly llmOpenAIQueue: Queue,
     @Inject(LLM_OLLAMA_QUEUE) private readonly llmOllamaQueue: Queue,
@@ -104,7 +105,7 @@ export class StrategyDispatch {
       {
         // Deterministic id so duplicate enqueues of the same run collapse to a
         // single job instead of racing to create two runs.
-        jobId: runStrategyJobId(puzzleId, strategyName, trialNumber),
+        jobId: runStrategyJobId(puzzleId, strategyName, model ?? null, trialNumber),
       },
     );
   }
@@ -130,7 +131,7 @@ export class StrategyDispatch {
       trialNumbers.map((trialNumber) => ({
         name: "run-strategy",
         data: { puzzleId, strategyName, date, trialNumber, model: model ?? null },
-        opts: { jobId: runStrategyJobId(puzzleId, strategyName, trialNumber) },
+        opts: { jobId: runStrategyJobId(puzzleId, strategyName, model ?? null, trialNumber) },
       })),
     );
   }
@@ -338,6 +339,14 @@ export class StrategyDispatch {
    * stay unique against the existing DB constraint (puzzleId, strategyName,
    * trialNumber) without a schema change; only the per-model *count* used for
    * the cap check is filtered by model.
+   *
+   * The read-check-reserve sequence runs inside a transaction holding a
+   * Postgres advisory lock scoped to (puzzleId, strategyName), so two
+   * concurrent calls for different models on the same puzzle can never
+   * compute the same trial number — without the lock, both would race to
+   * read the same "next" number and, now that the job id includes the model
+   * (see runStrategyJobId), both jobs would get queued and collide on the
+   * same StrategyRun row when processed. See issue #43.
    */
   private async triggerNextLlmTrial(
     puzzleId: number,
@@ -345,28 +354,39 @@ export class StrategyDispatch {
     date: string,
     model: string,
   ): Promise<void> {
-    const existingRuns = await this.strategyRunRepo.find({
-      where: { puzzleId, strategyName },
-      select: { trialNumber: true, modelName: true },
-    });
+    await this.dataSource.transaction(async (manager) => {
+      // hashtext() gives a stable int4 from strategyName; pg_advisory_xact_lock
+      // takes two int4 keys rather than one bigint so puzzleId doesn't need to
+      // be packed into a wider key by hand. Released automatically at the end
+      // of this transaction.
+      await manager.query("SELECT pg_advisory_xact_lock($1, hashtext($2))", [
+        puzzleId,
+        strategyName,
+      ]);
 
-    const limit = llmMaxTrialsPerModel();
-    const modelRunCount = existingRuns.filter((run) => run.modelName === model).length;
+      const existingRuns = await manager.find(StrategyRun, {
+        where: { puzzleId, strategyName },
+        select: { trialNumber: true, modelName: true },
+      });
 
-    if (modelRunCount >= limit) {
-      throw new BadRequestException(
-        `Model '${model}' has already reached its limit of ${limit} trial(s) for strategy` +
-          ` '${strategyName}' on this puzzle (see LLM_TRIALS_PER_MODEL).`,
+      const limit = llmMaxTrialsPerModel();
+      const modelRunCount = existingRuns.filter((run) => run.modelName === model).length;
+
+      if (modelRunCount >= limit) {
+        throw new BadRequestException(
+          `Model '${model}' has already reached its limit of ${limit} trial(s) for strategy` +
+            ` '${strategyName}' on this puzzle (see LLM_TRIALS_PER_MODEL).`,
+        );
+      }
+
+      const nextTrialNumber =
+        existingRuns.reduce((max, run) => Math.max(max, run.trialNumber), 0) + 1;
+
+      await this.queueFor(strategyName).add(
+        "run-strategy",
+        { puzzleId, strategyName, date, trialNumber: nextTrialNumber, model },
+        { jobId: runStrategyJobId(puzzleId, strategyName, model, nextTrialNumber) },
       );
-    }
-
-    const nextTrialNumber =
-      existingRuns.reduce((max, run) => Math.max(max, run.trialNumber), 0) + 1;
-
-    await this.queueFor(strategyName).add(
-      "run-strategy",
-      { puzzleId, strategyName, date, trialNumber: nextTrialNumber, model },
-      { jobId: runStrategyJobId(puzzleId, strategyName, nextTrialNumber) },
-    );
+    });
   }
 }
