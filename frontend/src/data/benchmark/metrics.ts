@@ -13,6 +13,7 @@ import type { LeaderboardRow } from "./types";
  * asc/desc arrow always matches the literal direction of the value that
  * column actually displays. */
 export type LeaderboardSortKey =
+  | "name"
   | "avgGuesses"
   | "successRate"
   | "duration"
@@ -25,8 +26,11 @@ export type LeaderboardSortDir = "asc" | "desc";
 
 /** Whether a larger value is "best" for a column — used only to pick the
  * direction a freshly-clicked column starts in; a second click on the same
- * column flips it regardless (see useLeaderboardSort). */
+ * column flips it regardless (see useLeaderboardSort). "name" isn't a
+ * "bigger is better" metric at all, but false gives it the same natural
+ * starting point (A-first ascending) as every other "false" column. */
 const HIGHER_IS_BETTER: Record<LeaderboardSortKey, boolean> = {
+  name: false,
   avgGuesses: false,
   successRate: true,
   duration: false,
@@ -42,8 +46,14 @@ export function defaultSortDir(key: LeaderboardSortKey): LeaderboardSortDir {
 
 /** Row shape with every field a leaderboard sort column can read from (see
  * the live LeaderboardRow in types.ts) — the helpers below don't need to
- * know the concrete row type, just that it has these. */
+ * know the concrete row type, just that it has these. "name" is the
+ * already-formatted display name (see describeLeaderboardRow) rather than
+ * the raw strategyName field, since that's what the Strategy column
+ * actually shows — and, for LLM rows, several rows can share one
+ * strategyName (e.g. every "llm-openai" row) while their display names
+ * (the model names) differ. */
 export interface LeaderboardSortSource {
+  name: string;
   avgGuessesToSolve: number | null;
   successRate: number | null;
   avgDurationMs: number | null;
@@ -55,8 +65,10 @@ export interface LeaderboardSortSource {
 export function leaderboardSortValue(
   strategy: LeaderboardSortSource,
   key: LeaderboardSortKey,
-): number | null {
+): number | string | null {
   switch (key) {
+    case "name":
+      return strategy.name;
     case "avgGuesses":
       return strategy.avgGuessesToSolve;
     case "successRate":
@@ -75,7 +87,8 @@ export function leaderboardSortValue(
 }
 
 /** Sorts leaderboard rows by a column in the given direction; nulls always
- * sort last regardless of direction. */
+ * sort last regardless of direction. String-valued columns (currently just
+ * "name") compare with localeCompare instead of subtraction. */
 export function sortLeaderboardRows<T extends LeaderboardSortSource>(
   rows: T[],
   key: LeaderboardSortKey,
@@ -87,7 +100,10 @@ export function sortLeaderboardRows<T extends LeaderboardSortSource>(
     if (aValue === null && bValue === null) return 0;
     if (aValue === null) return 1;
     if (bValue === null) return -1;
-    const diff = aValue - bValue;
+    const diff =
+      typeof aValue === "string" && typeof bValue === "string"
+        ? aValue.localeCompare(bValue)
+        : (aValue as number) - (bValue as number);
     return dir === "asc" ? diff : -diff;
   });
 }

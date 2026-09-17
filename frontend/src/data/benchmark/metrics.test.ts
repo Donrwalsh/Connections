@@ -17,6 +17,18 @@ const row = (id: string, categoryAccuracy: number | null) =>
     puzzlesCovered: 0,
   }) as never;
 
+const namedRow = (name: string) =>
+  ({
+    id: name,
+    name,
+    avgGuessesToSolve: null,
+    successRate: null,
+    avgDurationMs: null,
+    categoryAccuracy: null,
+    maxGuesses: null,
+    puzzlesCovered: 0,
+  }) as never;
+
 describe("categoryAccuracy sort column", () => {
   it("sorts highest accuracy first (desc, its default direction), nulls last", () => {
     const sorted = sortLeaderboardRows(
@@ -44,6 +56,42 @@ describe("defaultSortDir", () => {
     expect(defaultSortDir("avgGuesses")).toBe("asc");
     expect(defaultSortDir("duration")).toBe("asc");
     expect(defaultSortDir("range")).toBe("asc");
+  });
+
+  it("defaults the name column to ascending (A first)", () => {
+    expect(defaultSortDir("name")).toBe("asc");
+  });
+});
+
+describe("name sort column", () => {
+  it("sorts alphabetically ascending", () => {
+    const sorted = sortLeaderboardRows(
+      [namedRow("Reverse-Alphabetical"), namedRow("Alphabetical"), namedRow("Order")],
+      "name",
+      "asc",
+    );
+    expect(sorted.map((r) => (r as { name: string }).name)).toEqual([
+      "Alphabetical",
+      "Order",
+      "Reverse-Alphabetical",
+    ]);
+  });
+
+  it("reverses to descending", () => {
+    const sorted = sortLeaderboardRows(
+      [namedRow("Reverse-Alphabetical"), namedRow("Alphabetical"), namedRow("Order")],
+      "name",
+      "desc",
+    );
+    expect(sorted.map((r) => (r as { name: string }).name)).toEqual([
+      "Reverse-Alphabetical",
+      "Order",
+      "Alphabetical",
+    ]);
+  });
+
+  it("reads the raw string value off a row", () => {
+    expect(leaderboardSortValue(namedRow("Alphabetical"), "name")).toBe("Alphabetical");
   });
 });
 

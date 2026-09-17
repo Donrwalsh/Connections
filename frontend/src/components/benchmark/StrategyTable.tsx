@@ -19,6 +19,7 @@ import { StatusPill } from "./StatusPill";
  * carry their own label text (see the per-variant header row below); this
  * is just for the "sorted by ..." summary line above the table. */
 const SORT_LABELS: Record<LeaderboardSortKey, string> = {
+  name: "Strategy",
   avgGuesses: "Avg guesses",
   successRate: "Success rate",
   duration: "Avg duration",
@@ -78,7 +79,13 @@ function formatRange(
  * elements used to provide for free. */
 export function StrategyTable({ rows, sortBy, sortDir, onSortChange, variant }: StrategyTableProps) {
   const navigate = useNavigate();
-  const sorted = sortLeaderboardRows(rows, sortBy, sortDir);
+  // Attach the display name/description up front (rather than inside the
+  // render loop below) so sortLeaderboardRows can sort the "Strategy"
+  // column by the same name the row actually shows — for LLM rows that's
+  // the model name, not the shared strategyName every row of that
+  // provider ties on (e.g. every "llm-openai" row).
+  const rowsWithMeta = rows.map((row) => ({ ...row, ...describeLeaderboardRow(row) }));
+  const sorted = sortLeaderboardRows(rowsWithMeta, sortBy, sortDir);
   const isDeterministic = variant === "deterministic";
   const captionId = useId();
   const gridClass = isDeterministic ? "bench-grid--deterministic" : "bench-grid--llm";
@@ -91,7 +98,14 @@ export function StrategyTable({ rows, sortBy, sortDir, onSortChange, variant }: 
       </p>
       <div className="bench-table" role="table" aria-labelledby={captionId}>
         <div className={`bench-grid-header ${gridClass}`} role="row">
-          <div role="columnheader">Strategy</div>
+          <div role="columnheader">
+            <SortHeaderButton
+              label="Strategy"
+              isActive={sortBy === "name"}
+              dir={sortDir}
+              onClick={() => onSortChange("name")}
+            />
+          </div>
           {variant === "llm" ? (
             <div role="columnheader">
               <SortHeaderButton
@@ -130,19 +144,14 @@ export function StrategyTable({ rows, sortBy, sortDir, onSortChange, variant }: 
               </div>
             </>
           ) : (
-            <>
-              <div role="columnheader" className="bench-col--lg-only">
-                Avg issues
-              </div>
-              <div role="columnheader">
-                <SortHeaderButton
-                  label="Category IQ"
-                  isActive={sortBy === "categoryAccuracy"}
-                  dir={sortDir}
-                  onClick={() => onSortChange("categoryAccuracy")}
-                />
-              </div>
-            </>
+            <div role="columnheader">
+              <SortHeaderButton
+                label="Category IQ"
+                isActive={sortBy === "categoryAccuracy"}
+                dir={sortDir}
+                onClick={() => onSortChange("categoryAccuracy")}
+              />
+            </div>
           )}
           <div role="columnheader" className="bench-col--lg-only">
             <SortHeaderButton
@@ -155,8 +164,7 @@ export function StrategyTable({ rows, sortBy, sortDir, onSortChange, variant }: 
         </div>
 
         {sorted.map((row, index) => {
-          const { name, description } = describeLeaderboardRow(row);
-          const { progress } = row;
+          const { name, description, progress } = row;
           const queueBadges: { label: string; count: number; tone: "queued" | "active" | "failed" }[] = [
             { label: "Queued", count: progress.queued, tone: "queued" },
             { label: "Active", count: progress.active, tone: "active" },
@@ -167,7 +175,10 @@ export function StrategyTable({ rows, sortBy, sortDir, onSortChange, variant }: 
             row.totalPuzzles > 0
               ? `${((row.puzzlesCovered / row.totalPuzzles) * 100).toFixed(2)}%`
               : "0%";
-          const speed = leaderboardSortValue(row, "speed");
+          // "speed" always yields a number|null (see leaderboardSortValue) —
+          // narrowed explicitly since the function's return type is shared
+          // across all sort keys, including the string-valued "name" one.
+          const speed = leaderboardSortValue(row, "speed") as number | null;
           const successRateDisplay = row.successRate === null ? "—" : formatSuccessRate(row.successRate);
           // Unitless here — the "solves/hr" caption below the value supplies
           // the unit, so it isn't baked into this number too.
@@ -215,23 +226,18 @@ export function StrategyTable({ rows, sortBy, sortDir, onSortChange, variant }: 
                   </div>
                 </>
               ) : (
-                <>
-                  <div className="bench-mono bench-col--lg-only">
-                    {row.avgIssues === null ? "—" : row.avgIssues.toFixed(1)}
-                  </div>
-                  <div
-                    className="bench-mono"
-                    title={
-                      row.categoryEvaluated === 0
-                        ? "No successful guesses evaluated yet"
-                        : `${row.categoryCorrect} of ${row.categoryEvaluated} correct · ${row.categoryPartial} partial · ${row.categoryLucky} lucky`
-                    }
-                  >
-                    {row.categoryAccuracy === null
-                      ? "—"
-                      : formatSuccessRate(row.categoryAccuracy)}
-                  </div>
-                </>
+                <div
+                  className="bench-mono"
+                  title={
+                    row.categoryEvaluated === 0
+                      ? "No successful guesses evaluated yet"
+                      : `${row.categoryCorrect} of ${row.categoryEvaluated} correct · ${row.categoryPartial} partial · ${row.categoryLucky} lucky`
+                  }
+                >
+                  {row.categoryAccuracy === null
+                    ? "—"
+                    : formatSuccessRate(row.categoryAccuracy)}
+                </div>
               )}
               <div className="bench-progress-band">
                 <div className="bench-progress-band__row">

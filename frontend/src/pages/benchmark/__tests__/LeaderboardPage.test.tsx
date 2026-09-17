@@ -166,38 +166,35 @@ describe("LeaderboardPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the right column set per table: LLM gets success rate/avg duration/avg issues, deterministic gets avg speed/guesses/range", async () => {
+  it("shows the right column set per table: LLM gets success rate/avg duration, deterministic gets avg speed/guesses/range", async () => {
     stubFetch(leaderboard);
     renderLeaderboard();
 
     const tables = await screen.findAllByRole("table");
 
-    // LLM table (first): Success rate, Avg duration, Avg issues — no Avg
-    // guesses, Range, or Avg speed (that's the deterministic table's
-    // solves/hr framing; LLM shows raw wall-clock duration instead). Success
-    // rate is the LLM table's default sort column (descending, best first),
-    // so its header carries the "↓" active indicator.
+    // LLM table (first): Success rate, Avg duration — no Avg guesses, Range,
+    // or Avg speed (that's the deterministic table's solves/hr framing; LLM
+    // shows raw wall-clock duration instead). Success rate is the LLM
+    // table's default sort column (descending, best first), so its header
+    // carries the "↓" active indicator.
     expect(
       within(tables[0]!).getByRole("columnheader", { name: "Success rate ↓" }),
     ).toBeInTheDocument();
     expect(within(tables[0]!).getByRole("columnheader", { name: "Avg duration" })).toBeInTheDocument();
-    expect(within(tables[0]!).getByRole("columnheader", { name: "Avg issues" })).toBeInTheDocument();
     expect(
       within(tables[0]!).queryByRole("columnheader", { name: "Avg guesses" }),
     ).not.toBeInTheDocument();
     expect(within(tables[0]!).queryByRole("columnheader", { name: "Range" })).not.toBeInTheDocument();
     expect(within(tables[0]!).queryByRole("columnheader", { name: "Avg speed" })).not.toBeInTheDocument();
     expect(within(tables[0]!).getByText("80%")).toBeInTheDocument();
-    expect(within(tables[0]!).getByText("1.5")).toBeInTheDocument();
     // gpt row: avgDurationMs 12 -> raw duration, not a derived solves/hr rate.
     expect(firstRowIn(tables[0]!).textContent).toContain("12ms");
 
     // Deterministic table (second): Avg speed, Avg guesses, Range — no
-    // Success rate, Avg issues, or Avg duration (deterministic strategies
-    // have no LLM issue-tag concept, and their near-instant runs read
-    // better as a derived solves/hr rate than a raw millisecond duration).
-    // Avg guesses is this table's default sort column (ascending, fewest
-    // first), so its header carries the "↑" active indicator.
+    // Success rate or Avg duration (deterministic strategies' near-instant
+    // runs read better as a derived solves/hr rate than a raw millisecond
+    // duration). Avg guesses is this table's default sort column (ascending,
+    // fewest first), so its header carries the "↑" active indicator.
     expect(within(tables[1]!).getByRole("columnheader", { name: "Avg speed" })).toBeInTheDocument();
     expect(
       within(tables[1]!).getByRole("columnheader", { name: "Avg guesses ↑" }),
@@ -206,7 +203,6 @@ describe("LeaderboardPage", () => {
     expect(
       within(tables[1]!).queryByRole("columnheader", { name: "Success rate" }),
     ).not.toBeInTheDocument();
-    expect(within(tables[1]!).queryByRole("columnheader", { name: "Avg issues" })).not.toBeInTheDocument();
     expect(
       within(tables[1]!).queryByRole("columnheader", { name: "Avg duration" }),
     ).not.toBeInTheDocument();

@@ -170,6 +170,38 @@ describe("StrategyTable — header-click sorting", () => {
     expect(second).toHaveTextContent("A");
   });
 
+  it("sorts the Strategy column alphabetically by display name, not the raw strategyName", () => {
+    // Both rows share the "llm-openai" strategyName — only their display
+    // names (the model names) differ, so a correct alphabetical sort has to
+    // read the name actually shown in the column, not the tied strategyName.
+    renderTable(
+      <StrategyTable
+        rows={[
+          makeRow({
+            id: "gpt-5",
+            strategyName: "llm-openai",
+            modelName: "gpt-5",
+            kind: "llm",
+          }),
+          makeRow({
+            id: "gpt-4.1-nano",
+            strategyName: "llm-openai",
+            modelName: "gpt-4.1-nano",
+            kind: "llm",
+          }),
+        ]}
+        sortBy="name"
+        sortDir="asc"
+        onSortChange={vi.fn()}
+        variant="llm"
+      />,
+    );
+
+    const [first, second] = screen.getAllByRole("link");
+    expect(first).toHaveTextContent("gpt-4.1-nano");
+    expect(second).toHaveTextContent("gpt-5");
+  });
+
   it("sorts the Progress column by puzzles covered", () => {
     renderTable(
       <StrategyTable
