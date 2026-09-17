@@ -925,6 +925,63 @@ describe("StrategyDispatch", () => {
       expect(mockStrategyRunRepo.findOne).toHaveBeenCalledWith({ where: { id: 7 } });
     });
   });
+  describe("retryRun", () => {
+    it("flips an errored run back to running, clears finishedAt, and re-enqueues its job with manualRetry set", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({
+          id: 7,
+          puzzleId: 100,
+          strategyName: "llm-openai",
+          trialNumber: 2,
+          modelName: "gpt-4.1",
+          status: StrategyRunStatus.ERROR,
+          finishedAt: new Date("2024-01-01T00:00:00Z"),
+          puzzle: { date: "2024-01-01" } as Puzzle,
+        }),
+      );
+
+      const result = await service.retryRun(7);
+
+      expect(result).toEqual({ status: StrategyRunStatus.RUNNING });
+      expect(mockStrategyRunRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 7 },
+        relations: { puzzle: true },
+      });
+      expect(mockStrategyRunRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: StrategyRunStatus.RUNNING, finishedAt: null }),
+      );
+      expect(mockOpenAIQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
+        {
+          puzzleId: 100,
+          strategyName: "llm-openai",
+          date: "2024-01-01",
+          trialNumber: 2,
+          model: "gpt-4.1",
+          manualRetry: true,
+        },
+        expect.objectContaining({
+          jobId: expect.stringContaining("run-100-llm-openai-gpt-4.1-2-manual-retry-"),
+        }),
+      );
+    });
+
+    it("rejects a run that isn't in the error status", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ id: 7, status: StrategyRunStatus.RUNNING, puzzle: { date: "2024-01-01" } as Puzzle }),
+      );
+
+      await expect(service.retryRun(7)).rejects.toThrow(/not 'error'/);
+      expect(mockStrategyRunRepo.save).not.toHaveBeenCalled();
+      expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("rejects a nonexistent run", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.retryRun(999)).rejects.toThrow(/No strategy run/);
+    });
+  });
   describe("deleteErroredRuns", () => {
     it("should delegate to the run store and return its aggregated deleted counts", async () => {
       mockManager.find.mockResolvedValueOnce([{ id: 11 }]);

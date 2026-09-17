@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { Queue } from "bullmq";
 import {
   STRATEGY_QUEUE,
@@ -293,6 +293,59 @@ export class StrategyDispatch {
       where: { status: StrategyRunStatus.ERROR },
     });
     return { erroredRuns };
+  }
+
+  /**
+   * Resumes a run stuck in the 'error' status — the same flip-status-and-
+   * re-enqueue mechanism RpdResumeService uses for a parked
+   * RATE_LIMITED_DAILY run, triggered manually instead of by a cron sweep.
+   * The status flip is required: runLlmStrategy's TERMINAL_STATUSES gate
+   * (see llm-strategy-runner.service.ts) returns immediately without doing
+   * anything for a run still in 'error', so simply re-enqueueing the job
+   * alone would be a no-op. loadOrCreateRun then finds the existing row by
+   * (puzzleId, strategyName, trialNumber) and the solve loop resumes from
+   * the last successful guess, since its conversation state is rebuilt from
+   * persisted Guess rows on every call regardless of why the run stopped.
+   * The jobId gets a fresh timestamp suffix — the original job's id is
+   * still occupied by its failed BullMQ job record (removeOnFail keeps up
+   * to 5000), so reusing it would collide.
+   */
+  async retryRun(runId: number): Promise<{ status: StrategyRunStatus }> {
+    const run = await this.strategyRunRepo.findOne({
+      where: { id: runId },
+      relations: { puzzle: true },
+    });
+
+    if (!run) {
+      throw new NotFoundException(`No strategy run with id: ${runId}`);
+    }
+
+    if (run.status !== StrategyRunStatus.ERROR) {
+      throw new ConflictException(
+        `Strategy run ${runId} is in status '${run.status}', not 'error' — only an errored run can be manually retried.`,
+      );
+    }
+
+    run.status = StrategyRunStatus.RUNNING;
+    run.finishedAt = null;
+    await this.strategyRunRepo.save(run);
+
+    await this.queueFor(run.strategyName).add(
+      "run-strategy",
+      {
+        puzzleId: run.puzzleId,
+        strategyName: run.strategyName,
+        date: run.puzzle.date,
+        trialNumber: run.trialNumber,
+        model: run.modelName,
+        manualRetry: true,
+      },
+      {
+        jobId: `${runStrategyJobId(run.puzzleId, run.strategyName, run.modelName, run.trialNumber)}-manual-retry-${Date.now()}`,
+      },
+    );
+
+    return { status: run.status };
   }
 
   /**
