@@ -4,19 +4,40 @@ import {
   formatDuration,
   formatGuessCount,
   formatSuccessRate,
-  getMetricDefinition,
-  metricValue,
-  sortStrategiesByMetric,
-  type LeaderboardMetricKey,
+  leaderboardSortValue,
+  sortLeaderboardRows,
+  type LeaderboardSortDir,
+  type LeaderboardSortKey,
 } from "../../data/benchmark/metrics";
 import { describeLeaderboardRow } from "../../data/benchmark/mockData";
 import type { LeaderboardRow } from "../../data/benchmark/types";
 import { ProviderPill } from "./ProviderPill";
+import { SortHeaderButton } from "./SortHeaderButton";
 import { StatusPill } from "./StatusPill";
+
+/** Caption-only label for each sort key — the column headers themselves
+ * carry their own label text (see the per-variant header row below); this
+ * is just for the "sorted by ..." summary line above the table. */
+const SORT_LABELS: Record<LeaderboardSortKey, string> = {
+  name: "Strategy",
+  avgGuesses: "Avg guesses",
+  successRate: "Success rate",
+  duration: "Avg duration",
+  speed: "Avg speed",
+  categoryAccuracy: "Category IQ",
+  range: "Range",
+  progress: "Progress",
+};
 
 export interface StrategyTableProps {
   rows: LeaderboardRow[];
-  metricKey: LeaderboardMetricKey;
+  sortBy: LeaderboardSortKey;
+  sortDir: LeaderboardSortDir;
+  /** Clicking a sortable column header re-requests this sort — sorting is
+   * done client-side (unlike RunHistoryTable's server-side sort), so this
+   * just updates the sortBy/sortDir state that drives sortLeaderboardRows
+   * below. */
+  onSortChange: (key: LeaderboardSortKey) => void;
   /** 'llm' shows Success rate and Avg duration (the raw average time an LLM
    * call took, in ms/s as appropriate) — an LLM run's wall-clock time is
    * itself the meaningful number, unlike deterministic/shuffle runs which
@@ -56,10 +77,15 @@ function formatRange(
  * than content-sized, so they still line up from row to row. ARIA roles
  * (table/row/columnheader) stand in for the table semantics the native
  * elements used to provide for free. */
-export function StrategyTable({ rows, metricKey, variant }: StrategyTableProps) {
+export function StrategyTable({ rows, sortBy, sortDir, onSortChange, variant }: StrategyTableProps) {
   const navigate = useNavigate();
-  const metric = getMetricDefinition(metricKey);
-  const sorted = sortStrategiesByMetric(rows, metricKey);
+  // Attach the display name/description up front (rather than inside the
+  // render loop below) so sortLeaderboardRows can sort the "Strategy"
+  // column by the same name the row actually shows — for LLM rows that's
+  // the model name, not the shared strategyName every row of that
+  // provider ties on (e.g. every "llm-openai" row).
+  const rowsWithMeta = rows.map((row) => ({ ...row, ...describeLeaderboardRow(row) }));
+  const sorted = sortLeaderboardRows(rowsWithMeta, sortBy, sortDir);
   const isDeterministic = variant === "deterministic";
   const captionId = useId();
   const gridClass = isDeterministic ? "bench-grid--deterministic" : "bench-grid--llm";
@@ -68,34 +94,77 @@ export function StrategyTable({ rows, metricKey, variant }: StrategyTableProps) 
     <div className="bench-table-wrap bench-table-wrap--fluid">
       <p id={captionId} className="bench-table__caption">
         {variant === "llm" ? "LLM strategies" : "Deterministic & shuffle strategies"} ·{" "}
-        {metric.label} — {metric.higherIsBetter ? "best first" : "fewest guesses first"}
+        {SORT_LABELS[sortBy]} — {sortDir === "asc" ? "ascending" : "descending"}
       </p>
       <div className="bench-table" role="table" aria-labelledby={captionId}>
         <div className={`bench-grid-header ${gridClass}`} role="row">
-          <div role="columnheader">Strategy</div>
-          {variant === "llm" ? <div role="columnheader">Success rate</div> : null}
-          <div role="columnheader">{variant === "llm" ? "Avg duration" : "Avg speed"}</div>
+          <div role="columnheader">
+            <SortHeaderButton
+              label="Strategy"
+              isActive={sortBy === "name"}
+              dir={sortDir}
+              onClick={() => onSortChange("name")}
+            />
+          </div>
+          {variant === "llm" ? (
+            <div role="columnheader">
+              <SortHeaderButton
+                label="Success rate"
+                isActive={sortBy === "successRate"}
+                dir={sortDir}
+                onClick={() => onSortChange("successRate")}
+              />
+            </div>
+          ) : null}
+          <div role="columnheader">
+            <SortHeaderButton
+              label={variant === "llm" ? "Avg duration" : "Avg speed"}
+              isActive={sortBy === (variant === "llm" ? "duration" : "speed")}
+              dir={sortDir}
+              onClick={() => onSortChange(variant === "llm" ? "duration" : "speed")}
+            />
+          </div>
           {isDeterministic ? (
             <>
-              <div role="columnheader">Avg guesses</div>
-              <div role="columnheader">Range</div>
+              <div role="columnheader">
+                <SortHeaderButton
+                  label="Avg guesses"
+                  isActive={sortBy === "avgGuesses"}
+                  dir={sortDir}
+                  onClick={() => onSortChange("avgGuesses")}
+                />
+              </div>
+              <div role="columnheader">
+                <SortHeaderButton
+                  label="Range"
+                  isActive={sortBy === "range"}
+                  dir={sortDir}
+                  onClick={() => onSortChange("range")}
+                />
+              </div>
             </>
           ) : (
-            <>
-              <div role="columnheader" className="bench-col--lg-only">
-                Avg issues
-              </div>
-              <div role="columnheader">Category IQ</div>
-            </>
+            <div role="columnheader">
+              <SortHeaderButton
+                label="Category IQ"
+                isActive={sortBy === "categoryAccuracy"}
+                dir={sortDir}
+                onClick={() => onSortChange("categoryAccuracy")}
+              />
+            </div>
           )}
           <div role="columnheader" className="bench-col--lg-only">
-            Progress
+            <SortHeaderButton
+              label="Progress"
+              isActive={sortBy === "progress"}
+              dir={sortDir}
+              onClick={() => onSortChange("progress")}
+            />
           </div>
         </div>
 
         {sorted.map((row, index) => {
-          const { name, description } = describeLeaderboardRow(row);
-          const { progress } = row;
+          const { name, description, progress } = row;
           const queueBadges: { label: string; count: number; tone: "queued" | "active" | "failed" }[] = [
             { label: "Queued", count: progress.queued, tone: "queued" },
             { label: "Active", count: progress.active, tone: "active" },
@@ -106,7 +175,10 @@ export function StrategyTable({ rows, metricKey, variant }: StrategyTableProps) 
             row.totalPuzzles > 0
               ? `${((row.puzzlesCovered / row.totalPuzzles) * 100).toFixed(2)}%`
               : "0%";
-          const speed = metricValue(row, "speed");
+          // "speed" always yields a number|null (see leaderboardSortValue) —
+          // narrowed explicitly since the function's return type is shared
+          // across all sort keys, including the string-valued "name" one.
+          const speed = leaderboardSortValue(row, "speed") as number | null;
           const successRateDisplay = row.successRate === null ? "—" : formatSuccessRate(row.successRate);
           // Unitless here — the "solves/hr" caption below the value supplies
           // the unit, so it isn't baked into this number too.
@@ -154,23 +226,18 @@ export function StrategyTable({ rows, metricKey, variant }: StrategyTableProps) 
                   </div>
                 </>
               ) : (
-                <>
-                  <div className="bench-mono bench-col--lg-only">
-                    {row.avgIssues === null ? "—" : row.avgIssues.toFixed(1)}
-                  </div>
-                  <div
-                    className="bench-mono"
-                    title={
-                      row.categoryEvaluated === 0
-                        ? "No successful guesses evaluated yet"
-                        : `${row.categoryCorrect} of ${row.categoryEvaluated} correct · ${row.categoryPartial} partial · ${row.categoryLucky} lucky`
-                    }
-                  >
-                    {row.categoryAccuracy === null
-                      ? "—"
-                      : formatSuccessRate(row.categoryAccuracy)}
-                  </div>
-                </>
+                <div
+                  className="bench-mono"
+                  title={
+                    row.categoryEvaluated === 0
+                      ? "No successful guesses evaluated yet"
+                      : `${row.categoryCorrect} of ${row.categoryEvaluated} correct · ${row.categoryPartial} partial · ${row.categoryLucky} lucky`
+                  }
+                >
+                  {row.categoryAccuracy === null
+                    ? "—"
+                    : formatSuccessRate(row.categoryAccuracy)}
+                </div>
               )}
               <div className="bench-progress-band">
                 <div className="bench-progress-band__row">
