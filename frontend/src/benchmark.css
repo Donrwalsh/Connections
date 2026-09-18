@@ -824,6 +824,11 @@
   gap: 0.75rem;
 }
 
+.bench-visualizer__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .bench-visualizer__title {
   margin: 0 0 0.5rem;
 }

@@ -71,6 +71,7 @@ export interface SolvePromptDto {
   id: number;
   promptNumber: number;
   promptType: SolvePromptType;
+  manualRetry: boolean;
   status: SolvePromptStatus;
   rawResponseText: string | null;
   promptTokens: number | null;

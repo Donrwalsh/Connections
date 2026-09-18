@@ -114,6 +114,16 @@ export class SolvePrompt {
   @Column({ type: "int", default: 1 })
   attemptNumber: number;
 
+  // True for every row created while this step's run was resuming after an
+  // admin manually retried it from the 'error' status (see
+  // llm-strategy-runner.service.ts's runLlmStrategy `manualRetry` parameter
+  // and StrategyDispatch.retryRun). Orthogonal to promptType above, which
+  // tracks whether *this specific call* is re-prompting after a wrong guess
+  // (game logic) — a manually-retried run can produce either kind, so this
+  // needs its own column rather than a third promptType value.
+  @Column({ type: "boolean", default: false })
+  manualRetry: boolean;
+
   // ── Raw OpenAI call detail (populated on every attempt, not just the
   // step's eventual outcome — see llm-strategy-runner.service.ts) ────────
 

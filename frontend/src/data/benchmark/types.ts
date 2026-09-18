@@ -468,6 +468,7 @@ export interface SolvePromptRecord {
   id: number;
   promptNumber: number;
   promptType: SolvePromptTypeValue;
+  manualRetry: boolean;
   status: SolvePromptStatusValue;
   rawResponseText: string | null;
   promptTokens: number | null;
@@ -511,6 +512,14 @@ export interface DeleteRunResult {
   deletedSolvePrompts: number;
   deletedLlmProposals: number;
   deletedCategoryEvaluations: number;
+}
+
+/** Response from POST /dispatch/run/:runId/retry — the run's new status
+ * (always "running" on success; the request rejects otherwise). */
+export interface RetryRunResult {
+  message: string;
+  runId: number;
+  status: string;
 }
 
 /** GET /dispatch/runs/errored — how many strategy runs are in the 'error'

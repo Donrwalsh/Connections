@@ -6,6 +6,7 @@ import {
   fetchErroredRunCount,
   fetchFailedJudgeCallCount,
   fetchRecentActivity,
+  retryRun,
   toRunRecord,
 } from "./api";
 import type { StrategyRunListItem } from "./types";
@@ -147,6 +148,35 @@ describe("maintenance-panel API", () => {
       window.addEventListener(ADMIN_SESSION_EXPIRED_EVENT, handler);
 
       await expect(deleteErroredRuns()).rejects.toThrow("Session expired");
+      expect(handler).toHaveBeenCalledOnce();
+
+      window.removeEventListener(ADMIN_SESSION_EXPIRED_EVENT, handler);
+    });
+  });
+
+  describe("retryRun", () => {
+    it("POSTs /dispatch/run/:runId/retry with credentials and the admin header", async () => {
+      const calls = stubFetch({
+        message: "Strategy run 42 requeued for manual retry",
+        runId: 42,
+        status: "running",
+      });
+
+      const result = await retryRun(42);
+
+      expect(result.status).toBe("running");
+      expect(calls[0].url).toContain("/dispatch/run/42/retry");
+      expect(calls[0].init?.method).toBe("POST");
+      expect(calls[0].init?.credentials).toBe("include");
+      expect((calls[0].init?.headers as Record<string, string>)["X-Admin-Request"]).toBe("1");
+    });
+
+    it("rejects with a session-expired message and fires ADMIN_SESSION_EXPIRED_EVENT on a 403", async () => {
+      stubFetchError(403, "Invalid or missing dispatch password.");
+      const handler = vi.fn();
+      window.addEventListener(ADMIN_SESSION_EXPIRED_EVENT, handler);
+
+      await expect(retryRun(42)).rejects.toThrow("Session expired");
       expect(handler).toHaveBeenCalledOnce();
 
       window.removeEventListener(ADMIN_SESSION_EXPIRED_EVENT, handler);

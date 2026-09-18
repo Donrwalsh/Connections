@@ -831,6 +831,7 @@ export class RunHistoryReadModel {
         id: prompt.id,
         promptNumber: prompt.promptNumber,
         promptType: prompt.promptType,
+        manualRetry: prompt.manualRetry,
         status: prompt.status,
         rawResponseText: prompt.rawResponseText,
         promptTokens: prompt.promptTokens,

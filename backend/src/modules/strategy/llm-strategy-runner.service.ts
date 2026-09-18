@@ -177,7 +177,13 @@ export class LlmStrategyRunner {
     @Inject(RateLimitHoldService) private readonly rateLimitHold: RateLimitHoldService,
   ) {}
 
-  async runLlmStrategy(puzzleId: number, strategyName: string, trialNumber = 0, model?: string) {
+  async runLlmStrategy(
+    puzzleId: number,
+    strategyName: string,
+    trialNumber = 0,
+    model?: string,
+    manualRetry = false,
+  ) {
     // The strategy name alone determines the provider pool (there's no per-run
     // choice of provider today, only of model within it) — resolved once so
     // every orchestrator call, hold check and hold write for this run reads
@@ -369,6 +375,7 @@ export class LlmStrategyRunner {
           promptNumber: globalPromptNumber,
           attemptNumber,
           promptType,
+          manualRetry,
           status: SolvePromptStatus.PARSED,
           rawResponseText: data.response,
           promptText: transcriptText,
@@ -455,7 +462,7 @@ export class LlmStrategyRunner {
         // The step's failure gets its own row too — previously this
         // outcome left zero trace in the database.
         pendingPrompts.push(
-          this.buildCallErrorPromptRow(run.id, globalPromptNumber, promptType, {
+          this.buildCallErrorPromptRow(run.id, globalPromptNumber, promptType, manualRetry, {
             attemptNumber,
             promptText: transcriptText,
             requestBody: outcome.error.requestBody,
@@ -547,6 +554,7 @@ export class LlmStrategyRunner {
     strategyRunId: number,
     promptNumber: number,
     promptType: SolvePromptType,
+    manualRetry: boolean,
     attempt: {
       attemptNumber: number;
       promptText: string;
@@ -566,6 +574,7 @@ export class LlmStrategyRunner {
       promptNumber,
       attemptNumber: attempt.attemptNumber,
       promptType,
+      manualRetry,
       status: SolvePromptStatus.CALL_ERROR,
       promptText: attempt.promptText,
       requestBody: attempt.requestBody ?? null,

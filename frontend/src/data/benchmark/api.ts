@@ -19,6 +19,7 @@ import type {
   PoolDispatchStatus,
   Leaderboard,
   RecentActivityFeed,
+  RetryRunResult,
   RunHistory,
   RunHistorySortBy,
   RunHistorySortDir,
@@ -338,6 +339,16 @@ export function fetchRunDetail(runId: number, signal?: AbortSignal): Promise<Str
  * expired. */
 export function deleteRun(runId: number, signal?: AbortSignal): Promise<DeleteRunResult> {
   return fetchJsonAdmin(`/dispatch/run/${runId}`, signal, { method: "DELETE" });
+}
+
+/** Resumes a run stuck in the 'error' status — flips it back to running and
+ * re-enqueues its job, preserving every previously successful call. Rejects
+ * (thrown Error, message from the backend) if the run isn't in the 'error'
+ * status, doesn't exist, or the admin session has expired. The run resumes
+ * asynchronously on the job queue, so this resolving only means the retry
+ * was accepted — not that the run has finished (see RetryRunModal). */
+export function retryRun(runId: number, signal?: AbortSignal): Promise<RetryRunResult> {
+  return fetchJsonAdmin(`/dispatch/run/${runId}/retry`, signal, { method: "POST" });
 }
 
 /** Same detail payload as fetchRunDetail, keyed by (strategyName, date,
