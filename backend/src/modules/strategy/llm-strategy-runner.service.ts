@@ -281,9 +281,14 @@ export class LlmStrategyRunner {
     const state: LlmRunLoopState = {
       guessCount: priorGuesses.length,
       duplicateCount: priorGuesses.filter((guess) => guess.result === GuessResult.DUPLICATE).length,
-      failedGuessCount: priorGuesses.filter(
-        (guess) => guess.result === GuessResult.FAILURE || guess.result === GuessResult.OFF_BY_ONE,
-      ).length,
+      // Must match evaluateProposals' own increment exactly: its `else`
+      // branch (any non-SUCCESS result, including DUPLICATE) bumps
+      // failedGuessCount unconditionally, with DUPLICATE only *also*
+      // bumping duplicateCount on top of that. Excluding DUPLICATE here
+      // (as an earlier version of this rebuild did) let a resumed run's
+      // failedGuessCount start under-counted, allowing one extra duplicate
+      // guess through before maxFailedGuesses caught it.
+      failedGuessCount: priorGuesses.filter((guess) => guess.result !== GuessResult.SUCCESS).length,
       malformedCount: 0,
       consecutiveModelErrors: 0,
       rateLimitWaitMs: null,

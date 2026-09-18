@@ -1124,6 +1124,33 @@ describe("LlmStrategyRunner", () => {
       }
     });
 
+    it("should count a resumed run's prior duplicate guesses toward the failed-guess limit, not just failures", async () => {
+      process.env.LLM_MAX_FAILED_GUESSES = "4";
+      try {
+        // A real failure plus a duplicate already on the books before this
+        // resume — 2 non-success guesses total, which should leave only 2
+        // more slots before the cap fires.
+        mockGuessRepo.find.mockResolvedValueOnce([
+          { words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: GuessResult.FAILURE },
+          { words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: GuessResult.DUPLICATE },
+        ]);
+        // The model keeps re-proposing the same already-tried group.
+        mockOrchestratorService.requestSolveStep.mockResolvedValue(
+          makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]),
+        );
+
+        const result = await runner.runLlmStrategy(100, "llm-openai");
+
+        // 2 prior (persisted) + exactly 2 new duplicate guesses = 4 total,
+        // matching maxFailedGuesses — not 3 new ones (5 total), which is
+        // what an under-counted resume would let through.
+        expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(2);
+        expect(result).toEqual({ status: StrategyRunStatus.FAILED, guessCount: 4 });
+      } finally {
+        delete process.env.LLM_MAX_FAILED_GUESSES;
+      }
+    });
+
     it("should count one-aways toward the failed-guess limit", async () => {
       process.env.LLM_MAX_FAILED_GUESSES = "2";
       try {
