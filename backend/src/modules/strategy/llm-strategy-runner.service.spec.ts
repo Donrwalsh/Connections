@@ -33,7 +33,7 @@ describe("LlmStrategyRunner", () => {
     count: jest.Mock;
     find: jest.Mock;
   };
-  let mockSolvePromptRepo: { createQueryBuilder: jest.Mock };
+  let mockSolvePromptRepo: { createQueryBuilder: jest.Mock; findOne: jest.Mock };
   let mockOrchestratorService: {
     requestSolveStep: jest.Mock<Promise<SolveStepOutcome>, unknown[]>;
   };
@@ -96,6 +96,7 @@ describe("LlmStrategyRunner", () => {
         where: jest.fn().mockReturnThis(),
         getRawOne: jest.fn().mockResolvedValue({ max: null }),
       }),
+      findOne: jest.fn().mockResolvedValue(null),
     };
     mockOrchestratorService = {
       requestSolveStep: jest.fn(),
@@ -918,7 +919,7 @@ describe("LlmStrategyRunner", () => {
       expect(mockSupportedModelService.getContextWindow).not.toHaveBeenCalled();
     });
 
-    it("should resume with prior guesses loaded from the database", async () => {
+    it("should resume with prior guesses loaded from the database, continuing as a RETRY", async () => {
       mockGuessRepo.find.mockResolvedValueOnce([
         { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.FAILURE },
       ]);
@@ -931,16 +932,105 @@ describe("LlmStrategyRunner", () => {
 
       expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 3 });
 
-      // The conversation for this resumed process starts fresh with an
-      // INITIAL prompt; the runner doesn't reconstruct history from the DB.
-      expect(snapshots[0]).toHaveLength(1);
-      expect(snapshots[0][0].content).not.toContain("Feedback on Previous Guess:");
+      // The prior guess's outcome is replayed into state before the loop
+      // starts, so the resumed process's first new prompt correctly
+      // continues as a RETRY with feedback on the failed guess — not a
+      // fresh INITIAL prompt as if nothing had happened yet.
+      expect(snapshots[0][snapshots[0].length - 1].content).toContain("Feedback on Previous Guess:");
 
       // New guesses continue the sequence number after the persisted prior guess.
       const insertedGuesses = mockManager.insert.mock.calls
         .filter((call) => call[0] === "Guess")
         .flatMap((call) => call[1] as Array<{ sequenceNumber: number }>);
       expect(insertedGuesses.map((g) => g.sequenceNumber)).toEqual([2, 3]);
+    });
+
+    it("should replay the actual prior conversation history from the latest call's own request, dropping its own trailing turn", async () => {
+      mockGuessRepo.find.mockResolvedValueOnce([
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.FAILURE },
+      ]);
+      // requestBody.messages is the exact array the latest call was sent —
+      // i.e. every earlier turn plus that call's own (now-answered) user
+      // turn. Only the earlier turns should be replayed; that trailing turn
+      // is this resumed process's concern to rebuild fresh.
+      mockSolvePromptRepo.findOne.mockResolvedValueOnce({
+        requestBody: {
+          model: "gpt-4.1",
+          messages: [
+            { role: "user", content: "solve this puzzle" },
+            { role: "assistant", content: "here is my first answer" },
+            { role: "user", content: "that failed, try again" },
+          ],
+        },
+      });
+      const snapshots = captureMessages([
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]),
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      ]);
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      // The two genuinely-completed turns are replayed; the latest call's
+      // own trailing user turn is dropped and replaced by this resumed
+      // process's own new (correctly-typed RETRY) turn — not stacked on
+      // top of it, and not a conversation restarting from nothing.
+      expect(snapshots[0]).toEqual([
+        { role: "user", content: "solve this puzzle" },
+        { role: "assistant", content: "here is my first answer" },
+        expect.objectContaining({ role: "user" }),
+      ]);
+      expect(snapshots[0][2].content).toContain("Feedback on Previous Guess:");
+    });
+
+    it("should replay history seeded from a CALL_ERROR row just as readily as a successful one", async () => {
+      mockGuessRepo.find.mockResolvedValueOnce([
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.FAILURE },
+      ]);
+      // The run's last row before it errored out — its own request still
+      // carries the real conversation up to (but not including) its own
+      // failed attempt.
+      mockSolvePromptRepo.findOne.mockResolvedValueOnce({
+        requestBody: {
+          model: "gpt-4.1",
+          messages: [
+            { role: "user", content: "solve this puzzle" },
+            { role: "assistant", content: "here is my first answer" },
+            { role: "user", content: "the call that failed" },
+          ],
+        },
+      });
+      const snapshots = captureMessages([
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]),
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      ]);
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      expect(snapshots[0]).toEqual([
+        { role: "user", content: "solve this puzzle" },
+        { role: "assistant", content: "here is my first answer" },
+        expect.objectContaining({ role: "user" }),
+      ]);
+    });
+
+    it("should fall back to an empty conversation history when the latest row has no usable requestBody", async () => {
+      mockGuessRepo.find.mockResolvedValueOnce([
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.FAILURE },
+      ]);
+      // e.g. a row from before requestBody capture existed — nothing safe
+      // to replay from.
+      mockSolvePromptRepo.findOne.mockResolvedValueOnce({ requestBody: null });
+      const snapshots = captureMessages([
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]),
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      ]);
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      // No history to replay, but the RETRY prompt content itself still
+      // carries the feedback (state.lastFailedGuess was still rebuilt).
+      expect(snapshots[0]).toHaveLength(1);
+      expect(snapshots[0][0].content).toContain("Feedback on Previous Guess:");
     });
 
     it("should terminate with 'duplicate' once the duplicate limit is hit", async () => {
