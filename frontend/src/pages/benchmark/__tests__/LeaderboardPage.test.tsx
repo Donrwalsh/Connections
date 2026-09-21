@@ -12,6 +12,7 @@ const flagshipUsage: FreeTierUsage = {
   usedTokens: 12_000,
   dailyLimitTokens: 250_000,
   remainingTokens: 238_000,
+  reasoningTokensUsedToday: 0,
   models: ["gpt-5.4", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1", "gpt-4o", "o1", "o3"],
 };
 
@@ -21,6 +22,7 @@ const miniUsage: FreeTierUsage = {
   usedTokens: 500_000,
   dailyLimitTokens: 2_500_000,
   remainingTokens: 2_000_000,
+  reasoningTokensUsedToday: 0,
   models: [
     "gpt-5.4-mini",
     "gpt-5.4-nano",
@@ -166,39 +168,43 @@ describe("LeaderboardPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the right column set per table: LLM gets success rate/avg duration/avg issues, deterministic gets avg speed/guesses/range", async () => {
+  it("shows the right column set per table: LLM gets success rate/avg duration, deterministic gets avg speed/guesses/range", async () => {
     stubFetch(leaderboard);
     renderLeaderboard();
 
     const tables = await screen.findAllByRole("table");
 
-    // LLM table (first): Success rate, Avg duration, Avg issues — no Avg
-    // guesses, Range, or Avg speed (that's the deterministic table's
-    // solves/hr framing; LLM shows raw wall-clock duration instead).
-    expect(within(tables[0]!).getByRole("columnheader", { name: "Success rate" })).toBeInTheDocument();
+    // LLM table (first): Success rate, Avg duration — no Avg guesses, Range,
+    // or Avg speed (that's the deterministic table's solves/hr framing; LLM
+    // shows raw wall-clock duration instead). Success rate is the LLM
+    // table's default sort column (descending, best first), so its header
+    // carries the "↓" active indicator.
+    expect(
+      within(tables[0]!).getByRole("columnheader", { name: "Success rate ↓" }),
+    ).toBeInTheDocument();
     expect(within(tables[0]!).getByRole("columnheader", { name: "Avg duration" })).toBeInTheDocument();
-    expect(within(tables[0]!).getByRole("columnheader", { name: "Avg issues" })).toBeInTheDocument();
     expect(
       within(tables[0]!).queryByRole("columnheader", { name: "Avg guesses" }),
     ).not.toBeInTheDocument();
     expect(within(tables[0]!).queryByRole("columnheader", { name: "Range" })).not.toBeInTheDocument();
     expect(within(tables[0]!).queryByRole("columnheader", { name: "Avg speed" })).not.toBeInTheDocument();
     expect(within(tables[0]!).getByText("80%")).toBeInTheDocument();
-    expect(within(tables[0]!).getByText("1.5")).toBeInTheDocument();
     // gpt row: avgDurationMs 12 -> raw duration, not a derived solves/hr rate.
     expect(firstRowIn(tables[0]!).textContent).toContain("12ms");
 
     // Deterministic table (second): Avg speed, Avg guesses, Range — no
-    // Success rate, Avg issues, or Avg duration (deterministic strategies
-    // have no LLM issue-tag concept, and their near-instant runs read
-    // better as a derived solves/hr rate than a raw millisecond duration).
+    // Success rate or Avg duration (deterministic strategies' near-instant
+    // runs read better as a derived solves/hr rate than a raw millisecond
+    // duration). Avg guesses is this table's default sort column (ascending,
+    // fewest first), so its header carries the "↑" active indicator.
     expect(within(tables[1]!).getByRole("columnheader", { name: "Avg speed" })).toBeInTheDocument();
-    expect(within(tables[1]!).getByRole("columnheader", { name: "Avg guesses" })).toBeInTheDocument();
+    expect(
+      within(tables[1]!).getByRole("columnheader", { name: "Avg guesses ↑" }),
+    ).toBeInTheDocument();
     expect(within(tables[1]!).getByRole("columnheader", { name: "Range" })).toBeInTheDocument();
     expect(
       within(tables[1]!).queryByRole("columnheader", { name: "Success rate" }),
     ).not.toBeInTheDocument();
-    expect(within(tables[1]!).queryByRole("columnheader", { name: "Avg issues" })).not.toBeInTheDocument();
     expect(
       within(tables[1]!).queryByRole("columnheader", { name: "Avg duration" }),
     ).not.toBeInTheDocument();
@@ -238,30 +244,31 @@ describe("LeaderboardPage", () => {
     expect(screen.getByText("5 queued")).toBeInTheDocument();
   });
 
-  it("marks the top-ranked row per the default metric as leading, independently per table", async () => {
+  it("marks the top-ranked row per the default sort column as leading, independently per table", async () => {
     stubFetch(leaderboard);
     renderLeaderboard();
 
     const tables = await screen.findAllByRole("table");
-    // Default metric is now successRate, best first: alphabetical (100%)
-    // beats shuffle-foolish (60%) in the deterministic table (second — LLM
-    // renders first).
+    // Deterministic table's default sort is now Avg guesses, fewest first:
+    // alphabetical (12) beats shuffle-foolish (30) in the deterministic
+    // table (second — LLM renders first).
     expect(firstRowIn(tables[1]!)).toHaveClass("bench-row--leading");
     expect(firstRowIn(tables[1]!).textContent).toContain("Alphabetical");
   });
 
-  it("re-ranks the leading row when the metric changes", async () => {
+  it("re-ranks the leading row when a different column header is clicked", async () => {
     const user = userEvent.setup();
-    // alphabetical wins on the default metric (successRate); shuffle-foolish
-    // wins on avgGuesses — so switching to it should flip which row leads.
+    // alphabetical wins on the default sort column (Avg guesses: 8 < 40);
+    // shuffle-foolish wins on Range (its max of 30 beats alphabetical's 50)
+    // — so switching to that column should flip which row leads.
     stubFetch({
       deterministic: [
-        makeRow({ id: "alphabetical", strategyName: "alphabetical", successRate: 100, avgGuessesToSolve: 30 }),
+        makeRow({ id: "alphabetical", strategyName: "alphabetical", avgGuessesToSolve: 8, maxGuesses: 50 }),
         makeRow({
           id: "shuffle-foolish",
           strategyName: "shuffle-foolish",
-          successRate: 60,
-          avgGuessesToSolve: 12,
+          avgGuessesToSolve: 40,
+          maxGuesses: 30,
         }),
       ],
       llm: [],
@@ -271,7 +278,29 @@ describe("LeaderboardPage", () => {
     const tableBefore = await screen.findByRole("table");
     expect(firstRowIn(tableBefore).textContent).toContain("Alphabetical");
 
-    await user.click(screen.getByRole("button", { name: "Avg guesses" }));
+    await user.click(screen.getByRole("button", { name: "Sort by Range" }));
+
+    const tableAfter = screen.getByRole("table");
+    expect(firstRowIn(tableAfter).textContent).toContain("Shuffle-Foolish");
+  });
+
+  it("clicking the active column header again flips ascending/descending", async () => {
+    const user = userEvent.setup();
+    stubFetch({
+      deterministic: [
+        makeRow({ id: "alphabetical", strategyName: "alphabetical", avgGuessesToSolve: 8 }),
+        makeRow({ id: "shuffle-foolish", strategyName: "shuffle-foolish", avgGuessesToSolve: 40 }),
+      ],
+      llm: [],
+    });
+    renderLeaderboard();
+
+    // Default (ascending, fewest first): alphabetical (8) leads.
+    const tableBefore = await screen.findByRole("table");
+    expect(firstRowIn(tableBefore).textContent).toContain("Alphabetical");
+
+    // Clicking the already-active "Avg guesses" header flips to descending.
+    await user.click(screen.getByRole("button", { name: "Sort by Avg guesses, ascending" }));
 
     const tableAfter = screen.getByRole("table");
     expect(firstRowIn(tableAfter).textContent).toContain("Shuffle-Foolish");

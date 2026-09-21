@@ -135,12 +135,22 @@ export function categoryEvalJobId(llmProposalId: number): string {
 
 /**
  * Deterministic job id for a strategy run so that duplicate enqueues of the
- * same (puzzle, strategy, trial) collapse to a single BullMQ job.
+ * same (puzzle, strategy, model, trial) collapse to a single BullMQ job.
+ * Model is part of the id (fixed "none" placeholder when there isn't one) so
+ * that two different models never collide on the same id — see issue #43.
+ *
+ * Colons are stripped from the model first: BullMQ's Job.validateOptions
+ * rejects any custom jobId containing ":" unless it splits into exactly 3
+ * parts (the legacy repeatable-job id shape), and colon-tagged model names
+ * are common (Ollama's "qwen2.5:14b", OpenRouter's "z-ai/glm-5.2:free") — an
+ * unstripped one throws "Custom Id cannot contain :" out of queue.add().
  */
 export function runStrategyJobId(
   puzzleId: number | string,
   strategyName: string,
+  model: string | null,
   trialNumber: number,
 ): string {
-  return `run-${puzzleId}-${strategyName}-${trialNumber}`;
+  const modelSegment = (model ?? "none").replace(/:/g, "_");
+  return `run-${puzzleId}-${strategyName}-${modelSegment}-${trialNumber}`;
 }

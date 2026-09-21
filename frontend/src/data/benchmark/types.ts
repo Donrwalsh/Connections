@@ -256,6 +256,7 @@ export interface FreeTierUsage {
   usedTokens: number;
   dailyLimitTokens: number;
   remainingTokens: number;
+  reasoningTokensUsedToday: number;
   models: string[];
 }
 
@@ -428,6 +429,7 @@ export interface CategoryEvaluationRecord {
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
+  reasoningTokens: number | null;
   latencyMs: number | null;
   statusCode: number | null;
   errorName: string | null;
@@ -466,11 +468,13 @@ export interface SolvePromptRecord {
   id: number;
   promptNumber: number;
   promptType: SolvePromptTypeValue;
+  manualRetry: boolean;
   status: SolvePromptStatusValue;
   rawResponseText: string | null;
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
+  reasoningTokens: number | null;
   latencyMs: number | null;
   temperature: number | null;
   createdAt: string;
@@ -508,6 +512,14 @@ export interface DeleteRunResult {
   deletedSolvePrompts: number;
   deletedLlmProposals: number;
   deletedCategoryEvaluations: number;
+}
+
+/** Response from POST /dispatch/run/:runId/retry — the run's new status
+ * (always "running" on success; the request rejects otherwise). */
+export interface RetryRunResult {
+  message: string;
+  runId: number;
+  status: string;
 }
 
 /** GET /dispatch/runs/errored — how many strategy runs are in the 'error'

@@ -236,7 +236,7 @@ describe("PuzzleIngestionService", () => {
         expect(job.data.date).toBe("2024-01-02");
         expect(job.data.model).toBeNull();
         expect(job.opts.jobId).toBe(
-          `run-${job.data.puzzleId}-${job.data.strategyName}-${job.data.trialNumber}`,
+          `run-${job.data.puzzleId}-${job.data.strategyName}-none-${job.data.trialNumber}`,
         );
       }
     });

@@ -33,7 +33,7 @@ describe("LlmStrategyRunner", () => {
     count: jest.Mock;
     find: jest.Mock;
   };
-  let mockSolvePromptRepo: { createQueryBuilder: jest.Mock };
+  let mockSolvePromptRepo: { createQueryBuilder: jest.Mock; findOne: jest.Mock };
   let mockOrchestratorService: {
     requestSolveStep: jest.Mock<Promise<SolveStepOutcome>, unknown[]>;
   };
@@ -96,6 +96,7 @@ describe("LlmStrategyRunner", () => {
         where: jest.fn().mockReturnThis(),
         getRawOne: jest.fn().mockResolvedValue({ max: null }),
       }),
+      findOne: jest.fn().mockResolvedValue(null),
     };
     mockOrchestratorService = {
       requestSolveStep: jest.fn(),
@@ -282,6 +283,38 @@ describe("LlmStrategyRunner", () => {
         expect.objectContaining({
           status: StrategyRunStatus.COMPLETED,
           modelName: "mistral",
+        }),
+      );
+    });
+
+    it("should persist reasoningTokens on a successful row", async () => {
+      mockOrchestratorService.requestSolveStep
+        .mockResolvedValueOnce({
+          ok: true,
+          data: {
+            response: "test reasoning",
+            groups: [["APPLE", "BANANA", "CHERRY", "DATE"]],
+            proposalWords: [["APPLE", "BANANA", "CHERRY", "DATE"]],
+            categoryByGroup: {},
+            textIssues: [],
+            model: "gpt-5-nano",
+            latencyMs: 500,
+            usage: { promptTokens: 200, completionTokens: 500, totalTokens: 700, reasoningTokens: 400 },
+          },
+        })
+        .mockResolvedValueOnce(makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]));
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(
+        expect.objectContaining({
+          promptTokens: 200,
+          completionTokens: 500,
+          totalTokens: 700,
+          reasoningTokens: 400,
         }),
       );
     });
@@ -751,8 +784,42 @@ describe("LlmStrategyRunner", () => {
       );
     });
 
+    it("stamps manualRetry true on a success row when the run is a manual retry", async () => {
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
+        makeAssistResponse([
+          ["APPLE", "BANANA", "CHERRY", "DATE"],
+          ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        ]),
+      );
+
+      await runner.runLlmStrategy(100, "llm-openai", 0, undefined, true);
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(expect.objectContaining({ manualRetry: true }));
+    });
+
+    it("leaves manualRetry false on a success row for an ordinary (non-retried) run", async () => {
+      mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
+        makeAssistResponse([
+          ["APPLE", "BANANA", "CHERRY", "DATE"],
+          ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        ]),
+      );
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(expect.objectContaining({ manualRetry: false }));
+    });
+
     it("should consult the Ollama provider for the llm-ollama strategy", async () => {
-      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-ollama" }));
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm-ollama", modelName: "mistral" }),
+      );
       mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([
           ["APPLE", "BANANA", "CHERRY", "DATE"],
@@ -772,7 +839,9 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should consult the Google provider for the llm-google strategy", async () => {
-      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-google" }));
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" }),
+      );
       mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([
           ["APPLE", "BANANA", "CHERRY", "DATE"],
@@ -792,6 +861,9 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should pass the requested model and the openai provider for llm-openai", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm-openai", modelName: "gpt-4.1-nano-2025-04-14" }),
+      );
       mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([
           ["APPLE", "BANANA", "CHERRY", "DATE"],
@@ -814,7 +886,9 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should look up and thread the model's contextWindow through to requestSolveStep", async () => {
-      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-ollama" }));
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm-ollama", modelName: "mistral-nemo" }),
+      );
       mockSupportedModelService.getContextWindow.mockResolvedValueOnce(131072);
       mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(
         makeAssistResponse([
@@ -838,7 +912,9 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should correct the run's stored contextWindow to the actual (possibly capped) value from the response", async () => {
-      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-ollama" }));
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm-ollama", modelName: "mistral-nemo" }),
+      );
       mockSupportedModelService.getContextWindow.mockResolvedValueOnce(131072);
       mockOrchestratorService.requestSolveStep.mockResolvedValueOnce({
         ok: true,
@@ -884,7 +960,7 @@ describe("LlmStrategyRunner", () => {
       expect(mockSupportedModelService.getContextWindow).not.toHaveBeenCalled();
     });
 
-    it("should resume with prior guesses loaded from the database", async () => {
+    it("should resume with prior guesses loaded from the database, continuing as a RETRY", async () => {
       mockGuessRepo.find.mockResolvedValueOnce([
         { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.FAILURE },
       ]);
@@ -897,16 +973,105 @@ describe("LlmStrategyRunner", () => {
 
       expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 3 });
 
-      // The conversation for this resumed process starts fresh with an
-      // INITIAL prompt; the runner doesn't reconstruct history from the DB.
-      expect(snapshots[0]).toHaveLength(1);
-      expect(snapshots[0][0].content).not.toContain("Feedback on Previous Guess:");
+      // The prior guess's outcome is replayed into state before the loop
+      // starts, so the resumed process's first new prompt correctly
+      // continues as a RETRY with feedback on the failed guess — not a
+      // fresh INITIAL prompt as if nothing had happened yet.
+      expect(snapshots[0][snapshots[0].length - 1].content).toContain("Feedback on Previous Guess:");
 
       // New guesses continue the sequence number after the persisted prior guess.
       const insertedGuesses = mockManager.insert.mock.calls
         .filter((call) => call[0] === "Guess")
         .flatMap((call) => call[1] as Array<{ sequenceNumber: number }>);
       expect(insertedGuesses.map((g) => g.sequenceNumber)).toEqual([2, 3]);
+    });
+
+    it("should replay the actual prior conversation history from the latest call's own request, dropping its own trailing turn", async () => {
+      mockGuessRepo.find.mockResolvedValueOnce([
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.FAILURE },
+      ]);
+      // requestBody.messages is the exact array the latest call was sent —
+      // i.e. every earlier turn plus that call's own (now-answered) user
+      // turn. Only the earlier turns should be replayed; that trailing turn
+      // is this resumed process's concern to rebuild fresh.
+      mockSolvePromptRepo.findOne.mockResolvedValueOnce({
+        requestBody: {
+          model: "gpt-4.1",
+          messages: [
+            { role: "user", content: "solve this puzzle" },
+            { role: "assistant", content: "here is my first answer" },
+            { role: "user", content: "that failed, try again" },
+          ],
+        },
+      });
+      const snapshots = captureMessages([
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]),
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      ]);
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      // The two genuinely-completed turns are replayed; the latest call's
+      // own trailing user turn is dropped and replaced by this resumed
+      // process's own new (correctly-typed RETRY) turn — not stacked on
+      // top of it, and not a conversation restarting from nothing.
+      expect(snapshots[0]).toEqual([
+        { role: "user", content: "solve this puzzle" },
+        { role: "assistant", content: "here is my first answer" },
+        expect.objectContaining({ role: "user" }),
+      ]);
+      expect(snapshots[0][2].content).toContain("Feedback on Previous Guess:");
+    });
+
+    it("should replay history seeded from a CALL_ERROR row just as readily as a successful one", async () => {
+      mockGuessRepo.find.mockResolvedValueOnce([
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.FAILURE },
+      ]);
+      // The run's last row before it errored out — its own request still
+      // carries the real conversation up to (but not including) its own
+      // failed attempt.
+      mockSolvePromptRepo.findOne.mockResolvedValueOnce({
+        requestBody: {
+          model: "gpt-4.1",
+          messages: [
+            { role: "user", content: "solve this puzzle" },
+            { role: "assistant", content: "here is my first answer" },
+            { role: "user", content: "the call that failed" },
+          ],
+        },
+      });
+      const snapshots = captureMessages([
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]),
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      ]);
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      expect(snapshots[0]).toEqual([
+        { role: "user", content: "solve this puzzle" },
+        { role: "assistant", content: "here is my first answer" },
+        expect.objectContaining({ role: "user" }),
+      ]);
+    });
+
+    it("should fall back to an empty conversation history when the latest row has no usable requestBody", async () => {
+      mockGuessRepo.find.mockResolvedValueOnce([
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.FAILURE },
+      ]);
+      // e.g. a row from before requestBody capture existed — nothing safe
+      // to replay from.
+      mockSolvePromptRepo.findOne.mockResolvedValueOnce({ requestBody: null });
+      const snapshots = captureMessages([
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]),
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      ]);
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      // No history to replay, but the RETRY prompt content itself still
+      // carries the feedback (state.lastFailedGuess was still rebuilt).
+      expect(snapshots[0]).toHaveLength(1);
+      expect(snapshots[0][0].content).toContain("Feedback on Previous Guess:");
     });
 
     it("should terminate with 'duplicate' once the duplicate limit is hit", async () => {
@@ -941,6 +1106,32 @@ describe("LlmStrategyRunner", () => {
       }
     });
 
+    it("should capture usage on a callError row instead of leaving tokens null", async () => {
+      mockOrchestratorService.requestSolveStep.mockResolvedValue({
+        ok: false,
+        error: {
+          error: "Model produced a malformed response: ...",
+          code: "invalid_group",
+          usage: { promptTokens: 2100, completionTokens: 16000, totalTokens: 18100, reasoningTokens: 15900 },
+        },
+      });
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      const errorRow = promptRows.find((row) => row.status === "callError");
+      expect(errorRow).toEqual(
+        expect.objectContaining({
+          promptTokens: 2100,
+          completionTokens: 16000,
+          totalTokens: 18100,
+          reasoningTokens: 15900,
+        }),
+      );
+    });
+
     it("should terminate with 'failed' once the failed-guess limit is hit", async () => {
       process.env.LLM_MAX_FAILED_GUESSES = "2";
       try {
@@ -969,6 +1160,33 @@ describe("LlmStrategyRunner", () => {
           StrategyRun,
           expect.objectContaining({ status: StrategyRunStatus.FAILED }),
         );
+      } finally {
+        delete process.env.LLM_MAX_FAILED_GUESSES;
+      }
+    });
+
+    it("should count a resumed run's prior duplicate guesses toward the failed-guess limit, not just failures", async () => {
+      process.env.LLM_MAX_FAILED_GUESSES = "4";
+      try {
+        // A real failure plus a duplicate already on the books before this
+        // resume — 2 non-success guesses total, which should leave only 2
+        // more slots before the cap fires.
+        mockGuessRepo.find.mockResolvedValueOnce([
+          { words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: GuessResult.FAILURE },
+          { words: ["APPLE", "BANANA", "CHERRY", "DATE"], result: GuessResult.DUPLICATE },
+        ]);
+        // The model keeps re-proposing the same already-tried group.
+        mockOrchestratorService.requestSolveStep.mockResolvedValue(
+          makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]),
+        );
+
+        const result = await runner.runLlmStrategy(100, "llm-openai");
+
+        // 2 prior (persisted) + exactly 2 new duplicate guesses = 4 total,
+        // matching maxFailedGuesses — not 3 new ones (5 total), which is
+        // what an under-counted resume would let through.
+        expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(2);
+        expect(result).toEqual({ status: StrategyRunStatus.FAILED, guessCount: 4 });
       } finally {
         delete process.env.LLM_MAX_FAILED_GUESSES;
       }
@@ -1150,6 +1368,27 @@ describe("LlmStrategyRunner", () => {
       }
     });
 
+    it("stamps manualRetry true on a CALL_ERROR row when the run is a manual retry", async () => {
+      process.env.LLM_MAX_MODEL_ERRORS = "1";
+      try {
+        mockOrchestratorService.requestSolveStep.mockResolvedValue({
+          ok: false,
+          error: { error: "model down", code: "model_error", statusCode: 502 },
+        });
+
+        await runner.runLlmStrategy(100, "llm-openai", 0, undefined, true);
+
+        const promptRows = mockManager.insert.mock.calls
+          .filter((call) => call[0] === "SolvePrompt")
+          .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+        expect(promptRows[0]).toEqual(
+          expect.objectContaining({ status: "callError", manualRetry: true }),
+        );
+      } finally {
+        delete process.env.LLM_MAX_MODEL_ERRORS;
+      }
+    });
+
     it("should persist promptText on a CALL_ERROR row as the pre-pop transcript, for both INITIAL and RETRY prompts", async () => {
       // Three calls: (1) an INITIAL call that errors outright, (2) a
       // successful INITIAL call whose guess fails and sets up a RETRY
@@ -1203,6 +1442,9 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should wait the server-specified retryAfterSeconds and retry, without counting a rate_limited hit as a failure", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" }),
+      );
       const delaySpy = jest
         .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
         .mockResolvedValue(undefined);
@@ -1226,6 +1468,9 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should never terminate the run for repeated rate_limited hits, however many occur", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" }),
+      );
       jest
         .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
         .mockResolvedValue(undefined);
@@ -1253,6 +1498,9 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should fall back to llmGoogleRateLimitFallbackSeconds when retryAfterSeconds is absent", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" }),
+      );
       process.env.LLM_GOOGLE_RATE_LIMIT_FALLBACK_SECONDS = "45";
       const delaySpy = jest
         .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
@@ -1280,6 +1528,9 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should not reset or advance consecutiveModelErrors on an interleaved rate_limited hit, still reaching the error threshold on schedule", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ strategyName: "llm-google", modelName: "gemini-3.6-flash" }),
+      );
       const delaySpy = jest
         .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
         .mockResolvedValue(undefined);

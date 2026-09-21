@@ -24,7 +24,7 @@ import {
   SolvePromptIssueTag,
 } from "./entities/solve-prompt.entity";
 import { StrategyRun, StrategyRunStatus, TERMINAL_STATUSES } from "./entities/strategy-run.entity";
-import { OrchestratorService, type ChatMessage, type SolveErrorCode } from "./orchestrator.service";
+import { OrchestratorService, type ChatMessage, type SolveErrorCode, type SolveUsage } from "./orchestrator.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { RateLimitHoldService } from "./rate-limit-hold.service";
@@ -178,7 +178,13 @@ export class LlmStrategyRunner {
     @Inject(RateLimitHoldService) private readonly rateLimitHold: RateLimitHoldService,
   ) {}
 
-  async runLlmStrategy(puzzleId: number, strategyName: string, trialNumber = 0, model?: string) {
+  async runLlmStrategy(
+    puzzleId: number,
+    strategyName: string,
+    trialNumber = 0,
+    model?: string,
+    manualRetry = false,
+  ) {
     // The strategy name alone determines the provider pool (there's no per-run
     // choice of provider today, only of model within it) — resolved once so
     // every orchestrator call, hold check and hold write for this run reads
@@ -264,7 +270,11 @@ export class LlmStrategyRunner {
 
     // Rebuild state from flushed guesses so a worker restart mid-run resumes
     // with the same conversation context.
-    const priorGuesses = (await this.loadLlmGuessesForRun(run.id)).map((guess) => ({
+    const [priorGuessRows, latestPrompt] = await Promise.all([
+      this.loadLlmGuessesForRun(run.id),
+      this.loadLatestPrompt(run.id),
+    ]);
+    const priorGuesses = priorGuessRows.map((guess) => ({
       words: guess.words,
       result: guess.result,
     }));
@@ -272,9 +282,14 @@ export class LlmStrategyRunner {
     const state: LlmRunLoopState = {
       guessCount: priorGuesses.length,
       duplicateCount: priorGuesses.filter((guess) => guess.result === GuessResult.DUPLICATE).length,
-      failedGuessCount: priorGuesses.filter(
-        (guess) => guess.result === GuessResult.FAILURE || guess.result === GuessResult.OFF_BY_ONE,
-      ).length,
+      // Must match evaluateProposals' own increment exactly: its `else`
+      // branch (any non-SUCCESS result, including DUPLICATE) bumps
+      // failedGuessCount unconditionally, with DUPLICATE only *also*
+      // bumping duplicateCount on top of that. Excluding DUPLICATE here
+      // (as an earlier version of this rebuild did) let a resumed run's
+      // failedGuessCount start under-counted, allowing one extra duplicate
+      // guess through before maxFailedGuesses caught it.
+      failedGuessCount: priorGuesses.filter((guess) => guess.result !== GuessResult.SUCCESS).length,
       malformedCount: 0,
       consecutiveModelErrors: 0,
       rateLimitWaitMs: null,
@@ -284,6 +299,23 @@ export class LlmStrategyRunner {
       lastFailedGuess: null,
       priorGuesses,
     };
+
+    // Replay each prior guess's outcome the same way evaluateProposals does,
+    // so a resumed run's very next prompt is correctly a RETRY (with the
+    // right locked-in groups and feedback) rather than a fresh INITIAL_SOLVE
+    // — lockedInGroups/lastFailedGuess otherwise stay at the empty defaults
+    // above regardless of how far a previous execution actually got.
+    for (const guess of priorGuesses) {
+      if (guess.result === GuessResult.SUCCESS) {
+        state.lockedInGroups.push(guess.words);
+        state.lastFailedGuess = null;
+      } else {
+        state.lastFailedGuess = {
+          items: guess.words,
+          result: guess.result === GuessResult.OFF_BY_ONE ? "one away" : "incorrect",
+        };
+      }
+    }
 
     const maxDuplicates = llmMaxDuplicateGuesses();
     const maxFailedGuesses = llmMaxFailedGuesses();
@@ -296,8 +328,12 @@ export class LlmStrategyRunner {
       freeTier?.rateLimitFallbackSeconds() ??
       providerPoolById("google").freeTier!.rateLimitFallbackSeconds();
 
-    // Conversation history for the AI Assist prompt flow.
-    const messages: ChatMessage[] = [];
+    // Conversation history for the AI Assist prompt flow. On a fresh run
+    // this is empty; on a resumed run (RATE_LIMITED_DAILY sweep or a manual
+    // retry — see StrategyDispatch.retryRun) it's seeded from the latest
+    // call's own request, so the model sees the actual prior turns rather
+    // than a conversation that silently restarted mid-run.
+    const messages: ChatMessage[] = this.reconstructMessages(latestPrompt);
 
     const pendingGuesses: Partial<Guess>[] = [];
     const pendingProposals: Partial<LlmProposal>[] = [];
@@ -370,6 +406,7 @@ export class LlmStrategyRunner {
           promptNumber: globalPromptNumber,
           attemptNumber,
           promptType,
+          manualRetry,
           status: SolvePromptStatus.PARSED,
           rawResponseText: data.response,
           promptText: transcriptText,
@@ -378,6 +415,7 @@ export class LlmStrategyRunner {
           promptTokens: data.usage?.promptTokens ?? null,
           completionTokens: data.usage?.completionTokens ?? null,
           totalTokens: data.usage?.totalTokens ?? null,
+          reasoningTokens: data.usage?.reasoningTokens ?? null,
           latencyMs: data.latencyMs,
           requestBody: data.requestBody ?? null,
           responseId: data.responseId ?? null,
@@ -455,7 +493,7 @@ export class LlmStrategyRunner {
         // The step's failure gets its own row too — previously this
         // outcome left zero trace in the database.
         pendingPrompts.push(
-          this.buildCallErrorPromptRow(run.id, globalPromptNumber, promptType, {
+          this.buildCallErrorPromptRow(run.id, globalPromptNumber, promptType, manualRetry, {
             attemptNumber,
             promptText: transcriptText,
             requestBody: outcome.error.requestBody,
@@ -466,6 +504,7 @@ export class LlmStrategyRunner {
             errorName: outcome.error.errorName,
             errorMessage: outcome.error.error,
             isRetryable: outcome.error.isRetryable,
+            usage: outcome.error.usage,
           }),
         );
 
@@ -546,6 +585,7 @@ export class LlmStrategyRunner {
     strategyRunId: number,
     promptNumber: number,
     promptType: SolvePromptType,
+    manualRetry: boolean,
     attempt: {
       attemptNumber: number;
       promptText: string;
@@ -557,6 +597,7 @@ export class LlmStrategyRunner {
       errorName?: string;
       errorMessage?: string;
       isRetryable?: boolean;
+      usage?: SolveUsage;
     },
   ): Partial<SolvePrompt> {
     return {
@@ -564,6 +605,7 @@ export class LlmStrategyRunner {
       promptNumber,
       attemptNumber: attempt.attemptNumber,
       promptType,
+      manualRetry,
       status: SolvePromptStatus.CALL_ERROR,
       promptText: attempt.promptText,
       requestBody: attempt.requestBody ?? null,
@@ -574,6 +616,10 @@ export class LlmStrategyRunner {
       errorName: attempt.errorName ?? null,
       errorMessage: attempt.errorMessage ?? null,
       isRetryable: attempt.isRetryable ?? null,
+      promptTokens: attempt.usage?.promptTokens ?? null,
+      completionTokens: attempt.usage?.completionTokens ?? null,
+      totalTokens: attempt.usage?.totalTokens ?? null,
+      reasoningTokens: attempt.usage?.reasoningTokens ?? null,
     };
   }
 
@@ -855,5 +901,71 @@ export class LlmStrategyRunner {
       order: { sequenceNumber: "ASC" },
       select: { words: true, result: true },
     });
+  }
+
+  /**
+   * The most recent SolvePrompt row for this run, of any status — used by
+   * reconstructMessages to seed a resumed run's conversation history. `null`
+   * for a fresh run with no prior rows.
+   */
+  private async loadLatestPrompt(
+    strategyRunId: number,
+  ): Promise<Pick<SolvePrompt, "requestBody"> | null> {
+    return this.solvePromptRepo.findOne({
+      where: { strategyRunId },
+      order: { promptNumber: "DESC", attemptNumber: "DESC" },
+      select: { requestBody: true },
+    });
+  }
+
+  /**
+   * Rebuilds the `messages` array as it stood right before the run's last
+   * call, from that call's own persisted request — not a re-derivation, the
+   * literal data that was actually sent. `requestBody.messages` is the AI
+   * SDK's request payload (see orchestrator.service.ts /
+   * orchestrator/src/answer-step.ts): this run's full conversation history
+   * up through and including that call's own user turn.
+   *
+   * That trailing user turn is dropped rather than kept and answered,
+   * deliberately, for two reasons: (1) if the last row is CALL_ERROR, that
+   * turn was never actually answered — the live runner's own
+   * `messages.pop()` in the failed-call branch above already treats it as
+   * never having been sent; (2) even for a successful last row, replaying
+   * its assistant reply verbatim would need to match whatever the runner
+   * actually echoed back into history, which isn't always
+   * `rawResponseText` — a response tagged MULTIPLE_PROPOSALS gets a
+   * compacted stand-in instead (see `assistantContent` above), and that
+   * compaction isn't persisted anywhere to replay. Dropping the trailing
+   * turn sidesteps needing to reconstruct it: the resumed run's own next
+   * prompt (buildInitialPrompt/buildRetryPrompt, built from
+   * lockedInGroups/lastFailedGuess, both correctly rebuilt above from real
+   * guesses) already restates the puzzle's true current state, so the
+   * model doesn't need that one specific prior turn replayed to continue
+   * correctly — it needs everything *before* it, which this preserves.
+   *
+   * Falls back to an empty history for a fresh run, or defensively for any
+   * historical row predating requestBody capture or shaped unexpectedly.
+   */
+  private reconstructMessages(latestPrompt: Pick<SolvePrompt, "requestBody"> | null): ChatMessage[] {
+    if (!latestPrompt) return [];
+
+    const requestBody = latestPrompt.requestBody as { messages?: unknown } | null;
+    const priorMessages = requestBody?.messages;
+    if (!this.isChatMessageArray(priorMessages) || priorMessages.length === 0) return [];
+
+    return priorMessages.slice(0, -1);
+  }
+
+  private isChatMessageArray(value: unknown): value is ChatMessage[] {
+    return (
+      Array.isArray(value) &&
+      value.every(
+        (m) =>
+          typeof m === "object" &&
+          m !== null &&
+          ((m as { role?: unknown }).role === "user" || (m as { role?: unknown }).role === "assistant") &&
+          typeof (m as { content?: unknown }).content === "string",
+      )
+    );
   }
 }

@@ -16,6 +16,7 @@ import type {
   SolvePromptRecord,
 } from "../../data/benchmark/types";
 import { DeleteRunModal } from "./DeleteRunModal";
+import { RetryRunModal } from "./RetryRunModal";
 import { StatusPill } from "./StatusPill";
 
 export interface GuessChainVisualizerProps {
@@ -41,6 +42,7 @@ export function GuessChainVisualizer({ runId, onDeleted }: GuessChainVisualizerP
     error,
   } = useResource(["runDetail", runId], (signal) => fetchRunDetail(runId, signal));
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showRetryModal, setShowRetryModal] = useState(false);
 
   return (
     <section className="bench-visualizer" aria-label={`Guess chain for run ${runId}`}>
@@ -50,13 +52,22 @@ export function GuessChainVisualizer({ runId, onDeleted }: GuessChainVisualizerP
           <p className="bench-mono bench-visualizer__runid">#{runId}</p>
         </div>
         {isAdmin && detail?.status === "error" ? (
-          <button
-            type="button"
-            className="bench-sort-btn bench-sort-btn--danger"
-            onClick={() => setShowDeleteModal(true)}
-          >
-            Delete this run
-          </button>
+          <div className="bench-visualizer__actions">
+            <button
+              type="button"
+              className="bench-sort-btn"
+              onClick={() => setShowRetryModal(true)}
+            >
+              Manually retry
+            </button>
+            <button
+              type="button"
+              className="bench-sort-btn bench-sort-btn--danger"
+              onClick={() => setShowDeleteModal(true)}
+            >
+              Delete this run
+            </button>
+          </div>
         ) : null}
       </div>
 
@@ -77,6 +88,10 @@ export function GuessChainVisualizer({ runId, onDeleted }: GuessChainVisualizerP
           onClose={() => setShowDeleteModal(false)}
           onDeleted={(result) => onDeleted?.(result)}
         />
+      ) : null}
+
+      {showRetryModal ? (
+        <RetryRunModal runId={runId} onClose={() => setShowRetryModal(false)} />
       ) : null}
     </section>
   );
@@ -109,6 +124,7 @@ function PromptStep({ prompt }: { prompt: SolvePromptRecord }) {
         <span className="bench-step__type">
           {prompt.promptType === "retry" ? "Retry" : "Initial solve"}
         </span>
+        {prompt.manualRetry ? <StatusPill label="Manually retried" tone="neutral" /> : null}
         {prompt.status !== "parsed" ? (
           <StatusPill label={solvePromptStatusLabel(prompt.status)} tone="failed" />
         ) : null}
@@ -140,7 +156,11 @@ function PromptStep({ prompt }: { prompt: SolvePromptRecord }) {
           <summary>
             Raw response
             {prompt.completionTokens !== null
-              ? ` (${prompt.completionTokens.toLocaleString()} tokens)`
+              ? ` (${prompt.completionTokens.toLocaleString()} tokens${
+                  prompt.reasoningTokens !== null && prompt.reasoningTokens > 0
+                    ? `, ${prompt.reasoningTokens.toLocaleString()} reasoning`
+                    : ""
+                })`
               : ""}
           </summary>
           <pre className="bench-step__pre">{prompt.rawResponseText}</pre>
@@ -172,6 +192,9 @@ function CallErrorDetail({ prompt }: { prompt: SolvePromptRecord }) {
     prompt.errorName,
     prompt.statusCode !== null ? `HTTP ${prompt.statusCode}` : null,
     prompt.isRetryable !== null ? (prompt.isRetryable ? "retryable" : "not retryable") : null,
+    prompt.reasoningTokens !== null && prompt.reasoningTokens > 0
+      ? `${prompt.reasoningTokens.toLocaleString()} reasoning tokens`
+      : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -238,7 +261,11 @@ function ProposalRow({ proposal }: { proposal: LlmProposalRecord }) {
                 {[
                   `${proposal.categoryEvaluation.judgeProvider}/${proposal.categoryEvaluation.judgeModel}`,
                   proposal.categoryEvaluation.totalTokens !== null
-                    ? `${proposal.categoryEvaluation.totalTokens} tok`
+                    ? `${proposal.categoryEvaluation.totalTokens.toLocaleString()} tok`
+                    : null,
+                  proposal.categoryEvaluation.reasoningTokens !== null &&
+                  proposal.categoryEvaluation.reasoningTokens > 0
+                    ? `${proposal.categoryEvaluation.reasoningTokens.toLocaleString()} reasoning`
                     : null,
                   proposal.categoryEvaluation.latencyMs !== null
                     ? formatDuration(proposal.categoryEvaluation.latencyMs)

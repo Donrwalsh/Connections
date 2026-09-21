@@ -64,6 +64,7 @@ describe("StrategyDispatch", () => {
     count: jest.Mock;
     delete: jest.Mock;
     find: jest.Mock;
+    query: jest.Mock;
   };
   let mockDataSource: { transaction: jest.Mock };
 
@@ -158,6 +159,7 @@ describe("StrategyDispatch", () => {
       count: jest.fn().mockResolvedValue(0),
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
       find: jest.fn().mockResolvedValue([]),
+      query: jest.fn().mockResolvedValue(undefined),
     };
     mockDataSource = {
       transaction: jest.fn(async (cb: (manager: unknown) => Promise<unknown>) => cb(mockManager)),
@@ -205,7 +207,7 @@ describe("StrategyDispatch", () => {
           trialNumber: 0,
           model: null,
         },
-        { jobId: "run-100-order-0" },
+        { jobId: "run-100-order-none-0" },
       );
       expect(mockSupportedModelService.assertSupported).not.toHaveBeenCalled();
     });
@@ -222,7 +224,7 @@ describe("StrategyDispatch", () => {
           trialNumber: 0,
           model: null,
         },
-        { jobId: "run-100-order-0" },
+        { jobId: "run-100-order-none-0" },
       );
     });
 
@@ -242,7 +244,7 @@ describe("StrategyDispatch", () => {
           trialNumber: 0,
           model: "gpt-4.1-nano-2025-04-14",
         },
-        { jobId: "run-100-llm-openai-0" },
+        { jobId: "run-100-llm-openai-gpt-4.1-nano-2025-04-14-0" },
       );
       expect(mockQueue.add).not.toHaveBeenCalled();
       expect(mockOllamaQueue.add).not.toHaveBeenCalled();
@@ -264,7 +266,7 @@ describe("StrategyDispatch", () => {
           trialNumber: 0,
           model: "mistral",
         },
-        { jobId: "run-100-llm-ollama-0" },
+        { jobId: "run-100-llm-ollama-mistral-0" },
       );
       expect(mockQueue.add).not.toHaveBeenCalled();
       expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
@@ -286,7 +288,7 @@ describe("StrategyDispatch", () => {
           trialNumber: 0,
           model: "gemini-3.6-flash",
         },
-        { jobId: "run-100-llm-google-0" },
+        { jobId: "run-100-llm-google-gemini-3.6-flash-0" },
       );
       expect(mockQueue.add).not.toHaveBeenCalled();
       expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
@@ -309,7 +311,7 @@ describe("StrategyDispatch", () => {
           trialNumber: 0,
           model: "openai/gpt-oss-20b",
         },
-        { jobId: "run-100-llm-groq-0" },
+        { jobId: "run-100-llm-groq-openai/gpt-oss-20b-0" },
       );
       expect(mockQueue.add).not.toHaveBeenCalled();
       expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
@@ -333,7 +335,7 @@ describe("StrategyDispatch", () => {
           trialNumber: 0,
           model: "z-ai/glm-5.2:free",
         },
-        { jobId: "run-100-llm-openrouter-0" },
+        { jobId: "run-100-llm-openrouter-z-ai/glm-5.2_free-0" },
       );
       expect(mockQueue.add).not.toHaveBeenCalled();
       expect(mockGroqQueue.add).not.toHaveBeenCalled();
@@ -355,7 +357,7 @@ describe("StrategyDispatch", () => {
           trialNumber: 0,
           model: "mistral-small-latest",
         },
-        { jobId: "run-100-llm-mistral-0" },
+        { jobId: "run-100-llm-mistral-mistral-small-latest-0" },
       );
       expect(mockQueue.add).not.toHaveBeenCalled();
       expect(mockGroqQueue.add).not.toHaveBeenCalled();
@@ -378,7 +380,7 @@ describe("StrategyDispatch", () => {
           trialNumber: 0,
           model: "DeepSeek-V3.1",
         },
-        { jobId: "run-100-llm-sambanova-0" },
+        { jobId: "run-100-llm-sambanova-DeepSeek-V3.1-0" },
       );
       expect(mockQueue.add).not.toHaveBeenCalled();
       expect(mockMistralQueue.add).not.toHaveBeenCalled();
@@ -412,7 +414,7 @@ describe("StrategyDispatch", () => {
             trialNumber: 0,
             model: null,
           },
-          opts: { jobId: "run-100-order-0" },
+          opts: { jobId: "run-100-order-none-0" },
         },
       ]);
       expect(mockSupportedModelService.assertSupported).not.toHaveBeenCalled();
@@ -437,7 +439,7 @@ describe("StrategyDispatch", () => {
             trialNumber: 1,
             model: null,
           },
-          opts: { jobId: "run-100-shuffle-smart-1" },
+          opts: { jobId: "run-100-shuffle-smart-none-1" },
         },
         {
           name: "run-strategy",
@@ -448,7 +450,7 @@ describe("StrategyDispatch", () => {
             trialNumber: 2,
             model: null,
           },
-          opts: { jobId: "run-100-shuffle-smart-2" },
+          opts: { jobId: "run-100-shuffle-smart-none-2" },
         },
         {
           name: "run-strategy",
@@ -459,7 +461,7 @@ describe("StrategyDispatch", () => {
             trialNumber: 3,
             model: null,
           },
-          opts: { jobId: "run-100-shuffle-smart-3" },
+          opts: { jobId: "run-100-shuffle-smart-none-3" },
         },
       ]);
     });
@@ -483,7 +485,7 @@ describe("StrategyDispatch", () => {
             trialNumber: 1,
             model: null,
           },
-          opts: { jobId: "run-100-shuffle-foolish-1" },
+          opts: { jobId: "run-100-shuffle-foolish-none-1" },
         },
         {
           name: "run-strategy",
@@ -494,13 +496,13 @@ describe("StrategyDispatch", () => {
             trialNumber: 2,
             model: null,
           },
-          opts: { jobId: "run-100-shuffle-foolish-2" },
+          opts: { jobId: "run-100-shuffle-foolish-none-2" },
         },
       ]);
     });
 
     it("should queue exactly one new llm-openai trial on the OpenAI queue after validating the model", async () => {
-      mockStrategyRunRepo.find.mockResolvedValueOnce([]);
+      mockManager.find.mockResolvedValueOnce([]);
 
       await service.triggerStrategyRuns(100, "llm-openai", "2024-01-02", "gpt-4.1-nano-2025-04-14");
 
@@ -508,7 +510,12 @@ describe("StrategyDispatch", () => {
         "llm-openai",
         "gpt-4.1-nano-2025-04-14",
       );
-      expect(mockStrategyRunRepo.find).toHaveBeenCalledWith({
+      expect(mockDataSource.transaction).toHaveBeenCalledTimes(1);
+      expect(mockManager.query).toHaveBeenCalledWith(
+        "SELECT pg_advisory_xact_lock($1, hashtext($2))",
+        [100, "llm-openai"],
+      );
+      expect(mockManager.find).toHaveBeenCalledWith(StrategyRun, {
         where: { puzzleId: 100, strategyName: "llm-openai" },
         select: { trialNumber: true, modelName: true },
       });
@@ -524,12 +531,12 @@ describe("StrategyDispatch", () => {
           trialNumber: 1,
           model: "gpt-4.1-nano-2025-04-14",
         },
-        { jobId: "run-100-llm-openai-1" },
+        { jobId: "run-100-llm-openai-gpt-4.1-nano-2025-04-14-1" },
       );
     });
 
     it("should queue exactly one new llm-ollama trial on the Ollama queue after validating the model", async () => {
-      mockStrategyRunRepo.find.mockResolvedValueOnce([]);
+      mockManager.find.mockResolvedValueOnce([]);
 
       await service.triggerStrategyRuns(100, "llm-ollama", "2024-01-02", "mistral");
 
@@ -549,12 +556,12 @@ describe("StrategyDispatch", () => {
           trialNumber: 1,
           model: "mistral",
         },
-        { jobId: "run-100-llm-ollama-1" },
+        { jobId: "run-100-llm-ollama-mistral-1" },
       );
     });
 
     it("should queue exactly one new llm-google trial on the Google queue after validating the model", async () => {
-      mockStrategyRunRepo.find.mockResolvedValueOnce([]);
+      mockManager.find.mockResolvedValueOnce([]);
 
       await service.triggerStrategyRuns(100, "llm-google", "2024-01-02", "gemini-3.6-flash");
 
@@ -562,7 +569,7 @@ describe("StrategyDispatch", () => {
         "llm-google",
         "gemini-3.6-flash",
       );
-      expect(mockStrategyRunRepo.find).toHaveBeenCalledWith({
+      expect(mockManager.find).toHaveBeenCalledWith(StrategyRun, {
         where: { puzzleId: 100, strategyName: "llm-google" },
         select: { trialNumber: true, modelName: true },
       });
@@ -578,12 +585,12 @@ describe("StrategyDispatch", () => {
           trialNumber: 1,
           model: "gemini-3.6-flash",
         },
-        { jobId: "run-100-llm-google-1" },
+        { jobId: "run-100-llm-google-gemini-3.6-flash-1" },
       );
     });
 
     it("should advance the trial number on repeated calls for the same model", async () => {
-      mockStrategyRunRepo.find.mockResolvedValueOnce([
+      mockManager.find.mockResolvedValueOnce([
         { trialNumber: 1, modelName: "gpt-4.1-nano-2025-04-14" },
       ]);
 
@@ -598,7 +605,7 @@ describe("StrategyDispatch", () => {
           trialNumber: 2,
           model: "gpt-4.1-nano-2025-04-14",
         },
-        { jobId: "run-100-llm-openai-2" },
+        { jobId: "run-100-llm-openai-gpt-4.1-nano-2025-04-14-2" },
       );
     });
 
@@ -606,7 +613,7 @@ describe("StrategyDispatch", () => {
       // Two prior trials already exist for gpt-4.1-nano; a request for a
       // different model should still be allowed (its own count is 0) and
       // should not reuse gpt-4.1-nano's trial numbers.
-      mockStrategyRunRepo.find.mockResolvedValueOnce([
+      mockManager.find.mockResolvedValueOnce([
         { trialNumber: 1, modelName: "gpt-4.1-nano-2025-04-14" },
         { trialNumber: 2, modelName: "gpt-4.1-nano-2025-04-14" },
       ]);
@@ -622,13 +629,41 @@ describe("StrategyDispatch", () => {
           trialNumber: 3,
           model: "gpt-4.1-mini-2025-04-14",
         },
-        { jobId: "run-100-llm-openai-3" },
+        { jobId: "run-100-llm-openai-gpt-4.1-mini-2025-04-14-3" },
+      );
+    });
+
+    it("locks on (puzzleId, strategyName) so two different models racing on the same puzzle never allocate the same trial number", async () => {
+      // Simulates the exact issue #43 repro: model A and model B both
+      // dispatched against the same puzzle before either drains. Each call's
+      // manager.find sees only what was reserved before it — since the
+      // service serializes through the advisory lock, the DB is expected to
+      // reflect model A's reservation by the time model B's call reads it.
+      mockManager.find
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ trialNumber: 1, modelName: "qwen2.5:14b" }]);
+
+      await service.triggerStrategyRuns(100, "llm-ollama", "2024-01-02", "qwen2.5:14b");
+      await service.triggerStrategyRuns(100, "llm-ollama", "2024-01-02", "llama3");
+
+      expect(mockDataSource.transaction).toHaveBeenCalledTimes(2);
+      expect(mockOllamaQueue.add).toHaveBeenNthCalledWith(
+        1,
+        "run-strategy",
+        expect.objectContaining({ trialNumber: 1, model: "qwen2.5:14b" }),
+        { jobId: "run-100-llm-ollama-qwen2.5_14b-1" },
+      );
+      expect(mockOllamaQueue.add).toHaveBeenNthCalledWith(
+        2,
+        "run-strategy",
+        expect.objectContaining({ trialNumber: 2, model: "llama3" }),
+        { jobId: "run-100-llm-ollama-llama3-2" },
       );
     });
 
     it("should reject dispatch once a model has reached LLM_TRIALS_PER_MODEL", async () => {
       process.env.LLM_TRIALS_PER_MODEL = "2";
-      mockStrategyRunRepo.find.mockResolvedValueOnce([
+      mockManager.find.mockResolvedValueOnce([
         { trialNumber: 1, modelName: "gpt-4.1-nano-2025-04-14" },
         { trialNumber: 2, modelName: "gpt-4.1-nano-2025-04-14" },
       ]);
@@ -888,6 +923,63 @@ describe("StrategyDispatch", () => {
         deletedCategoryEvaluations: 4,
       });
       expect(mockStrategyRunRepo.findOne).toHaveBeenCalledWith({ where: { id: 7 } });
+    });
+  });
+  describe("retryRun", () => {
+    it("flips an errored run back to running, clears finishedAt, and re-enqueues its job with manualRetry set", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({
+          id: 7,
+          puzzleId: 100,
+          strategyName: "llm-openai",
+          trialNumber: 2,
+          modelName: "gpt-4.1",
+          status: StrategyRunStatus.ERROR,
+          finishedAt: new Date("2024-01-01T00:00:00Z"),
+          puzzle: { date: "2024-01-01" } as Puzzle,
+        }),
+      );
+
+      const result = await service.retryRun(7);
+
+      expect(result).toEqual({ status: StrategyRunStatus.RUNNING });
+      expect(mockStrategyRunRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 7 },
+        relations: { puzzle: true },
+      });
+      expect(mockStrategyRunRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: StrategyRunStatus.RUNNING, finishedAt: null }),
+      );
+      expect(mockOpenAIQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
+        {
+          puzzleId: 100,
+          strategyName: "llm-openai",
+          date: "2024-01-01",
+          trialNumber: 2,
+          model: "gpt-4.1",
+          manualRetry: true,
+        },
+        expect.objectContaining({
+          jobId: expect.stringContaining("run-100-llm-openai-gpt-4.1-2-manual-retry-"),
+        }),
+      );
+    });
+
+    it("rejects a run that isn't in the error status", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+        makeRun({ id: 7, status: StrategyRunStatus.RUNNING, puzzle: { date: "2024-01-01" } as Puzzle }),
+      );
+
+      await expect(service.retryRun(7)).rejects.toThrow(/not 'error'/);
+      expect(mockStrategyRunRepo.save).not.toHaveBeenCalled();
+      expect(mockOpenAIQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("rejects a nonexistent run", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.retryRun(999)).rejects.toThrow(/No strategy run/);
     });
   });
   describe("deleteErroredRuns", () => {

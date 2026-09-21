@@ -225,39 +225,6 @@
   font-size: 0.8rem;
 }
 
-/* Metric selector — pill group on desktop, native select on narrow screens. */
-.bench-metric-selector__pills {
-  display: flex;
-  gap: 0.25rem;
-}
-
-.bench-metric-btn {
-  border: 1px solid var(--border);
-  background: transparent;
-  border-radius: 999px;
-  padding: 0.3rem 0.75rem;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-.bench-metric-btn--selected {
-  border-color: var(--accent-border);
-  color: var(--accent);
-}
-
-.bench-metric-selector__select {
-  display: none;
-}
-
-@media (max-width: 640px) {
-  .bench-metric-selector__pills {
-    display: none;
-  }
-  .bench-metric-selector__select {
-    display: block;
-  }
-}
-
 /* Tables (leaderboard + puzzle breakdown + runs). */
 .bench-table-wrap {
   overflow-x: auto;
@@ -389,18 +356,34 @@
   color: var(--text);
 }
 
+/* .bench-sort-btn's usual 0.75rem side padding is sized for a standalone
+ * pill control — inside a column header, multiplied across 3-4 fixed-width
+ * metric columns, it was most of why those columns needed to grow so wide
+ * to fit a label on one line at all. Tightened here rather than on the
+ * shared class, so standalone sort/filter pills elsewhere keep their normal
+ * size. */
+.bench-grid-header .bench-sort-btn {
+  padding: 0.2rem 0.4rem;
+}
+
 .bench-grid-row {
   padding: 0.5rem 0.6rem;
   row-gap: 0.4rem;
 }
 
+/* Below 900px, columns stay at their original narrow width and a header
+ * label that doesn't fit wraps onto a second line — acceptable there since
+ * screen space is the scarcer resource on a phone. At 900px+ there's room
+ * to widen just enough instead, so the (still-legible) header row stays a
+ * single line without over-spacing the columns beyond what each one's own
+ * label needs. */
 .bench-grid--llm {
   grid-template-columns: minmax(0, 1fr) 4.5rem 4.5rem 4.5rem;
 }
 
 @media (min-width: 900px) {
   .bench-grid--llm {
-    grid-template-columns: minmax(0, 1fr) 4.5rem 4.5rem 4.5rem 4.5rem 11rem;
+    grid-template-columns: minmax(0, 1fr) 6.5rem 6.5rem 6.5rem 11rem;
   }
 }
 
@@ -410,7 +393,7 @@
 
 @media (min-width: 900px) {
   .bench-grid--deterministic {
-    grid-template-columns: minmax(0, 1fr) 5rem 5rem 6rem 11rem;
+    grid-template-columns: minmax(0, 1fr) 6rem 6.5rem 6rem 11rem;
   }
 }
 
@@ -418,8 +401,8 @@
  * the grid templates above), so it spans every column, which pushes it onto
  * a new line within the row's own grid — a full-width band underneath the
  * values above it, still inside the same row. At 900px+ a real column opens
- * up (its header is the "Progress" columnheader, .bench-col--lg-only like
- * Avg issues), so it drops the span and the band-only chrome (the inline
+ * up (its header is the "Progress" columnheader, .bench-col--lg-only), so
+ * it drops the span and the band-only chrome (the inline
  * "Progress" label, the tight label-to-count spacing) that only makes sense
  * when there's no column header doing that job. */
 .bench-progress-band {
@@ -839,6 +822,11 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
+}
+
+.bench-visualizer__actions {
+  display: flex;
+  gap: 0.5rem;
 }
 
 .bench-visualizer__title {

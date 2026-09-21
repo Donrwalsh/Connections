@@ -378,6 +378,29 @@ export class DispatchController {
     };
   }
 
+  // Resumes a strategy run stuck in the 'error' status — flips it back to
+  // RUNNING and re-enqueues the same (puzzle, strategy, trial, model) job,
+  // so the solve loop picks up from the last successful guess instead of
+  // starting over. Unlike DELETE run/:runId, nothing is destroyed. Only an
+  // 'error'-status run qualifies — see StrategyDispatch.retryRun.
+  @Post("run/:runId/retry")
+  @UseGuards(DispatchAuthGuard)
+  @ApiParam({
+    name: "runId",
+    type: Number,
+    description: "The strategy run's numeric id",
+    example: 12292,
+  })
+  @ApiBody({ type: DispatchAuthDto })
+  async retryRun(@Param("runId", ParseIntPipe) runId: number) {
+    const result = await this.strategyDispatch.retryRun(runId);
+    return {
+      message: `Strategy run ${runId} requeued for manual retry`,
+      runId,
+      ...result,
+    };
+  }
+
   // Runs the same refresh ModelMetadataRefreshBootstrap schedules daily, on
   // demand — e.g. right after registering a new model's openRouterSlug.
   @Post("refresh-model-metadata")

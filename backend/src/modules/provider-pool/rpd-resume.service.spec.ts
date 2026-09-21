@@ -130,7 +130,7 @@ describe.each([
       },
       {
         jobId: expect.stringMatching(
-          new RegExp(`^${runStrategyJobId(10, strategyName, 0)}-resume-`),
+          new RegExp(`^${runStrategyJobId(10, strategyName, "model-a", 0)}-resume-`),
         ),
       },
     );
@@ -145,8 +145,8 @@ describe.each([
     await invoke();
 
     const jobId = (m.runsQueue.add.mock.calls[0][2] as { jobId: string }).jobId;
-    expect(jobId).not.toBe(runStrategyJobId(10, strategyName, 0));
-    expect(jobId.startsWith(`${runStrategyJobId(10, strategyName, 0)}-`)).toBe(true);
+    expect(jobId).not.toBe(runStrategyJobId(10, strategyName, "model-a", 0));
+    expect(jobId.startsWith(`${runStrategyJobId(10, strategyName, "model-a", 0)}-`)).toBe(true);
   });
 
   it("uses the same id for every run within one sweep, so a retried sweep collapses to one job", async () => {
@@ -269,7 +269,7 @@ describe("RpdResumeService — fixed-cron job-id stamping (google)", () => {
     await m.service.runResume("google");
 
     expect((m.runsQueue.add.mock.calls[0][2] as { jobId: string }).jobId).toBe(
-      `run-10-llm-google-0-resume-${PACIFIC_STAMP}`,
+      `run-10-llm-google-model-a-0-resume-${PACIFIC_STAMP}`,
     );
     jest.useRealTimers();
   });
@@ -308,7 +308,7 @@ describe("RpdResumeService — openrouter (account-wide)", () => {
       expect.objectContaining({ strategyName: "llm-openrouter", puzzleId: 10, date: "2026-01-01" }),
       {
         jobId: expect.stringMatching(
-          new RegExp(`^${runStrategyJobId(10, "llm-openrouter", 0)}-resume-`),
+          new RegExp(`^${runStrategyJobId(10, "llm-openrouter", "z-ai/glm-5.2:free", 0)}-resume-`),
         ),
       },
     );
@@ -341,7 +341,7 @@ describe("RpdResumeService — openrouter (account-wide)", () => {
     const firstId = m.runsQueue.add.mock.calls[0][2].jobId as string;
     const secondId = m.runsQueue.add.mock.calls[1][2].jobId as string;
     expect(firstId.split("-resume-")[1]).toBe(secondId.split("-resume-")[1]);
-    expect(firstId).not.toBe(runStrategyJobId(10, "llm-openrouter", 0));
+    expect(firstId).not.toBe(runStrategyJobId(10, "llm-openrouter", "z-ai/glm-5.2:free", 0));
   });
 
   it("leaves a run parked when its enqueue fails (without rethrowing)", async () => {

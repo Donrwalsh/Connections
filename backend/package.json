@@ -21,6 +21,8 @@
     "backfill:image-dates": "node dist/scripts/backfill-image-puzzle-dates.js",
     "backfill:issue-tags": "node dist/scripts/backfill-issue-tags.js",
     "backfill:prompt-text": "node dist/scripts/backfill-prompt-text.js",
+    "backfill:token-usage": "node dist/scripts/backfill-token-usage.js",
+    "trim:resume-corrupted-runs": "node dist/scripts/trim-resume-corrupted-runs.js",
     "eval:categories": "tsx src/scripts/evaluate-categories.ts",
     "purge:case-mismatch-runs": "tsx src/scripts/purge-case-mismatch-runs.ts"
   },

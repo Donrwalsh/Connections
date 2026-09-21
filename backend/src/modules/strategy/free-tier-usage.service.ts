@@ -25,6 +25,11 @@ export interface FreeTierUsageDto {
   usedTokens: number;
   dailyLimitTokens: number;
   remainingTokens: number;
+  // Today's (UTC) reasoning-token share of usedTokens above — same window,
+  // same two sources, purely informational (see SolvePrompt.reasoningTokens).
+  // Not subtracted from remainingTokens: it's already included in
+  // usedTokens, since OpenAI bills reasoning tokens as ordinary output.
+  reasoningTokensUsedToday: number;
   // The models counted toward usedTokens — from SupportedModel.freeTier.
   models: string[];
 }
@@ -82,6 +87,7 @@ export class FreeTierUsageService {
         usedTokens: 0,
         dailyLimitTokens,
         remainingTokens: dailyLimitTokens,
+        reasoningTokensUsedToday: 0,
         models,
       };
     }
@@ -93,16 +99,20 @@ export class FreeTierUsageService {
         .where("run.modelName IN (:...models)", { models })
         .andWhere("prompt.createdAt >= :startOfTodayUtc", { startOfTodayUtc: since })
         .select("COALESCE(SUM(prompt.totalTokens), 0)", "totalTokens")
-        .getRawOne<{ totalTokens: string }>(),
+        .addSelect("COALESCE(SUM(prompt.reasoningTokens), 0)", "reasoningTokens")
+        .getRawOne<{ totalTokens: string; reasoningTokens: string }>(),
       this.categoryEvaluationRepo
         .createQueryBuilder("evaluation")
         .where("evaluation.judgeModel IN (:...models)", { models })
         .andWhere("evaluation.evaluatedAt >= :startOfTodayUtc", { startOfTodayUtc: since })
         .select("COALESCE(SUM(evaluation.totalTokens), 0)", "totalTokens")
-        .getRawOne<{ totalTokens: string }>(),
+        .addSelect("COALESCE(SUM(evaluation.reasoningTokens), 0)", "reasoningTokens")
+        .getRawOne<{ totalTokens: string; reasoningTokens: string }>(),
     ]);
 
     const usedTokens = Number(promptRaw?.totalTokens ?? 0) + Number(judgeRaw?.totalTokens ?? 0);
+    const reasoningTokensUsedToday =
+      Number(promptRaw?.reasoningTokens ?? 0) + Number(judgeRaw?.reasoningTokens ?? 0);
 
     return {
       tier,
@@ -110,6 +120,7 @@ export class FreeTierUsageService {
       usedTokens,
       dailyLimitTokens,
       remainingTokens: Math.max(0, dailyLimitTokens - usedTokens),
+      reasoningTokensUsedToday,
       models,
     };
   }

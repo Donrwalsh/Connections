@@ -44,11 +44,13 @@ const llmDetail: StrategyRunDetail = {
       id: 1,
       promptNumber: 1,
       promptType: "initialSolve",
+      manualRetry: false,
       status: "parsed",
       rawResponseText: "### ANSWER\nAPPLE, BANANA, CHERRY, DATE",
       promptTokens: 100,
       completionTokens: 50,
       totalTokens: 150,
+      reasoningTokens: null,
       latencyMs: 1200,
       temperature: 0.2,
       createdAt: "2025-01-01T00:00:00Z",
@@ -257,6 +259,57 @@ describe("GuessChainVisualizer", () => {
     expect(screen.queryByText("No candidate groups parsed.")).not.toBeInTheDocument();
   });
 
+  it("includes a reasoning-token count in the callError summary when the failed call still spent reasoning tokens", async () => {
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [
+        {
+          ...llmDetail.solvePrompts[0]!,
+          status: "callError",
+          rawResponseText: null,
+          proposals: [],
+          errorName: "AI_APICallError",
+          errorMessage: "Rate limit exceeded",
+          statusCode: 429,
+          isRetryable: true,
+          reasoningTokens: 16000,
+        },
+      ],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Rate limit exceeded")).toBeInTheDocument();
+    expect(
+      screen.getByText("AI_APICallError · HTTP 429 · retryable · 16,000 reasoning tokens"),
+    ).toBeInTheDocument();
+  });
+
+  it("omits the reasoning-token count from the callError summary when reasoningTokens is null or zero", async () => {
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [
+        {
+          ...llmDetail.solvePrompts[0]!,
+          status: "callError",
+          rawResponseText: null,
+          proposals: [],
+          errorName: "AI_APICallError",
+          errorMessage: "Rate limit exceeded",
+          statusCode: 429,
+          isRetryable: true,
+          reasoningTokens: null,
+        },
+      ],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Rate limit exceeded")).toBeInTheDocument();
+    expect(screen.getByText("AI_APICallError · HTTP 429 · retryable")).toBeInTheDocument();
+    expect(screen.queryByText(/reasoning tokens/)).not.toBeInTheDocument();
+  });
+
   it("skips the raw request/response disclosures when a callError row has no detail captured", async () => {
     stubFetch({
       ...llmDetail,
@@ -300,6 +353,7 @@ describe("GuessChainVisualizer", () => {
                 promptTokens: 90,
                 completionTokens: 8,
                 totalTokens: 98,
+                reasoningTokens: null,
                 latencyMs: 30,
                 statusCode: null,
                 errorName: null,
@@ -356,6 +410,7 @@ describe("GuessChainVisualizer", () => {
                 promptTokens: null,
                 completionTokens: null,
                 totalTokens: null,
+                reasoningTokens: null,
                 latencyMs: null,
                 statusCode: 502,
                 errorName: "APICallError",
@@ -451,5 +506,58 @@ describe("GuessChainVisualizer", () => {
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /12345/ })).toBeInTheDocument();
+  });
+
+  it("shows a 'Manually retry' button only when the run's status is 'error' for an admin session", async () => {
+    stubFetch({ ...plainDetail, status: "error" });
+
+    renderAsAdmin(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByRole("button", { name: "Manually retry" })).toBeInTheDocument();
+  });
+
+  it("does not show the manually-retry button for a non-error status", async () => {
+    stubFetch({ ...plainDetail, status: "completed" });
+
+    renderAsAdmin(<GuessChainVisualizer runId={12345} />);
+
+    await screen.findByText("APPLE, BANANA, CHERRY, DATE");
+    expect(screen.queryByRole("button", { name: "Manually retry" })).not.toBeInTheDocument();
+  });
+
+  it("does not show the manually-retry button for a non-admin visitor, even on an errored run", async () => {
+    stubFetch({ ...plainDetail, status: "error" });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    await screen.findByText("APPLE, BANANA, CHERRY, DATE");
+    expect(screen.queryByRole("button", { name: "Manually retry" })).not.toBeInTheDocument();
+  });
+
+  it("opens the retry-run modal when the manually-retry button is clicked", async () => {
+    const user = userEvent.setup();
+    stubFetch({ ...plainDetail, status: "error" });
+
+    renderAsAdmin(<GuessChainVisualizer runId={12345} />);
+
+    await user.click(await screen.findByRole("button", { name: "Manually retry" }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Manually retry run #12345/ })).toBeInTheDocument();
+  });
+
+  it("shows a 'Manually retried' badge on a step produced by a manual retry, and not on other steps", async () => {
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [
+        { ...llmDetail.solvePrompts[0]!, manualRetry: false },
+        { ...llmDetail.solvePrompts[0]!, id: 2, promptNumber: 2, manualRetry: true },
+      ],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Manually retried")).toBeInTheDocument();
+    expect(screen.getAllByText("Manually retried")).toHaveLength(1);
   });
 });
