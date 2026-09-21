@@ -6,7 +6,7 @@ import { StrategyRunStore } from "./strategy-run-store.service";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { Guess, GuessResult } from "./entities/guess.entity";
-import { SolvePrompt } from "./entities/solve-prompt.entity";
+import { SolvePrompt, SolvePromptStatus } from "./entities/solve-prompt.entity";
 import { LlmProposalStatus } from "./entities/llm-proposal.entity";
 import { OrchestratorService, type SolveStepOutcome, type ChatMessage } from "./orchestrator.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
@@ -1095,6 +1095,69 @@ describe("LlmStrategyRunner", () => {
             { role: "user", content: [{ type: "text", text: "solve this puzzle" }] },
             { role: "assistant", content: "here is my first answer" },
             { role: "user", content: [{ type: "text", text: "that failed, try again" }] },
+          ],
+        },
+      });
+      const snapshots = captureMessages([
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]),
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      ]);
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      expect(snapshots[0]).toEqual([
+        { role: "user", content: "solve this puzzle" },
+        { role: "assistant", content: "here is my first answer" },
+        expect.objectContaining({ role: "user" }),
+      ]);
+    });
+
+    it("should keep and answer the latest row's own turn when it was a genuine success, not drop it", async () => {
+      mockGuessRepo.find.mockResolvedValueOnce([
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.FAILURE },
+      ]);
+      // The run's last surviving row is its *only* row (e.g. right after
+      // trim-manual-retry-history-loss.ts rolls a run back to its last
+      // success) — dropping its own trailing turn unconditionally (the old
+      // behavior) would leave nothing at all, even though it's a real,
+      // answered exchange. Its rawResponseText is what was actually
+      // returned, so it should be kept and paired with the request's own
+      // single turn as a genuine assistant reply.
+      mockSolvePromptRepo.findOne.mockResolvedValueOnce({
+        status: SolvePromptStatus.PARSED,
+        rawResponseText: "here is my first answer",
+        requestBody: {
+          model: "ministral-3b-latest",
+          messages: [{ role: "user", content: "solve this puzzle" }],
+        },
+      });
+      const snapshots = captureMessages([
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]),
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      ]);
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      expect(snapshots[0]).toEqual([
+        { role: "user", content: "solve this puzzle" },
+        { role: "assistant", content: "here is my first answer" },
+        expect.objectContaining({ role: "user" }),
+      ]);
+    });
+
+    it("should still drop the latest row's own turn when it's a CALL_ERROR, since it was never answered", async () => {
+      mockGuessRepo.find.mockResolvedValueOnce([
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.FAILURE },
+      ]);
+      mockSolvePromptRepo.findOne.mockResolvedValueOnce({
+        status: SolvePromptStatus.CALL_ERROR,
+        rawResponseText: null,
+        requestBody: {
+          model: "gpt-4.1",
+          messages: [
+            { role: "user", content: "solve this puzzle" },
+            { role: "assistant", content: "here is my first answer" },
+            { role: "user", content: "the call that failed" },
           ],
         },
       });
