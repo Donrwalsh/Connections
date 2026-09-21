@@ -54,22 +54,45 @@ export interface ManualRetryHistoryLoss {
   retryPromptNumber: number;
 }
 
-/** True for a requestBody shaped the way reconstructMessages
- * (llm-strategy-runner.service.ts) needs it: a non-empty ChatMessage[] under
- * `.messages`. Mirrors that method's own isChatMessageArray check exactly —
- * this script must flag precisely the rows that method actually fell back to
- * `[]` for, nothing more and nothing less. */
+/** True for a requestBody shaped either way reconstructMessages
+ * (llm-strategy-runner.service.ts) can use it: a non-empty ChatMessage[]
+ * under `.messages` (every non-OpenAI provider, and the backend->
+ * orchestrator payload OrchestratorService.executeCall falls back to on a
+ * client-side failure), or a non-empty Responses-API `.input` array (the
+ * shape `@ai-sdk/openai`'s default `openai(modelId)` factory always uses —
+ * see orchestrator/src/answer-step.ts's `result.request.body`). Mirrors
+ * that method's own isChatMessageArray/isResponsesApiInputArray checks
+ * exactly — this script must flag precisely the rows that method actually
+ * fell back to `[]` for, nothing more and nothing less. */
 function hasReconstructableHistory(requestBody: unknown): boolean {
-  const messages = (requestBody as { messages?: unknown } | null)?.messages;
+  const body = requestBody as { messages?: unknown; input?: unknown } | null;
+
+  const messages = body?.messages;
+  if (Array.isArray(messages) && messages.length > 0 && messages.every(isChatMessage)) {
+    return true;
+  }
+
+  const input = body?.input;
+  return Array.isArray(input) && input.length > 0 && input.every(isResponsesApiInputItem);
+}
+
+function isChatMessage(m: unknown): boolean {
   return (
-    Array.isArray(messages) &&
-    messages.length > 0 &&
-    messages.every(
-      (m) =>
-        typeof m === "object" &&
-        m !== null &&
-        ((m as { role?: unknown }).role === "user" || (m as { role?: unknown }).role === "assistant") &&
-        typeof (m as { content?: unknown }).content === "string",
+    typeof m === "object" &&
+    m !== null &&
+    ((m as { role?: unknown }).role === "user" || (m as { role?: unknown }).role === "assistant") &&
+    typeof (m as { content?: unknown }).content === "string"
+  );
+}
+
+function isResponsesApiInputItem(item: unknown): boolean {
+  return (
+    typeof item === "object" &&
+    item !== null &&
+    ((item as { role?: unknown }).role === "user" || (item as { role?: unknown }).role === "assistant") &&
+    Array.isArray((item as { content?: unknown }).content) &&
+    (item as { content: unknown[] }).content.every(
+      (part) => typeof part === "object" && part !== null && typeof (part as { text?: unknown }).text === "string",
     )
   );
 }

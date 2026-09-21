@@ -901,10 +901,17 @@ export class LlmStrategyRunner {
   /**
    * Rebuilds the `messages` array as it stood right before the run's last
    * call, from that call's own persisted request — not a re-derivation, the
-   * literal data that was actually sent. `requestBody.messages` is the AI
-   * SDK's request payload (see orchestrator.service.ts /
-   * orchestrator/src/answer-step.ts): this run's full conversation history
-   * up through and including that call's own user turn.
+   * literal data that was actually sent. `requestBody` can be shaped either
+   * of two ways depending on how it was captured (see the two normalize*
+   * helpers below for exactly which): `{ messages: ChatMessage[] }` — every
+   * non-OpenAI provider's request, and the backend->orchestrator payload
+   * OrchestratorService.executeCall falls back to on a client-side failure
+   * — or `{ input: [...] }`, the Responses API shape `@ai-sdk/openai`'s
+   * default `openai(modelId)` factory always uses (see
+   * orchestrator/src/answer-step.ts's `result.request.body` and
+   * orchestrator/src/provider.ts's `getModel`). Either way this is this
+   * run's full conversation history up through and including that call's
+   * own user turn.
    *
    * That trailing user turn is dropped rather than kept and answered,
    * deliberately, for two reasons: (1) if the last row is CALL_ERROR, that
@@ -929,11 +936,19 @@ export class LlmStrategyRunner {
   private reconstructMessages(latestPrompt: Pick<SolvePrompt, "requestBody"> | null): ChatMessage[] {
     if (!latestPrompt) return [];
 
-    const requestBody = latestPrompt.requestBody as { messages?: unknown } | null;
-    const priorMessages = requestBody?.messages;
-    if (!this.isChatMessageArray(priorMessages) || priorMessages.length === 0) return [];
+    const requestBody = latestPrompt.requestBody as { messages?: unknown; input?: unknown } | null;
+    if (!requestBody) return [];
 
-    return priorMessages.slice(0, -1);
+    if (this.isChatMessageArray(requestBody.messages)) {
+      return requestBody.messages.length > 0 ? requestBody.messages.slice(0, -1) : [];
+    }
+
+    if (this.isResponsesApiInputArray(requestBody.input)) {
+      const priorMessages = this.normalizeResponsesApiInput(requestBody.input);
+      return priorMessages.length > 0 ? priorMessages.slice(0, -1) : [];
+    }
+
+    return [];
   }
 
   private isChatMessageArray(value: unknown): value is ChatMessage[] {
@@ -947,5 +962,36 @@ export class LlmStrategyRunner {
           typeof (m as { content?: unknown }).content === "string",
       )
     );
+  }
+
+  // The Responses API's per-turn shape: content is an array of typed parts
+  // (`{ type: "input_text" | "output_text", text }`) rather than a plain
+  // string — confirmed against real captured requestBody rows (a user turn
+  // has one "input_text" part, an assistant turn one "output_text" part).
+  private isResponsesApiInputArray(
+    value: unknown,
+  ): value is Array<{ role: "user" | "assistant"; content: Array<{ text?: unknown }> }> {
+    return (
+      Array.isArray(value) &&
+      value.every(
+        (item) =>
+          typeof item === "object" &&
+          item !== null &&
+          ((item as { role?: unknown }).role === "user" || (item as { role?: unknown }).role === "assistant") &&
+          Array.isArray((item as { content?: unknown }).content) &&
+          (item as { content: unknown[] }).content.every(
+            (part) => typeof part === "object" && part !== null && typeof (part as { text?: unknown }).text === "string",
+          ),
+      )
+    );
+  }
+
+  private normalizeResponsesApiInput(
+    input: Array<{ role: "user" | "assistant"; content: Array<{ text?: unknown }> }>,
+  ): ChatMessage[] {
+    return input.map((item) => ({
+      role: item.role,
+      content: item.content.map((part) => part.text as string).join(""),
+    }));
   }
 }

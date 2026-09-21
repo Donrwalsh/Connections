@@ -1013,6 +1013,39 @@ describe("LlmStrategyRunner", () => {
       ]);
     });
 
+    it("should replay history from a Responses-API-shaped requestBody (OpenAI's default provider)", async () => {
+      mockGuessRepo.find.mockResolvedValueOnce([
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.FAILURE },
+      ]);
+      // @ai-sdk/openai's default openai(modelId) factory uses the Responses
+      // API, whose request body has no top-level "messages" array at all —
+      // conversation turns live under "input", and each turn's content is
+      // an array of typed parts ({ type: "input_text"/"output_text", text })
+      // rather than a plain string. Confirmed against a real captured row.
+      mockSolvePromptRepo.findOne.mockResolvedValueOnce({
+        requestBody: {
+          model: "gpt-4.1",
+          input: [
+            { role: "user", content: [{ type: "input_text", text: "solve this puzzle" }] },
+            { role: "assistant", content: [{ type: "output_text", text: "here is my first answer" }] },
+            { role: "user", content: [{ type: "input_text", text: "that failed, try again" }] },
+          ],
+        },
+      });
+      const snapshots = captureMessages([
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]),
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      ]);
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      expect(snapshots[0]).toEqual([
+        { role: "user", content: "solve this puzzle" },
+        { role: "assistant", content: "here is my first answer" },
+        expect.objectContaining({ role: "user" }),
+      ]);
+    });
+
     it("should fall back to an empty conversation history when the latest row has no usable requestBody", async () => {
       mockGuessRepo.find.mockResolvedValueOnce([
         { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.FAILURE },

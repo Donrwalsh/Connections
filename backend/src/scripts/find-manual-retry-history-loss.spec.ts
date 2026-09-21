@@ -56,6 +56,43 @@ describe("findManualRetryHistoryLoss", () => {
     expect(findManualRetryHistoryLoss(rows)).toBeNull();
   });
 
+  it("does not flag a manual retry whose trigger row's requestBody is Responses-API-shaped but reconstructable", () => {
+    // @ai-sdk/openai's default provider (see orchestrator/src/provider.ts)
+    // uses the Responses API: conversation turns live under "input", not
+    // "messages", and each turn's content is an array of typed parts
+    // rather than a plain string.
+    const rows = [
+      makeRow({ promptNumber: 1, status: SolvePromptStatus.PARSED }),
+      makeRow({
+        promptNumber: 2,
+        status: SolvePromptStatus.CALL_ERROR,
+        requestBody: {
+          input: [
+            { role: "user", content: [{ type: "input_text", text: "solve this puzzle" }] },
+            { role: "assistant", content: [{ type: "output_text", text: "here is my answer" }] },
+          ],
+        },
+      }),
+      makeRow({ promptNumber: 3, manualRetry: true, status: SolvePromptStatus.PARSED }),
+    ];
+
+    expect(findManualRetryHistoryLoss(rows)).toBeNull();
+  });
+
+  it("flags a manual retry whose trigger row's Responses-API input array is empty", () => {
+    const rows = [
+      makeRow({ promptNumber: 1, status: SolvePromptStatus.PARSED }),
+      makeRow({
+        promptNumber: 2,
+        status: SolvePromptStatus.CALL_ERROR,
+        requestBody: { input: [] },
+      }),
+      makeRow({ promptNumber: 3, manualRetry: true, status: SolvePromptStatus.PARSED }),
+    ];
+
+    expect(findManualRetryHistoryLoss(rows)).toEqual({ triggerPromptNumber: 2, retryPromptNumber: 3 });
+  });
+
   it("does not flag a manual retry when nothing before the trigger row ever succeeded (nothing real to lose)", () => {
     const rows = [
       // The run's very first call failed outright — its own turn was popped
