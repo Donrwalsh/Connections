@@ -16,6 +16,7 @@ const openRouterChatMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 const createOpenRouterMock = vi.hoisted(() => vi.fn(() => ({ chat: openRouterChatMock })));
 const createMistralMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 const createSambaNovaMock = vi.hoisted(() => vi.fn(() => vi.fn()));
+const createOpenAICompatibleMock = vi.hoisted(() => vi.fn(() => vi.fn()));
 
 vi.mock("ai-sdk-ollama", () => ({
   createOllama: createOllamaMock,
@@ -45,6 +46,10 @@ vi.mock("sambanova-ai-provider", () => ({
   createSambaNova: createSambaNovaMock,
 }));
 
+vi.mock("@ai-sdk/openai-compatible", () => ({
+  createOpenAICompatible: createOpenAICompatibleMock,
+}));
+
 describe("getModel", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -56,6 +61,7 @@ describe("getModel", () => {
     openRouterChatMock.mockClear();
     createMistralMock.mockClear();
     createSambaNovaMock.mockClear();
+    createOpenAICompatibleMock.mockClear();
   });
 
   it("passes num_ctx from MODEL_CONTEXT_WINDOW to the Ollama model", () => {
@@ -306,6 +312,45 @@ describe("getModel", () => {
     const modelFactory = createSambaNovaMock.mock.results[0].value;
     expect(modelFactory).toHaveBeenCalledWith("Meta-Llama-3.3-70B-Instruct");
   });
+
+  it("resolves the Nvidia model without num_ctx", () => {
+    getModel("nvidia");
+
+    expect(createOpenAICompatibleMock).toHaveBeenCalledTimes(1);
+    const modelFactory = createOpenAICompatibleMock.mock.results[0].value;
+    expect(modelFactory).toHaveBeenCalledWith("meta/llama-3.3-70b-instruct");
+    expect(openaiMock).not.toHaveBeenCalled();
+    expect(createOllamaMock).not.toHaveBeenCalled();
+  });
+
+  it("passes NVIDIA_API_KEY, the NIM base URL, and supportsStructuredOutputs to createOpenAICompatible", () => {
+    vi.stubEnv("NVIDIA_API_KEY", "test-nvidia-key");
+
+    getModel("nvidia");
+
+    expect(createOpenAICompatibleMock).toHaveBeenCalledWith({
+      name: "nvidia",
+      baseURL: "https://integrate.api.nvidia.com/v1",
+      apiKey: "test-nvidia-key",
+      supportsStructuredOutputs: true,
+    });
+  });
+
+  it("uses the model override instead of NVIDIA_MODEL when given", () => {
+    vi.stubEnv("NVIDIA_MODEL", "mistralai/mixtral-8x22b-instruct-v0.1");
+
+    getModel("nvidia", "nvidia/nemotron-3-ultra-550b-a55b");
+
+    const modelFactory = createOpenAICompatibleMock.mock.results[0].value;
+    expect(modelFactory).toHaveBeenCalledWith("nvidia/nemotron-3-ultra-550b-a55b");
+  });
+
+  it("accepts a contextWindow for nvidia without using it", () => {
+    getModel("nvidia", undefined, 262144);
+
+    const modelFactory = createOpenAICompatibleMock.mock.results[0].value;
+    expect(modelFactory).toHaveBeenCalledWith("meta/llama-3.3-70b-instruct");
+  });
 });
 
 describe("getModelName", () => {
@@ -402,6 +447,22 @@ describe("getModelName", () => {
     vi.stubEnv("SAMBANOVA_MODEL", "DeepSeek-V3.1");
     expect(getModelName("sambanova", "gpt-oss-120b")).toBe("gpt-oss-120b");
   });
+
+  it("returns the configured Nvidia model for the nvidia provider", () => {
+    vi.stubEnv("NVIDIA_MODEL", "mistralai/mixtral-8x22b-instruct-v0.1");
+    expect(getModelName("nvidia")).toBe("mistralai/mixtral-8x22b-instruct-v0.1");
+  });
+
+  it("falls back to the Nvidia default when unset", () => {
+    expect(getModelName("nvidia")).toBe("meta/llama-3.3-70b-instruct");
+  });
+
+  it("prefers the model override over NVIDIA_MODEL", () => {
+    vi.stubEnv("NVIDIA_MODEL", "mistralai/mixtral-8x22b-instruct-v0.1");
+    expect(getModelName("nvidia", "nvidia/nemotron-3-ultra-550b-a55b")).toBe(
+      "nvidia/nemotron-3-ultra-550b-a55b",
+    );
+  });
 });
 
 describe("defaultProvider", () => {
@@ -438,6 +499,11 @@ describe("defaultProvider", () => {
   it("returns sambanova when MODEL_PROVIDER is set to sambanova", () => {
     vi.stubEnv("MODEL_PROVIDER", "sambanova");
     expect(defaultProvider()).toBe("sambanova");
+  });
+
+  it("returns nvidia when MODEL_PROVIDER is set to nvidia", () => {
+    vi.stubEnv("MODEL_PROVIDER", "nvidia");
+    expect(defaultProvider()).toBe("nvidia");
   });
 });
 
@@ -476,6 +542,10 @@ describe("effectiveContextWindow", () => {
 
   it("never caps openrouter — returns the given contextWindow unchanged", () => {
     expect(effectiveContextWindow("openrouter", 262144)).toBe(262144);
+  });
+
+  it("never caps nvidia — returns the given contextWindow unchanged", () => {
+    expect(effectiveContextWindow("nvidia", 262144)).toBe(262144);
   });
 });
 

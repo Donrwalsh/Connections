@@ -5,6 +5,7 @@ import { createGroq } from "@ai-sdk/groq";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createMistral } from "@ai-sdk/mistral";
 import { createSambaNova } from "sambanova-ai-provider";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
 
 export const DEFAULT_OPENAI_MODEL = "gpt-4.1-nano";
@@ -14,6 +15,7 @@ export const DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b";
 export const DEFAULT_OPENROUTER_MODEL = "google/gemma-4-31b-it:free";
 export const DEFAULT_MISTRAL_MODEL = "mistral-small-latest";
 export const DEFAULT_SAMBANOVA_MODEL = "Meta-Llama-3.3-70B-Instruct";
+export const DEFAULT_NVIDIA_MODEL = "meta/llama-3.3-70b-instruct";
 export const DEFAULT_JUDGE_MODEL = "gpt-4.1-nano";
 export const DEFAULT_JUDGE_PROVIDER: ModelProvider = "openai";
 export const DEFAULT_CONTEXT_WINDOW = 8192;
@@ -26,7 +28,8 @@ export type ModelProvider =
   | "groq"
   | "openrouter"
   | "mistral"
-  | "sambanova";
+  | "sambanova"
+  | "nvidia";
 
 /**
  * Resolves the default model provider from the MODEL_PROVIDER env var.
@@ -47,6 +50,7 @@ export function defaultProvider(): ModelProvider {
   if (provider === "openrouter") return "openrouter";
   if (provider === "mistral") return "mistral";
   if (provider === "sambanova") return "sambanova";
+  if (provider === "nvidia") return "nvidia";
   return "openai";
 }
 
@@ -122,6 +126,29 @@ export function getModel(
     return sambanova(modelOverride ?? process.env.SAMBANOVA_MODEL ?? DEFAULT_SAMBANOVA_MODEL);
   }
 
+  if (provider === "nvidia") {
+    const nvidia = createOpenAICompatible({
+      name: "nvidia",
+      baseURL: "https://integrate.api.nvidia.com/v1",
+      apiKey: process.env.NVIDIA_API_KEY,
+      // NIM's structured-output support varies by model; this codebase calls
+      // generateObject exclusively, so every seeded NIM model must support
+      // OpenAI-style json_schema mode — leaving this unset would silently
+      // downgrade to the looser, unenforced json_object fallback instead.
+      supportsStructuredOutputs: true,
+    });
+    // @ai-sdk/openai-compatible pulls in its own @ai-sdk/provider@4.0.17,
+    // structurally newer than the 4.0.4 the "ai" package (and every other
+    // provider here) resolves to — npm doesn't dedupe these across the AI
+    // SDK's many small packages (see e.g. sambanova-ai-provider's own nested
+    // @ai-sdk/openai-compatible@1.x), so this is the same class of
+    // "structurally identical but nominally distinct" LanguageModelV4 as
+    // every other cross-package pairing here, just the one pair (4.0.4 vs
+    // 4.0.17) that happens to differ enough for tsc to notice. Runtime shape
+    // is unaffected; only the compile-time nominal type needs the cast.
+    return nvidia(modelOverride ?? process.env.NVIDIA_MODEL ?? DEFAULT_NVIDIA_MODEL) as LanguageModel;
+  }
+
   return openai(modelOverride ?? process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL);
 }
 
@@ -165,6 +192,9 @@ export function getModelName(provider: ModelProvider, modelOverride?: string): s
   }
   if (provider === "sambanova") {
     return modelOverride ?? process.env.SAMBANOVA_MODEL ?? DEFAULT_SAMBANOVA_MODEL;
+  }
+  if (provider === "nvidia") {
+    return modelOverride ?? process.env.NVIDIA_MODEL ?? DEFAULT_NVIDIA_MODEL;
   }
   return modelOverride ?? process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL;
 }
