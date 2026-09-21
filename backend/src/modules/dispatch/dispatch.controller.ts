@@ -354,6 +354,35 @@ export class DispatchController {
     };
   }
 
+  // Same as GET runs/errored, scoped to one strategy — the fresh count
+  // StrategyPuzzlePage's bulk-action modals fetch right before their confirm
+  // dialog. Read-only, un-gated, matching the global version.
+  @Get("strategy/:strategyName/runs/errored")
+  async countErroredRunsForStrategy(@Param("strategyName") strategyName: string) {
+    return this.strategyDispatch.countErroredRuns(strategyName);
+  }
+
+  // Bulk version of DELETE run/:runId, scoped to one strategy — same
+  // teardown as the global DELETE runs/errored above, filtered to
+  // strategyName.
+  @Delete("strategy/:strategyName/runs/errored")
+  @UseGuards(DispatchAuthGuard)
+  @ApiParam({
+    name: "strategyName",
+    type: String,
+    description: "The strategy name (== model name, for LLM strategies)",
+    example: "llm-openai",
+  })
+  @ApiBody({ type: DispatchAuthDto })
+  async deleteErroredRunsForStrategy(@Param("strategyName") strategyName: string) {
+    const result = await this.strategyDispatch.deleteErroredRuns(strategyName);
+    return {
+      message: `Deleted ${result.deletedRuns} errored strategy run(s) for '${strategyName}' and all related data`,
+      strategyName,
+      ...result,
+    };
+  }
+
   // Permanently deletes a strategy run and every row that belongs to it —
   // for scrubbing a run that errored out after the underlying bug is fixed
   // in code, so a rerun doesn't leave the broken attempt cluttering its
@@ -397,6 +426,28 @@ export class DispatchController {
     return {
       message: `Strategy run ${runId} requeued for manual retry`,
       runId,
+      ...result,
+    };
+  }
+
+  // Bulk version of POST run/:runId/retry, scoped to one strategy.
+  @Post("strategy/:strategyName/runs/errored/retry")
+  @UseGuards(DispatchAuthGuard)
+  @ApiParam({
+    name: "strategyName",
+    type: String,
+    description: "The strategy name (== model name, for LLM strategies)",
+    example: "llm-openai",
+  })
+  @ApiBody({ type: DispatchAuthDto })
+  async retryErroredRunsForStrategy(@Param("strategyName") strategyName: string) {
+    const result = await this.strategyDispatch.retryErroredRuns(strategyName);
+    const suffix =
+      (result.skipped > 0 ? `, ${result.skipped} already handled` : "") +
+      (result.failed > 0 ? `, ${result.failed} failed to enqueue` : "");
+    return {
+      message: `Queued ${result.retried} errored strategy run(s) for '${strategyName}' for manual retry${suffix}`,
+      strategyName,
       ...result,
     };
   }
