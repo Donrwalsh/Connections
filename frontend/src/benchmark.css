@@ -127,6 +127,11 @@
   border-color: #cdd3da;
 }
 
+.bench-pill--nvidia {
+  color: #a67c1e;
+  border-color: #e6d9b8;
+}
+
 /* Provider-pool filter — a row of toggle chips on the leaderboard and
  * activity pages; selection lives in the ?provider= query param. */
 .bench-provider-filter {

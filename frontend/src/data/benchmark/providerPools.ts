@@ -12,7 +12,8 @@ export type ProviderPoolId =
   | "openrouter"
   | "mistral"
   | "sambanova"
-  | "ollama";
+  | "ollama"
+  | "nvidia";
 
 export interface ProviderPool {
   id: ProviderPoolId;
@@ -33,6 +34,7 @@ export const PROVIDER_POOLS: ProviderPool[] = [
   { id: "mistral", label: "Mistral", strategyName: "llm-mistral" },
   { id: "sambanova", label: "SambaNova", strategyName: "llm-sambanova" },
   { id: "ollama", label: "Ollama", strategyName: "llm-ollama" },
+  { id: "nvidia", label: "NVIDIA NIM", strategyName: "llm-nvidia" },
 ];
 
 const POOL_BY_STRATEGY = new Map<string, ProviderPoolId>(
