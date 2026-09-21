@@ -2,10 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ADMIN_SESSION_EXPIRED_EVENT,
   deleteErroredRuns,
+  deleteErroredRunsForStrategy,
   deleteFailedJudgeCalls,
   fetchErroredRunCount,
+  fetchErroredRunCountForStrategy,
   fetchFailedJudgeCallCount,
   fetchRecentActivity,
+  retryErroredRunsForStrategy,
   retryRun,
   toRunRecord,
 } from "./api";
@@ -177,6 +180,83 @@ describe("maintenance-panel API", () => {
       window.addEventListener(ADMIN_SESSION_EXPIRED_EVENT, handler);
 
       await expect(retryRun(42)).rejects.toThrow("Session expired");
+      expect(handler).toHaveBeenCalledOnce();
+
+      window.removeEventListener(ADMIN_SESSION_EXPIRED_EVENT, handler);
+    });
+  });
+
+  describe("fetchErroredRunCountForStrategy", () => {
+    it("GETs /dispatch/strategy/:strategyName/runs/errored and returns the count payload", async () => {
+      const calls = stubFetch({ erroredRuns: 3 });
+
+      const result = await fetchErroredRunCountForStrategy("llm-openai");
+
+      expect(result).toEqual({ erroredRuns: 3 });
+      expect(calls[0].url).toContain("/dispatch/strategy/llm-openai/runs/errored");
+      expect(calls[0].init?.method ?? "GET").toBe("GET");
+    });
+  });
+
+  describe("deleteErroredRunsForStrategy", () => {
+    it("DELETEs /dispatch/strategy/:strategyName/runs/errored with credentials and the admin header", async () => {
+      const calls = stubFetch({
+        message: "Deleted 2 errored strategy run(s) for 'llm-openai' and all related data",
+        strategyName: "llm-openai",
+        deletedRuns: 2,
+        deletedGuesses: 11,
+        deletedSolvePrompts: 22,
+        deletedLlmProposals: 33,
+        deletedCategoryEvaluations: 44,
+      });
+
+      const result = await deleteErroredRunsForStrategy("llm-openai");
+
+      expect(result.deletedRuns).toBe(2);
+      expect(calls[0].url).toContain("/dispatch/strategy/llm-openai/runs/errored");
+      expect(calls[0].init?.method).toBe("DELETE");
+      expect(calls[0].init?.credentials).toBe("include");
+      expect((calls[0].init?.headers as Record<string, string>)["X-Admin-Request"]).toBe("1");
+    });
+
+    it("rejects with a session-expired message and fires ADMIN_SESSION_EXPIRED_EVENT on a 403", async () => {
+      stubFetchError(403, "Invalid or missing dispatch password.");
+      const handler = vi.fn();
+      window.addEventListener(ADMIN_SESSION_EXPIRED_EVENT, handler);
+
+      await expect(deleteErroredRunsForStrategy("llm-openai")).rejects.toThrow("Session expired");
+      expect(handler).toHaveBeenCalledOnce();
+
+      window.removeEventListener(ADMIN_SESSION_EXPIRED_EVENT, handler);
+    });
+  });
+
+  describe("retryErroredRunsForStrategy", () => {
+    it("POSTs /dispatch/strategy/:strategyName/runs/errored/retry with credentials and the admin header", async () => {
+      const calls = stubFetch({
+        message: "Queued 2 errored strategy run(s) for 'llm-openai' for manual retry",
+        strategyName: "llm-openai",
+        retried: 2,
+        skipped: 0,
+        failed: 0,
+        failures: [],
+      });
+
+      const result = await retryErroredRunsForStrategy("llm-openai");
+
+      expect(result.retried).toBe(2);
+      expect(calls[0].url).toContain("/dispatch/strategy/llm-openai/runs/errored/retry");
+      expect(calls[0].init?.method).toBe("POST");
+      expect(calls[0].init?.credentials).toBe("include");
+      expect((calls[0].init?.headers as Record<string, string>)["X-Admin-Request"]).toBe("1");
+    });
+
+    it("rejects with a session-expired message and fires ADMIN_SESSION_EXPIRED_EVENT on a 403", async () => {
+      stubFetchError(403, "Invalid or missing dispatch password.");
+      const handler = vi.fn();
+      window.addEventListener(ADMIN_SESSION_EXPIRED_EVENT, handler);
+
+      await expect(retryErroredRunsForStrategy("llm-openai")).rejects.toThrow("Session expired");
       expect(handler).toHaveBeenCalledOnce();
 
       window.removeEventListener(ADMIN_SESSION_EXPIRED_EVENT, handler);

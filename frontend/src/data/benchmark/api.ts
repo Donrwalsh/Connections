@@ -5,7 +5,9 @@
 
 import type {
   AutomationStatus,
+  BulkRetryErroredRunsResult,
   CategoryEvaluationCoverage,
+  DeleteErroredRunsForStrategyResult,
   DeleteErroredRunsResult,
   DeleteFailedJudgeCallsResult,
   DeleteRunResult,
@@ -349,6 +351,43 @@ export function deleteRun(runId: number, signal?: AbortSignal): Promise<DeleteRu
  * was accepted — not that the run has finished (see RetryRunModal). */
 export function retryRun(runId: number, signal?: AbortSignal): Promise<RetryRunResult> {
   return fetchJsonAdmin(`/dispatch/run/${runId}/retry`, signal, { method: "POST" });
+}
+
+/** How many strategy runs are in the 'error' status right now, for one
+ * strategy — the figure StrategyPuzzlePage's bulk-action buttons/modals act
+ * on. Read-only, un-gated, same shape as fetchErroredRunCount. */
+export function fetchErroredRunCountForStrategy(
+  strategyName: string,
+  signal?: AbortSignal,
+): Promise<ErroredRunCount> {
+  return fetchJson(`/dispatch/strategy/${strategyName}/runs/errored`, signal);
+}
+
+/** Permanently deletes every strategy run in the 'error' status for one
+ * strategy, plus all rows tied to each. Rejects (thrown Error, message from
+ * the backend) if the admin session has expired. */
+export function deleteErroredRunsForStrategy(
+  strategyName: string,
+  signal?: AbortSignal,
+): Promise<DeleteErroredRunsForStrategyResult> {
+  return fetchJsonAdmin(`/dispatch/strategy/${strategyName}/runs/errored`, signal, {
+    method: "DELETE",
+  });
+}
+
+/** Queues every strategy run in the 'error' status for one strategy for
+ * manual retry. Rejects (thrown Error, message from the backend) if the
+ * admin session has expired. Each run resumes asynchronously on the job
+ * queue, same as retryRun — this resolving only means the batch was
+ * accepted, not that any run has finished (see BulkActionModal usage in
+ * StrategyPuzzlePage). */
+export function retryErroredRunsForStrategy(
+  strategyName: string,
+  signal?: AbortSignal,
+): Promise<BulkRetryErroredRunsResult> {
+  return fetchJsonAdmin(`/dispatch/strategy/${strategyName}/runs/errored/retry`, signal, {
+    method: "POST",
+  });
 }
 
 /** Same detail payload as fetchRunDetail, keyed by (strategyName, date,
