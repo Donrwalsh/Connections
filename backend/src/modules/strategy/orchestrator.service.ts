@@ -132,7 +132,7 @@ export class OrchestratorService {
   async requestSolveStep(
     messages: ChatMessage[],
     model?: string,
-    provider?: "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral" | "sambanova",
+    provider?: "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral" | "sambanova" | "nvidia",
     contextWindow?: number | null,
   ): Promise<SolveStepOutcome> {
     return this.executeCall<SolveStepSuccess>(
@@ -167,7 +167,7 @@ export class OrchestratorService {
     proposedCategory: string,
     actualCategory: string,
     model?: string,
-    provider?: "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral" | "sambanova",
+    provider?: "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral" | "sambanova" | "nvidia",
   ): Promise<JudgeCategoryOutcome> {
     return this.executeCall<JudgeCategorySuccess>(
       "/judge-category",

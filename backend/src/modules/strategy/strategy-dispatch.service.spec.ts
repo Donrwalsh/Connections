@@ -11,6 +11,7 @@ import {
   LLM_OPENROUTER_QUEUE,
   LLM_MISTRAL_QUEUE,
   LLM_SAMBANOVA_QUEUE,
+  LLM_NVIDIA_QUEUE,
 } from "../queue/queue.module";
 import { StrategyDispatch } from "./strategy-dispatch.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
@@ -30,6 +31,7 @@ describe("StrategyDispatch", () => {
   let mockOpenRouterQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockMistralQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockSambaNovaQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
+  let mockNvidiaQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockStrategyRunRepo: {
     findOne: jest.Mock;
     find: jest.Mock;
@@ -123,6 +125,11 @@ describe("StrategyDispatch", () => {
       addBulk: jest.fn().mockResolvedValue(undefined),
       getJobs: jest.fn().mockResolvedValue([]),
     };
+    mockNvidiaQueue = {
+      add: jest.fn().mockResolvedValue(undefined),
+      addBulk: jest.fn().mockResolvedValue(undefined),
+      getJobs: jest.fn().mockResolvedValue([]),
+    };
     mockStrategyRunRepo = {
       findOne: jest.fn(),
       find: jest.fn(),
@@ -178,6 +185,7 @@ describe("StrategyDispatch", () => {
         { provide: LLM_OPENROUTER_QUEUE, useValue: mockOpenRouterQueue },
         { provide: LLM_MISTRAL_QUEUE, useValue: mockMistralQueue },
         { provide: LLM_SAMBANOVA_QUEUE, useValue: mockSambaNovaQueue },
+        { provide: LLM_NVIDIA_QUEUE, useValue: mockNvidiaQueue },
         { provide: getRepositoryToken(StrategyRun), useValue: mockStrategyRunRepo },
         { provide: getRepositoryToken(Puzzle), useValue: mockPuzzleRepo },
         { provide: getRepositoryToken(Guess), useValue: mockGuessRepo },
