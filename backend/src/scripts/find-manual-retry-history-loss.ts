@@ -54,46 +54,46 @@ export interface ManualRetryHistoryLoss {
   retryPromptNumber: number;
 }
 
-/** True for a requestBody shaped either way reconstructMessages
- * (llm-strategy-runner.service.ts) can use it: a non-empty ChatMessage[]
- * under `.messages` (every non-OpenAI provider, and the backend->
- * orchestrator payload OrchestratorService.executeCall falls back to on a
- * client-side failure), or a non-empty Responses-API `.input` array (the
- * shape `@ai-sdk/openai`'s default `openai(modelId)` factory always uses —
- * see orchestrator/src/answer-step.ts's `result.request.body`). Mirrors
- * that method's own isChatMessageArray/isResponsesApiInputArray checks
- * exactly — this script must flag precisely the rows that method actually
- * fell back to `[]` for, nothing more and nothing less. */
+/** True for a requestBody shaped any of the three ways reconstructMessages
+ * (llm-strategy-runner.service.ts) can use it — mirrors that method's own
+ * normalizeTurns exactly, trying `.messages` (every non-OpenAI, non-Google
+ * provider, and the backend->orchestrator fallback body
+ * OrchestratorService.executeCall captures on a client-side failure),
+ * `.input` (OpenAI's default Responses API provider), then `.contents`
+ * (Google's Gemini API, whose assistant role is spelled "model") — this
+ * script must flag precisely the rows that method actually fell back to
+ * `[]` for, nothing more and nothing less. */
 function hasReconstructableHistory(requestBody: unknown): boolean {
-  const body = requestBody as { messages?: unknown; input?: unknown } | null;
-
-  const messages = body?.messages;
-  if (Array.isArray(messages) && messages.length > 0 && messages.every(isChatMessage)) {
-    return true;
-  }
-
-  const input = body?.input;
-  return Array.isArray(input) && input.length > 0 && input.every(isResponsesApiInputItem);
-}
-
-function isChatMessage(m: unknown): boolean {
+  const body = requestBody as { messages?: unknown; input?: unknown; contents?: unknown } | null;
   return (
-    typeof m === "object" &&
-    m !== null &&
-    ((m as { role?: unknown }).role === "user" || (m as { role?: unknown }).role === "assistant") &&
-    typeof (m as { content?: unknown }).content === "string"
+    isTurnsArray(body?.messages, "content", "assistant") ||
+    isTurnsArray(body?.input, "content", "assistant") ||
+    isTurnsArray(body?.contents, "parts", "model")
   );
 }
 
-function isResponsesApiInputItem(item: unknown): boolean {
+/** Mirrors llm-strategy-runner.service.ts's normalizeTurns' own validation
+ * exactly (see that method for why each of the two per-turn content
+ * layouts — a plain string, or a list of typed parts each with a `text`
+ * field — is real and which provider produces which). */
+function isTurnsArray(value: unknown, contentKey: string, assistantRole: string): boolean {
   return (
-    typeof item === "object" &&
-    item !== null &&
-    ((item as { role?: unknown }).role === "user" || (item as { role?: unknown }).role === "assistant") &&
-    Array.isArray((item as { content?: unknown }).content) &&
-    (item as { content: unknown[] }).content.every(
-      (part) => typeof part === "object" && part !== null && typeof (part as { text?: unknown }).text === "string",
-    )
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((item) => {
+      if (typeof item !== "object" || item === null) return false;
+      const role = (item as Record<string, unknown>).role;
+      if (role !== "user" && role !== assistantRole) return false;
+
+      const content = (item as Record<string, unknown>)[contentKey];
+      if (typeof content === "string") return true;
+      return (
+        Array.isArray(content) &&
+        content.every(
+          (part) => typeof part === "object" && part !== null && typeof (part as { text?: unknown }).text === "string",
+        )
+      );
+    })
   );
 }
 

@@ -93,6 +93,49 @@ describe("findManualRetryHistoryLoss", () => {
     expect(findManualRetryHistoryLoss(rows)).toEqual({ triggerPromptNumber: 2, retryPromptNumber: 3 });
   });
 
+  it("does not flag a manual retry whose trigger row's requestBody is Gemini-shaped but reconstructable", () => {
+    // @ai-sdk/google builds { contents: [{ role, parts }] } — a different
+    // top-level key than every other provider, and the assistant role is
+    // spelled "model", not "assistant".
+    const rows = [
+      makeRow({ promptNumber: 1, status: SolvePromptStatus.PARSED }),
+      makeRow({
+        promptNumber: 2,
+        status: SolvePromptStatus.CALL_ERROR,
+        requestBody: {
+          contents: [
+            { role: "user", parts: [{ text: "solve this puzzle" }] },
+            { role: "model", parts: [{ text: "here is my answer" }] },
+          ],
+        },
+      }),
+      makeRow({ promptNumber: 3, manualRetry: true, status: SolvePromptStatus.PARSED }),
+    ];
+
+    expect(findManualRetryHistoryLoss(rows)).toBeNull();
+  });
+
+  it("does not flag a manual retry whose trigger row's requestBody is Mistral-shaped (messages, array-of-parts content)", () => {
+    // @ai-sdk/mistral uses the "messages" key, but a user turn's content is
+    // an array of typed parts, not a plain string.
+    const rows = [
+      makeRow({ promptNumber: 1, status: SolvePromptStatus.PARSED }),
+      makeRow({
+        promptNumber: 2,
+        status: SolvePromptStatus.CALL_ERROR,
+        requestBody: {
+          messages: [
+            { role: "user", content: [{ type: "text", text: "solve this puzzle" }] },
+            { role: "assistant", content: "here is my answer" },
+          ],
+        },
+      }),
+      makeRow({ promptNumber: 3, manualRetry: true, status: SolvePromptStatus.PARSED }),
+    ];
+
+    expect(findManualRetryHistoryLoss(rows)).toBeNull();
+  });
+
   it("does not flag a manual retry when nothing before the trigger row ever succeeded (nothing real to lose)", () => {
     const rows = [
       // The run's very first call failed outright — its own turn was popped
