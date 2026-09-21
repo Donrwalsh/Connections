@@ -110,6 +110,7 @@ function stubFetch(detail: StrategyRunDetail) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("GuessChainVisualizer", () => {
@@ -533,6 +534,50 @@ describe("GuessChainVisualizer", () => {
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Manually retry run #12345/ })).toBeInTheDocument();
+  });
+
+  it("shows a relative timestamp for a prompt step, with the absolute time in a hover title", async () => {
+    // Only Date is faked, so testing-library's own setTimeout-based polling
+    // (findByText) keeps working against the real clock.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2025-01-01T00:03:00Z"));
+    stubFetch(llmDetail);
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    const label = await screen.findByText("3m ago");
+    expect(label).toHaveAttribute("title", expect.stringContaining("2025"));
+  });
+
+  it("shows a relative timestamp for a plain guess-list row, with the absolute time in a hover title", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2025-01-01T00:03:00Z"));
+    stubFetch(plainDetail);
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    const label = await screen.findByText("3m ago");
+    expect(label).toHaveAttribute("title", expect.stringContaining("2025"));
+  });
+
+  it("shows a timestamp on a callError step's header, even though it has no proposals", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2025-01-01T00:03:00Z"));
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [
+        {
+          ...llmDetail.solvePrompts[0]!,
+          status: "callError",
+          rawResponseText: null,
+          proposals: [],
+        },
+      ],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("3m ago")).toBeInTheDocument();
   });
 
   it("shows a 'Manually retried' badge on a step produced by a manual retry, and not on other steps", async () => {

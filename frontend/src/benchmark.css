@@ -883,6 +883,16 @@
   color: var(--text);
 }
 
+/* margin-left: auto here too so this still lands at the header's trailing
+ * edge on its own when there's no telemetry to sit next to (telemetry is
+ * conditionally rendered; only one of the two auto margins ends up doing
+ * anything once the row has flowed). */
+.bench-step__timestamp {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
 .bench-step__detail {
   margin: 0.4rem 0;
   font-size: 0.85rem;
@@ -999,6 +1009,11 @@
 
 .bench-guess-list__words {
   flex: 1;
+}
+
+.bench-guess-list__timestamp {
+  font-size: 0.8rem;
+  color: var(--text);
 }
 
 /* Coverage-calendar placeholder. */
