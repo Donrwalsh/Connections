@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Provider id: `nvidia`. Strategy name: `llm-nvidia`. Env vars: `NVIDIA_API_KEY`, `NVIDIA_MODEL`, `LLM_NVIDIA_CONCURRENCY`.
-- Base URL: `https://integrate.api.nvidia.com/v1`. Default model: `meta/llama-3.3-70b-instruct`.
+- Base URL: `https://integrate.api.nvidia.com/v1`. Default model: `nvidia/nemotron-3-ultra-550b-a55b` — **not** `meta/llama-3.3-70b-instruct`, which every code snippet in Tasks 1–2 below still shows (written before Task 8's live verification found it dead, HTTP 410, real NVIDIA EOL). Task 9 documents the full model-list supersession. When executing Tasks 1–2 from scratch, use `nvidia/nemotron-3-ultra-550b-a55b` everywhere those tasks say `meta/llama-3.3-70b-instruct`, and prefer other still-live models from Task 9's list (`mistralai/mistral-nemotron`, `google/gemma-4-31b-it`, `nvidia/nemotron-3-super-120b-a12b`, etc.) over `mistralai/mixtral-8x22b-instruct-v0.1` (also dead) for any test's "a different model than the default" value.
 - AI SDK package: `@ai-sdk/openai-compatible@^3.0.53` (confirmed compatible with this repo's `ai@^7.0.41` / `@ai-sdk/mistral@^4.0.0`-generation stack — all resolve to the same `@ai-sdk/provider@4.0.17` / `@ai-sdk/provider-utils@5.0.45` pair).
 - `createOpenAICompatible` MUST be called with `supportsStructuredOutputs: true`, or a schema-bearing call silently downgrades to loose `json_object` mode instead of `json_schema` — unacceptable since this app calls `generateObject` exclusively.
 - NVIDIA is a **non-free-tier** pool (`freeTier: null`), same shape as `openai`/`ollama` — it gets no `FreeTierConfig`, no free-dispatch/RPD-resume queues, and needs no entry in `pool-knobs.ts`.

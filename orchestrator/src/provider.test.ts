@@ -318,7 +318,7 @@ describe("getModel", () => {
 
     expect(createOpenAICompatibleMock).toHaveBeenCalledTimes(1);
     const modelFactory = createOpenAICompatibleMock.mock.results[0].value;
-    expect(modelFactory).toHaveBeenCalledWith("meta/llama-3.3-70b-instruct");
+    expect(modelFactory).toHaveBeenCalledWith("nvidia/nemotron-3-ultra-550b-a55b");
     expect(openaiMock).not.toHaveBeenCalled();
     expect(createOllamaMock).not.toHaveBeenCalled();
   });
@@ -337,19 +337,19 @@ describe("getModel", () => {
   });
 
   it("uses the model override instead of NVIDIA_MODEL when given", () => {
-    vi.stubEnv("NVIDIA_MODEL", "mistralai/mixtral-8x22b-instruct-v0.1");
+    vi.stubEnv("NVIDIA_MODEL", "mistralai/mistral-nemotron");
 
-    getModel("nvidia", "nvidia/nemotron-3-ultra-550b-a55b");
+    getModel("nvidia", "google/gemma-4-31b-it");
 
     const modelFactory = createOpenAICompatibleMock.mock.results[0].value;
-    expect(modelFactory).toHaveBeenCalledWith("nvidia/nemotron-3-ultra-550b-a55b");
+    expect(modelFactory).toHaveBeenCalledWith("google/gemma-4-31b-it");
   });
 
   it("accepts a contextWindow for nvidia without using it", () => {
     getModel("nvidia", undefined, 262144);
 
     const modelFactory = createOpenAICompatibleMock.mock.results[0].value;
-    expect(modelFactory).toHaveBeenCalledWith("meta/llama-3.3-70b-instruct");
+    expect(modelFactory).toHaveBeenCalledWith("nvidia/nemotron-3-ultra-550b-a55b");
   });
 });
 
@@ -449,18 +449,18 @@ describe("getModelName", () => {
   });
 
   it("returns the configured Nvidia model for the nvidia provider", () => {
-    vi.stubEnv("NVIDIA_MODEL", "mistralai/mixtral-8x22b-instruct-v0.1");
-    expect(getModelName("nvidia")).toBe("mistralai/mixtral-8x22b-instruct-v0.1");
+    vi.stubEnv("NVIDIA_MODEL", "mistralai/mistral-nemotron");
+    expect(getModelName("nvidia")).toBe("mistralai/mistral-nemotron");
   });
 
   it("falls back to the Nvidia default when unset", () => {
-    expect(getModelName("nvidia")).toBe("meta/llama-3.3-70b-instruct");
+    expect(getModelName("nvidia")).toBe("nvidia/nemotron-3-ultra-550b-a55b");
   });
 
   it("prefers the model override over NVIDIA_MODEL", () => {
-    vi.stubEnv("NVIDIA_MODEL", "mistralai/mixtral-8x22b-instruct-v0.1");
-    expect(getModelName("nvidia", "nvidia/nemotron-3-ultra-550b-a55b")).toBe(
-      "nvidia/nemotron-3-ultra-550b-a55b",
+    vi.stubEnv("NVIDIA_MODEL", "mistralai/mistral-nemotron");
+    expect(getModelName("nvidia", "nvidia/nemotron-3-super-120b-a12b")).toBe(
+      "nvidia/nemotron-3-super-120b-a12b",
     );
   });
 });

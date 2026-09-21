@@ -107,7 +107,7 @@ describe("classifyModelCallError", () => {
   it("falls back to model_error for nvidia — no classifier configured yet", () => {
     const err = makeAPICallError({ statusCode: 429, responseBody: "rate limited" });
 
-    const result = classifyModelCallError(err, "nvidia", { model: "meta/llama-3.3-70b-instruct" });
+    const result = classifyModelCallError(err, "nvidia", { model: "nvidia/nemotron-3-ultra-550b-a55b" });
 
     expect(result.code).toBe("model_error");
   });
