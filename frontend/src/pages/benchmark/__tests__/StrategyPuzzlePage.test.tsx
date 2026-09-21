@@ -725,4 +725,53 @@ describe("bulk errored-run actions", () => {
       ),
     ).toBe(true);
   });
+
+  it("scopes every bulk-action request to the model, not just the strategy, for an LLM row — one strategyName (e.g. llm-openai) backs many models", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubFetch({
+      erroredCount: 22,
+      leaderboard: {
+        deterministic: [],
+        llm: [
+          makeLeaderboardRow({
+            id: "gpt-4.1-nano-2025-04-14",
+            strategyName: "llm-openai",
+            modelName: "gpt-4.1-nano-2025-04-14",
+            kind: "llm",
+          }),
+        ],
+      },
+      history: {
+        rows: [makeRow({ strategyName: "llm-openai", modelName: "gpt-4.1-nano-2025-04-14" })],
+        meta: { total: 1, page: 1, limit: 100 },
+      },
+      deleteErroredRunsResult: {
+        message: "Deleted 22 errored strategy run(s) for 'llm-openai' model 'gpt-4.1-nano-2025-04-14' and all related data",
+        strategyName: "llm-openai",
+        deletedRuns: 22,
+        deletedGuesses: 0,
+        deletedSolvePrompts: 0,
+        deletedLlmProposals: 0,
+        deletedCategoryEvaluations: 0,
+      },
+    });
+
+    renderStrategyAsAdmin("gpt-4.1-nano-2025-04-14");
+
+    await user.click(await screen.findByRole("button", { name: "Delete all errored runs" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete all errored runs" }));
+    await within(dialog).findByText(/Deleted 22 errored strategy run/);
+
+    // Every /runs/errored request this test triggers (the count fetch, the
+    // refetch on button click, and the delete itself) must carry the model
+    // param — none should fall back to sweeping every llm-openai model.
+    const erroredRunCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes("/dispatch/strategy/llm-openai/runs/errored"),
+    );
+    expect(erroredRunCalls.length).toBeGreaterThan(0);
+    for (const [url] of erroredRunCalls) {
+      expect(String(url)).toContain("model=gpt-4.1-nano-2025-04-14");
+    }
+  });
 });

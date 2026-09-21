@@ -354,30 +354,58 @@ export class DispatchController {
     };
   }
 
-  // Same as GET runs/errored, scoped to one strategy — the fresh count
-  // StrategyPuzzlePage's bulk-action modals fetch right before their confirm
-  // dialog. Read-only, un-gated, matching the global version.
+  // Same as GET runs/errored, scoped to one strategy (and, for an LLM
+  // strategy, one model within it — see the `model` query param) — the fresh
+  // count StrategyPuzzlePage's bulk-action modals fetch right before their
+  // confirm dialog. Read-only, un-gated, matching the global version.
   @Get("strategy/:strategyName/runs/errored")
-  async countErroredRunsForStrategy(@Param("strategyName") strategyName: string) {
-    return this.strategyDispatch.countErroredRuns(strategyName);
+  @ApiQuery({
+    name: "model",
+    type: String,
+    required: false,
+    description:
+      "Narrows to one model's errored runs. Required in practice for an LLM strategy" +
+      " (e.g. 'llm-google'), since one strategyName backs every model on that provider" +
+      " — without it, the count/action covers every model's errored runs, not just one.",
+    example: "gemini-3.1-flash-lite",
+  })
+  async countErroredRunsForStrategy(
+    @Param("strategyName") strategyName: string,
+    @Query("model") model?: string,
+  ) {
+    return this.strategyDispatch.countErroredRuns(strategyName, model);
   }
 
-  // Bulk version of DELETE run/:runId, scoped to one strategy — same
-  // teardown as the global DELETE runs/errored above, filtered to
-  // strategyName.
+  // Bulk version of DELETE run/:runId, scoped to one strategy (and model —
+  // see the `model` query param above) — same teardown as the global DELETE
+  // runs/errored above, filtered to strategyName/modelName.
   @Delete("strategy/:strategyName/runs/errored")
   @UseGuards(DispatchAuthGuard)
   @ApiParam({
     name: "strategyName",
     type: String,
-    description: "The strategy name (== model name, for LLM strategies)",
-    example: "llm-openai",
+    description: "The strategy name (for a deterministic/shuffle strategy, this alone identifies it;" +
+      " for an LLM strategy, e.g. 'llm-google', pair it with the model query param)",
+    example: "llm-google",
+  })
+  @ApiQuery({
+    name: "model",
+    type: String,
+    required: false,
+    description:
+      "Narrows to one model's errored runs. Required in practice for an LLM strategy — see GET" +
+      " above.",
+    example: "gemini-3.1-flash-lite",
   })
   @ApiBody({ type: DispatchAuthDto })
-  async deleteErroredRunsForStrategy(@Param("strategyName") strategyName: string) {
-    const result = await this.strategyDispatch.deleteErroredRuns(strategyName);
+  async deleteErroredRunsForStrategy(
+    @Param("strategyName") strategyName: string,
+    @Query("model") model?: string,
+  ) {
+    const result = await this.strategyDispatch.deleteErroredRuns(strategyName, model);
+    const target = model ? `'${strategyName}' model '${model}'` : `'${strategyName}'`;
     return {
-      message: `Deleted ${result.deletedRuns} errored strategy run(s) for '${strategyName}' and all related data`,
+      message: `Deleted ${result.deletedRuns} errored strategy run(s) for ${target} and all related data`,
       strategyName,
       ...result,
     };
@@ -430,23 +458,38 @@ export class DispatchController {
     };
   }
 
-  // Bulk version of POST run/:runId/retry, scoped to one strategy.
+  // Bulk version of POST run/:runId/retry, scoped to one strategy (and
+  // model — see the `model` query param on GET .../runs/errored above).
   @Post("strategy/:strategyName/runs/errored/retry")
   @UseGuards(DispatchAuthGuard)
   @ApiParam({
     name: "strategyName",
     type: String,
-    description: "The strategy name (== model name, for LLM strategies)",
-    example: "llm-openai",
+    description: "The strategy name (for a deterministic/shuffle strategy, this alone identifies it;" +
+      " for an LLM strategy, e.g. 'llm-google', pair it with the model query param)",
+    example: "llm-google",
+  })
+  @ApiQuery({
+    name: "model",
+    type: String,
+    required: false,
+    description:
+      "Narrows to one model's errored runs. Required in practice for an LLM strategy — see GET" +
+      " .../runs/errored above.",
+    example: "gemini-3.1-flash-lite",
   })
   @ApiBody({ type: DispatchAuthDto })
-  async retryErroredRunsForStrategy(@Param("strategyName") strategyName: string) {
-    const result = await this.strategyDispatch.retryErroredRuns(strategyName);
+  async retryErroredRunsForStrategy(
+    @Param("strategyName") strategyName: string,
+    @Query("model") model?: string,
+  ) {
+    const result = await this.strategyDispatch.retryErroredRuns(strategyName, model);
+    const target = model ? `'${strategyName}' model '${model}'` : `'${strategyName}'`;
     const suffix =
       (result.skipped > 0 ? `, ${result.skipped} already handled` : "") +
       (result.failed > 0 ? `, ${result.failed} failed to enqueue` : "");
     return {
-      message: `Queued ${result.retried} errored strategy run(s) for '${strategyName}' for manual retry${suffix}`,
+      message: `Queued ${result.retried} errored strategy run(s) for ${target} for manual retry${suffix}`,
       strategyName,
       ...result,
     };

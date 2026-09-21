@@ -279,24 +279,29 @@ export class StrategyDispatch {
   /**
    * Bulk-deletes every strategy run whose status is 'error', along with all
    * rows tied to each — see StrategyRunStore.deleteErroredRuns. `strategyName`,
-   * when given, scopes the sweep to one strategy (== one model, for LLM
-   * strategies) instead of every errored run in the table.
+   * when given, scopes the sweep to one strategy; `modelName` narrows it
+   * further to one model within that strategy. Both are needed for an LLM
+   * strategy — one strategyName (e.g. "llm-google") backs every model on
+   * that provider, so strategyName alone would sweep every model's errored
+   * runs, not just one.
    */
-  async deleteErroredRuns(strategyName?: string) {
-    return this.store.deleteErroredRuns(strategyName);
+  async deleteErroredRuns(strategyName?: string, modelName?: string) {
+    return this.store.deleteErroredRuns(strategyName, modelName);
   }
 
   /**
    * How many strategy runs are currently in the 'error' status — the figure
    * the maintenance panel's "delete errored runs" button acts on.
-   * `strategyName`, when given, scopes the count to one strategy — the
-   * figure StrategyPuzzlePage's bulk-action buttons act on instead.
+   * `strategyName`/`modelName`, when given, scope the count the same way as
+   * deleteErroredRuns — the figure StrategyPuzzlePage's bulk-action buttons
+   * act on instead.
    */
-  async countErroredRuns(strategyName?: string): Promise<{ erroredRuns: number }> {
+  async countErroredRuns(strategyName?: string, modelName?: string): Promise<{ erroredRuns: number }> {
     const erroredRuns = await this.strategyRunRepo.count({
       where: {
         status: StrategyRunStatus.ERROR,
         ...(strategyName ? { strategyName } : {}),
+        ...(modelName ? { modelName } : {}),
       },
     });
     return { erroredRuns };
@@ -356,25 +361,35 @@ export class StrategyDispatch {
   }
 
   /**
-   * Bulk version of retryRun, scoped to one strategy (== one model, for LLM
-   * strategies) — retries every run currently in the 'error' status for
-   * strategyName through the exact same retryRun path, so each inherits its
-   * per-run status check, job-id collision avoidance, and (for LLM runs)
-   * conversation-history reconstruction. Unlike deleteErroredRuns this is not
-   * one transaction: each retryRun call independently flips one row and
-   * enqueues one job, so one run's failure can't roll back another's, and a
-   * run whose status changed out from under us between listing and retrying
-   * (e.g. another operator already retried it, or it self-resumed from
-   * RATE_LIMITED_DAILY) is counted as 'skipped', not 'failed'.
+   * Bulk version of retryRun, scoped to one strategy — retries every run
+   * currently in the 'error' status for strategyName through the exact same
+   * retryRun path, so each inherits its per-run status check, job-id
+   * collision avoidance, and (for LLM runs) conversation-history
+   * reconstruction. `modelName`, when given, narrows the sweep to one model
+   * within the strategy — needed for an LLM strategy, where one strategyName
+   * (e.g. "llm-google") backs every model on that provider. Unlike
+   * deleteErroredRuns this is not one transaction: each retryRun call
+   * independently flips one row and enqueues one job, so one run's failure
+   * can't roll back another's, and a run whose status changed out from under
+   * us between listing and retrying (e.g. another operator already retried
+   * it, or it self-resumed from RATE_LIMITED_DAILY) is counted as 'skipped',
+   * not 'failed'.
    */
-  async retryErroredRuns(strategyName: string): Promise<{
+  async retryErroredRuns(
+    strategyName: string,
+    modelName?: string,
+  ): Promise<{
     retried: number;
     skipped: number;
     failed: number;
     failures: { runId: number; reason: string }[];
   }> {
     const erroredRuns = await this.strategyRunRepo.find({
-      where: { strategyName, status: StrategyRunStatus.ERROR },
+      where: {
+        strategyName,
+        ...(modelName ? { modelName } : {}),
+        status: StrategyRunStatus.ERROR,
+      },
       select: { id: true },
     });
 
