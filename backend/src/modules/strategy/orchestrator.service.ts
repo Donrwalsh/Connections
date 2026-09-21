@@ -224,20 +224,42 @@ export class OrchestratorService {
           // key, which is only present when the orchestrator's error details
           // bag happened to carry one and is `undefined` otherwise.
           statusCode: callDetail.statusCode ?? response.status,
+          // Same fallback as the catch block below, for the same reason: the
+          // orchestrator's error response doesn't always carry a `details`
+          // bag with its own requestBody (a bare 502 from a proxy in front
+          // of it, or any orchestrator error path that doesn't attach one) —
+          // when it doesn't, fall back to what we know we sent rather than
+          // leaving reconstructMessages with nothing.
+          requestBody: callDetail.requestBody ?? body,
         },
       };
     } catch (err) {
+      // A client-side failure never reaches the orchestrator, so there's no
+      // server response to pull a requestBody from — but `body` (what we
+      // tried to send) is already known regardless of whether it ever went
+      // out, and for requestSolveStep its `messages` is exactly what a later
+      // manual retry needs to reconstruct this run's conversation history
+      // from the CALL_ERROR row this failure becomes (see
+      // llm-strategy-runner.service.ts's reconstructMessages). Omitting it
+      // silently degrades that reconstruction to an empty history whenever
+      // the run's terminal failure was a timeout/network error rather than
+      // an HTTP error response.
       if (err instanceof Error && err.name === "AbortError") {
         return {
           ok: false,
-          error: { error: "Request timed out", code: "model_error", errorName: "AbortError" },
+          error: {
+            error: "Request timed out",
+            code: "model_error",
+            errorName: "AbortError",
+            requestBody: body,
+          },
         };
       }
       const message = this.describeError(err);
       this.logger.warn(`Orchestrator ${path} call failed: ${message}`);
       return {
         ok: false,
-        error: { error: message, code: "model_error", errorName: this.causeName(err) },
+        error: { error: message, code: "model_error", errorName: this.causeName(err), requestBody: body },
       };
     }
   }
