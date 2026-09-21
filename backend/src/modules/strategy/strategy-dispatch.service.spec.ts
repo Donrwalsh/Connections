@@ -1,5 +1,5 @@
 import { Test, TestingModule } from "@nestjs/testing";
-import { BadRequestException } from "@nestjs/common";
+import { BadRequestException, ConflictException } from "@nestjs/common";
 import { DataSource } from "typeorm";
 import { getRepositoryToken } from "@nestjs/typeorm";
 import {
@@ -1005,6 +1005,17 @@ describe("StrategyDispatch", () => {
         select: { id: true },
       });
     });
+
+    it("should thread a strategyName filter through to the run store", async () => {
+      mockManager.find.mockResolvedValueOnce([]);
+
+      await service.deleteErroredRuns("llm-openai");
+
+      expect(mockManager.find).toHaveBeenCalledWith(StrategyRun, {
+        where: { status: StrategyRunStatus.ERROR, strategyName: "llm-openai" },
+        select: { id: true },
+      });
+    });
   });
   describe("countErroredRuns", () => {
     it("should count only runs in the error status, for the maintenance panel's button", async () => {
@@ -1016,6 +1027,70 @@ describe("StrategyDispatch", () => {
       expect(mockStrategyRunRepo.count).toHaveBeenCalledWith({
         where: { status: StrategyRunStatus.ERROR },
       });
+    });
+
+    it("should filter by strategyName when given, for StrategyPuzzlePage's bulk-action buttons", async () => {
+      mockStrategyRunRepo.count.mockResolvedValueOnce(2);
+
+      const result = await service.countErroredRuns("llm-openai");
+
+      expect(result).toEqual({ erroredRuns: 2 });
+      expect(mockStrategyRunRepo.count).toHaveBeenCalledWith({
+        where: { status: StrategyRunStatus.ERROR, strategyName: "llm-openai" },
+      });
+    });
+  });
+  describe("retryErroredRuns", () => {
+    it("retries every errored run for the strategy through retryRun and counts successes", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([{ id: 11 }, { id: 22 }]);
+      const retryRunSpy = jest.spyOn(service, "retryRun").mockResolvedValue({
+        status: StrategyRunStatus.RUNNING,
+      });
+
+      const result = await service.retryErroredRuns("llm-openai");
+
+      expect(result).toEqual({ retried: 2, skipped: 0, failed: 0, failures: [] });
+      expect(mockStrategyRunRepo.find).toHaveBeenCalledWith({
+        where: { strategyName: "llm-openai", status: StrategyRunStatus.ERROR },
+        select: { id: true },
+      });
+      expect(retryRunSpy).toHaveBeenNthCalledWith(1, 11);
+      expect(retryRunSpy).toHaveBeenNthCalledWith(2, 22);
+    });
+
+    it("counts a ConflictException (status changed under us) as skipped, not failed", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([{ id: 11 }]);
+      jest.spyOn(service, "retryRun").mockRejectedValueOnce(
+        new ConflictException("Strategy run 11 is in status 'running', not 'error'"),
+      );
+
+      const result = await service.retryErroredRuns("llm-openai");
+
+      expect(result).toEqual({ retried: 0, skipped: 1, failed: 0, failures: [] });
+    });
+
+    it("counts an unexpected error as failed, with the run id and reason", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([{ id: 11 }]);
+      jest.spyOn(service, "retryRun").mockRejectedValueOnce(new Error("boom"));
+
+      const result = await service.retryErroredRuns("llm-openai");
+
+      expect(result).toEqual({
+        retried: 0,
+        skipped: 0,
+        failed: 1,
+        failures: [{ runId: 11, reason: "boom" }],
+      });
+    });
+
+    it("returns all zeros without calling retryRun when there are no errored runs", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([]);
+      const retryRunSpy = jest.spyOn(service, "retryRun");
+
+      const result = await service.retryErroredRuns("llm-openai");
+
+      expect(result).toEqual({ retried: 0, skipped: 0, failed: 0, failures: [] });
+      expect(retryRunSpy).not.toHaveBeenCalled();
     });
   });
 });

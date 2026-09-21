@@ -540,6 +540,27 @@ export interface DeleteErroredRunsResult {
   deletedCategoryEvaluations: number;
 }
 
+/** Response from DELETE /dispatch/strategy/:strategyName/runs/errored — the
+ * same per-table counts as DeleteErroredRunsResult, scoped to one strategy. */
+export interface DeleteErroredRunsForStrategyResult extends DeleteErroredRunsResult {
+  strategyName: string;
+}
+
+/** Response from POST /dispatch/strategy/:strategyName/runs/errored/retry —
+ * per-run *enqueue* outcome, not the eventual retry result: a queued job's
+ * real outcome isn't known until it completes on the worker (see
+ * RetryRunModal, which has the same "refresh to see progress" framing for a
+ * single run). 'skipped' is a run whose status changed out from under the
+ * sweep (e.g. already retried by someone else) — not a real failure. */
+export interface BulkRetryErroredRunsResult {
+  message: string;
+  strategyName: string;
+  retried: number;
+  skipped: number;
+  failed: number;
+  failures: { runId: number; reason: string }[];
+}
+
 /** GET /category-evaluation/failed — how many CategoryEvaluation rows are
  * failed judge calls (status 'callError'). The figure the maintenance
  * panel's "delete failed judge calls" button acts on. */

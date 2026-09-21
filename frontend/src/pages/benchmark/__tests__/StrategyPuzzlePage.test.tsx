@@ -2,7 +2,15 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Leaderboard, LeaderboardRow, RunHistory, RunHistoryRow } from "../../../data/benchmark/types";
+import { AdminAuthContext } from "../../../auth/useAdminAuth";
+import type {
+  BulkRetryErroredRunsResult,
+  DeleteErroredRunsForStrategyResult,
+  Leaderboard,
+  LeaderboardRow,
+  RunHistory,
+  RunHistoryRow,
+} from "../../../data/benchmark/types";
 import { StrategyPuzzlePage } from "../StrategyPuzzlePage";
 
 function makeRow(overrides: Partial<RunHistoryRow> = {}): RunHistoryRow {
@@ -63,13 +71,32 @@ function stubFetch({
   leaderboard = emptyLeaderboard,
   history = emptyHistory,
   historyOk = true,
+  erroredCount = 0,
+  deleteErroredRunsResult,
+  retryErroredRunsResult,
 }: {
   leaderboard?: Leaderboard;
   history?: RunHistory | ((href: string) => RunHistory);
   historyOk?: boolean;
+  erroredCount?: number;
+  deleteErroredRunsResult?: DeleteErroredRunsForStrategyResult;
+  retryErroredRunsResult?: BulkRetryErroredRunsResult;
 } = {}) {
-  const fetchMock = vi.fn((url: unknown) => {
+  const fetchMock = vi.fn((url: unknown, init?: RequestInit) => {
     const href = String(url);
+    // Checked before the generic "/runs" branch below — "/runs/errored" also
+    // contains "/runs" as a substring and would otherwise be misrouted to
+    // the run-history stub.
+    if (href.includes("/runs/errored")) {
+      const method = init?.method ?? "GET";
+      if (method === "DELETE") {
+        return Promise.resolve({ ok: true, json: async () => deleteErroredRunsResult });
+      }
+      if (method === "POST") {
+        return Promise.resolve({ ok: true, json: async () => retryErroredRunsResult });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ erroredRuns: erroredCount }) });
+    }
     if (href.includes("/strategy/leaderboard")) {
       return Promise.resolve({ ok: true, json: async () => leaderboard });
     }
@@ -97,6 +124,20 @@ function renderStrategy(strategyId = "alphabetical") {
         <Route path="/leaderboard/:strategyId/:puzzleId" element={<div>runs-page</div>} />
       </Routes>
     </MemoryRouter>,
+  );
+}
+
+function renderStrategyAsAdmin(strategyId = "alphabetical") {
+  render(
+    <AdminAuthContext.Provider
+      value={{ isAdmin: true, isLoading: false, login: vi.fn(), logout: vi.fn() }}
+    >
+      <MemoryRouter initialEntries={[`/leaderboard/${strategyId}`]}>
+        <Routes>
+          <Route path="/leaderboard/:strategyId" element={<StrategyPuzzlePage />} />
+        </Routes>
+      </MemoryRouter>
+    </AdminAuthContext.Provider>,
   );
 }
 
@@ -568,5 +609,120 @@ describe("StrategyPuzzlePage", () => {
 
     await screen.findByRole("heading", { name: "LLM · gpt-4.1-nano-2025-04-14" });
     expect(screen.queryByText(/^For tasks/)).not.toBeInTheDocument();
+  });
+});
+
+describe("bulk errored-run actions", () => {
+  it("does not show bulk-action buttons when not an admin", async () => {
+    stubFetch({
+      erroredCount: 5,
+      history: { rows: [makeRow()], meta: { total: 1, page: 1, limit: 100 } },
+    });
+
+    renderStrategy("alphabetical");
+
+    await screen.findByRole("table");
+    expect(screen.queryByRole("button", { name: "Retry all errored runs" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete all errored runs" })).not.toBeInTheDocument();
+  });
+
+  it("does not show bulk-action buttons when the admin's errored count is zero", async () => {
+    stubFetch({
+      erroredCount: 0,
+      history: { rows: [makeRow()], meta: { total: 1, page: 1, limit: 100 } },
+    });
+
+    renderStrategyAsAdmin("alphabetical");
+
+    await screen.findByRole("table");
+    expect(screen.queryByRole("button", { name: "Retry all errored runs" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete all errored runs" })).not.toBeInTheDocument();
+  });
+
+  it("shows both bulk-action buttons for an admin when there are errored runs", async () => {
+    stubFetch({
+      erroredCount: 3,
+      history: { rows: [makeRow()], meta: { total: 1, page: 1, limit: 100 } },
+    });
+
+    renderStrategyAsAdmin("alphabetical");
+
+    expect(await screen.findByRole("button", { name: "Retry all errored runs" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete all errored runs" })).toBeInTheDocument();
+  });
+
+  it("opens the delete-all modal, confirms, and refetches the count and history", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubFetch({
+      erroredCount: 2,
+      history: { rows: [makeRow()], meta: { total: 1, page: 1, limit: 100 } },
+      deleteErroredRunsResult: {
+        message: "Deleted 2 errored strategy run(s) for 'alphabetical' and all related data",
+        strategyName: "alphabetical",
+        deletedRuns: 2,
+        deletedGuesses: 3,
+        deletedSolvePrompts: 0,
+        deletedLlmProposals: 0,
+        deletedCategoryEvaluations: 0,
+      },
+    });
+
+    renderStrategyAsAdmin("alphabetical");
+
+    await user.click(await screen.findByRole("button", { name: "Delete all errored runs" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/2 errored run\(s\) for Alphabetical/)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Delete all errored runs" }));
+
+    expect(
+      await within(dialog).findByText(
+        "Deleted 2 errored strategy run(s) for 'alphabetical' and all related data",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).includes("/dispatch/strategy/alphabetical/runs/errored") &&
+          (init as RequestInit | undefined)?.method === "DELETE",
+      ),
+    ).toBe(true);
+  });
+
+  it("opens the retry-all modal, confirms, and shows the enqueue summary", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubFetch({
+      erroredCount: 2,
+      history: { rows: [makeRow()], meta: { total: 1, page: 1, limit: 100 } },
+      retryErroredRunsResult: {
+        message: "Queued 2 errored strategy run(s) for 'alphabetical' for manual retry",
+        strategyName: "alphabetical",
+        retried: 2,
+        skipped: 0,
+        failed: 0,
+        failures: [],
+      },
+    });
+
+    renderStrategyAsAdmin("alphabetical");
+
+    await user.click(await screen.findByRole("button", { name: "Retry all errored runs" }));
+
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Retry all errored runs" }));
+
+    expect(
+      await within(dialog).findByText(
+        "Queued 2 errored strategy run(s) for 'alphabetical' for manual retry",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).includes("/dispatch/strategy/alphabetical/runs/errored/retry") &&
+          (init as RequestInit | undefined)?.method === "POST",
+      ),
+    ).toBe(true);
   });
 });

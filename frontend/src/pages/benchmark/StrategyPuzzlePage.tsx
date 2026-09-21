@@ -1,8 +1,16 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { useAdminAuth } from "../../auth/useAdminAuth";
+import { BulkActionModal } from "../../components/benchmark/BulkActionModal";
 import { RunHistoryTable } from "../../components/benchmark/RunHistoryTable";
 import { StatusPill } from "../../components/benchmark/StatusPill";
-import { fetchLeaderboard, fetchRunHistory } from "../../data/benchmark/api";
+import {
+  deleteErroredRunsForStrategy,
+  fetchErroredRunCountForStrategy,
+  fetchLeaderboard,
+  fetchRunHistory,
+  retryErroredRunsForStrategy,
+} from "../../data/benchmark/api";
 import { formatCostUsd, formatDuration, formatSuccessRate } from "../../data/benchmark/metrics";
 import { useResource } from "../../hooks/useResource";
 import { useStrategyMeta } from "../../data/benchmark/useStrategyMeta";
@@ -37,11 +45,13 @@ export function StrategyPuzzlePage() {
   const resolvedStrategyName = meta?.strategyName;
   const resolvedKind = meta?.kind;
   const resolvedModelId = meta?.id;
+  const { isAdmin } = useAdminAuth();
 
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState<RunHistorySortBy>("puzzleDate");
   const [sortDir, setSortDir] = useState<RunHistorySortDir>("desc");
   const [status, setStatus] = useState<RunStatus | null>(null);
+  const [openBulkModal, setOpenBulkModal] = useState<null | "delete" | "retry">(null);
 
   // Best-effort — see the header comment above; a miss just leaves the
   // summary stats blank, so the fetch's own error is never surfaced.
@@ -58,6 +68,7 @@ export function StrategyPuzzlePage() {
     data: history,
     loading: isLoading,
     error,
+    refetch: refetchHistory,
   } = useResource(
     ["runHistory", resolvedStrategyName, resolvedKind, resolvedModelId, page, sortBy, sortDir, status],
     (signal) => {
@@ -74,6 +85,20 @@ export function StrategyPuzzlePage() {
         },
         signal,
       );
+    },
+    { enabled: !!resolvedStrategyName },
+  );
+
+  // Admin-only bulk retry/delete for every 'error'-status run of this
+  // strategy — the fresh count both gates the buttons (hidden at zero) and
+  // is re-fetched right before each confirm modal opens (see the onClick
+  // handlers below), so the modal's warning text never acts on a stale
+  // number.
+  const { data: erroredCount, refetch: refetchErroredCount } = useResource(
+    ["erroredRunCount", resolvedStrategyName],
+    (signal) => {
+      if (!resolvedStrategyName) return Promise.reject(new Error("Strategy not resolved"));
+      return fetchErroredRunCountForStrategy(resolvedStrategyName, signal);
     },
     { enabled: !!resolvedStrategyName },
   );
@@ -224,6 +249,31 @@ export function StrategyPuzzlePage() {
             </div>
           </>
         ) : null}
+
+        {isAdmin && resolvedStrategyName && (erroredCount?.erroredRuns ?? 0) > 0 ? (
+          <div className="bench-visualizer__actions">
+            <button
+              type="button"
+              className="bench-sort-btn"
+              onClick={() => {
+                void refetchErroredCount();
+                setOpenBulkModal("retry");
+              }}
+            >
+              Retry all errored runs
+            </button>
+            <button
+              type="button"
+              className="bench-sort-btn bench-sort-btn--danger"
+              onClick={() => {
+                void refetchErroredCount();
+                setOpenBulkModal("delete");
+              }}
+            >
+              Delete all errored runs
+            </button>
+          </div>
+        ) : null}
       </header>
 
       {isLoading ? <p className="bench-muted">Loading runs…</p> : null}
@@ -263,6 +313,37 @@ export function StrategyPuzzlePage() {
             </button>
           </div>
         </>
+      ) : null}
+
+      {openBulkModal === "delete" && resolvedStrategyName ? (
+        <BulkActionModal
+          title={`Delete all errored runs for ${meta.name}`}
+          warning={
+            `This permanently deletes ${erroredCount?.erroredRuns ?? "all"} errored run(s) for ` +
+            `${meta.name} and every row tied to them. This cannot be undone.`
+          }
+          confirmLabel="Delete all errored runs"
+          action={() => deleteErroredRunsForStrategy(resolvedStrategyName)}
+          onClose={() => setOpenBulkModal(null)}
+          onDone={() => {
+            void refetchErroredCount();
+            void refetchHistory();
+          }}
+        />
+      ) : null}
+
+      {openBulkModal === "retry" && resolvedStrategyName ? (
+        <BulkActionModal
+          title={`Retry all errored runs for ${meta.name}`}
+          warning={
+            `This queues ${erroredCount?.erroredRuns ?? "all"} errored run(s) for ${meta.name} for ` +
+            "manual retry. Retries run asynchronously — refresh this page to see progress."
+          }
+          confirmLabel="Retry all errored runs"
+          action={() => retryErroredRunsForStrategy(resolvedStrategyName)}
+          onClose={() => setOpenBulkModal(null)}
+          onDone={() => void refetchErroredCount()}
+        />
       ) : null}
     </div>
   );
