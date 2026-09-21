@@ -3,6 +3,7 @@ import { useAdminAuth } from "../../auth/useAdminAuth";
 import { fetchRunDetail } from "../../data/benchmark/api";
 import { useResource } from "../../hooks/useResource";
 import { formatDuration } from "../../data/benchmark/metrics";
+import { poolFromStrategyName, providerPoolLabel } from "../../data/benchmark/providerPools";
 import {
   categoryVerdictLabel,
   categoryVerdictTone,
@@ -43,6 +44,7 @@ export function GuessChainVisualizer({ runId, onDeleted }: GuessChainVisualizerP
   } = useResource(["runDetail", runId], (signal) => fetchRunDetail(runId, signal));
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showRetryModal, setShowRetryModal] = useState(false);
+  const providerLabel = resolveProviderLabel(detail?.strategyName);
 
   return (
     <section className="bench-visualizer" aria-label={`Guess chain for run ${runId}`}>
@@ -76,7 +78,7 @@ export function GuessChainVisualizer({ runId, onDeleted }: GuessChainVisualizerP
 
       {detail && !isLoading && !error ? (
         detail.solvePrompts.length > 0 ? (
-          <PromptChain solvePrompts={detail.solvePrompts} />
+          <PromptChain solvePrompts={detail.solvePrompts} providerLabel={providerLabel} />
         ) : (
           <PlainGuessList guesses={detail.guesses} />
         )
@@ -97,20 +99,40 @@ export function GuessChainVisualizer({ runId, onDeleted }: GuessChainVisualizerP
   );
 }
 
+/** The display name of the provider that served this run — falls back to a
+ * generic phrase for an unrecognized/missing strategy name, which in
+ * practice shouldn't happen since every LLM strategy has a pool entry. */
+function resolveProviderLabel(strategyName: string | null | undefined): string {
+  const poolId = poolFromStrategyName(strategyName);
+  return poolId ? providerPoolLabel(poolId) : "the provider";
+}
+
 /** The LLM guess chain: one step per model call, in order. */
-function PromptChain({ solvePrompts }: { solvePrompts: SolvePromptRecord[] }) {
+function PromptChain({
+  solvePrompts,
+  providerLabel,
+}: {
+  solvePrompts: SolvePromptRecord[];
+  providerLabel: string;
+}) {
   return (
     <ol className="bench-chain">
       {solvePrompts.map((prompt) => (
         <li key={prompt.id} className="bench-chain__step">
-          <PromptStep prompt={prompt} />
+          <PromptStep prompt={prompt} providerLabel={providerLabel} />
         </li>
       ))}
     </ol>
   );
 }
 
-function PromptStep({ prompt }: { prompt: SolvePromptRecord }) {
+function PromptStep({
+  prompt,
+  providerLabel,
+}: {
+  prompt: SolvePromptRecord;
+  providerLabel: string;
+}) {
   const isCallError = prompt.status === "callError";
   const telemetry = [
     prompt.totalTokens !== null ? `${prompt.totalTokens.toLocaleString()} tok` : null,
@@ -168,7 +190,7 @@ function PromptStep({ prompt }: { prompt: SolvePromptRecord }) {
       ) : null}
 
       {isCallError ? (
-        <CallErrorDetail prompt={prompt} />
+        <CallErrorDetail prompt={prompt} providerLabel={providerLabel} />
       ) : (
         <ul className="bench-proposals">
           {prompt.proposals.map((proposal) => (
@@ -183,11 +205,18 @@ function PromptStep({ prompt }: { prompt: SolvePromptRecord }) {
   );
 }
 
-/** The OpenAI call itself failed — no model text at all, so there's nothing
- * to show in the usual proposals list. Surfaces the error message/status
- * plus the raw request/response the orchestrator captured, in the same
- * collapsible-detail style as the prompt/response blocks above. */
-function CallErrorDetail({ prompt }: { prompt: SolvePromptRecord }) {
+/** The provider call itself failed — no model text at all, so there's
+ * nothing to show in the usual proposals list. Surfaces the error
+ * message/status plus the raw request/response the orchestrator captured,
+ * in the same collapsible-detail style as the prompt/response blocks
+ * above. */
+function CallErrorDetail({
+  prompt,
+  providerLabel,
+}: {
+  prompt: SolvePromptRecord;
+  providerLabel: string;
+}) {
   const summary = [
     prompt.errorName,
     prompt.statusCode !== null ? `HTTP ${prompt.statusCode}` : null,
@@ -208,14 +237,14 @@ function CallErrorDetail({ prompt }: { prompt: SolvePromptRecord }) {
 
       {prompt.requestBody !== null ? (
         <details className="bench-step__detail">
-          <summary>Raw request sent to OpenAI</summary>
+          <summary>Raw request sent to {providerLabel}</summary>
           <pre className="bench-step__pre">{JSON.stringify(prompt.requestBody, null, 2)}</pre>
         </details>
       ) : null}
 
       {prompt.responseBody !== null ? (
         <details className="bench-step__detail">
-          <summary>Raw response from OpenAI</summary>
+          <summary>Raw response from {providerLabel}</summary>
           <pre className="bench-step__pre">{JSON.stringify(prompt.responseBody, null, 2)}</pre>
         </details>
       ) : null}
