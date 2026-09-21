@@ -104,6 +104,14 @@ describe("classifyModelCallError", () => {
     expect(result.code).toBe("model_error");
   });
 
+  it("falls back to model_error for nvidia — no classifier configured yet", () => {
+    const err = makeAPICallError({ statusCode: 429, responseBody: "rate limited" });
+
+    const result = classifyModelCallError(err, "nvidia", { model: "meta/llama-3.3-70b-instruct" });
+
+    expect(result.code).toBe("model_error");
+  });
+
   it("attaches usage from a NoObjectGeneratedError so a billed-but-malformed judge call still records its tokens", () => {
     const err = new NoObjectGeneratedError({
       message: "No object generated: response did not match schema.",
