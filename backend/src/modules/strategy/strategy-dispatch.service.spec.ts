@@ -1016,6 +1016,21 @@ describe("StrategyDispatch", () => {
         select: { id: true },
       });
     });
+
+    it("should thread a modelName filter through to the run store as well, when given", async () => {
+      mockManager.find.mockResolvedValueOnce([]);
+
+      await service.deleteErroredRuns("llm-google", "gemini-3.1-flash-lite");
+
+      expect(mockManager.find).toHaveBeenCalledWith(StrategyRun, {
+        where: {
+          status: StrategyRunStatus.ERROR,
+          strategyName: "llm-google",
+          modelName: "gemini-3.1-flash-lite",
+        },
+        select: { id: true },
+      });
+    });
   });
   describe("countErroredRuns", () => {
     it("should count only runs in the error status, for the maintenance panel's button", async () => {
@@ -1039,6 +1054,21 @@ describe("StrategyDispatch", () => {
         where: { status: StrategyRunStatus.ERROR, strategyName: "llm-openai" },
       });
     });
+
+    it("should also filter by modelName when given — one strategyName (e.g. llm-google) backs many models", async () => {
+      mockStrategyRunRepo.count.mockResolvedValueOnce(22);
+
+      const result = await service.countErroredRuns("llm-google", "gemini-3.1-flash-lite");
+
+      expect(result).toEqual({ erroredRuns: 22 });
+      expect(mockStrategyRunRepo.count).toHaveBeenCalledWith({
+        where: {
+          status: StrategyRunStatus.ERROR,
+          strategyName: "llm-google",
+          modelName: "gemini-3.1-flash-lite",
+        },
+      });
+    });
   });
   describe("retryErroredRuns", () => {
     it("retries every errored run for the strategy through retryRun and counts successes", async () => {
@@ -1056,6 +1086,21 @@ describe("StrategyDispatch", () => {
       });
       expect(retryRunSpy).toHaveBeenNthCalledWith(1, 11);
       expect(retryRunSpy).toHaveBeenNthCalledWith(2, 22);
+    });
+
+    it("also filters by modelName when given — one strategyName can back many models", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([]);
+
+      await service.retryErroredRuns("llm-google", "gemini-3.1-flash-lite");
+
+      expect(mockStrategyRunRepo.find).toHaveBeenCalledWith({
+        where: {
+          strategyName: "llm-google",
+          modelName: "gemini-3.1-flash-lite",
+          status: StrategyRunStatus.ERROR,
+        },
+        select: { id: true },
+      });
     });
 
     it("counts a ConflictException (status changed under us) as skipped, not failed", async () => {

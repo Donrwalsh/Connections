@@ -22,9 +22,23 @@ commit `89e9968`), but nothing scoped to a single model, and no bulk *retry* exi
 
 This adds two buttons to `StrategyPuzzlePage` (the per-model run-history page a Leaderboard row
 links to): **"Retry all errored runs"** and **"Delete all errored runs"**, each acting on every
-`StrategyRun` where `strategyName` equals the page's own strategy (== the model, for LLM rows) and
-`status === 'error'` — exactly the same condition that already gates the single-run buttons, no
-broader and no narrower.
+`StrategyRun` matching the page's own strategy and (for an LLM row) model, with `status ===
+'error'` — exactly the same condition that already gates the single-run buttons, no broader and no
+narrower.
+
+> **Post-implementation correction:** the original version of this spec (Design/Scope/Q9 below)
+> scoped the new routes by `strategyName` alone, on the assumption that "a strategy page is one
+> model." That's wrong for LLM strategies: `SupportedModel`'s `UNIQUE (strategyName, modelName)`
+> constraint means one `strategyName` (e.g. `"llm-google"`) backs *every* model on that provider —
+> exactly why `RunHistoryTable`/`fetchRunHistory` already filter by `model` *separately* from
+> `strategyName`, a fact this spec's own Fact-check section noted but didn't carry through to the
+> route design. Caught via manual testing after the first implementation shipped (a "22 errored"
+> page showed "queues 207 errored run(s)" — every Google model's errored runs, not just the one
+> being viewed). Fixed in a follow-up commit: all three routes/service methods/client functions
+> gained an optional `model`/`modelName` parameter alongside `strategyName`, and
+> `StrategyPuzzlePage` now passes `resolvedModelId` (the same value `fetchRunHistory` already
+> passes as `model`) through to all three. The text below is left as originally written, with this
+> note as the correction — see the actual code for the fixed signatures.
 
 ---
 

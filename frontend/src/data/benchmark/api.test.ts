@@ -196,6 +196,15 @@ describe("maintenance-panel API", () => {
       expect(calls[0].url).toContain("/dispatch/strategy/llm-openai/runs/errored");
       expect(calls[0].init?.method ?? "GET").toBe("GET");
     });
+
+    it("adds a model query param when given, so one LLM strategy's many models don't get mixed up", async () => {
+      const calls = stubFetch({ erroredRuns: 22 });
+
+      await fetchErroredRunCountForStrategy("llm-google", "gemini-3.1-flash-lite");
+
+      expect(calls[0].url).toContain("/dispatch/strategy/llm-google/runs/errored");
+      expect(calls[0].url).toContain("model=gemini-3.1-flash-lite");
+    });
   });
 
   describe("deleteErroredRunsForStrategy", () => {
@@ -217,6 +226,24 @@ describe("maintenance-panel API", () => {
       expect(calls[0].init?.method).toBe("DELETE");
       expect(calls[0].init?.credentials).toBe("include");
       expect((calls[0].init?.headers as Record<string, string>)["X-Admin-Request"]).toBe("1");
+    });
+
+    it("adds a model query param when given", async () => {
+      const calls = stubFetch({
+        message: "Deleted 22 errored strategy run(s) for 'llm-google' model 'gemini-3.1-flash-lite' and all related data",
+        strategyName: "llm-google",
+        deletedRuns: 22,
+        deletedGuesses: 0,
+        deletedSolvePrompts: 0,
+        deletedLlmProposals: 0,
+        deletedCategoryEvaluations: 0,
+      });
+
+      await deleteErroredRunsForStrategy("llm-google", "gemini-3.1-flash-lite");
+
+      expect(calls[0].url).toContain("/dispatch/strategy/llm-google/runs/errored");
+      expect(calls[0].url).toContain("model=gemini-3.1-flash-lite");
+      expect(calls[0].init?.method).toBe("DELETE");
     });
 
     it("rejects with a session-expired message and fires ADMIN_SESSION_EXPIRED_EVENT on a 403", async () => {
@@ -249,6 +276,23 @@ describe("maintenance-panel API", () => {
       expect(calls[0].init?.method).toBe("POST");
       expect(calls[0].init?.credentials).toBe("include");
       expect((calls[0].init?.headers as Record<string, string>)["X-Admin-Request"]).toBe("1");
+    });
+
+    it("adds a model query param when given", async () => {
+      const calls = stubFetch({
+        message: "Queued 22 errored strategy run(s) for 'llm-google' model 'gemini-3.1-flash-lite' for manual retry",
+        strategyName: "llm-google",
+        retried: 22,
+        skipped: 0,
+        failed: 0,
+        failures: [],
+      });
+
+      await retryErroredRunsForStrategy("llm-google", "gemini-3.1-flash-lite");
+
+      expect(calls[0].url).toContain("/dispatch/strategy/llm-google/runs/errored/retry");
+      expect(calls[0].url).toContain("model=gemini-3.1-flash-lite");
+      expect(calls[0].init?.method).toBe("POST");
     });
 
     it("rejects with a session-expired message and fires ADMIN_SESSION_EXPIRED_EVENT on a 403", async () => {

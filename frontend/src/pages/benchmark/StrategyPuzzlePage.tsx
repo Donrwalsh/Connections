@@ -90,15 +90,19 @@ export function StrategyPuzzlePage() {
   );
 
   // Admin-only bulk retry/delete for every 'error'-status run of this
-  // strategy — the fresh count both gates the buttons (hidden at zero) and
-  // is re-fetched right before each confirm modal opens (see the onClick
-  // handlers below), so the modal's warning text never acts on a stale
-  // number.
+  // strategy (and, for an LLM row, this model specifically — one
+  // strategyName like "llm-google" backs every model on that provider, so
+  // the model must be threaded through everywhere strategyName is, exactly
+  // like fetchRunHistory's own `model` option above). The fresh count both
+  // gates the buttons (hidden at zero) and is re-fetched right before each
+  // confirm modal opens (see the onClick handlers below), so the modal's
+  // warning text never acts on a stale number.
+  const bulkActionModel = resolvedKind === "llm" ? resolvedModelId : undefined;
   const { data: erroredCount, refetch: refetchErroredCount } = useResource(
-    ["erroredRunCount", resolvedStrategyName],
+    ["erroredRunCount", resolvedStrategyName, bulkActionModel],
     (signal) => {
       if (!resolvedStrategyName) return Promise.reject(new Error("Strategy not resolved"));
-      return fetchErroredRunCountForStrategy(resolvedStrategyName, signal);
+      return fetchErroredRunCountForStrategy(resolvedStrategyName, bulkActionModel, signal);
     },
     { enabled: !!resolvedStrategyName },
   );
@@ -323,7 +327,7 @@ export function StrategyPuzzlePage() {
             `${meta.name} and every row tied to them. This cannot be undone.`
           }
           confirmLabel="Delete all errored runs"
-          action={() => deleteErroredRunsForStrategy(resolvedStrategyName)}
+          action={() => deleteErroredRunsForStrategy(resolvedStrategyName, bulkActionModel)}
           onClose={() => setOpenBulkModal(null)}
           onDone={() => {
             void refetchErroredCount();
@@ -340,7 +344,7 @@ export function StrategyPuzzlePage() {
             "manual retry. Retries run asynchronously — refresh this page to see progress."
           }
           confirmLabel="Retry all errored runs"
-          action={() => retryErroredRunsForStrategy(resolvedStrategyName)}
+          action={() => retryErroredRunsForStrategy(resolvedStrategyName, bulkActionModel)}
           onClose={() => setOpenBulkModal(null)}
           onDone={() => void refetchErroredCount()}
         />
