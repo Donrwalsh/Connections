@@ -1174,7 +1174,7 @@ Add after the `SAMBANOVA_MODEL` line (line 57):
 # only — not part of automatic free-tier rotation. NIM's real-world
 # rate-limit shape is unverified, so 429s fall back to generic retry
 # handling for now.
-NVIDIA_MODEL=meta/llama-3.3-70b-instruct
+NVIDIA_MODEL=nvidia/nemotron-3-ultra-550b-a55b
 ```
 
 Add a new section after the SambaNova block (after `SAMBANOVA_DISPATCH_MAX_IN_FLIGHT=2`, line 233):
@@ -1206,7 +1206,7 @@ Update the `MODEL_PROVIDER` row (line 102) to mention nvidia:
 Add after the `SAMBANOVA_MODEL` row (line 108):
 
 ```
-| `NVIDIA_MODEL` | `meta/llama-3.3-70b-instruct` | NVIDIA NIM model id (used by the `llm-nvidia` strategy and provider-less requests). Manual dispatch only — not part of automatic free-tier rotation; NIM's real-world rate-limit shape is unverified, so 429s fall back to generic retry handling for now |
+| `NVIDIA_MODEL` | `nvidia/nemotron-3-ultra-550b-a55b` | NVIDIA NIM model id (used by the `llm-nvidia` strategy and provider-less requests). Manual dispatch only — not part of automatic free-tier rotation; NIM's real-world rate-limit shape is unverified, so 429s fall back to generic retry handling for now |
 ```
 
 Add after the `LLM_SAMBANOVA_DAILY_HOLD_FALLBACK_SECONDS` / `SAMBANOVA_DISPATCH_MAX_IN_FLIGHT` block (after line 154):
