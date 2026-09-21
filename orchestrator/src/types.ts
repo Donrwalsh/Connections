@@ -84,7 +84,7 @@ export const SolveStepRequestSchema = AssistRequestSchema.extend({
     .optional()
     .describe("Model to call, overriding the orchestrator's env-configured default"),
   provider: z
-    .enum(["openai", "ollama", "google", "groq", "openrouter", "mistral", "sambanova"])
+    .enum(["openai", "ollama", "google", "groq", "openrouter", "mistral", "sambanova", "nvidia"])
     .optional()
     .describe("Provider to call, overriding MODEL_PROVIDER"),
   contextWindow: z
@@ -149,7 +149,9 @@ export const JudgeCategoryRequestSchema = z.object({
   proposedCategory: z.string().min(1),
   actualCategory: z.string().min(1),
   model: z.string().min(1).optional(),
-  provider: z.enum(["openai", "ollama", "google", "groq", "openrouter", "mistral", "sambanova"]).optional(),
+  provider: z
+    .enum(["openai", "ollama", "google", "groq", "openrouter", "mistral", "sambanova", "nvidia"])
+    .optional(),
 });
 export type JudgeCategoryRequest = z.infer<typeof JudgeCategoryRequestSchema>;
 
