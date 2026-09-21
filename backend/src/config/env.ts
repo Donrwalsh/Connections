@@ -18,7 +18,7 @@ export interface AppEnv {
   DB_MIGRATIONS_RUN: boolean;
   DISPATCH_PASSWORD: string;
   JUDGE_MODEL: string;
-  JUDGE_PROVIDER: "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral" | "sambanova";
+  JUDGE_PROVIDER: "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral" | "sambanova" | "nvidia";
 }
 
 /** Every provider-pool id the judge can ride — mirrors ProviderPoolId
@@ -32,6 +32,7 @@ const JUDGE_PROVIDERS = [
   "openrouter",
   "mistral",
   "sambanova",
+  "nvidia",
 ] as const;
 
 function required(name: string, value: string | undefined): string {
