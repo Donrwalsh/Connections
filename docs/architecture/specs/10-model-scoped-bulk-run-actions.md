@@ -474,9 +474,9 @@ All on `feature/bulk-actions-by-model`, one PR, four commits:
   with `where: { status: StrategyRunStatus.ERROR }`, no `strategyName` key at all — assert
   `expect(mockManager.find).toHaveBeenCalledWith(StrategyRun, { where: { status:
   StrategyRunStatus.ERROR }, select: { id: true } })` still passes with no changes).
-- Run: `cd backend && npx vitest run strategy-run-store.service.spec.ts` (or the repo's configured
-  test runner — check `backend/package.json`'s `test` script if `vitest` isn't it). Expect the new
-  assertion to FAIL (current code ignores any argument).
+- Run: `cd backend && npx jest strategy-run-store.service.spec.ts` (the backend's `test` script is
+  `jest --forceExit --detectOpenHandles`). Expect the new assertion to FAIL (current code ignores
+  any argument).
 - Implement the `strategyName?: string` change in `StrategyRunStore.deleteErroredRuns` (Design,
   above). Re-run — expect PASS, and the old no-arg test still PASS.
 - `backend/src/modules/strategy/strategy-dispatch.service.spec.ts`: add a `strategyName` case to

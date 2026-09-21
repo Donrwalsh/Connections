@@ -278,19 +278,26 @@ export class StrategyDispatch {
 
   /**
    * Bulk-deletes every strategy run whose status is 'error', along with all
-   * rows tied to each — see StrategyRunStore.deleteErroredRuns.
+   * rows tied to each — see StrategyRunStore.deleteErroredRuns. `strategyName`,
+   * when given, scopes the sweep to one strategy (== one model, for LLM
+   * strategies) instead of every errored run in the table.
    */
-  async deleteErroredRuns() {
-    return this.store.deleteErroredRuns();
+  async deleteErroredRuns(strategyName?: string) {
+    return this.store.deleteErroredRuns(strategyName);
   }
 
   /**
    * How many strategy runs are currently in the 'error' status — the figure
    * the maintenance panel's "delete errored runs" button acts on.
+   * `strategyName`, when given, scopes the count to one strategy — the
+   * figure StrategyPuzzlePage's bulk-action buttons act on instead.
    */
-  async countErroredRuns(): Promise<{ erroredRuns: number }> {
+  async countErroredRuns(strategyName?: string): Promise<{ erroredRuns: number }> {
     const erroredRuns = await this.strategyRunRepo.count({
-      where: { status: StrategyRunStatus.ERROR },
+      where: {
+        status: StrategyRunStatus.ERROR,
+        ...(strategyName ? { strategyName } : {}),
+      },
     });
     return { erroredRuns };
   }
@@ -346,6 +353,49 @@ export class StrategyDispatch {
     );
 
     return { status: run.status };
+  }
+
+  /**
+   * Bulk version of retryRun, scoped to one strategy (== one model, for LLM
+   * strategies) — retries every run currently in the 'error' status for
+   * strategyName through the exact same retryRun path, so each inherits its
+   * per-run status check, job-id collision avoidance, and (for LLM runs)
+   * conversation-history reconstruction. Unlike deleteErroredRuns this is not
+   * one transaction: each retryRun call independently flips one row and
+   * enqueues one job, so one run's failure can't roll back another's, and a
+   * run whose status changed out from under us between listing and retrying
+   * (e.g. another operator already retried it, or it self-resumed from
+   * RATE_LIMITED_DAILY) is counted as 'skipped', not 'failed'.
+   */
+  async retryErroredRuns(strategyName: string): Promise<{
+    retried: number;
+    skipped: number;
+    failed: number;
+    failures: { runId: number; reason: string }[];
+  }> {
+    const erroredRuns = await this.strategyRunRepo.find({
+      where: { strategyName, status: StrategyRunStatus.ERROR },
+      select: { id: true },
+    });
+
+    let retried = 0;
+    let skipped = 0;
+    const failures: { runId: number; reason: string }[] = [];
+
+    for (const { id } of erroredRuns) {
+      try {
+        await this.retryRun(id);
+        retried += 1;
+      } catch (err) {
+        if (err instanceof ConflictException) {
+          skipped += 1;
+        } else {
+          failures.push({ runId: id, reason: err instanceof Error ? err.message : String(err) });
+        }
+      }
+    }
+
+    return { retried, skipped, failed: failures.length, failures };
   }
 
   /**

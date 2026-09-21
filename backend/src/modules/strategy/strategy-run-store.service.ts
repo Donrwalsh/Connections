@@ -278,8 +278,10 @@ export class StrategyRunStore {
    * one down through the same path as deleteRun. The 'error' filter already
    * excludes 'running', so no per-run running check is needed. Runs in a
    * single transaction so a mid-sweep failure rolls the whole thing back.
+   * `strategyName`, when given, scopes the sweep to one strategy instead of
+   * every errored run in the table.
    */
-  async deleteErroredRuns(): Promise<{
+  async deleteErroredRuns(strategyName?: string): Promise<{
     deletedRuns: number;
     deletedGuesses: number;
     deletedSolvePrompts: number;
@@ -288,7 +290,10 @@ export class StrategyRunStore {
   }> {
     return this.dataSource.transaction(async (manager) => {
       const erroredRuns = await manager.find(StrategyRun, {
-        where: { status: StrategyRunStatus.ERROR },
+        where: {
+          status: StrategyRunStatus.ERROR,
+          ...(strategyName ? { strategyName } : {}),
+        },
         select: { id: true },
       });
 
