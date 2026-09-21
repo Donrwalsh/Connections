@@ -360,6 +360,7 @@ describe("OrchestratorService", () => {
         error: "malformed",
         code: "invalid_group",
         statusCode: 400,
+        requestBody: { messages },
       },
     });
     expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -384,8 +385,30 @@ describe("OrchestratorService", () => {
         error: "model down",
         code: "model_error",
         statusCode: 502,
+        requestBody: { messages },
       },
     });
+  });
+
+  // Same reconstruction concern as the client-side-failure tests above, via
+  // a different path: the orchestrator's own error response carries no
+  // `details` bag at all here (a bare 502 from a proxy in front of it, or
+  // any of its error paths that don't attach one) — extractCallDetail then
+  // has nothing to pull a requestBody from either, so this must fall back to
+  // the outbound `body` exactly like the exception branches do.
+  it("should fall back to the outbound request body when the orchestrator's error response has no details bag", async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockResponse({
+        ok: false,
+        status: 502,
+        body: { error: "model down", code: "model_error" },
+      }),
+    );
+
+    const outcome = await service.requestSolveStep(messages, "gpt-4.1", "openai");
+
+    if (outcome.ok) throw new Error("expected failure");
+    expect(outcome.error.requestBody).toEqual({ messages, model: "gpt-4.1", provider: "openai" });
   });
 
   it("should classify a network failure as model_error with no retry", async () => {
@@ -401,6 +424,25 @@ describe("OrchestratorService", () => {
     if (!outcome.ok) {
       expect(outcome.error.error).toContain("ECONNREFUSED");
     }
+  });
+
+  // A client-side failure (this test, the timeout test below) never reaches
+  // the orchestrator, so there's no server response to extract a requestBody
+  // from — but the outbound `body` we tried to send is already in hand, and
+  // its `messages` is exactly what LlmStrategyRunner.reconstructMessages
+  // needs to seed a manually-retried run's conversation history from the
+  // SolvePrompt row this failure becomes. Omitting it here (as this code
+  // used to) silently degrades every manual retry whose triggering failure
+  // was a timeout/network error into a fresh conversation with no memory of
+  // the run's actual prior turns — see llm-strategy-runner.service.ts's
+  // reconstructMessages.
+  it("should include the request body on a network failure, so a manual retry can still reconstruct conversation history", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+
+    const outcome = await service.requestSolveStep(messages, "gpt-4.1", "openai");
+
+    if (outcome.ok) throw new Error("expected failure");
+    expect(outcome.error.requestBody).toEqual({ messages, model: "gpt-4.1", provider: "openai" });
   });
 
   it("should unwrap the undici cause behind a bare 'fetch failed'", async () => {
@@ -422,6 +464,7 @@ describe("OrchestratorService", () => {
         error: "fetch failed (ECONNRESET: read ECONNRESET)",
         code: "model_error",
         errorName: "ECONNRESET",
+        requestBody: { messages },
       },
     });
   });
@@ -452,7 +495,12 @@ describe("OrchestratorService", () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(outcome).toEqual({
       ok: false,
-      error: { error: "Request timed out", code: "model_error", errorName: "AbortError" },
+      error: {
+        error: "Request timed out",
+        code: "model_error",
+        errorName: "AbortError",
+        requestBody: { messages },
+      },
     });
   });
 
@@ -535,6 +583,7 @@ describe("OrchestratorService", () => {
         statusCode: 502,
         errorName: "FetchError",
         isRetryable: true,
+        requestBody: { messages },
       },
     });
   });
