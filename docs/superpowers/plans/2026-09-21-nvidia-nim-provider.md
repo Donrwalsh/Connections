@@ -1256,6 +1256,15 @@ Expected: `provider-pool-dispatch.e2e-spec.ts` and the rest of the e2e suite pas
 Run: `cd frontend && npm run test:run`
 Expected: all tests pass, including the new `nvidia` case from Task 6.
 
+- [ ] **Step 5b: Two more registries a real end-to-end smoke test caught**
+
+Typecheck and unit tests are not enough to catch every registry — a real live dispatch through the actual backend → worker → orchestrator → NVIDIA API pipeline surfaced two more:
+
+1. `orchestrator/src/types.ts` — `SolveStepRequestSchema` and `JudgeCategoryRequestSchema` each declare their own `provider: z.enum([...])`, independent of `ModelProvider` in `provider.ts`. Neither had `"nvidia"` added, so every real dispatch got rejected with a 400 "Invalid enum value" before `getModel()` was ever called — invisible to `tsc`/unit tests since nothing exercises the actual HTTP validation layer. Add `"nvidia"` to both enums.
+2. `docker-compose.yml`'s `orchestrator` service explicitly allowlists each provider's env vars one by one under `environment:` (not a blanket `.env` passthrough) — add `NVIDIA_API_KEY: ${NVIDIA_API_KEY}` and `NVIDIA_MODEL: ${NVIDIA_MODEL:-nvidia/nemotron-3-ultra-550b-a55b}` next to the other providers' entries, or the container never sees the key even with it correctly set in `.env`.
+
+Also worth knowing: `docker-compose.prod.yml`'s orchestrator service only wires `OPENAI_API_KEY`/`OPENAI_MODEL` today — every other provider (Google, Groq, OpenRouter, Mistral, SambaNova, and now NVIDIA) is unconfigured there, a pre-existing gap predating this work. Decide separately whether that's intentional (e.g. Coolify injects env vars a different way) or needs the same fix.
+
 - [ ] **Step 6: Manual smoke check**
 
 With `NVIDIA_API_KEY` set in your `.env` and the stack running (`docker compose up` or your usual dev flow), dispatch one manual run per seeded model via the existing admin dispatch endpoint (`POST /dispatch/model/:modelName/:date`, per README's dispatch section) for `llm-nvidia`, and confirm in Bull Board (`/bull/queues`) that each run lands on the new `llm-nvidia-runs` queue and completes (or fails for a reason unrelated to provider wiring, e.g. an actual puzzle-solving miss).
