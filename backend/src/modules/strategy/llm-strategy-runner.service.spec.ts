@@ -634,6 +634,47 @@ describe("LlmStrategyRunner", () => {
       expect((promptRows[0].issueTags as string[])).toHaveLength(2);
     });
 
+    it("should accept a proposal whose words match a puzzle group only after lowercasing, normalizing it to canonical case and flagging caseMismatch", async () => {
+      mockOrchestratorService.requestSolveStep
+        .mockResolvedValueOnce(makeAssistResponse([["apple", "banana", "cherry", "date"]]))
+        .mockResolvedValueOnce(makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]));
+
+      const result = await runner.runLlmStrategy(100, "llm-openai");
+
+      // Only reaches COMPLETED if availableWords was correctly filtered by
+      // the *canonical*-case words after step 1 — this is a regression
+      // guard for that downstream filter, not just the tag/guess check.
+      expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
+
+      const insertedGuesses = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "Guess")
+        .flatMap((call) => call[1] as Array<{ words: string[] }>);
+      expect(insertedGuesses[0].words).toEqual(["APPLE", "BANANA", "CHERRY", "DATE"]);
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(expect.objectContaining({ issueTags: ["caseMismatch"] }));
+    });
+
+    it("should still flag wordNotOnList, not caseMismatch, for a proposal with a genuinely hallucinated word regardless of casing", async () => {
+      mockOrchestratorService.requestSolveStep
+        .mockResolvedValueOnce(makeAssistResponse([["ocean", "banana", "cherry", "date"]]))
+        .mockResolvedValueOnce(
+          makeAssistResponse([
+            ["APPLE", "BANANA", "CHERRY", "DATE"],
+            ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+          ]),
+        );
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows[0]).toEqual(expect.objectContaining({ issueTags: ["wordNotOnList"] }));
+    });
+
     it("should trim conversation history to the registered proposal when a response contains multiple full answer attempts", async () => {
       const multiProposalResponse =
         "### GROUPS\n#### Group 1\nCategory: Fruits\nWords: APPLE, BANANA, CHERRY, DATE\n\n" +

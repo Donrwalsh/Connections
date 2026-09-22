@@ -192,6 +192,17 @@ describe("GuessChainVisualizer", () => {
     expect(await screen.findByText("Multiple proposals")).toBeInTheDocument();
   });
 
+  it("flags a step with a caseMismatch issue tag", async () => {
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [{ ...llmDetail.solvePrompts[0]!, issueTags: ["caseMismatch"] }],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Case mismatch")).toBeInTheDocument();
+  });
+
   it("does not render an issue badge for a step with no issue tags", async () => {
     stubFetch(llmDetail);
 

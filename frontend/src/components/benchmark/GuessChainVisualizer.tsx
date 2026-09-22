@@ -360,6 +360,8 @@ function issueTagLabel(tag: string): string {
       return "Unclassified issue";
     case "multipleProposals":
       return "Multiple proposals";
+    case "caseMismatch":
+      return "Case mismatch";
     default:
       return tag;
   }
@@ -377,6 +379,8 @@ function issueTagTitle(tag: string): string {
       return "A group went missing from the response for a reason not yet covered by a named check.";
     case "multipleProposals":
       return "This response contained more than one full answer attempt — only the first is what was actually registered. Later prompts include just that proposal, not the full response, to keep the conversation from ballooning.";
+    case "caseMismatch":
+      return "The model proposed the right words in the wrong case — the guess was accepted after normalizing to the puzzle's casing.";
     default:
       return "Unrecognized issue tag.";
   }
