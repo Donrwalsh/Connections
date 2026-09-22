@@ -237,6 +237,16 @@ export interface SupportedModelRecord {
   releaseDate: string | null;
 }
 
+/** Response from GET /strategy/models/:modelName/strategy — the one
+ * strategy a bare model name currently resolves to. The request rejects
+ * (thrown Error, message from the backend) if the model is unknown,
+ * unsupported, or configured under more than one strategy — see
+ * useStrategyMeta, which is this call's only consumer. */
+export interface ResolvedModelStrategy {
+  modelName: string;
+  strategyName: string;
+}
+
 /** The backend tracks two separate, non-overlapping free-token programs —
  * model membership lives on SupportedModel.freeTier (see
  * backend/src/modules/supported-model/entities/supported-model.entity.ts)
