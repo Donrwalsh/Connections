@@ -26,6 +26,10 @@ export interface RunHistoryTableProps {
    * "qwen/qwen3.6-27b" contains a literal "/" that would otherwise split
    * into an extra path segment no route matches. */
   strategyId: string;
+  /** The page's ?strategy= qualifier, when the model name it's viewing is
+   * ambiguous (see useStrategyMeta) — carried into the puzzle-detail link so
+   * PuzzleRunsPage resolves the same provider without re-showing the picker. */
+  strategyQualifier?: string;
   rows: RunHistoryRow[];
   sortBy: RunHistorySortBy;
   sortDir: RunHistorySortDir;
@@ -62,6 +66,7 @@ const TOKEN_COST_COLUMN: { key: RunHistorySortBy; label: string } = {
  * separate widget above it. */
 export function RunHistoryTable({
   strategyId,
+  strategyQualifier,
   rows,
   sortBy,
   sortDir,
@@ -71,6 +76,7 @@ export function RunHistoryTable({
   onStatusChange,
 }: RunHistoryTableProps) {
   const navigate = useNavigate();
+  const qualifierSuffix = strategyQualifier ? `?strategy=${encodeURIComponent(strategyQualifier)}` : "";
   const sortableColumns = showTokenCost ? [...SORTABLE_COLUMNS, TOKEN_COST_COLUMN] : SORTABLE_COLUMNS;
   const columnCount = sortableColumns.length + 1;
 
@@ -101,11 +107,11 @@ export function RunHistoryTable({
             className="bench-row"
             role="link"
             tabIndex={0}
-            onClick={() => navigate(`/leaderboard/${encodeURIComponent(strategyId)}/${row.puzzleId}`)}
+            onClick={() => navigate(`/leaderboard/${encodeURIComponent(strategyId)}/${row.puzzleId}${qualifierSuffix}`)}
             onKeyDown={(event) => {
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
-                navigate(`/leaderboard/${encodeURIComponent(strategyId)}/${row.puzzleId}`);
+                navigate(`/leaderboard/${encodeURIComponent(strategyId)}/${row.puzzleId}${qualifierSuffix}`);
               }
             }}
             aria-label={`View runs for puzzle #${row.puzzleId}`}
