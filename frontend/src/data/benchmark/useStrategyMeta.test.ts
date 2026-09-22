@@ -3,10 +3,41 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useStrategyMeta } from "./useStrategyMeta";
 import type { SupportedModelRecord } from "./types";
 
+// Routes by URL like the real backend: the bulk allowlist
+// (GET /strategy/models) always returns every row, while the resolve
+// endpoint (GET /strategy/models/:modelName/strategy) mirrors
+// resolveSupportedStrategy's own semantics — one match resolves, zero or
+// more than one rejects with a 400 (see useStrategyMeta's own doc comment
+// for why the hook depends on that distinction, not just the bulk list).
 function stubModelsFetch(models: SupportedModelRecord[]) {
   vi.stubGlobal(
     "fetch",
-    vi.fn(() => Promise.resolve({ ok: true, json: async () => models })),
+    vi.fn((url: unknown) => {
+      const href = String(url);
+      const resolveMatch = href.match(/\/strategy\/models\/([^/]+)\/strategy$/);
+      if (resolveMatch) {
+        const modelName = decodeURIComponent(resolveMatch[1]!);
+        const matches = models.filter((model) => model.modelName === modelName);
+        if (matches.length === 1) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ modelName, strategyName: matches[0]!.strategyName }),
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          status: 400,
+          json: async () => ({
+            message:
+              matches.length === 0
+                ? `Model '${modelName}' is not a supported model.`
+                : `Model '${modelName}' is ambiguous — it is configured as supported under` +
+                  ` multiple strategies (${matches.map((m) => m.strategyName).join(", ")}).`,
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => models });
+    }),
   );
 }
 
