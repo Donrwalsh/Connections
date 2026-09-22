@@ -1,5 +1,5 @@
 import { Test, TestingModule } from "@nestjs/testing";
-import { BadRequestException } from "@nestjs/common";
+import { BadRequestException, ConflictException } from "@nestjs/common";
 import { DataSource } from "typeorm";
 import { getRepositoryToken } from "@nestjs/typeorm";
 import {
@@ -11,6 +11,7 @@ import {
   LLM_OPENROUTER_QUEUE,
   LLM_MISTRAL_QUEUE,
   LLM_SAMBANOVA_QUEUE,
+  LLM_NVIDIA_QUEUE,
 } from "../queue/queue.module";
 import { StrategyDispatch } from "./strategy-dispatch.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
@@ -30,6 +31,7 @@ describe("StrategyDispatch", () => {
   let mockOpenRouterQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockMistralQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockSambaNovaQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
+  let mockNvidiaQueue: { add: jest.Mock; addBulk: jest.Mock; getJobs: jest.Mock };
   let mockStrategyRunRepo: {
     findOne: jest.Mock;
     find: jest.Mock;
@@ -123,6 +125,11 @@ describe("StrategyDispatch", () => {
       addBulk: jest.fn().mockResolvedValue(undefined),
       getJobs: jest.fn().mockResolvedValue([]),
     };
+    mockNvidiaQueue = {
+      add: jest.fn().mockResolvedValue(undefined),
+      addBulk: jest.fn().mockResolvedValue(undefined),
+      getJobs: jest.fn().mockResolvedValue([]),
+    };
     mockStrategyRunRepo = {
       findOne: jest.fn(),
       find: jest.fn(),
@@ -178,6 +185,7 @@ describe("StrategyDispatch", () => {
         { provide: LLM_OPENROUTER_QUEUE, useValue: mockOpenRouterQueue },
         { provide: LLM_MISTRAL_QUEUE, useValue: mockMistralQueue },
         { provide: LLM_SAMBANOVA_QUEUE, useValue: mockSambaNovaQueue },
+        { provide: LLM_NVIDIA_QUEUE, useValue: mockNvidiaQueue },
         { provide: getRepositoryToken(StrategyRun), useValue: mockStrategyRunRepo },
         { provide: getRepositoryToken(Puzzle), useValue: mockPuzzleRepo },
         { provide: getRepositoryToken(Guess), useValue: mockGuessRepo },
@@ -1005,6 +1013,32 @@ describe("StrategyDispatch", () => {
         select: { id: true },
       });
     });
+
+    it("should thread a strategyName filter through to the run store", async () => {
+      mockManager.find.mockResolvedValueOnce([]);
+
+      await service.deleteErroredRuns("llm-openai");
+
+      expect(mockManager.find).toHaveBeenCalledWith(StrategyRun, {
+        where: { status: StrategyRunStatus.ERROR, strategyName: "llm-openai" },
+        select: { id: true },
+      });
+    });
+
+    it("should thread a modelName filter through to the run store as well, when given", async () => {
+      mockManager.find.mockResolvedValueOnce([]);
+
+      await service.deleteErroredRuns("llm-google", "gemini-3.1-flash-lite");
+
+      expect(mockManager.find).toHaveBeenCalledWith(StrategyRun, {
+        where: {
+          status: StrategyRunStatus.ERROR,
+          strategyName: "llm-google",
+          modelName: "gemini-3.1-flash-lite",
+        },
+        select: { id: true },
+      });
+    });
   });
   describe("countErroredRuns", () => {
     it("should count only runs in the error status, for the maintenance panel's button", async () => {
@@ -1016,6 +1050,100 @@ describe("StrategyDispatch", () => {
       expect(mockStrategyRunRepo.count).toHaveBeenCalledWith({
         where: { status: StrategyRunStatus.ERROR },
       });
+    });
+
+    it("should filter by strategyName when given, for StrategyPuzzlePage's bulk-action buttons", async () => {
+      mockStrategyRunRepo.count.mockResolvedValueOnce(2);
+
+      const result = await service.countErroredRuns("llm-openai");
+
+      expect(result).toEqual({ erroredRuns: 2 });
+      expect(mockStrategyRunRepo.count).toHaveBeenCalledWith({
+        where: { status: StrategyRunStatus.ERROR, strategyName: "llm-openai" },
+      });
+    });
+
+    it("should also filter by modelName when given — one strategyName (e.g. llm-google) backs many models", async () => {
+      mockStrategyRunRepo.count.mockResolvedValueOnce(22);
+
+      const result = await service.countErroredRuns("llm-google", "gemini-3.1-flash-lite");
+
+      expect(result).toEqual({ erroredRuns: 22 });
+      expect(mockStrategyRunRepo.count).toHaveBeenCalledWith({
+        where: {
+          status: StrategyRunStatus.ERROR,
+          strategyName: "llm-google",
+          modelName: "gemini-3.1-flash-lite",
+        },
+      });
+    });
+  });
+  describe("retryErroredRuns", () => {
+    it("retries every errored run for the strategy through retryRun and counts successes", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([{ id: 11 }, { id: 22 }]);
+      const retryRunSpy = jest.spyOn(service, "retryRun").mockResolvedValue({
+        status: StrategyRunStatus.RUNNING,
+      });
+
+      const result = await service.retryErroredRuns("llm-openai");
+
+      expect(result).toEqual({ retried: 2, skipped: 0, failed: 0, failures: [] });
+      expect(mockStrategyRunRepo.find).toHaveBeenCalledWith({
+        where: { strategyName: "llm-openai", status: StrategyRunStatus.ERROR },
+        select: { id: true },
+      });
+      expect(retryRunSpy).toHaveBeenNthCalledWith(1, 11);
+      expect(retryRunSpy).toHaveBeenNthCalledWith(2, 22);
+    });
+
+    it("also filters by modelName when given — one strategyName can back many models", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([]);
+
+      await service.retryErroredRuns("llm-google", "gemini-3.1-flash-lite");
+
+      expect(mockStrategyRunRepo.find).toHaveBeenCalledWith({
+        where: {
+          strategyName: "llm-google",
+          modelName: "gemini-3.1-flash-lite",
+          status: StrategyRunStatus.ERROR,
+        },
+        select: { id: true },
+      });
+    });
+
+    it("counts a ConflictException (status changed under us) as skipped, not failed", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([{ id: 11 }]);
+      jest.spyOn(service, "retryRun").mockRejectedValueOnce(
+        new ConflictException("Strategy run 11 is in status 'running', not 'error'"),
+      );
+
+      const result = await service.retryErroredRuns("llm-openai");
+
+      expect(result).toEqual({ retried: 0, skipped: 1, failed: 0, failures: [] });
+    });
+
+    it("counts an unexpected error as failed, with the run id and reason", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([{ id: 11 }]);
+      jest.spyOn(service, "retryRun").mockRejectedValueOnce(new Error("boom"));
+
+      const result = await service.retryErroredRuns("llm-openai");
+
+      expect(result).toEqual({
+        retried: 0,
+        skipped: 0,
+        failed: 1,
+        failures: [{ runId: 11, reason: "boom" }],
+      });
+    });
+
+    it("returns all zeros without calling retryRun when there are no errored runs", async () => {
+      mockStrategyRunRepo.find.mockResolvedValueOnce([]);
+      const retryRunSpy = jest.spyOn(service, "retryRun");
+
+      const result = await service.retryErroredRuns("llm-openai");
+
+      expect(result).toEqual({ retried: 0, skipped: 0, failed: 0, failures: [] });
+      expect(retryRunSpy).not.toHaveBeenCalled();
     });
   });
 });

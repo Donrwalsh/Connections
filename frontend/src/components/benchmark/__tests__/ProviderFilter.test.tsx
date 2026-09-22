@@ -22,7 +22,16 @@ describe("ProviderFilter", () => {
   it("renders a toggle for every provider pool", () => {
     renderFilter();
 
-    for (const label of ["OpenAI", "Google", "Groq", "OpenRouter", "Mistral", "SambaNova", "Ollama"]) {
+    for (const label of [
+      "OpenAI",
+      "Google",
+      "Groq",
+      "OpenRouter",
+      "Mistral",
+      "SambaNova",
+      "Ollama",
+      "NVIDIA NIM",
+    ]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
   });

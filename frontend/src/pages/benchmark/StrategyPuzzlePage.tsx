@@ -1,8 +1,17 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import { useAdminAuth } from "../../auth/useAdminAuth";
+import { AmbiguousModelPicker } from "../../components/benchmark/AmbiguousModelPicker";
+import { BulkActionModal } from "../../components/benchmark/BulkActionModal";
 import { RunHistoryTable } from "../../components/benchmark/RunHistoryTable";
 import { StatusPill } from "../../components/benchmark/StatusPill";
-import { fetchLeaderboard, fetchRunHistory } from "../../data/benchmark/api";
+import {
+  deleteErroredRunsForStrategy,
+  fetchErroredRunCountForStrategy,
+  fetchLeaderboard,
+  fetchRunHistory,
+  retryErroredRunsForStrategy,
+} from "../../data/benchmark/api";
 import { formatCostUsd, formatDuration, formatSuccessRate } from "../../data/benchmark/metrics";
 import { useResource } from "../../hooks/useResource";
 import { useStrategyMeta } from "../../data/benchmark/useStrategyMeta";
@@ -33,15 +42,24 @@ const PAGE_SIZE = 100;
  */
 export function StrategyPuzzlePage() {
   const { strategyId } = useParams();
-  const { meta, isResolving: isResolvingMeta } = useStrategyMeta(strategyId);
+  const [searchParams] = useSearchParams();
+  const strategyQualifier = searchParams.get("strategy") ?? undefined;
+  const {
+    meta,
+    isResolving: isResolvingMeta,
+    isAmbiguous,
+    ambiguousCandidates,
+  } = useStrategyMeta(strategyId, strategyQualifier);
   const resolvedStrategyName = meta?.strategyName;
   const resolvedKind = meta?.kind;
   const resolvedModelId = meta?.id;
+  const { isAdmin } = useAdminAuth();
 
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState<RunHistorySortBy>("puzzleDate");
   const [sortDir, setSortDir] = useState<RunHistorySortDir>("desc");
   const [status, setStatus] = useState<RunStatus | null>(null);
+  const [openBulkModal, setOpenBulkModal] = useState<null | "delete" | "retry">(null);
 
   // Best-effort — see the header comment above; a miss just leaves the
   // summary stats blank, so the fetch's own error is never surfaced.
@@ -50,14 +68,23 @@ export function StrategyPuzzlePage() {
     (signal) => fetchLeaderboard(signal),
     { enabled: !!strategyId },
   );
-  const leaderboardRow = leaderboardData
-    ? ([...leaderboardData.deterministic, ...leaderboardData.llm].find((r) => r.id === strategyId) ?? null)
-    : null;
+  // For an LLM row, id alone (bare modelName) isn't enough once a name is
+  // shared by more than one provider — match strategyName too, now that
+  // meta.strategyName has already been unambiguously resolved (either from
+  // the ?strategy= qualifier or a unique backend match; the isAmbiguous
+  // branch below returns before this point otherwise).
+  const leaderboardRow =
+    leaderboardData && meta
+      ? ([...leaderboardData.deterministic, ...leaderboardData.llm].find(
+          (r) => r.id === strategyId && (meta.kind !== "llm" || r.strategyName === meta.strategyName),
+        ) ?? null)
+      : null;
 
   const {
     data: history,
     loading: isLoading,
     error,
+    refetch: refetchHistory,
   } = useResource(
     ["runHistory", resolvedStrategyName, resolvedKind, resolvedModelId, page, sortBy, sortDir, status],
     (signal) => {
@@ -74,6 +101,24 @@ export function StrategyPuzzlePage() {
         },
         signal,
       );
+    },
+    { enabled: !!resolvedStrategyName },
+  );
+
+  // Admin-only bulk retry/delete for every 'error'-status run of this
+  // strategy (and, for an LLM row, this model specifically — one
+  // strategyName like "llm-google" backs every model on that provider, so
+  // the model must be threaded through everywhere strategyName is, exactly
+  // like fetchRunHistory's own `model` option above). The fresh count both
+  // gates the buttons (hidden at zero) and is re-fetched right before each
+  // confirm modal opens (see the onClick handlers below), so the modal's
+  // warning text never acts on a stale number.
+  const bulkActionModel = resolvedKind === "llm" ? resolvedModelId : undefined;
+  const { data: erroredCount, refetch: refetchErroredCount } = useResource(
+    ["erroredRunCount", resolvedStrategyName, bulkActionModel],
+    (signal) => {
+      if (!resolvedStrategyName) return Promise.reject(new Error("Strategy not resolved"));
+      return fetchErroredRunCountForStrategy(resolvedStrategyName, bulkActionModel, signal);
     },
     { enabled: !!resolvedStrategyName },
   );
@@ -102,6 +147,10 @@ export function StrategyPuzzlePage() {
         </Link>
       </div>
     );
+  }
+
+  if (isAmbiguous) {
+    return <AmbiguousModelPicker modelName={strategyId} candidates={ambiguousCandidates} />;
   }
 
   if (!meta) {
@@ -224,6 +273,31 @@ export function StrategyPuzzlePage() {
             </div>
           </>
         ) : null}
+
+        {isAdmin && resolvedStrategyName && (erroredCount?.erroredRuns ?? 0) > 0 ? (
+          <div className="bench-visualizer__actions">
+            <button
+              type="button"
+              className="bench-sort-btn"
+              onClick={() => {
+                void refetchErroredCount();
+                setOpenBulkModal("retry");
+              }}
+            >
+              Retry all errored runs
+            </button>
+            <button
+              type="button"
+              className="bench-sort-btn bench-sort-btn--danger"
+              onClick={() => {
+                void refetchErroredCount();
+                setOpenBulkModal("delete");
+              }}
+            >
+              Delete all errored runs
+            </button>
+          </div>
+        ) : null}
       </header>
 
       {isLoading ? <p className="bench-muted">Loading runs…</p> : null}
@@ -233,6 +307,7 @@ export function StrategyPuzzlePage() {
         <>
           <RunHistoryTable
             strategyId={strategyId}
+            strategyQualifier={strategyQualifier}
             rows={history.rows}
             sortBy={sortBy}
             sortDir={sortDir}
@@ -263,6 +338,37 @@ export function StrategyPuzzlePage() {
             </button>
           </div>
         </>
+      ) : null}
+
+      {openBulkModal === "delete" && resolvedStrategyName ? (
+        <BulkActionModal
+          title={`Delete all errored runs for ${meta.name}`}
+          warning={
+            `This permanently deletes ${erroredCount?.erroredRuns ?? "all"} errored run(s) for ` +
+            `${meta.name} and every row tied to them. This cannot be undone.`
+          }
+          confirmLabel="Delete all errored runs"
+          action={() => deleteErroredRunsForStrategy(resolvedStrategyName, bulkActionModel)}
+          onClose={() => setOpenBulkModal(null)}
+          onDone={() => {
+            void refetchErroredCount();
+            void refetchHistory();
+          }}
+        />
+      ) : null}
+
+      {openBulkModal === "retry" && resolvedStrategyName ? (
+        <BulkActionModal
+          title={`Retry all errored runs for ${meta.name}`}
+          warning={
+            `This queues ${erroredCount?.erroredRuns ?? "all"} errored run(s) for ${meta.name} for ` +
+            "manual retry. Retries run asynchronously — refresh this page to see progress."
+          }
+          confirmLabel="Retry all errored runs"
+          action={() => retryErroredRunsForStrategy(resolvedStrategyName, bulkActionModel)}
+          onClose={() => setOpenBulkModal(null)}
+          onDone={() => void refetchErroredCount()}
+        />
       ) : null}
     </div>
   );

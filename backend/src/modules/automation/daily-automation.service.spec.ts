@@ -17,6 +17,7 @@ const BURN_LABEL: Record<ProviderPoolId, string> = {
   sambanova: "sambaNovaBurn",
   openai: "openaiBurn",
   ollama: "ollamaBurn",
+  nvidia: "nvidiaBurn",
 };
 
 describe("DailyAutomationService", () => {

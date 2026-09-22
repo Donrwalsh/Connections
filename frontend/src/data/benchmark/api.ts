@@ -5,7 +5,9 @@
 
 import type {
   AutomationStatus,
+  BulkRetryErroredRunsResult,
   CategoryEvaluationCoverage,
+  DeleteErroredRunsForStrategyResult,
   DeleteErroredRunsResult,
   DeleteFailedJudgeCallsResult,
   DeleteRunResult,
@@ -19,6 +21,7 @@ import type {
   PoolDispatchStatus,
   Leaderboard,
   RecentActivityFeed,
+  ResolvedModelStrategy,
   RetryRunResult,
   RunHistory,
   RunHistorySortBy,
@@ -174,6 +177,19 @@ export function fetchRecentActivity(
  * last updated — rather than treating it as an unknown strategy outright. */
 export function fetchSupportedModels(signal?: AbortSignal): Promise<SupportedModelRecord[]> {
   return fetchJson("/strategy/models", signal);
+}
+
+/** Resolves a bare model name to the one strategy it's currently supported
+ * under — the backend enforcement useStrategyMeta relies on when a
+ * /leaderboard/:strategyId page has no ?strategy= qualifier telling it which
+ * provider was meant. Rejects (thrown Error, message from the backend) if
+ * the model is unknown, unsupported, or configured under more than one
+ * strategy — see resolveSupportedStrategy on the backend. */
+export function resolveModelStrategy(
+  modelName: string,
+  signal?: AbortSignal,
+): Promise<ResolvedModelStrategy> {
+  return fetchJson(`/strategy/models/${encodeURIComponent(modelName)}/strategy`, signal);
 }
 
 /** Today's spend against one of the two free-token programs — see
@@ -349,6 +365,54 @@ export function deleteRun(runId: number, signal?: AbortSignal): Promise<DeleteRu
  * was accepted — not that the run has finished (see RetryRunModal). */
 export function retryRun(runId: number, signal?: AbortSignal): Promise<RetryRunResult> {
   return fetchJsonAdmin(`/dispatch/run/${runId}/retry`, signal, { method: "POST" });
+}
+
+/** How many strategy runs are in the 'error' status right now, for one
+ * strategy — the figure StrategyPuzzlePage's bulk-action buttons/modals act
+ * on. `model`, when given, narrows this to one model within the strategy —
+ * required in practice for an LLM strategy (e.g. "llm-google"), since one
+ * strategyName backs every model on that provider. Read-only, un-gated,
+ * same shape as fetchErroredRunCount. */
+export function fetchErroredRunCountForStrategy(
+  strategyName: string,
+  model?: string,
+  signal?: AbortSignal,
+): Promise<ErroredRunCount> {
+  const query = model ? `?model=${encodeURIComponent(model)}` : "";
+  return fetchJson(`/dispatch/strategy/${strategyName}/runs/errored${query}`, signal);
+}
+
+/** Permanently deletes every strategy run in the 'error' status for one
+ * strategy (and model, when given — see fetchErroredRunCountForStrategy),
+ * plus all rows tied to each. Rejects (thrown Error, message from the
+ * backend) if the admin session has expired. */
+export function deleteErroredRunsForStrategy(
+  strategyName: string,
+  model?: string,
+  signal?: AbortSignal,
+): Promise<DeleteErroredRunsForStrategyResult> {
+  const query = model ? `?model=${encodeURIComponent(model)}` : "";
+  return fetchJsonAdmin(`/dispatch/strategy/${strategyName}/runs/errored${query}`, signal, {
+    method: "DELETE",
+  });
+}
+
+/** Queues every strategy run in the 'error' status for one strategy (and
+ * model, when given — see fetchErroredRunCountForStrategy) for manual
+ * retry. Rejects (thrown Error, message from the backend) if the admin
+ * session has expired. Each run resumes asynchronously on the job queue,
+ * same as retryRun — this resolving only means the batch was accepted, not
+ * that any run has finished (see BulkActionModal usage in
+ * StrategyPuzzlePage). */
+export function retryErroredRunsForStrategy(
+  strategyName: string,
+  model?: string,
+  signal?: AbortSignal,
+): Promise<BulkRetryErroredRunsResult> {
+  const query = model ? `?model=${encodeURIComponent(model)}` : "";
+  return fetchJsonAdmin(`/dispatch/strategy/${strategyName}/runs/errored/retry${query}`, signal, {
+    method: "POST",
+  });
 }
 
 /** Same detail payload as fetchRunDetail, keyed by (strategyName, date,

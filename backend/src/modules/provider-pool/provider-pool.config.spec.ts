@@ -11,7 +11,7 @@ import {
 } from "./provider-pool.config";
 
 const FREE_TIER_IDS = ["google", "groq", "openrouter", "mistral", "sambanova"];
-const NON_FREE_TIER_IDS = ["openai", "ollama"];
+const NON_FREE_TIER_IDS = ["openai", "ollama", "nvidia"];
 
 const byId = (id: string): ProviderPool => {
   const pool = PROVIDER_POOLS.find((p) => p.id === id);
@@ -20,7 +20,7 @@ const byId = (id: string): ProviderPool => {
 };
 
 describe("PROVIDER_POOLS row shape", () => {
-  it("has exactly the seven known pools, in burn order then non-free-tier", () => {
+  it("has exactly the eight known pools, in burn order then non-free-tier", () => {
     expect(PROVIDER_POOLS.map((p) => p.id)).toEqual([
       "google",
       "groq",
@@ -29,6 +29,7 @@ describe("PROVIDER_POOLS row shape", () => {
       "sambanova",
       "openai",
       "ollama",
+      "nvidia",
     ]);
   });
 
@@ -258,6 +259,10 @@ describe("lookups", () => {
     expect(providerPool("")).toBeNull();
     expect(providerPool(null)).toBeNull();
     expect(providerPool(undefined)).toBeNull();
+  });
+
+  it("providerPool resolves nvidia to its row", () => {
+    expect(providerPool("llm-nvidia")).toBe(byId("nvidia"));
   });
 
   it("providerPoolOrThrow returns the row or throws with the strategy name", () => {

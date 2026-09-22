@@ -1054,6 +1054,105 @@ describe("LlmStrategyRunner", () => {
       ]);
     });
 
+    it("should replay history from a Responses-API-shaped requestBody (OpenAI's default provider)", async () => {
+      mockGuessRepo.find.mockResolvedValueOnce([
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.FAILURE },
+      ]);
+      // @ai-sdk/openai's default openai(modelId) factory uses the Responses
+      // API, whose request body has no top-level "messages" array at all —
+      // conversation turns live under "input", and each turn's content is
+      // an array of typed parts ({ type: "input_text"/"output_text", text })
+      // rather than a plain string. Confirmed against a real captured row.
+      mockSolvePromptRepo.findOne.mockResolvedValueOnce({
+        requestBody: {
+          model: "gpt-4.1",
+          input: [
+            { role: "user", content: [{ type: "input_text", text: "solve this puzzle" }] },
+            { role: "assistant", content: [{ type: "output_text", text: "here is my first answer" }] },
+            { role: "user", content: [{ type: "input_text", text: "that failed, try again" }] },
+          ],
+        },
+      });
+      const snapshots = captureMessages([
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]),
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      ]);
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      expect(snapshots[0]).toEqual([
+        { role: "user", content: "solve this puzzle" },
+        { role: "assistant", content: "here is my first answer" },
+        expect.objectContaining({ role: "user" }),
+      ]);
+    });
+
+    it("should replay history from a Gemini-shaped requestBody (contents/parts, assistant role spelled 'model')", async () => {
+      mockGuessRepo.find.mockResolvedValueOnce([
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.FAILURE },
+      ]);
+      // @ai-sdk/google builds { contents: [{ role, parts }] } — a
+      // completely different top-level key than every other provider, and
+      // Gemini's own API spells the assistant role "model", not
+      // "assistant". Confirmed against @ai-sdk/google's own
+      // convertToGoogleGenerativeAIMessages source.
+      mockSolvePromptRepo.findOne.mockResolvedValueOnce({
+        requestBody: {
+          model: "gemini-3.1-flash-lite",
+          contents: [
+            { role: "user", parts: [{ text: "solve this puzzle" }] },
+            { role: "model", parts: [{ text: "here is my first answer" }] },
+            { role: "user", parts: [{ text: "that failed, try again" }] },
+          ],
+        },
+      });
+      const snapshots = captureMessages([
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]),
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      ]);
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      expect(snapshots[0]).toEqual([
+        { role: "user", content: "solve this puzzle" },
+        { role: "assistant", content: "here is my first answer" },
+        expect.objectContaining({ role: "user" }),
+      ]);
+    });
+
+    it("should replay history from a Mistral-shaped requestBody (messages, but content as an array of parts)", async () => {
+      mockGuessRepo.find.mockResolvedValueOnce([
+        { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.FAILURE },
+      ]);
+      // @ai-sdk/mistral does use the "messages" key, but a user turn's
+      // content is an array of typed parts ({ type: "text", text }), not a
+      // plain string — isChatMessageArray's old plain-string check would
+      // have rejected this even though it's a "messages" shape. Confirmed
+      // against @ai-sdk/mistral's own convertToMistralChatMessages source.
+      mockSolvePromptRepo.findOne.mockResolvedValueOnce({
+        requestBody: {
+          model: "ministral-3b-latest",
+          messages: [
+            { role: "user", content: [{ type: "text", text: "solve this puzzle" }] },
+            { role: "assistant", content: "here is my first answer" },
+            { role: "user", content: [{ type: "text", text: "that failed, try again" }] },
+          ],
+        },
+      });
+      const snapshots = captureMessages([
+        makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]),
+        makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]),
+      ]);
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      expect(snapshots[0]).toEqual([
+        { role: "user", content: "solve this puzzle" },
+        { role: "assistant", content: "here is my first answer" },
+        expect.objectContaining({ role: "user" }),
+      ]);
+    });
+
     it("should fall back to an empty conversation history when the latest row has no usable requestBody", async () => {
       mockGuessRepo.find.mockResolvedValueOnce([
         { words: ["APPLE", "BANANA", "EGGPLANT", "FIG"], result: GuessResult.FAILURE },

@@ -17,6 +17,7 @@ import {
   LLM_OPENROUTER,
   LLM_MISTRAL,
   LLM_SAMBANOVA,
+  LLM_NVIDIA,
   LLM_STRATEGIES,
   llmMaxDuplicateGuesses,
   llmMaxFailedGuesses,
@@ -86,6 +87,14 @@ describe("strategies", () => {
       expect(SUPPORTED_STRATEGIES).toContain("llm-sambanova");
       expect(isLlmStrategy("llm-sambanova")).toBe(true);
       expect(LLM_STRATEGIES).toContain(LLM_SAMBANOVA);
+    });
+  });
+
+  describe("LLM_NVIDIA membership", () => {
+    it("is a supported LLM strategy", () => {
+      expect(SUPPORTED_STRATEGIES).toContain("llm-nvidia");
+      expect(isLlmStrategy("llm-nvidia")).toBe(true);
+      expect(LLM_STRATEGIES).toContain(LLM_NVIDIA);
     });
   });
 

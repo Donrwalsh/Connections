@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import { AmbiguousModelPicker } from "../../components/benchmark/AmbiguousModelPicker";
 import { GuessChainVisualizer } from "../../components/benchmark/GuessChainVisualizer";
 import { ProviderPill } from "../../components/benchmark/ProviderPill";
 import { RunsTable } from "../../components/benchmark/RunsTable";
@@ -53,8 +54,16 @@ export function PuzzleRunsPage() {
   const { strategyId, puzzleId: puzzleIdParam } = useParams();
   const puzzleId = Number(puzzleIdParam);
   const isValidPuzzleId = Number.isInteger(puzzleId);
+  const [searchParams] = useSearchParams();
+  const strategyQualifier = searchParams.get("strategy") ?? undefined;
+  const qualifierSuffix = strategyQualifier ? `?strategy=${encodeURIComponent(strategyQualifier)}` : "";
 
-  const { meta, isResolving: isResolvingMeta } = useStrategyMeta(strategyId);
+  const {
+    meta,
+    isResolving: isResolvingMeta,
+    isAmbiguous,
+    ambiguousCandidates,
+  } = useStrategyMeta(strategyId, strategyQualifier);
   // Stable primitives (not `meta` itself — a fresh object every render for
   // the static-lookup case) so effects below can depend on "is this strategy
   // resolved" without re-firing on every render.
@@ -102,6 +111,10 @@ export function PuzzleRunsPage() {
     );
   }
 
+  if (isAmbiguous) {
+    return <AmbiguousModelPicker modelName={strategyId} candidates={ambiguousCandidates} />;
+  }
+
   if (!meta) {
     if (isResolvingMeta) {
       return (
@@ -124,7 +137,7 @@ export function PuzzleRunsPage() {
     return (
       <div className="bench-page">
         <p className="bench-muted">Unknown puzzle.</p>
-        <Link to={`/leaderboard/${encodeURIComponent(strategyId)}`} className="bench-page-header__back">
+        <Link to={`/leaderboard/${encodeURIComponent(strategyId)}${qualifierSuffix}`} className="bench-page-header__back">
           ← Back to {meta.name}
         </Link>
       </div>
@@ -135,7 +148,7 @@ export function PuzzleRunsPage() {
     <div className="bench-page">
       <header className="bench-page-header">
         <div className="bench-page-header__nav">
-          <Link to={`/leaderboard/${encodeURIComponent(strategyId)}`} className="bench-page-header__back">
+          <Link to={`/leaderboard/${encodeURIComponent(strategyId)}${qualifierSuffix}`} className="bench-page-header__back">
             ← {meta.name}
           </Link>
           {date ? (
