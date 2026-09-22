@@ -84,6 +84,32 @@ function stubFetch(
     "fetch",
     vi.fn((url: unknown) => {
       const href = String(url);
+      // GET /strategy/models/:modelName/strategy (checked first — its path
+      // is a superset of the bulk list's below) mirrors
+      // resolveSupportedStrategy's real semantics: one match resolves, zero
+      // or more than one rejects with a 400. See useStrategyMeta.
+      const resolveMatch = href.match(/\/strategy\/models\/([^/]+)\/strategy$/);
+      if (resolveMatch) {
+        const modelName = decodeURIComponent(resolveMatch[1]!);
+        const matches = models.filter((model) => model.modelName === modelName);
+        if (matches.length === 1) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ modelName, strategyName: matches[0]!.strategyName }),
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          status: 400,
+          json: async () => ({
+            message:
+              matches.length === 0
+                ? `Model '${modelName}' is not a supported model.`
+                : `Model '${modelName}' is ambiguous — it is configured as supported under` +
+                  ` multiple strategies (${matches.map((m) => m.strategyName).join(", ")}).`,
+          }),
+        });
+      }
       if (href.includes("/strategy/models")) {
         return Promise.resolve({ ok: true, json: async () => models });
       }

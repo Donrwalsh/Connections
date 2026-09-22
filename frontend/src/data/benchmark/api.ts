@@ -21,6 +21,7 @@ import type {
   PoolDispatchStatus,
   Leaderboard,
   RecentActivityFeed,
+  ResolvedModelStrategy,
   RetryRunResult,
   RunHistory,
   RunHistorySortBy,
@@ -176,6 +177,19 @@ export function fetchRecentActivity(
  * last updated — rather than treating it as an unknown strategy outright. */
 export function fetchSupportedModels(signal?: AbortSignal): Promise<SupportedModelRecord[]> {
   return fetchJson("/strategy/models", signal);
+}
+
+/** Resolves a bare model name to the one strategy it's currently supported
+ * under — the backend enforcement useStrategyMeta relies on when a
+ * /leaderboard/:strategyId page has no ?strategy= qualifier telling it which
+ * provider was meant. Rejects (thrown Error, message from the backend) if
+ * the model is unknown, unsupported, or configured under more than one
+ * strategy — see resolveSupportedStrategy on the backend. */
+export function resolveModelStrategy(
+  modelName: string,
+  signal?: AbortSignal,
+): Promise<ResolvedModelStrategy> {
+  return fetchJson(`/strategy/models/${encodeURIComponent(modelName)}/strategy`, signal);
 }
 
 /** Today's spend against one of the two free-token programs — see

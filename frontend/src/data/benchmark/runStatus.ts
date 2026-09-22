@@ -18,7 +18,8 @@ export type PillTone =
   | "openrouter"
   | "mistral"
   | "sambanova"
-  | "ollama";
+  | "ollama"
+  | "nvidia";
 
 const FAILED_STATUSES: RunStatus[] = ["failed", "duplicate", "malformedResponse", "error"];
 

@@ -89,6 +89,16 @@ export const llmSambaNovaQueue = new Queue("llm-sambanova-runs", {
   },
 });
 
+export const llmNvidiaQueue = new Queue("llm-nvidia-runs", {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 1000 },
+    removeOnComplete: { count: 1000 },
+    removeOnFail: { count: 5000 },
+  },
+});
+
 /**
  * Routes a strategy run to the queue that processes it: a provider-pool
  * strategy gets its pool's per-provider queue (looked up in

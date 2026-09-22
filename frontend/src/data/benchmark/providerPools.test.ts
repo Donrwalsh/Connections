@@ -16,6 +16,7 @@ describe("poolFromStrategyName", () => {
     expect(poolFromStrategyName("llm-mistral")).toBe("mistral");
     expect(poolFromStrategyName("llm-sambanova")).toBe("sambanova");
     expect(poolFromStrategyName("llm-ollama")).toBe("ollama");
+    expect(poolFromStrategyName("llm-nvidia")).toBe("nvidia");
   });
 
   it("returns null for non-LLM strategies and unknown names", () => {
@@ -36,7 +37,7 @@ describe("providerPoolLabel", () => {
 });
 
 describe("PROVIDER_POOLS", () => {
-  it("covers all seven pools once, in a stable order", () => {
+  it("covers all eight pools once, in a stable order", () => {
     expect(PROVIDER_POOLS.map((p) => p.id)).toEqual([
       "openai",
       "google",
@@ -45,6 +46,7 @@ describe("PROVIDER_POOLS", () => {
       "mistral",
       "sambanova",
       "ollama",
+      "nvidia",
     ]);
   });
 });

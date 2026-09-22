@@ -4,6 +4,7 @@ import {
   LLM_GOOGLE,
   LLM_GROQ,
   LLM_MISTRAL,
+  LLM_NVIDIA,
   LLM_OLLAMA,
   LLM_OPENAI,
   LLM_OPENROUTER,
@@ -24,6 +25,7 @@ const groq = { name: "groq" } as never;
 const openrouter = { name: "openrouter" } as never;
 const mistral = { name: "mistral" } as never;
 const sambanova = { name: "sambanova" } as never;
+const nvidia = { name: "nvidia" } as never;
 const shared = { name: "shared" } as never;
 
 const runsQueueByPool = new Map<ProviderPoolId, Queue>([
@@ -34,6 +36,7 @@ const runsQueueByPool = new Map<ProviderPoolId, Queue>([
   ["openrouter", openrouter],
   ["mistral", mistral],
   ["sambanova", sambanova],
+  ["nvidia", nvidia],
 ]);
 
 describe("queueForStrategy", () => {
@@ -45,6 +48,7 @@ describe("queueForStrategy", () => {
     expect(queueForStrategy(runsQueueByPool, shared, LLM_OPENROUTER)).toBe(openrouter);
     expect(queueForStrategy(runsQueueByPool, shared, LLM_MISTRAL)).toBe(mistral);
     expect(queueForStrategy(runsQueueByPool, shared, LLM_SAMBANOVA)).toBe(sambanova);
+    expect(queueForStrategy(runsQueueByPool, shared, LLM_NVIDIA)).toBe(nvidia);
     expect(queueForStrategy(runsQueueByPool, shared, "alphabetical")).toBe(shared);
   });
 
@@ -62,6 +66,7 @@ describe("queueForJudgeProvider", () => {
     expect(queueForJudgeProvider("openrouter", runsQueueByPool)).toBe(openrouter);
     expect(queueForJudgeProvider("mistral", runsQueueByPool)).toBe(mistral);
     expect(queueForJudgeProvider("sambanova", runsQueueByPool)).toBe(sambanova);
+    expect(queueForJudgeProvider("nvidia", runsQueueByPool)).toBe(nvidia);
   });
 
   it("throws rather than silently defaulting when the pool has no entry in the map", () => {

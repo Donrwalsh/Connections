@@ -9,6 +9,7 @@ import {
   LLM_OPENROUTER_QUEUE,
   LLM_MISTRAL_QUEUE,
   LLM_SAMBANOVA_QUEUE,
+  LLM_NVIDIA_QUEUE,
 } from "../queue/queue.module";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 import { DataSource, Repository } from "typeorm";
@@ -50,6 +51,7 @@ export class StrategyDispatch {
     @Inject(LLM_OPENROUTER_QUEUE) private readonly llmOpenRouterQueue: Queue,
     @Inject(LLM_MISTRAL_QUEUE) private readonly llmMistralQueue: Queue,
     @Inject(LLM_SAMBANOVA_QUEUE) private readonly llmSambaNovaQueue: Queue,
+    @Inject(LLM_NVIDIA_QUEUE) private readonly llmNvidiaQueue: Queue,
     @InjectRepository(StrategyRun)
     private readonly strategyRunRepo: Repository<StrategyRun>,
     @InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>,
@@ -76,6 +78,7 @@ export class StrategyDispatch {
       ["openrouter", this.llmOpenRouterQueue],
       ["mistral", this.llmMistralQueue],
       ["sambanova", this.llmSambaNovaQueue],
+      ["nvidia", this.llmNvidiaQueue],
     ]);
     return queueForStrategy(this.runsQueueByPool, this.queue, strategyName);
   }
