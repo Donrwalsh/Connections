@@ -1,4 +1,4 @@
-import { fetchSupportedModels } from "./api";
+import { fetchSupportedModels, resolveModelStrategy } from "./api";
 import { formatModelStatsDescription } from "./formatModelStats";
 import { useResource } from "../../hooks/useResource";
 import { getStrategyMeta } from "./mockData";
@@ -28,6 +28,18 @@ function buildDynamicMeta(model: SupportedModelRecord): StrategyMeta {
   };
 }
 
+export interface UseStrategyMetaResult {
+  meta: StrategyMeta | undefined;
+  isResolving: boolean;
+  /** True when `strategyId` names a model more than one provider currently
+   * supports and `strategyQualifier` didn't pick one — see
+   * ambiguousCandidates for the choices to present. */
+  isAmbiguous: boolean;
+  /** Populated only when isAmbiguous — every currently-supported
+   * SupportedModel row sharing this modelName, for a picker UI to list. */
+  ambiguousCandidates: SupportedModelRecord[];
+}
+
 /**
  * Resolves a /leaderboard/:strategyId route param to its StrategyMeta. For
  * "llm" kind rows the id is actually a *model name*
@@ -40,28 +52,59 @@ function buildDynamicMeta(model: SupportedModelRecord): StrategyMeta {
  * from real backend data (e.g. a model added after the mock list was last
  * updated) resolve correctly instead of always reporting "Unknown strategy".
  * Shared by every /leaderboard/:strategyId... page.
+ *
+ * `strategyQualifier` is the page's `?strategy=` query param (see
+ * StrategyTable/RunHistoryTable, which only ever add it for a model name
+ * that's actually ambiguous). When given, it picks a row directly — no
+ * ambiguity is possible, since the caller already named an exact provider.
+ * When absent, an LLM-kind id is resolved through the backend's
+ * GET /strategy/models/:modelName/strategy (see resolveModelStrategy) rather
+ * than a client-side guess: the backend is the single authority on whether a
+ * bare model name has one answer, so its rejection (not a locally-recomputed
+ * count) is what flips isAmbiguous — see the design doc's "Frontend
+ * resolution flow" section for why this costs one extra request even for the
+ * common (non-ambiguous) case.
  */
-export function useStrategyMeta(strategyId: string | undefined): {
-  meta: StrategyMeta | undefined;
-  isResolving: boolean;
-} {
+export function useStrategyMeta(
+  strategyId: string | undefined,
+  strategyQualifier?: string,
+): UseStrategyMetaResult {
   const staticMeta = strategyId ? getStrategyMeta(strategyId) : undefined;
   const knownNonLlm = !!(staticMeta && staticMeta.kind !== "llm");
+  const dynamicEnabled = !!strategyId && !knownNonLlm;
 
-  // Resolves live model data for every LLM row — either to synthesize a
-  // full StrategyMeta (when the static mock catalog doesn't recognize
-  // strategyId at all) or just to source a live, non-stale description for
-  // one the catalog does recognize. Skipped entirely for non-LLM rows,
-  // which are always fully described by the static catalog. Best-effort: a
-  // fetch failure just falls through to the "Unknown strategy" state below
-  // like any other miss.
-  const { data: models, loading: isResolving } = useResource(
+  const { data: models, loading: isResolvingModels } = useResource(
     ["supportedModels", strategyId],
     (signal) => fetchSupportedModels(signal),
-    { enabled: !!strategyId && !knownNonLlm },
+    { enabled: dynamicEnabled },
   );
-  const match = models?.find((model) => model.modelName === strategyId);
+
+  // Only consulted when the URL named no explicit provider — a qualifier
+  // already picks a single (strategyName, modelName) row directly below, so
+  // there's nothing for the backend to resolve or reject.
+  const { data: resolved, loading: isResolvingStrategy, error: resolveError } = useResource(
+    ["resolveModelStrategy", strategyId],
+    (signal) => resolveModelStrategy(strategyId as string, signal),
+    { enabled: dynamicEnabled && !strategyQualifier },
+  );
+
+  const resolvedStrategyName = strategyQualifier ?? resolved?.strategyName;
+  const match = models?.find(
+    (model) => model.modelName === strategyId && model.strategyName === resolvedStrategyName,
+  );
   const dynamicMeta = match ? buildDynamicMeta(match) : null;
+
+  // The backend rejected an unqualified resolve — fall back to the
+  // already-fetched bulk list to find out *why* and, if it's a real
+  // collision, list the candidates. A rejection with 0 or 1 local matches
+  // means the model genuinely doesn't exist / isn't supported (a stale
+  // link), not an ambiguity — that falls through to the normal "Unknown
+  // strategy" state via dynamicMeta staying null.
+  const ambiguousCandidates =
+    dynamicEnabled && !strategyQualifier && !!resolveError
+      ? (models?.filter((model) => model.modelName === strategyId && model.supported) ?? [])
+      : [];
+  const isAmbiguous = ambiguousCandidates.length > 1;
 
   // For an LLM row, description always comes from live data once it
   // resolves (identity/copy — name/kind/strategyName — stays static); for
@@ -73,5 +116,10 @@ export function useStrategyMeta(strategyId: string | undefined): {
         : staticMeta
       : (staticMeta ?? dynamicMeta ?? undefined);
 
-  return { meta, isResolving };
+  return {
+    meta,
+    isResolving: isResolvingModels || isResolvingStrategy,
+    isAmbiguous,
+    ambiguousCandidates,
+  };
 }
