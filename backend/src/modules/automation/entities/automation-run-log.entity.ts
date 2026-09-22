@@ -10,7 +10,8 @@ export type AutomationLegOutcome = "started" | "alreadyActive" | "alreadyExhaust
 /**
  * One row per UTC calendar day (`date`, "YYYY-MM-DD"), upserted as each leg
  * of the daily-automation chain (model-metadata refresh, judge dispatch,
- * OpenAI mini/nano burn, Google burn, Groq burn — see DailyAutomationService)
+ * OpenAI mini/nano burn, OpenAI flagship burn, Google burn, Groq burn — see
+ * DailyAutomationService)
  * reports its outcome. This is the single source of truth the UI reads to
  * answer "did today's
  * automatic run happen, and what did it do" — rather than inferring it from
@@ -42,6 +43,12 @@ export class AutomationRunLog {
 
   @Column({ type: "text", nullable: true })
   miniBurnMessage: string | null;
+
+  @Column({ type: "varchar", nullable: true })
+  flagshipBurnOutcome: AutomationLegOutcome | null;
+
+  @Column({ type: "text", nullable: true })
+  flagshipBurnMessage: string | null;
 
   @Column({ type: "varchar", nullable: true })
   googleBurnOutcome: AutomationLegOutcome | null;

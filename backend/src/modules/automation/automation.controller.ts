@@ -4,8 +4,9 @@ import { nextDailyAutomationRunAt } from "../../strategies";
 
 /**
  * Read-only status for the daily free-tier-automation chain — backs the
- * "Auto-run: ... · Next: ..." line on the mini FreeTierBudgetWidget,
- * CategoryJudgingWidget, and GoogleDispatchWidget. Not password-gated: it
+ * "Auto-run: ... · Next: ..." line on the mini and flagship
+ * FreeTierBudgetWidget instances, CategoryJudgingWidget, and
+ * GoogleDispatchWidget. Not password-gated: it
  * enqueues nothing, same as /category-evaluation/coverage.
  */
 @Controller("automation")
@@ -32,6 +33,10 @@ export class AutomationController {
       miniBurn: {
         outcome: log?.miniBurnOutcome ?? null,
         message: log?.miniBurnMessage ?? null,
+      },
+      flagshipBurn: {
+        outcome: log?.flagshipBurnOutcome ?? null,
+        message: log?.flagshipBurnMessage ?? null,
       },
       googleBurn: {
         outcome: log?.googleBurnOutcome ?? null,

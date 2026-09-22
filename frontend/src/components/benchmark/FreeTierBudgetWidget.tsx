@@ -51,9 +51,7 @@ export interface FreeTierBudgetWidgetProps {
    * its own status directly after stopping. */
   refreshSignal?: number;
   /** The daily-automation "burn" leg for this tier (see AutomationStatus) —
-   * only meaningful for the mini instance, which is the only tier the daily
-   * automation chain touches; the flagship instance is simply never given
-   * this prop by the parent. */
+   * the parent passes each tier's own leg (miniBurn or flagshipBurn). */
   automation?: AutomationLegDisplay | null;
 }
 

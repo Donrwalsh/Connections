@@ -326,10 +326,11 @@ export interface AutomationJudgeLeg {
   error: string | null;
 }
 
-/** One leg's outcome from the mini-burn, Google-burn, Groq-burn, OpenRouter-burn,
- * or Mistral-burn side of GET /automation/status — see the backend's
- * AutomationRunLog miniBurnOutcome/miniBurnMessage (or the matching
- * googleBurn / groqBurn / openRouterBurn / mistralBurn column pair). */
+/** One leg's outcome from the mini-burn, flagship-burn, Google-burn,
+ * Groq-burn, OpenRouter-burn, or Mistral-burn side of GET /automation/status
+ * — see the backend's AutomationRunLog miniBurnOutcome/miniBurnMessage (or
+ * the matching flagshipBurn / googleBurn / groqBurn / openRouterBurn /
+ * mistralBurn column pair). */
 export interface AutomationBurnLeg {
   outcome: AutomationLegOutcome | null;
   message: string | null;
@@ -337,14 +338,15 @@ export interface AutomationBurnLeg {
 
 /** GET /automation/status — today's daily-automation run (see the backend's
  * DailyAutomationService/AutomationRunLog): the judge-dispatch leg, the
- * mini/nano burn leg, and the Google / Groq / OpenRouter / Mistral burn
- * legs, plus when the chain is next expected to fire. `lastRunAt` is null
- * until the first automatic run of the day has fired. */
+ * mini/nano and flagship burn legs, and the Google / Groq / OpenRouter /
+ * Mistral burn legs, plus when the chain is next expected to fire.
+ * `lastRunAt` is null until the first automatic run of the day has fired. */
 export interface AutomationStatus {
   lastRunAt: string | null;
   nextRunAt: string;
   judge: AutomationJudgeLeg;
   miniBurn: AutomationBurnLeg;
+  flagshipBurn: AutomationBurnLeg;
   googleBurn: AutomationBurnLeg;
   groqBurn: AutomationBurnLeg;
   openRouterBurn: AutomationBurnLeg;

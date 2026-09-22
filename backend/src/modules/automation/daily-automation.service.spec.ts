@@ -42,8 +42,22 @@ describe("DailyAutomationService", () => {
       enqueuePending: jest.fn().mockResolvedValue({ enqueued: 12, llmProposalIds: [] }),
     };
     mockFreeTierDispatchService = {
-      getStatus: jest.fn().mockResolvedValue({ tier: "mini", active: false, thresholdPercent: null, startedAt: null }),
-      start: jest.fn().mockResolvedValue({ tier: "mini", active: true, thresholdPercent: 80, startedAt: new Date() }),
+      getStatus: jest
+        .fn()
+        .mockImplementation(async (tier: "mini" | "flagship") => ({
+          tier,
+          active: false,
+          thresholdPercent: null,
+          startedAt: null,
+        })),
+      start: jest
+        .fn()
+        .mockImplementation(async (tier: "mini" | "flagship", thresholdPercent: number) => ({
+          tier,
+          active: true,
+          thresholdPercent,
+          startedAt: new Date(),
+        })),
     };
     mockFreeDispatchService = {
       getStatus: jest.fn().mockImplementation(async () => defaultPoolStatus()),
@@ -89,9 +103,9 @@ describe("DailyAutomationService", () => {
         order.push("judge");
         return { enqueued: 12, llmProposalIds: [] };
       });
-      mockFreeTierDispatchService.start.mockImplementation(async () => {
-        order.push("miniBurn");
-        return { tier: "mini", active: true, thresholdPercent: 80, startedAt: new Date() };
+      mockFreeTierDispatchService.start.mockImplementation(async (tier: "mini" | "flagship") => {
+        order.push(tier === "mini" ? "miniBurn" : "flagshipBurn");
+        return { tier, active: true, thresholdPercent: 80, startedAt: new Date() };
       });
       mockFreeDispatchService.start.mockImplementation(async (poolId: ProviderPoolId) => {
         order.push(BURN_LABEL[poolId]);
@@ -104,6 +118,7 @@ describe("DailyAutomationService", () => {
         "metadataRefresh",
         "judge",
         "miniBurn",
+        "flagshipBurn",
         "googleBurn",
         "groqBurn",
         "openRouterBurn",
@@ -202,7 +217,7 @@ describe("DailyAutomationService", () => {
 
       await service.run();
 
-      expect(mockFreeTierDispatchService.start).not.toHaveBeenCalled();
+      expect(mockFreeTierDispatchService.start).not.toHaveBeenCalledWith("mini", expect.anything());
       expect(mockRunLogRepo.update).toHaveBeenCalledWith(
         { date: todayStamp() },
         { miniBurnOutcome: "alreadyActive", miniBurnMessage: "already running at 90%" },
@@ -217,6 +232,47 @@ describe("DailyAutomationService", () => {
       expect(mockRunLogRepo.update).toHaveBeenCalledWith(
         { date: todayStamp() },
         { miniBurnOutcome: "error", miniBurnMessage: "boom" },
+      );
+      expect(mockFreeDispatchService.start).toHaveBeenCalledWith("google");
+    });
+
+    it("starts the flagship burn at an 80% ceiling when no cycle is already running", async () => {
+      await service.run();
+
+      expect(mockFreeTierDispatchService.start).toHaveBeenCalledWith("flagship", 80);
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        { flagshipBurnOutcome: "started", flagshipBurnMessage: "started at 80%" },
+      );
+    });
+
+    it("records alreadyActive for the flagship leg without calling start, when a cycle is already running", async () => {
+      mockFreeTierDispatchService.getStatus.mockImplementation(async (tier: "mini" | "flagship") =>
+        tier === "flagship"
+          ? { tier, active: true, thresholdPercent: 90, startedAt: new Date() }
+          : { tier, active: false, thresholdPercent: null, startedAt: null },
+      );
+
+      await service.run();
+
+      expect(mockFreeTierDispatchService.start).not.toHaveBeenCalledWith("flagship", expect.anything());
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        { flagshipBurnOutcome: "alreadyActive", flagshipBurnMessage: "already running at 90%" },
+      );
+    });
+
+    it("records an error for the flagship leg when start throws, without crashing the run", async () => {
+      mockFreeTierDispatchService.start.mockImplementation(async (tier: "mini" | "flagship") => {
+        if (tier === "flagship") throw new BadRequestException("boom");
+        return { tier, active: true, thresholdPercent: 80, startedAt: new Date() };
+      });
+
+      await expect(service.run()).resolves.toBeUndefined();
+
+      expect(mockRunLogRepo.update).toHaveBeenCalledWith(
+        { date: todayStamp() },
+        { flagshipBurnOutcome: "error", flagshipBurnMessage: "boom" },
       );
       expect(mockFreeDispatchService.start).toHaveBeenCalledWith("google");
     });

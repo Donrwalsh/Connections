@@ -94,6 +94,18 @@ export function ActivityPage() {
       }
     : null;
 
+  const flagshipBurnAutomation: AutomationLegDisplay | null = automationStatus
+    ? {
+        message:
+          automationStatus.flagshipBurn.outcome === "error"
+            ? `failed: ${automationStatus.flagshipBurn.message}`
+            : automationStatus.flagshipBurn.message,
+        lastRunAt: automationStatus.lastRunAt,
+        nextRunAt: automationStatus.nextRunAt,
+        isError: automationStatus.flagshipBurn.outcome === "error",
+      }
+    : null;
+
   const googleBurnAutomation: AutomationLegDisplay | null = automationStatus
     ? {
         message:
@@ -205,6 +217,7 @@ export function ActivityPage() {
             tier="flagship"
             spentUsd={flagshipSpentUsd}
             refreshSignal={dispatchRefreshSignal}
+            automation={flagshipBurnAutomation}
           />
           <FreeTierBudgetWidget
             tier="mini"
