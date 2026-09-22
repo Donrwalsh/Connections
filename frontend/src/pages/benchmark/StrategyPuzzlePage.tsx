@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useAdminAuth } from "../../auth/useAdminAuth";
+import { AmbiguousModelPicker } from "../../components/benchmark/AmbiguousModelPicker";
 import { BulkActionModal } from "../../components/benchmark/BulkActionModal";
 import { RunHistoryTable } from "../../components/benchmark/RunHistoryTable";
 import { StatusPill } from "../../components/benchmark/StatusPill";
@@ -41,7 +42,14 @@ const PAGE_SIZE = 100;
  */
 export function StrategyPuzzlePage() {
   const { strategyId } = useParams();
-  const { meta, isResolving: isResolvingMeta } = useStrategyMeta(strategyId);
+  const [searchParams] = useSearchParams();
+  const strategyQualifier = searchParams.get("strategy") ?? undefined;
+  const {
+    meta,
+    isResolving: isResolvingMeta,
+    isAmbiguous,
+    ambiguousCandidates,
+  } = useStrategyMeta(strategyId, strategyQualifier);
   const resolvedStrategyName = meta?.strategyName;
   const resolvedKind = meta?.kind;
   const resolvedModelId = meta?.id;
@@ -60,9 +68,17 @@ export function StrategyPuzzlePage() {
     (signal) => fetchLeaderboard(signal),
     { enabled: !!strategyId },
   );
-  const leaderboardRow = leaderboardData
-    ? ([...leaderboardData.deterministic, ...leaderboardData.llm].find((r) => r.id === strategyId) ?? null)
-    : null;
+  // For an LLM row, id alone (bare modelName) isn't enough once a name is
+  // shared by more than one provider — match strategyName too, now that
+  // meta.strategyName has already been unambiguously resolved (either from
+  // the ?strategy= qualifier or a unique backend match; the isAmbiguous
+  // branch below returns before this point otherwise).
+  const leaderboardRow =
+    leaderboardData && meta
+      ? ([...leaderboardData.deterministic, ...leaderboardData.llm].find(
+          (r) => r.id === strategyId && (meta.kind !== "llm" || r.strategyName === meta.strategyName),
+        ) ?? null)
+      : null;
 
   const {
     data: history,
@@ -131,6 +147,10 @@ export function StrategyPuzzlePage() {
         </Link>
       </div>
     );
+  }
+
+  if (isAmbiguous) {
+    return <AmbiguousModelPicker modelName={strategyId} candidates={ambiguousCandidates} />;
   }
 
   if (!meta) {
@@ -287,6 +307,7 @@ export function StrategyPuzzlePage() {
         <>
           <RunHistoryTable
             strategyId={strategyId}
+            strategyQualifier={strategyQualifier}
             rows={history.rows}
             sortBy={sortBy}
             sortDir={sortDir}
