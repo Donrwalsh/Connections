@@ -38,7 +38,7 @@ import { findCaseInsensitiveGroupMatch } from "../modules/strategy/case-insensit
  *   npx tsx src/scripts/purge-case-mismatch-runs.ts --execute
  *
  * Production/container:
- *   docker exec <container> npx tsx src/scripts/purge-case-mismatch-runs.ts --execute
+ *   docker exec <container> npm run purge:case-mismatch-runs -- --execute
  */
 
 const logger = new Logger("PurgeCaseMismatchRuns");
