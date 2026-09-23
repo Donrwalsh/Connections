@@ -5,18 +5,28 @@ import { GuessSequencePanel } from "../components/GuessSequencePanel";
 import { type Puzzle } from "../data/types";
 import { useResource } from "../hooks/useResource";
 
+/** The viewer's own calendar date (not UTC), so "today's puzzle" matches
+ * what the viewer's wall clock considers today regardless of server timezone. */
+function todayLocalDateString(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function PuzzlePage() {
   const { date } = useParams();
   const [isGuessPanelOpen, setIsGuessPanelOpen] = useState(false);
+
+  const resolvedDate = date ?? todayLocalDateString();
 
   const {
     data: puzzleData,
     loading: isLoading,
     error,
-  } = useResource(["puzzle", date ?? "today"], async (signal) => {
-    const endpoint = date
-      ? `${import.meta.env.VITE_API_URL}/game/puzzle/${date}`
-      : `${import.meta.env.VITE_API_URL}/game/puzzle/today`;
+  } = useResource(["puzzle", resolvedDate], async (signal) => {
+    const endpoint = `${import.meta.env.VITE_API_URL}/game/puzzle/${resolvedDate}`;
     try {
       const res = await fetch(endpoint, { signal });
       if (!res.ok) throw new Error("Failed to load puzzle data");

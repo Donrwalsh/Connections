@@ -108,4 +108,29 @@ describe("PuzzlePage Component", () => {
 
     expect(await screen.findByText(/Error: boom/)).toBeInTheDocument();
   });
+
+  describe("when no date param is present (homepage route)", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("requests the puzzle for the viewer's local calendar date, not UTC", async () => {
+      mockedParams = {};
+      // 2024-01-16T02:00:00Z is still 2024-01-15, 8pm in America/Chicago (UTC-6).
+      // A viewer there should get the 15th's puzzle, not the UTC 16th's.
+      vi.stubEnv("TZ", "America/Chicago");
+      vi.setSystemTime(new Date("2024-01-16T02:00:00Z"));
+      setupSuccessFetch();
+
+      render(<PuzzlePage />);
+
+      await screen.findByText("HAIL");
+
+      const fetchMock = vi.mocked(fetch);
+      const requestedUrl = String(fetchMock.mock.calls[0][0]);
+      expect(requestedUrl).toContain("/game/puzzle/2024-01-15");
+      expect(requestedUrl).not.toContain("/game/puzzle/today");
+      expect(requestedUrl).not.toContain("2024-01-16");
+    });
+  });
 });
