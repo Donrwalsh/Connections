@@ -10,7 +10,7 @@ import {
   LLM_MISTRAL_QUEUE,
   LLM_SAMBANOVA_QUEUE,
   LLM_NVIDIA_QUEUE,
-} from "../queue/queue.module";
+} from "../queue/queue.tokens";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 import { DataSource, Repository } from "typeorm";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
@@ -22,7 +22,7 @@ import {
   strategyTrialNumbers,
   startOfTodayUtc,
 } from "../../strategies";
-import { runStrategyJobId, queueForStrategy } from "../queue/strategy.queue";
+import { runStrategyJobId, queueForStrategy } from "../queue/strategy-queue.utils";
 import type { ProviderPoolId } from "../provider-pool/provider-pool.config";
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";

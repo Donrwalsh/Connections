@@ -7,7 +7,7 @@ import { StrategyRun } from "./entities/strategy-run.entity";
 import { Guess, GuessResult } from "./entities/guess.entity";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { OrchestratorService } from "./orchestrator.service";
-import { RUNS_QUEUE_BY_POOL } from "../queue/queue.module";
+import { RUNS_QUEUE_BY_POOL } from "../queue/queue.tokens";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import type { ProviderPoolId } from "../provider-pool/provider-pool.config";
 import type { Queue } from "bullmq";

@@ -16,7 +16,7 @@ import {
   queueForJudgeProvider,
   queueForStrategy,
   runStrategyJobId,
-} from "./strategy.queue";
+} from "./strategy-queue.utils";
 
 const openai = { name: "openai" } as never;
 const ollama = { name: "ollama" } as never;

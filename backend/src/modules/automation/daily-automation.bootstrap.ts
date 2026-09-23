@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from "@nestjs/common";
 import { Queue } from "bullmq";
-import { DAILY_AUTOMATION_QUEUE } from "../queue/queue.module";
+import { DAILY_AUTOMATION_QUEUE } from "../queue/queue.tokens";
 import { DAILY_AUTOMATION_CRON } from "../../strategies";
 
 /**

@@ -12,7 +12,7 @@ import {
   LLM_MISTRAL_QUEUE,
   LLM_SAMBANOVA_QUEUE,
   LLM_NVIDIA_QUEUE,
-} from "../queue/queue.module";
+} from "../queue/queue.tokens";
 import { RunHistoryReadModel } from "./strategy-read.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";

@@ -14,8 +14,8 @@ import { StrategyRun } from "./entities/strategy-run.entity";
 import { GuessResult } from "./entities/guess.entity";
 import { OrchestratorService } from "./orchestrator.service";
 import { Queue } from "bullmq";
-import { RUNS_QUEUE_BY_POOL } from "../queue/queue.module";
-import { queueForJudgeProvider, categoryEvalJobId } from "../queue/strategy.queue";
+import { RUNS_QUEUE_BY_POOL } from "../queue/queue.tokens";
+import { queueForJudgeProvider, categoryEvalJobId } from "../queue/strategy-queue.utils";
 import { providerPoolById, type ProviderPoolId } from "../provider-pool/provider-pool.config";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 

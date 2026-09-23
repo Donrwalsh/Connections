@@ -10,7 +10,7 @@ import {
   LLM_MISTRAL_QUEUE,
   LLM_SAMBANOVA_QUEUE,
   LLM_NVIDIA_QUEUE,
-} from "../queue/queue.module";
+} from "../queue/queue.tokens";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";

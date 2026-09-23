@@ -1,8 +1,8 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { getRepositoryToken } from "@nestjs/typeorm";
 
-import { RUNS_QUEUE_BY_POOL, RPD_RESUME_QUEUE_BY_POOL } from "../queue/queue.module";
-import { runStrategyJobId } from "../queue/strategy.queue";
+import { RUNS_QUEUE_BY_POOL, RPD_RESUME_QUEUE_BY_POOL } from "../queue/queue.tokens";
+import { runStrategyJobId } from "../queue/strategy-queue.utils";
 import { StrategyRun, StrategyRunStatus } from "../strategy/entities/strategy-run.entity";
 import { RateLimitHoldService } from "../strategy/rate-limit-hold.service";
 import type { ProviderPoolId } from "./provider-pool.config";

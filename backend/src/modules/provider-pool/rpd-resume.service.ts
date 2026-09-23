@@ -3,8 +3,8 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { Queue } from "bullmq";
 
-import { RPD_RESUME_QUEUE_BY_POOL, RUNS_QUEUE_BY_POOL } from "../queue/queue.module";
-import { runStrategyJobId } from "../queue/strategy.queue";
+import { RPD_RESUME_QUEUE_BY_POOL, RUNS_QUEUE_BY_POOL } from "../queue/queue.tokens";
+import { runStrategyJobId } from "../queue/strategy-queue.utils";
 import { StrategyRun, StrategyRunStatus } from "../strategy/entities/strategy-run.entity";
 import { RateLimitHoldService } from "../strategy/rate-limit-hold.service";
 import {

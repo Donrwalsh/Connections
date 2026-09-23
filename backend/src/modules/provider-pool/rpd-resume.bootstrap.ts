@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from "@nestjs/common";
 import { Queue } from "bullmq";
 
-import { RPD_RESUME_QUEUE_BY_POOL } from "../queue/queue.module";
+import { RPD_RESUME_QUEUE_BY_POOL } from "../queue/queue.tokens";
 import { FREE_TIER_POOLS, type ProviderPoolId } from "./provider-pool.config";
 
 /**

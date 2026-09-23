@@ -1,6 +1,6 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { PuzzleQueueBootstrap } from "./puzzle-queue.bootstrap";
-import { PUZZLE_QUEUE } from "../queue/queue.module";
+import { PUZZLE_QUEUE } from "../queue/queue.tokens";
 
 describe("PuzzleQueueBootstrap", () => {
   let bootstrap: PuzzleQueueBootstrap;

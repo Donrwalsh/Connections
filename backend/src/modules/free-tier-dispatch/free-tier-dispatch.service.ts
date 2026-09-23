@@ -2,7 +2,7 @@ import { BadRequestException, Inject, Injectable, Logger } from "@nestjs/common"
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { Queue } from "bullmq";
-import { FREE_TIER_DISPATCH_QUEUE } from "../queue/queue.module";
+import { FREE_TIER_DISPATCH_QUEUE } from "../queue/queue.tokens";
 import { FreeTierDispatchState } from "./entities/free-tier-dispatch-state.entity";
 import { StrategyDispatch } from "../strategy/strategy-dispatch.service";
 import { FreeTierUsageService, FreeTierId } from "../strategy/free-tier-usage.service";
