@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 import { DataSource, EntityManager, Repository } from "typeorm";
 import { Puzzle } from "../game/entities/puzzle.entity";
@@ -57,6 +57,8 @@ export function computeInitialWordOrder(puzzle: Puzzle, strategyName: string): s
  */
 @Injectable()
 export class StrategyRunStore {
+  private readonly logger = new Logger(StrategyRunStore.name);
+
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(StrategyRun)
@@ -237,6 +239,34 @@ export class StrategyRunStore {
 
       await manager.save(StrategyRun, run);
     });
+  }
+
+  /**
+   * Marks a run FAILED when BullMQ has formally exhausted its retries on the
+   * job processing it (see worker.ts's `on("failed")` handlers) — a genuine,
+   * repeated infra/application error, not the restart-orphan case (a dead
+   * worker's job never reaches BullMQ's own 'failed' event at all; that's
+   * handled by StaleRunSweepService instead). No-ops if the run is missing or
+   * no longer RUNNING, since the run loop itself may already have written its
+   * own terminal status by the time this fires.
+   */
+  async markFailedIfStillRunning(
+    puzzleId: number,
+    strategyName: string,
+    trialNumber: number,
+    reason: string,
+  ): Promise<void> {
+    const run = await this.strategyRunRepo.findOne({
+      where: { puzzleId, strategyName, trialNumber },
+    });
+    if (!run || run.status !== StrategyRunStatus.RUNNING) return;
+
+    run.status = StrategyRunStatus.FAILED;
+    run.finishedAt = new Date();
+    await this.strategyRunRepo.save(run);
+    this.logger.warn(
+      `Marked StrategyRun ${run.id} (puzzle ${puzzleId}, strategy '${strategyName}', trial ${trialNumber}) FAILED — job exhausted retries: ${reason}`,
+    );
   }
 
   /**
