@@ -39,6 +39,7 @@ export const SolvePromptIssueTag = {
   WORD_NOT_ON_LIST: "wordNotOnList",
   UNCLASSIFIED: "unclassified",
   MULTIPLE_PROPOSALS: "multipleProposals",
+  CASE_MISMATCH: "caseMismatch",
 } as const;
 
 export type SolvePromptIssueTagValue =

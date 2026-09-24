@@ -12,6 +12,7 @@ export const SUPPORTED_STRATEGIES = [
   "llm-openrouter",
   "llm-mistral",
   "llm-sambanova",
+  "llm-nvidia",
 ] as const;
 
 export type SupportedStrategy = (typeof SUPPORTED_STRATEGIES)[number];
@@ -27,6 +28,7 @@ export const LLM_GROQ = "llm-groq" as const;
 export const LLM_OPENROUTER = "llm-openrouter" as const;
 export const LLM_MISTRAL = "llm-mistral" as const;
 export const LLM_SAMBANOVA = "llm-sambanova" as const;
+export const LLM_NVIDIA = "llm-nvidia" as const;
 
 export const LLM_STRATEGIES = [
   LLM_OPENAI,
@@ -36,6 +38,7 @@ export const LLM_STRATEGIES = [
   LLM_OPENROUTER,
   LLM_MISTRAL,
   LLM_SAMBANOVA,
+  LLM_NVIDIA,
 ] as const;
 
 export function isLlmStrategy(strategyName: string): boolean {

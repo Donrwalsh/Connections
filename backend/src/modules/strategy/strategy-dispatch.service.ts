@@ -9,6 +9,7 @@ import {
   LLM_OPENROUTER_QUEUE,
   LLM_MISTRAL_QUEUE,
   LLM_SAMBANOVA_QUEUE,
+  LLM_NVIDIA_QUEUE,
 } from "../queue/queue.module";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 import { DataSource, Repository } from "typeorm";
@@ -50,6 +51,7 @@ export class StrategyDispatch {
     @Inject(LLM_OPENROUTER_QUEUE) private readonly llmOpenRouterQueue: Queue,
     @Inject(LLM_MISTRAL_QUEUE) private readonly llmMistralQueue: Queue,
     @Inject(LLM_SAMBANOVA_QUEUE) private readonly llmSambaNovaQueue: Queue,
+    @Inject(LLM_NVIDIA_QUEUE) private readonly llmNvidiaQueue: Queue,
     @InjectRepository(StrategyRun)
     private readonly strategyRunRepo: Repository<StrategyRun>,
     @InjectRepository(Puzzle) private readonly puzzleRepo: Repository<Puzzle>,
@@ -76,6 +78,7 @@ export class StrategyDispatch {
       ["openrouter", this.llmOpenRouterQueue],
       ["mistral", this.llmMistralQueue],
       ["sambanova", this.llmSambaNovaQueue],
+      ["nvidia", this.llmNvidiaQueue],
     ]);
     return queueForStrategy(this.runsQueueByPool, this.queue, strategyName);
   }
@@ -278,19 +281,31 @@ export class StrategyDispatch {
 
   /**
    * Bulk-deletes every strategy run whose status is 'error', along with all
-   * rows tied to each — see StrategyRunStore.deleteErroredRuns.
+   * rows tied to each — see StrategyRunStore.deleteErroredRuns. `strategyName`,
+   * when given, scopes the sweep to one strategy; `modelName` narrows it
+   * further to one model within that strategy. Both are needed for an LLM
+   * strategy — one strategyName (e.g. "llm-google") backs every model on
+   * that provider, so strategyName alone would sweep every model's errored
+   * runs, not just one.
    */
-  async deleteErroredRuns() {
-    return this.store.deleteErroredRuns();
+  async deleteErroredRuns(strategyName?: string, modelName?: string) {
+    return this.store.deleteErroredRuns(strategyName, modelName);
   }
 
   /**
    * How many strategy runs are currently in the 'error' status — the figure
    * the maintenance panel's "delete errored runs" button acts on.
+   * `strategyName`/`modelName`, when given, scope the count the same way as
+   * deleteErroredRuns — the figure StrategyPuzzlePage's bulk-action buttons
+   * act on instead.
    */
-  async countErroredRuns(): Promise<{ erroredRuns: number }> {
+  async countErroredRuns(strategyName?: string, modelName?: string): Promise<{ erroredRuns: number }> {
     const erroredRuns = await this.strategyRunRepo.count({
-      where: { status: StrategyRunStatus.ERROR },
+      where: {
+        status: StrategyRunStatus.ERROR,
+        ...(strategyName ? { strategyName } : {}),
+        ...(modelName ? { modelName } : {}),
+      },
     });
     return { erroredRuns };
   }
@@ -346,6 +361,59 @@ export class StrategyDispatch {
     );
 
     return { status: run.status };
+  }
+
+  /**
+   * Bulk version of retryRun, scoped to one strategy — retries every run
+   * currently in the 'error' status for strategyName through the exact same
+   * retryRun path, so each inherits its per-run status check, job-id
+   * collision avoidance, and (for LLM runs) conversation-history
+   * reconstruction. `modelName`, when given, narrows the sweep to one model
+   * within the strategy — needed for an LLM strategy, where one strategyName
+   * (e.g. "llm-google") backs every model on that provider. Unlike
+   * deleteErroredRuns this is not one transaction: each retryRun call
+   * independently flips one row and enqueues one job, so one run's failure
+   * can't roll back another's, and a run whose status changed out from under
+   * us between listing and retrying (e.g. another operator already retried
+   * it, or it self-resumed from RATE_LIMITED_DAILY) is counted as 'skipped',
+   * not 'failed'.
+   */
+  async retryErroredRuns(
+    strategyName: string,
+    modelName?: string,
+  ): Promise<{
+    retried: number;
+    skipped: number;
+    failed: number;
+    failures: { runId: number; reason: string }[];
+  }> {
+    const erroredRuns = await this.strategyRunRepo.find({
+      where: {
+        strategyName,
+        ...(modelName ? { modelName } : {}),
+        status: StrategyRunStatus.ERROR,
+      },
+      select: { id: true },
+    });
+
+    let retried = 0;
+    let skipped = 0;
+    const failures: { runId: number; reason: string }[] = [];
+
+    for (const { id } of erroredRuns) {
+      try {
+        await this.retryRun(id);
+        retried += 1;
+      } catch (err) {
+        if (err instanceof ConflictException) {
+          skipped += 1;
+        } else {
+          failures.push({ runId: id, reason: err instanceof Error ? err.message : String(err) });
+        }
+      }
+    }
+
+    return { retried, skipped, failed: failures.length, failures };
   }
 
   /**

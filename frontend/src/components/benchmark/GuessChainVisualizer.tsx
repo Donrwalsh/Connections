@@ -4,6 +4,7 @@ import { fetchRunDetail } from "../../data/benchmark/api";
 import { useResource } from "../../hooks/useResource";
 import { useRelativeNow } from "../../hooks/useRelativeNow";
 import { formatDuration, formatTimestamp } from "../../data/benchmark/metrics";
+import { poolFromStrategyName, providerPoolLabel } from "../../data/benchmark/providerPools";
 import { formatRelativeTime } from "../../data/benchmark/relativeTime";
 import {
   categoryVerdictLabel,
@@ -48,6 +49,7 @@ export function GuessChainVisualizer({ runId, onDeleted }: GuessChainVisualizerP
   // One shared tick for every relative-time label on the page, rather than a
   // timer per row.
   const now = useRelativeNow();
+  const providerLabel = resolveProviderLabel(detail?.strategyName);
 
   return (
     <section className="bench-visualizer" aria-label={`Guess chain for run ${runId}`}>
@@ -81,7 +83,11 @@ export function GuessChainVisualizer({ runId, onDeleted }: GuessChainVisualizerP
 
       {detail && !isLoading && !error ? (
         detail.solvePrompts.length > 0 ? (
-          <PromptChain solvePrompts={detail.solvePrompts} now={now} />
+          <PromptChain
+            solvePrompts={detail.solvePrompts}
+            providerLabel={providerLabel}
+            now={now}
+          />
         ) : (
           <PlainGuessList guesses={detail.guesses} now={now} />
         )
@@ -102,26 +108,44 @@ export function GuessChainVisualizer({ runId, onDeleted }: GuessChainVisualizerP
   );
 }
 
+/** The display name of the provider that served this run — falls back to a
+ * generic phrase for an unrecognized/missing strategy name, which in
+ * practice shouldn't happen since every LLM strategy has a pool entry. */
+function resolveProviderLabel(strategyName: string | null | undefined): string {
+  const poolId = poolFromStrategyName(strategyName);
+  return poolId ? providerPoolLabel(poolId) : "the provider";
+}
+
 /** The LLM guess chain: one step per model call, in order. */
 function PromptChain({
   solvePrompts,
+  providerLabel,
   now,
 }: {
   solvePrompts: SolvePromptRecord[];
+  providerLabel: string;
   now: number;
 }) {
   return (
     <ol className="bench-chain">
       {solvePrompts.map((prompt) => (
         <li key={prompt.id} className="bench-chain__step">
-          <PromptStep prompt={prompt} now={now} />
+          <PromptStep prompt={prompt} providerLabel={providerLabel} now={now} />
         </li>
       ))}
     </ol>
   );
 }
 
-function PromptStep({ prompt, now }: { prompt: SolvePromptRecord; now: number }) {
+function PromptStep({
+  prompt,
+  providerLabel,
+  now,
+}: {
+  prompt: SolvePromptRecord;
+  providerLabel: string;
+  now: number;
+}) {
   const isCallError = prompt.status === "callError";
   const telemetry = [
     prompt.totalTokens !== null ? `${prompt.totalTokens.toLocaleString()} tok` : null,
@@ -185,7 +209,7 @@ function PromptStep({ prompt, now }: { prompt: SolvePromptRecord; now: number })
       ) : null}
 
       {isCallError ? (
-        <CallErrorDetail prompt={prompt} />
+        <CallErrorDetail prompt={prompt} providerLabel={providerLabel} />
       ) : (
         <ul className="bench-proposals">
           {prompt.proposals.map((proposal) => (
@@ -200,11 +224,18 @@ function PromptStep({ prompt, now }: { prompt: SolvePromptRecord; now: number })
   );
 }
 
-/** The OpenAI call itself failed — no model text at all, so there's nothing
- * to show in the usual proposals list. Surfaces the error message/status
- * plus the raw request/response the orchestrator captured, in the same
- * collapsible-detail style as the prompt/response blocks above. */
-function CallErrorDetail({ prompt }: { prompt: SolvePromptRecord }) {
+/** The provider call itself failed — no model text at all, so there's
+ * nothing to show in the usual proposals list. Surfaces the error
+ * message/status plus the raw request/response the orchestrator captured,
+ * in the same collapsible-detail style as the prompt/response blocks
+ * above. */
+function CallErrorDetail({
+  prompt,
+  providerLabel,
+}: {
+  prompt: SolvePromptRecord;
+  providerLabel: string;
+}) {
   const summary = [
     prompt.errorName,
     prompt.statusCode !== null ? `HTTP ${prompt.statusCode}` : null,
@@ -225,14 +256,14 @@ function CallErrorDetail({ prompt }: { prompt: SolvePromptRecord }) {
 
       {prompt.requestBody !== null ? (
         <details className="bench-step__detail">
-          <summary>Raw request sent to OpenAI</summary>
+          <summary>Raw request sent to {providerLabel}</summary>
           <pre className="bench-step__pre">{JSON.stringify(prompt.requestBody, null, 2)}</pre>
         </details>
       ) : null}
 
       {prompt.responseBody !== null ? (
         <details className="bench-step__detail">
-          <summary>Raw response from OpenAI</summary>
+          <summary>Raw response from {providerLabel}</summary>
           <pre className="bench-step__pre">{JSON.stringify(prompt.responseBody, null, 2)}</pre>
         </details>
       ) : null}
@@ -383,6 +414,8 @@ function issueTagLabel(tag: string): string {
       return "Unclassified issue";
     case "multipleProposals":
       return "Multiple proposals";
+    case "caseMismatch":
+      return "Case mismatch";
     default:
       return tag;
   }
@@ -400,6 +433,8 @@ function issueTagTitle(tag: string): string {
       return "A group went missing from the response for a reason not yet covered by a named check.";
     case "multipleProposals":
       return "This response contained more than one full answer attempt — only the first is what was actually registered. Later prompts include just that proposal, not the full response, to keep the conversation from ballooning.";
+    case "caseMismatch":
+      return "The model proposed the right words in the wrong case — the guess was accepted after normalizing to the puzzle's casing.";
     default:
       return "Unrecognized issue tag.";
   }

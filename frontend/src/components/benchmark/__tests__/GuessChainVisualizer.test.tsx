@@ -193,6 +193,17 @@ describe("GuessChainVisualizer", () => {
     expect(await screen.findByText("Multiple proposals")).toBeInTheDocument();
   });
 
+  it("flags a step with a caseMismatch issue tag", async () => {
+    stubFetch({
+      ...llmDetail,
+      solvePrompts: [{ ...llmDetail.solvePrompts[0]!, issueTags: ["caseMismatch"] }],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Case mismatch")).toBeInTheDocument();
+  });
+
   it("does not render an issue badge for a step with no issue tags", async () => {
     stubFetch(llmDetail);
 
@@ -247,6 +258,58 @@ describe("GuessChainVisualizer", () => {
     expect(screen.getByText("Raw request sent to OpenAI")).toBeInTheDocument();
     expect(screen.getByText("Raw response from OpenAI")).toBeInTheDocument();
     expect(screen.queryByText("No candidate groups parsed.")).not.toBeInTheDocument();
+  });
+
+  it("labels the raw request/response with the run's actual provider, not a hardcoded one", async () => {
+    stubFetch({
+      ...llmDetail,
+      strategyName: "llm-groq",
+      solvePrompts: [
+        {
+          ...llmDetail.solvePrompts[0]!,
+          status: "callError",
+          rawResponseText: null,
+          proposals: [],
+          errorName: "AI_APICallError",
+          errorMessage: "Rate limit exceeded",
+          statusCode: 429,
+          isRetryable: true,
+          requestBody: { model: "llama-3.3-70b" },
+          responseBody: { error: { message: "Rate limit exceeded" } },
+        },
+      ],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Rate limit exceeded")).toBeInTheDocument();
+    expect(screen.getByText("Raw request sent to Groq")).toBeInTheDocument();
+    expect(screen.getByText("Raw response from Groq")).toBeInTheDocument();
+    expect(screen.queryByText("Raw request sent to OpenAI")).not.toBeInTheDocument();
+  });
+
+  it("falls back to a generic provider phrase when the run's strategy name isn't a recognized provider pool", async () => {
+    stubFetch({
+      ...llmDetail,
+      strategyName: "unrecognized-strategy",
+      solvePrompts: [
+        {
+          ...llmDetail.solvePrompts[0]!,
+          status: "callError",
+          rawResponseText: null,
+          proposals: [],
+          errorMessage: "Rate limit exceeded",
+          requestBody: { model: "unknown" },
+          responseBody: { error: { message: "Rate limit exceeded" } },
+        },
+      ],
+    });
+
+    render(<GuessChainVisualizer runId={12345} />);
+
+    expect(await screen.findByText("Rate limit exceeded")).toBeInTheDocument();
+    expect(screen.getByText("Raw request sent to the provider")).toBeInTheDocument();
+    expect(screen.getByText("Raw response from the provider")).toBeInTheDocument();
   });
 
   it("includes a reasoning-token count in the callError summary when the failed call still spent reasoning tokens", async () => {

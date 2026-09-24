@@ -30,6 +30,31 @@ export class StrategyController {
     return this.supportedModelService.findAll();
   }
 
+  // Resolves a bare model name to the one strategy it's currently supported
+  // under — the same guard the admin dispatch/model/:modelName/* routes
+  // already rely on (see SupportedModelService.resolveSupportedStrategy).
+  // Lets a /leaderboard/:strategyId page that has no ?strategy= qualifier
+  // ask the backend, not just guess client-side, whether the bare model
+  // name actually has one answer — throws the same 400 "is ambiguous"/"is
+  // not a supported model" error the admin routes throw when it doesn't.
+  // Registered under "models/" (a literal segment, like "models" and
+  // "leaderboard" above) so it can't collide with the :strategyName/...
+  // routes below regardless of registration order.
+  @Get("models/:modelName/strategy")
+  @ApiParam({
+    name: "modelName",
+    type: String,
+    description:
+      "A model name from the SupportedModel table. Resolves to the one strategy it's currently" +
+      " supported under — rejected with 400 if the model is unknown, unsupported, or configured" +
+      " under more than one strategy.",
+    example: "openai/gpt-oss-20b",
+  })
+  async resolveModelStrategy(@Param("modelName") modelName: string) {
+    const strategyName = await this.supportedModelService.resolveSupportedStrategy(modelName);
+    return { modelName, strategyName };
+  }
+
   // Same reasoning as "models" above — "leaderboard" as a literal first
   // segment is unambiguous with :strategyName/... regardless of order.
   @Get("leaderboard")

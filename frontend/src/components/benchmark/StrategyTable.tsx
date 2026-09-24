@@ -90,6 +90,25 @@ export function StrategyTable({ rows, sortBy, sortDir, onSortChange, variant }: 
   const captionId = useId();
   const gridClass = isDeterministic ? "bench-grid--deterministic" : "bench-grid--llm";
 
+  // A model name shared by more than one provider's row needs its
+  // strategyName carried explicitly (see useStrategyMeta) — every other
+  // row's URL stays exactly as it is today. Computed live from this table's
+  // own rows (not a hardcoded list), so a future provider colliding with an
+  // existing model name needs no code change here — only its SupportedModel
+  // seed rows.
+  const modelNameCounts = new Map<string, number>();
+  if (variant === "llm") {
+    for (const row of rows) {
+      modelNameCounts.set(row.id, (modelNameCounts.get(row.id) ?? 0) + 1);
+    }
+  }
+
+  function linkFor(row: LeaderboardRow): string {
+    const isAmbiguous = (modelNameCounts.get(row.id) ?? 0) > 1;
+    const qualifier = isAmbiguous ? `?strategy=${encodeURIComponent(row.strategyName)}` : "";
+    return `/leaderboard/${encodeURIComponent(row.id)}${qualifier}`;
+  }
+
   return (
     <div className="bench-table-wrap bench-table-wrap--fluid">
       <p id={captionId} className="bench-table__caption">
@@ -187,13 +206,17 @@ export function StrategyTable({ rows, sortBy, sortDir, onSortChange, variant }: 
             row.avgDurationMs === null ? "—" : formatDuration(row.avgDurationMs);
           return (
             <div
-              key={row.id}
+              // row.id alone isn't a unique React key once two rows (one per
+              // provider) can share the same modelName — strategyName makes
+              // it unique again without needing to be parsed back out of
+              // anywhere, unlike the URL (see linkFor above).
+              key={`${row.strategyName}::${row.id}`}
               className={`bench-grid-row ${gridClass} ${index === 0 ? "bench-row bench-row--leading" : "bench-row"}`}
-              onClick={() => navigate(`/leaderboard/${encodeURIComponent(row.id)}`)}
+              onClick={() => navigate(linkFor(row))}
               onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault();
-                  navigate(`/leaderboard/${encodeURIComponent(row.id)}`);
+                  navigate(linkFor(row));
                 }
               }}
               role="link"

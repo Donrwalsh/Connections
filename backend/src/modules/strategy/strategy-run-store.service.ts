@@ -278,8 +278,14 @@ export class StrategyRunStore {
    * one down through the same path as deleteRun. The 'error' filter already
    * excludes 'running', so no per-run running check is needed. Runs in a
    * single transaction so a mid-sweep failure rolls the whole thing back.
+   * `strategyName`, when given, scopes the sweep to one strategy instead of
+   * every errored run in the table. `modelName` narrows it further to one
+   * model within that strategy — required for LLM strategies, where one
+   * strategyName (e.g. "llm-google") backs every model on that provider (see
+   * SupportedModel's UNIQUE (strategyName, modelName)), so strategyName
+   * alone would sweep every model's errored runs, not just one.
    */
-  async deleteErroredRuns(): Promise<{
+  async deleteErroredRuns(strategyName?: string, modelName?: string): Promise<{
     deletedRuns: number;
     deletedGuesses: number;
     deletedSolvePrompts: number;
@@ -288,7 +294,11 @@ export class StrategyRunStore {
   }> {
     return this.dataSource.transaction(async (manager) => {
       const erroredRuns = await manager.find(StrategyRun, {
-        where: { status: StrategyRunStatus.ERROR },
+        where: {
+          status: StrategyRunStatus.ERROR,
+          ...(strategyName ? { strategyName } : {}),
+          ...(modelName ? { modelName } : {}),
+        },
         select: { id: true },
       });
 

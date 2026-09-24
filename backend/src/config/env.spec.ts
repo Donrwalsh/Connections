@@ -50,6 +50,7 @@ describe("loadEnv", () => {
     it("should accept each supported provider", () => {
       expect(loadEnv({ ...baseEnv, JUDGE_PROVIDER: "google" }).JUDGE_PROVIDER).toBe("google");
       expect(loadEnv({ ...baseEnv, JUDGE_PROVIDER: "ollama" }).JUDGE_PROVIDER).toBe("ollama");
+      expect(loadEnv({ ...baseEnv, JUDGE_PROVIDER: "nvidia" }).JUDGE_PROVIDER).toBe("nvidia");
     });
 
     it("should throw for an unrecognized JUDGE_PROVIDER", () => {

@@ -330,6 +330,7 @@ type RateLimit429Classifier = (
 const RATE_LIMIT_429_CLASSIFIERS: Record<ModelProvider, RateLimit429Classifier | null> = {
   openai: null,
   ollama: null,
+  nvidia: null,
 
   google: (err, message, details, apiDetails) => {
     const retryAfterSeconds = parseGoogleRateLimit(err.responseBody);

@@ -23,7 +23,10 @@
     "backfill:prompt-text": "node dist/scripts/backfill-prompt-text.js",
     "backfill:token-usage": "node dist/scripts/backfill-token-usage.js",
     "trim:resume-corrupted-runs": "node dist/scripts/trim-resume-corrupted-runs.js",
-    "eval:categories": "tsx src/scripts/evaluate-categories.ts"
+    "find:manual-retry-history-loss": "node dist/scripts/find-manual-retry-history-loss.js",
+    "trim:manual-retry-history-loss": "node dist/scripts/trim-manual-retry-history-loss.js",
+    "eval:categories": "tsx src/scripts/evaluate-categories.ts",
+    "purge:case-mismatch-runs": "node dist/scripts/purge-case-mismatch-runs.js"
   },
   "dependencies": {
     "@bull-board/api": "^8.4.0",

@@ -10,6 +10,7 @@ import {
   llmOpenRouterQueue,
   llmMistralQueue,
   llmSambaNovaQueue,
+  llmNvidiaQueue,
 } from "./strategy.queue";
 import { puzzleQueue } from "./puzzle.queue";
 import { freeTierDispatchQueue } from "./free-tier-dispatch.queue";
@@ -34,6 +35,7 @@ export const LLM_GROQ_QUEUE = "LLM_GROQ_QUEUE";
 export const LLM_OPENROUTER_QUEUE = "LLM_OPENROUTER_QUEUE";
 export const LLM_MISTRAL_QUEUE = "LLM_MISTRAL_QUEUE";
 export const LLM_SAMBANOVA_QUEUE = "LLM_SAMBANOVA_QUEUE";
+export const LLM_NVIDIA_QUEUE = "LLM_NVIDIA_QUEUE";
 export const PUZZLE_QUEUE = "PUZZLE_QUEUE";
 export const FREE_TIER_DISPATCH_QUEUE = "FREE_TIER_DISPATCH_QUEUE";
 export const MODEL_METADATA_QUEUE = "MODEL_METADATA_QUEUE";
@@ -67,6 +69,7 @@ const runsQueueByPool: ReadonlyMap<ProviderPoolId, Queue> = new Map([
   ["openrouter", llmOpenRouterQueue],
   ["mistral", llmMistralQueue],
   ["sambanova", llmSambaNovaQueue],
+  ["nvidia", llmNvidiaQueue],
 ]);
 
 const rpdResumeQueueByPool: ReadonlyMap<ProviderPoolId, Queue> = new Map([
@@ -95,6 +98,7 @@ const freeDispatchQueueByPool: ReadonlyMap<ProviderPoolId, Queue> = new Map([
     { provide: LLM_OPENROUTER_QUEUE, useValue: llmOpenRouterQueue },
     { provide: LLM_MISTRAL_QUEUE, useValue: llmMistralQueue },
     { provide: LLM_SAMBANOVA_QUEUE, useValue: llmSambaNovaQueue },
+    { provide: LLM_NVIDIA_QUEUE, useValue: llmNvidiaQueue },
     { provide: PUZZLE_QUEUE, useValue: puzzleQueue },
     { provide: FREE_TIER_DISPATCH_QUEUE, useValue: freeTierDispatchQueue },
     { provide: MODEL_METADATA_QUEUE, useValue: modelMetadataQueue },
@@ -122,6 +126,7 @@ const freeDispatchQueueByPool: ReadonlyMap<ProviderPoolId, Queue> = new Map([
     LLM_OPENROUTER_QUEUE,
     LLM_MISTRAL_QUEUE,
     LLM_SAMBANOVA_QUEUE,
+    LLM_NVIDIA_QUEUE,
     PUZZLE_QUEUE,
     FREE_TIER_DISPATCH_QUEUE,
     MODEL_METADATA_QUEUE,

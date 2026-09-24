@@ -31,6 +31,7 @@ import { RateLimitHoldService } from "./rate-limit-hold.service";
 import { firstCombination } from "./combinatorics";
 import { formatCompactAnswer, GROUP_SIZE } from "answer-grammar";
 import { applyOneOffWordFixups } from "./normalize-puzzle-word";
+import { findCaseInsensitiveGroupMatch } from "./case-insensitive-match";
 
 const MODEL_ERROR_RETRY_BASE_DELAY_MS = 1000;
 const MODEL_ERROR_RETRY_MAX_DELAY_MS = 300000;
@@ -712,25 +713,44 @@ export class LlmStrategyRunner {
     const originalPuzzleWords = new Set(
       puzzle.answerGroups.flatMap((group) => group.members.map((member) => member.word)),
     );
+    const answerGroupWords = puzzle.answerGroups.map((group) => group.members.map((member) => member.word));
 
     for (const currentProposal of proposalEntries) {
-      const guessWords = currentProposal.words!;
+      let guessWords = currentProposal.words!;
 
       // A word missing from run.availableWords is either already solved by
       // an earlier guess in this loop (expected, boring — every word in
-      // state.lockedInGroups is still a real puzzle word) or was never part
-      // of the puzzle at all (a genuine model hallucination). Both skip the
-      // proposal the same way today; only the second is worth flagging.
+      // state.lockedInGroups is still a real puzzle word), the right words
+      // in the wrong case (tolerated below, not a hallucination), or a
+      // genuine model hallucination.
       const isWordMissingFromAvailable = guessWords.some((w) => !run.availableWords.includes(w));
       if (isWordMissingFromAvailable) {
-        const hasHallucinatedWord = guessWords.some((w) => !originalPuzzleWords.has(w));
-        if (hasHallucinatedWord) {
+        const caseInsensitiveMatch = findCaseInsensitiveGroupMatch(guessWords, answerGroupWords);
+        const isCaseMismatchStillAvailable =
+          caseInsensitiveMatch?.every((w) => run.availableWords.includes(w)) ?? false;
+
+        if (caseInsensitiveMatch && isCaseMismatchStillAvailable) {
+          // Normalize to canonical casing right here, before guessWords is
+          // used to build the Guess or filter run.availableWords below —
+          // both of those compare case-sensitively against canonical-case
+          // data, so carrying the model's raw casing any further would
+          // corrupt run state even though the guess itself succeeds.
+          guessWords = caseInsensitiveMatch;
+          currentProposal.words = guessWords;
           const issueTags = currentProposal.solvePrompt!.issueTags;
-          if (!issueTags.includes(SolvePromptIssueTag.WORD_NOT_ON_LIST)) {
-            issueTags.push(SolvePromptIssueTag.WORD_NOT_ON_LIST);
+          if (!issueTags.includes(SolvePromptIssueTag.CASE_MISMATCH)) {
+            issueTags.push(SolvePromptIssueTag.CASE_MISMATCH);
           }
+        } else {
+          const hasHallucinatedWord = guessWords.some((w) => !originalPuzzleWords.has(w));
+          if (hasHallucinatedWord) {
+            const issueTags = currentProposal.solvePrompt!.issueTags;
+            if (!issueTags.includes(SolvePromptIssueTag.WORD_NOT_ON_LIST)) {
+              issueTags.push(SolvePromptIssueTag.WORD_NOT_ON_LIST);
+            }
+          }
+          continue;
         }
-        continue;
       }
 
       state.guessCount++;
@@ -901,10 +921,11 @@ export class LlmStrategyRunner {
   /**
    * Rebuilds the `messages` array as it stood right before the run's last
    * call, from that call's own persisted request — not a re-derivation, the
-   * literal data that was actually sent. `requestBody.messages` is the AI
-   * SDK's request payload (see orchestrator.service.ts /
-   * orchestrator/src/answer-step.ts): this run's full conversation history
-   * up through and including that call's own user turn.
+   * literal data that was actually sent. Every provider captures this
+   * differently (see normalizeTurns below for the three known top-level
+   * shapes — `messages`/`input`/`contents` — this tries in order), but it's
+   * always this run's full conversation history up through and including
+   * that call's own user turn.
    *
    * That trailing user turn is dropped rather than kept and answered,
    * deliberately, for two reasons: (1) if the last row is CALL_ERROR, that
@@ -929,23 +950,77 @@ export class LlmStrategyRunner {
   private reconstructMessages(latestPrompt: Pick<SolvePrompt, "requestBody"> | null): ChatMessage[] {
     if (!latestPrompt) return [];
 
-    const requestBody = latestPrompt.requestBody as { messages?: unknown } | null;
-    const priorMessages = requestBody?.messages;
-    if (!this.isChatMessageArray(priorMessages) || priorMessages.length === 0) return [];
+    const requestBody = latestPrompt.requestBody as
+      | { messages?: unknown; input?: unknown; contents?: unknown }
+      | null;
+    if (!requestBody) return [];
+
+    const priorMessages =
+      // Every non-OpenAI, non-Google provider's request, and the backend->
+      // orchestrator payload OrchestratorService.executeCall falls back to
+      // on a client-side failure.
+      this.normalizeTurns(requestBody.messages, "content") ??
+      // @ai-sdk/openai's default openai(modelId) factory: the Responses API
+      // (see orchestrator/src/answer-step.ts's result.request.body and
+      // orchestrator/src/provider.ts's getModel).
+      this.normalizeTurns(requestBody.input, "content") ??
+      // @ai-sdk/google: Gemini's native "contents"/"parts" shape, whose
+      // assistant role is spelled "model", not "assistant".
+      this.normalizeTurns(requestBody.contents, "parts", { assistantRole: "model" });
+
+    if (!priorMessages || priorMessages.length === 0) return [];
 
     return priorMessages.slice(0, -1);
   }
 
-  private isChatMessageArray(value: unknown): value is ChatMessage[] {
-    return (
-      Array.isArray(value) &&
-      value.every(
-        (m) =>
-          typeof m === "object" &&
-          m !== null &&
-          ((m as { role?: unknown }).role === "user" || (m as { role?: unknown }).role === "assistant") &&
-          typeof (m as { content?: unknown }).content === "string",
-      )
-    );
+  /**
+   * Normalizes one provider's captured request turns into this run's
+   * ChatMessage[] — or null if `value` isn't an array of turns shaped like
+   * this provider's API at all (so reconstructMessages can try the next
+   * shape). Handles both known per-turn content layouts, confirmed against
+   * real captured requestBody rows and each provider's own AI SDK message-
+   * conversion source:
+   *   - a plain string: `{ role, [contentKey]: string }` (most providers,
+   *     and Mistral's assistant turns with no reasoning)
+   *   - a list of typed parts, each with its own `text` field:
+   *     `{ role, [contentKey]: Array<{ text?: string }> }` (OpenAI's
+   *     Responses API `input`, Google's `contents.parts`, and Mistral's
+   *     `messages.content` for a user turn)
+   * `assistantRole` is this shape's own spelling of the assistant role
+   * (Google's Gemini API calls it "model") — defaults to "assistant".
+   */
+  private normalizeTurns(
+    value: unknown,
+    contentKey: string,
+    opts: { assistantRole?: string } = {},
+  ): ChatMessage[] | null {
+    if (!Array.isArray(value)) return null;
+    const assistantRole = opts.assistantRole ?? "assistant";
+
+    const messages: ChatMessage[] = [];
+    for (const item of value) {
+      if (typeof item !== "object" || item === null) return null;
+      const rawRole = (item as Record<string, unknown>).role;
+      const role: "user" | "assistant" | null =
+        rawRole === "user" ? "user" : rawRole === assistantRole ? "assistant" : null;
+      if (!role) return null;
+
+      const rawContent = (item as Record<string, unknown>)[contentKey];
+      if (typeof rawContent === "string") {
+        messages.push({ role, content: rawContent });
+        continue;
+      }
+      if (!Array.isArray(rawContent)) return null;
+
+      const parts: string[] = [];
+      for (const part of rawContent) {
+        if (typeof part !== "object" || part === null || typeof (part as { text?: unknown }).text !== "string") {
+          return null;
+        }
+        parts.push((part as { text: string }).text);
+      }
+      messages.push({ role, content: parts.join("") });
+    }
+    return messages;
   }
 }

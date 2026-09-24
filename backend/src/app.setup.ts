@@ -17,6 +17,7 @@ import {
   llmOpenRouterQueue,
   llmMistralQueue,
   llmSambaNovaQueue,
+  llmNvidiaQueue,
 } from "./modules/queue/strategy.queue";
 
 const BULL_LOGIN_PATH = "/bull/login";
@@ -208,6 +209,7 @@ export async function configureApp(app: INestApplication): Promise<INestApplicat
       new BullMQAdapter(llmOpenRouterQueue),
       new BullMQAdapter(llmMistralQueue),
       new BullMQAdapter(llmSambaNovaQueue),
+      new BullMQAdapter(llmNvidiaQueue),
       new BullMQAdapter(puzzleQueue),
     ],
     serverAdapter,

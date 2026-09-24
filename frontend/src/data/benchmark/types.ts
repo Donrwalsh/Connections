@@ -237,6 +237,16 @@ export interface SupportedModelRecord {
   releaseDate: string | null;
 }
 
+/** Response from GET /strategy/models/:modelName/strategy — the one
+ * strategy a bare model name currently resolves to. The request rejects
+ * (thrown Error, message from the backend) if the model is unknown,
+ * unsupported, or configured under more than one strategy — see
+ * useStrategyMeta, which is this call's only consumer. */
+export interface ResolvedModelStrategy {
+  modelName: string;
+  strategyName: string;
+}
+
 /** The backend tracks two separate, non-overlapping free-token programs —
  * model membership lives on SupportedModel.freeTier (see
  * backend/src/modules/supported-model/entities/supported-model.entity.ts)
@@ -457,7 +467,7 @@ export type SolvePromptTypeValue = "initialSolve" | "retry";
 export type SolvePromptStatusValue =
   | "parsed"
   | "malformedNoAnswerBlock"
-  // The OpenAI call itself never produced usable model text (backend:
+  // The provider call itself never produced usable model text (backend:
   // SolvePromptStatus.CALL_ERROR). Shown inline in the guess chain like
   // any other step — see errorName/errorMessage/etc. below.
   | "callError";
@@ -538,6 +548,27 @@ export interface DeleteErroredRunsResult {
   deletedSolvePrompts: number;
   deletedLlmProposals: number;
   deletedCategoryEvaluations: number;
+}
+
+/** Response from DELETE /dispatch/strategy/:strategyName/runs/errored — the
+ * same per-table counts as DeleteErroredRunsResult, scoped to one strategy. */
+export interface DeleteErroredRunsForStrategyResult extends DeleteErroredRunsResult {
+  strategyName: string;
+}
+
+/** Response from POST /dispatch/strategy/:strategyName/runs/errored/retry —
+ * per-run *enqueue* outcome, not the eventual retry result: a queued job's
+ * real outcome isn't known until it completes on the worker (see
+ * RetryRunModal, which has the same "refresh to see progress" framing for a
+ * single run). 'skipped' is a run whose status changed out from under the
+ * sweep (e.g. already retried by someone else) — not a real failure. */
+export interface BulkRetryErroredRunsResult {
+  message: string;
+  strategyName: string;
+  retried: number;
+  skipped: number;
+  failed: number;
+  failures: { runId: number; reason: string }[];
 }
 
 /** GET /category-evaluation/failed — how many CategoryEvaluation rows are

@@ -20,6 +20,7 @@ import {
   LLM_GOOGLE,
   LLM_GROQ,
   LLM_MISTRAL,
+  LLM_NVIDIA,
   LLM_OLLAMA,
   LLM_OPENAI,
   LLM_OPENROUTER,
@@ -57,7 +58,8 @@ export type ProviderPoolId =
   | "openrouter"
   | "mistral"
   | "sambanova"
-  | "ollama";
+  | "ollama"
+  | "nvidia";
 
 /** Reads an env-backed knob at call time. Config rows hold the accessor, not a
  * snapshotted number, so a runtime env override keeps working. */
@@ -144,9 +146,9 @@ const SELF_REARM_MAX_DELAY_MS = 15 * 60_000;
 
 /**
  * Every pool, ordered google → groq → openrouter → mistral → sambanova (the
- * daily-automation burn order that step 6's loop must reproduce), then the two
- * non-free-tier pools. The UI renders pools in its own order — the parity test
- * compares as an unordered set.
+ * daily-automation burn order that step 6's loop must reproduce), then the
+ * three non-free-tier pools (openai, ollama, nvidia). The UI renders pools in
+ * its own order — the parity test compares as an unordered set.
  */
 export const PROVIDER_POOLS: ProviderPool[] = [
   {
@@ -300,6 +302,15 @@ export const PROVIDER_POOLS: ProviderPool[] = [
     orchestratorProvider: "ollama",
     concurrency: () => intEnv("LLM_OLLAMA_CONCURRENCY", DEFAULT_CONCURRENCY),
     queues: { runs: "llm-ollama-runs" },
+    freeTier: null,
+  },
+  {
+    id: "nvidia",
+    label: "NVIDIA NIM",
+    strategyName: LLM_NVIDIA,
+    orchestratorProvider: "nvidia",
+    concurrency: () => intEnv("LLM_NVIDIA_CONCURRENCY", DEFAULT_CONCURRENCY),
+    queues: { runs: "llm-nvidia-runs" },
     freeTier: null,
   },
 ];

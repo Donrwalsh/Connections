@@ -430,5 +430,31 @@ describe("StrategyRunStore", () => {
       expect(mockManager.delete).toHaveBeenCalledWith(StrategyRun, { id: 11 });
       expect(mockManager.delete).toHaveBeenCalledWith(StrategyRun, { id: 22 });
     });
+
+    it("should filter to one strategy when strategyName is given", async () => {
+      mockManager.find.mockResolvedValueOnce([]);
+
+      await store.deleteErroredRuns("llm-openai");
+
+      expect(mockManager.find).toHaveBeenCalledWith(StrategyRun, {
+        where: { status: StrategyRunStatus.ERROR, strategyName: "llm-openai" },
+        select: { id: true },
+      });
+    });
+
+    it("should further filter to one model when modelName is also given — one strategyName can back many models (e.g. llm-google spans every Google model)", async () => {
+      mockManager.find.mockResolvedValueOnce([]);
+
+      await store.deleteErroredRuns("llm-google", "gemini-3.1-flash-lite");
+
+      expect(mockManager.find).toHaveBeenCalledWith(StrategyRun, {
+        where: {
+          status: StrategyRunStatus.ERROR,
+          strategyName: "llm-google",
+          modelName: "gemini-3.1-flash-lite",
+        },
+        select: { id: true },
+      });
+    });
   });
 });
