@@ -467,7 +467,7 @@ export type SolvePromptTypeValue = "initialSolve" | "retry";
 export type SolvePromptStatusValue =
   | "parsed"
   | "malformedNoAnswerBlock"
-  // The OpenAI call itself never produced usable model text (backend:
+  // The provider call itself never produced usable model text (backend:
   // SolvePromptStatus.CALL_ERROR). Shown inline in the guess chain like
   // any other step — see errorName/errorMessage/etc. below.
   | "callError";
