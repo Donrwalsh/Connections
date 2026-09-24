@@ -14,6 +14,7 @@ import { DeterministicSolver } from "./deterministic-solver.service";
 import { StrategyDispatch } from "./strategy-dispatch.service";
 import { LlmStrategyRunner } from "./llm-strategy-runner.service";
 import { StrategyRunStore } from "./strategy-run-store.service";
+import { StaleRunSweepService } from "./stale-run-sweep.service";
 import { OrchestratorService } from "./orchestrator.service";
 import { CategoryEvaluatorService } from "./category-evaluator.service";
 import { FreeTierUsageService } from "./free-tier-usage.service";
@@ -44,6 +45,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     DeterministicSolver,
     StrategyDispatch,
     StrategyRunStore,
+    StaleRunSweepService,
     LlmStrategyRunner,
     OrchestratorService,
     CategoryEvaluatorService,
