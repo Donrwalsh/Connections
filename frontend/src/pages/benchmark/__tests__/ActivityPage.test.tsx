@@ -115,6 +115,7 @@ const defaultAutomation: AutomationStatus = {
   nextRunAt: "2024-06-02T00:15:00.000Z",
   judge: { enqueued: null, error: null },
   miniBurn: { outcome: null, message: null },
+  flagshipBurn: { outcome: null, message: null },
   googleBurn: { outcome: null, message: null },
   groqBurn: { outcome: null, message: null },
   openRouterBurn: { outcome: null, message: null },
@@ -454,6 +455,7 @@ describe("ActivityPage", () => {
         nextRunAt: "2024-06-02T00:15:00.000Z",
         judge: { enqueued: 4, error: null },
         miniBurn: { outcome: "started", message: "started at 80%" },
+        flagshipBurn: { outcome: "alreadyActive", message: "already running at 80%" },
         googleBurn: { outcome: "started", message: "started" },
         groqBurn: { outcome: "alreadyExhausted", message: "every Groq model is currently RPD-held" },
         openRouterBurn: {
@@ -479,6 +481,11 @@ describe("ActivityPage", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText("Auto-run: started at 80% (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Auto-run: already running at 80% (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM",
+      ),
     ).toBeInTheDocument();
     expect(
       screen.getByText("Auto-run: started (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM"),
@@ -518,6 +525,22 @@ describe("ActivityPage", () => {
         ...defaultAutomation,
         lastRunAt: "2024-06-01T00:15:00.000Z",
         miniBurn: { outcome: "error", message: "threshold exceeded" },
+      },
+    });
+    renderActivity();
+
+    const line = await screen.findByText(
+      "Auto-run: failed: threshold exceeded (Jun 1, 2024, 12:15 AM) · Next: Jun 2, 2024, 12:15 AM",
+    );
+    expect(line).toHaveClass("bench-error");
+  });
+
+  it("shows the flagship-burn leg's auto-run line as a failure when it errored", async () => {
+    stubFetch({
+      automation: {
+        ...defaultAutomation,
+        lastRunAt: "2024-06-01T00:15:00.000Z",
+        flagshipBurn: { outcome: "error", message: "threshold exceeded" },
       },
     });
     renderActivity();

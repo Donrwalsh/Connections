@@ -30,12 +30,18 @@ export const JUDGE_LEG_LIMIT = 500;
 // in the day — see docs/superpowers/specs/2026-09-04-daily-free-tier-automation-design.md.
 export const MINI_BURN_CEILING_PERCENT = 80;
 
+// Flagship has no judge-leg contention (JUDGE_MODEL is a mini/nano-tier
+// model, so judge spend never lands in flagship's own budget) — this is a
+// separate constant from MINI_BURN_CEILING_PERCENT so the two can diverge
+// later, not because the reasoning behind the number differs today.
+export const FLAGSHIP_BURN_CEILING_PERCENT = 80;
+
 function todayUtcDateStamp(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
 /**
- * Runs on a daily UTC cron (see DailyAutomationBootstrap). Runs eight legs
+ * Runs on a daily UTC cron (see DailyAutomationBootstrap). Runs nine legs
  * in turn — each leg is awaited before the next starts, but one leg's
  * failure never prevents the next from running (see each leg's own
  * try/catch) — and records each one's outcome into today's AutomationRunLog
@@ -63,6 +69,10 @@ function todayUtcDateStamp(): string {
  *  - miniBurn: starts a FreeTierDispatchService "mini" cycle at an 80%
  *    ceiling, leaving the other 15% (of the 95% overall safety cap) as
  *    headroom for the judge leg's spend;
+ *  - flagshipBurn: starts a FreeTierDispatchService "flagship" cycle at an
+ *    80% ceiling. Unlike miniBurn, this isn't reserving headroom for the
+ *    judge leg (judge spend lands in mini's budget, not flagship's) — it's
+ *    just matching mini's number for now;
  *  - googleBurn/groqBurn/openRouterBurn/mistralBurn/sambaNovaBurn: each
  *    starts the unified FreeDispatchService's cycle for that pool — runs
  *    until every model is RPD-held (google/groq/mistral/sambanova) or the
@@ -156,6 +166,7 @@ export class DailyAutomationService {
       await this.runJudgeLeg(date);
     }
     await this.runMiniBurnLeg(date);
+    await this.runFlagshipBurnLeg(date);
     for (const leg of this.burnLegs) {
       await this.runPoolBurnLeg(leg, date);
     }
@@ -216,6 +227,35 @@ export class DailyAutomationService {
       const message = err instanceof Error ? err.message : "Failed to start mini/nano burn";
       this.logger.error(`daily automation mini-burn leg failed: ${message}`);
       await this.runLogRepo.update({ date }, { miniBurnOutcome: "error", miniBurnMessage: message });
+    }
+  }
+
+  private async runFlagshipBurnLeg(date: string): Promise<void> {
+    try {
+      const current = await this.freeTierDispatchService.getStatus("flagship");
+      if (current.active) {
+        await this.runLogRepo.update(
+          { date },
+          {
+            flagshipBurnOutcome: "alreadyActive",
+            flagshipBurnMessage: `already running at ${current.thresholdPercent}%`,
+          },
+        );
+        return;
+      }
+
+      await this.freeTierDispatchService.start("flagship", FLAGSHIP_BURN_CEILING_PERCENT);
+      await this.runLogRepo.update(
+        { date },
+        {
+          flagshipBurnOutcome: "started",
+          flagshipBurnMessage: `started at ${FLAGSHIP_BURN_CEILING_PERCENT}%`,
+        },
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to start flagship burn";
+      this.logger.error(`daily automation flagship-burn leg failed: ${message}`);
+      await this.runLogRepo.update({ date }, { flagshipBurnOutcome: "error", flagshipBurnMessage: message });
     }
   }
 
