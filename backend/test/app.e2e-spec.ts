@@ -524,6 +524,11 @@ describe("App (e2e)", () => {
     expect(jobA).toBeDefined();
     expect(jobB).toBeDefined();
     expect(jobA!.id).not.toBe(jobB!.id);
+    // Distinct job ids alone don't prove safety — the job id includes the
+    // model, so two jobs can differ there yet share a trial number and
+    // collide on the StrategyRun unique key once a worker runs them. The
+    // second dispatch must see the first's still-queued job and move past it.
+    expect(jobA!.data.trialNumber).not.toBe(jobB!.data.trialNumber);
 
     await llmOpenAIQueue.remove(jobA!.id!);
     await llmOpenAIQueue.remove(jobB!.id!);

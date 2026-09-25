@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { Queue } from "bullmq";
+import { Queue, type JobType } from "bullmq";
 import {
   STRATEGY_QUEUE,
   LLM_OPENAI_QUEUE,
@@ -26,10 +26,17 @@ import { runStrategyJobId, queueForStrategy } from "../queue/strategy.queue";
 import type { ProviderPoolId } from "../provider-pool/provider-pool.config";
 import { StrategyRunStore } from "./strategy-run-store.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
+import type { RunStrategyJobData } from "./llm-job-handler";
 
 // How many waiting/delayed BullMQ jobs to fetch per page when tallying
 // queued counts — see queuedCountsByModel.
 const QUEUE_PAGE_SIZE = 1000;
+
+/** One queued run-strategy job's trial reservation — see queuedTrialsForPuzzle. */
+interface QueuedTrial {
+  trialNumber: number;
+  model: string | null;
+}
 
 /**
  * Dispatch support: queueing runs, routing a strategy to its provider-pool
@@ -151,8 +158,8 @@ export class StrategyDispatch {
    * A puzzle with only a *queued* (not yet started) job for this model still
    * counts as unrun here, since no StrategyRun row exists for it yet — two
    * bulk-dispatch calls made before a worker drains the queue can therefore
-   * both select the same puzzle. That mirrors the existing race in
-   * triggerNextLlmTrial/triggerStrategyRuns and isn't specific to this query.
+   * both select the same puzzle. That's harmless: triggerNextLlmTrial treats
+   * a second dispatch of a model with a not-yet-started trial as a no-op.
    */
   async findUnrunPuzzleDatesForModel(
     strategyName: string,
@@ -448,6 +455,42 @@ export class StrategyDispatch {
   }
 
   /**
+   * Trials queued on `strategyName`'s queue for one puzzle that may not have
+   * a StrategyRun row yet, split by whether a worker has picked them up.
+   * `pending` covers every not-yet-started state — including 'delayed',
+   * where a job waiting out a retry backoff sits. See triggerNextLlmTrial.
+   */
+  private async queuedTrialsForPuzzle(
+    puzzleId: number,
+    strategyName: string,
+  ): Promise<{ pending: QueuedTrial[]; active: QueuedTrial[] }> {
+    const queue = this.queueFor(strategyName);
+
+    const collect = async (states: JobType[]): Promise<QueuedTrial[]> => {
+      const trials: QueuedTrial[] = [];
+      for (let start = 0; ; start += QUEUE_PAGE_SIZE) {
+        const jobs = await queue.getJobs(states, start, start + QUEUE_PAGE_SIZE - 1);
+
+        for (const job of jobs) {
+          const data = job.data as Partial<RunStrategyJobData>;
+          if (data.puzzleId === puzzleId && data.strategyName === strategyName) {
+            trials.push({ trialNumber: data.trialNumber ?? 0, model: data.model ?? null });
+          }
+        }
+
+        if (jobs.length < QUEUE_PAGE_SIZE) break;
+      }
+      return trials;
+    };
+
+    const [pending, active] = await Promise.all([
+      collect(["waiting", "delayed", "prioritized", "paused"]),
+      collect(["active"]),
+    ]);
+    return { pending, active };
+  }
+
+  /**
    * Queues a single new trial for an LLM strategy + model. The
    * LLM_TRIALS_PER_MODEL cap (llmMaxTrialsPerModel) applies per model, not
    * per strategy run as a whole — so 'llm-openai' can accumulate up to the
@@ -468,6 +511,13 @@ export class StrategyDispatch {
    * read the same "next" number and, now that the job id includes the model
    * (see runStrategyJobId), both jobs would get queued and collide on the
    * same StrategyRun row when processed. See issue #43.
+   *
+   * The lock alone isn't enough: a trial "reserved" by an earlier call is
+   * only a queued job until a worker starts it and writes the row, so the
+   * trial numbers and per-model cap are computed over StrategyRun rows *and*
+   * this puzzle's queued/active jobs (queuedTrialsForPuzzle). A call for a
+   * model that already has a not-yet-started trial on the puzzle queues
+   * nothing.
    */
   private async triggerNextLlmTrial(
     puzzleId: number,
@@ -490,8 +540,26 @@ export class StrategyDispatch {
         select: { trialNumber: true, modelName: true },
       });
 
+      // A queued job has no StrategyRun row until a worker starts it, so the
+      // rows alone miss every trial still sitting in the queue — several
+      // models dispatched onto the same puzzle before any of them started
+      // would all compute the same "next" number and collide on the unique
+      // (puzzleId, strategyName, trialNumber) row. Reserve queued trials too.
+      const { pending, active } = await this.queuedTrialsForPuzzle(puzzleId, strategyName);
+
+      // Re-dispatching a model whose trial hasn't started yet is a no-op —
+      // the behavior the deterministic job id used to give for free, before
+      // queued trials advanced the number.
+      if (pending.some((trial) => trial.model === model)) return;
+
+      const trialModels = new Map<number, string | null>();
+      for (const run of existingRuns) trialModels.set(run.trialNumber, run.modelName);
+      // An active job may or may not have written its row yet — keyed by
+      // trial number so it's never counted twice.
+      for (const trial of [...pending, ...active]) trialModels.set(trial.trialNumber, trial.model);
+
       const limit = llmMaxTrialsPerModel();
-      const modelRunCount = existingRuns.filter((run) => run.modelName === model).length;
+      const modelRunCount = [...trialModels.values()].filter((m) => m === model).length;
 
       if (modelRunCount >= limit) {
         throw new BadRequestException(
@@ -500,8 +568,7 @@ export class StrategyDispatch {
         );
       }
 
-      const nextTrialNumber =
-        existingRuns.reduce((max, run) => Math.max(max, run.trialNumber), 0) + 1;
+      const nextTrialNumber = Math.max(0, ...trialModels.keys()) + 1;
 
       await this.queueFor(strategyName).add(
         "run-strategy",

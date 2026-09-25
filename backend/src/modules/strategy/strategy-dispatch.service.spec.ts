@@ -641,15 +641,32 @@ describe("StrategyDispatch", () => {
       );
     });
 
-    it("locks on (puzzleId, strategyName) so two different models racing on the same puzzle never allocate the same trial number", async () => {
-      // Simulates the exact issue #43 repro: model A and model B both
-      // dispatched against the same puzzle before either drains. Each call's
-      // manager.find sees only what was reserved before it — since the
-      // service serializes through the advisory lock, the DB is expected to
-      // reflect model A's reservation by the time model B's call reads it.
-      mockManager.find
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([{ trialNumber: 1, modelName: "qwen2.5:14b" }]);
+    // A fake ollama queue whose getJobs answers from `jobsByState` — each
+    // entry is a job's data, filed under the BullMQ state it is sitting in.
+    const stubOllamaJobs = (
+      jobsByState: Record<string, Array<Record<string, unknown>>>,
+    ) => {
+      mockOllamaQueue.getJobs.mockImplementation(async (states: string[]) =>
+        states.flatMap((state) => (jobsByState[state] ?? []).map((data) => ({ data }))),
+      );
+    };
+    const ollamaJob = (puzzleId: number, model: string, trialNumber: number) => ({
+      puzzleId,
+      strategyName: "llm-ollama",
+      date: "2024-01-02",
+      trialNumber,
+      model,
+    });
+
+    it("never allocates the same trial number to two models queued on the same puzzle before either starts", async () => {
+      // The real race behind the provider-wide dispatch failures: model A's
+      // job is queued but no worker has picked it up, so no StrategyRun row
+      // exists yet — the DB is still empty when model B is dispatched. The
+      // queued job itself must reserve its trial number.
+      mockManager.find.mockResolvedValue([]);
+      mockOllamaQueue.add.mockImplementation(async (_name: string, data: Record<string, unknown>) => {
+        stubOllamaJobs({ waiting: [data] });
+      });
 
       await service.triggerStrategyRuns(100, "llm-ollama", "2024-01-02", "qwen2.5:14b");
       await service.triggerStrategyRuns(100, "llm-ollama", "2024-01-02", "llama3");
@@ -667,6 +684,74 @@ describe("StrategyDispatch", () => {
         expect.objectContaining({ trialNumber: 2, model: "llama3" }),
         { jobId: "run-100-llm-ollama-llama3-2" },
       );
+    });
+
+    it("counts delayed (retrying), prioritized, paused and active jobs toward the next trial number", async () => {
+      mockManager.find.mockResolvedValueOnce([{ trialNumber: 1, modelName: "phi4" }]);
+      stubOllamaJobs({
+        delayed: [ollamaJob(100, "gemma2:9b", 2)],
+        prioritized: [ollamaJob(100, "glm4:9b", 3)],
+        paused: [ollamaJob(100, "command-r7b", 4)],
+        active: [ollamaJob(100, "qwen2.5:14b", 5)],
+      });
+
+      await service.triggerStrategyRuns(100, "llm-ollama", "2024-01-02", "llama3");
+
+      expect(mockOllamaQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
+        expect.objectContaining({ trialNumber: 6, model: "llama3" }),
+        { jobId: "run-100-llm-ollama-llama3-6" },
+      );
+    });
+
+    it("ignores queued jobs for other puzzles when picking the trial number", async () => {
+      mockManager.find.mockResolvedValueOnce([]);
+      stubOllamaJobs({ waiting: [ollamaJob(999, "qwen2.5:14b", 7)] });
+
+      await service.triggerStrategyRuns(100, "llm-ollama", "2024-01-02", "llama3");
+
+      expect(mockOllamaQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
+        expect.objectContaining({ trialNumber: 1 }),
+        { jobId: "run-100-llm-ollama-llama3-1" },
+      );
+    });
+
+    it("is a no-op when the same model already has a not-yet-started job for the puzzle", async () => {
+      // Preserves the old job-id dedupe: re-dispatching a model before its
+      // queued trial starts must not stack a second trial behind it.
+      mockManager.find.mockResolvedValueOnce([]);
+      stubOllamaJobs({ delayed: [ollamaJob(100, "llama3", 1)] });
+
+      await service.triggerStrategyRuns(100, "llm-ollama", "2024-01-02", "llama3");
+
+      expect(mockOllamaQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("counts a model's active job toward its trial cap without double-counting its run row", async () => {
+      process.env.LLM_TRIALS_PER_MODEL = "2";
+      try {
+        // Trial 1's job is active AND has created its row — one trial, not two.
+        mockManager.find.mockResolvedValueOnce([{ trialNumber: 1, modelName: "llama3" }]);
+        stubOllamaJobs({ active: [ollamaJob(100, "llama3", 1)] });
+        await service.triggerStrategyRuns(100, "llm-ollama", "2024-01-02", "llama3");
+        expect(mockOllamaQueue.add).toHaveBeenCalledWith(
+          "run-strategy",
+          expect.objectContaining({ trialNumber: 2 }),
+          { jobId: "run-100-llm-ollama-llama3-2" },
+        );
+
+        // Trial 2 is active but hasn't written its row yet — still 2 trials.
+        mockOllamaQueue.add.mockClear();
+        mockManager.find.mockResolvedValueOnce([{ trialNumber: 1, modelName: "llama3" }]);
+        stubOllamaJobs({ active: [ollamaJob(100, "llama3", 2)] });
+        await expect(
+          service.triggerStrategyRuns(100, "llm-ollama", "2024-01-02", "llama3"),
+        ).rejects.toThrow(BadRequestException);
+        expect(mockOllamaQueue.add).not.toHaveBeenCalled();
+      } finally {
+        delete process.env.LLM_TRIALS_PER_MODEL;
+      }
     });
 
     it("should reject dispatch once a model has reached LLM_TRIALS_PER_MODEL", async () => {
