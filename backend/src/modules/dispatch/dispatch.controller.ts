@@ -20,7 +20,7 @@ import {
   FreeTierDispatchStatusDto,
 } from "../free-tier-dispatch/free-tier-dispatch.service";
 import { FreeDispatchService } from "../provider-pool/free-dispatch.service";
-import { FREE_TIER_POOLS, type ProviderPoolId } from "../provider-pool/provider-pool.config";
+import { FREE_TIER_POOLS, PROVIDER_POOLS, type ProviderPoolId } from "../provider-pool/provider-pool.config";
 import { FreeTierId } from "../strategy/free-tier-usage.service";
 import { AUTOMATIC_STRATEGIES, LLM_STRATEGIES, STRATEGY_SET, isLlmStrategy } from "../../strategies";
 import { DispatchAuthGuard } from "./dispatch-auth.guard";
@@ -199,6 +199,98 @@ export class DispatchController {
       strategyName,
       modelName,
       dates: targets.map((target) => target.date),
+    };
+  }
+
+  // Provider-wide version of model/:modelName/runs/:n — for catching every
+  // supported model on one pool up on newly released puzzles. Each model gets
+  // up to `n` random unrun dates (same selection as the single-model route),
+  // but unlike that route a model that falls short doesn't fail the request:
+  // it queues what it has and reports the shortfall. Jobs are enqueued
+  // round-robin across models (every model's 1st pick, then every 2nd, ...)
+  // so a serial queue like ollama's produces results for each model early
+  // rather than draining one model's whole batch first.
+  @Post("provider/:poolId/runs/:n")
+  @UseGuards(DispatchAuthGuard)
+  @ApiParam({
+    name: "poolId",
+    enum: PROVIDER_POOLS.map((pool) => pool.id),
+    description: "Provider pool whose supported models are all dispatched.",
+    example: "ollama",
+  })
+  @ApiParam({
+    name: "n",
+    type: Number,
+    description:
+      "Max puzzle dates to queue per model. Each supported model on the pool gets up to `n`" +
+      " randomly picked dates it has never been run on (one trial each). A model with fewer" +
+      " than `n` such dates queues what it has; one with none is reported as skipped.",
+    example: 3,
+  })
+  @ApiBody({ type: DispatchAuthDto })
+  async queueProviderRuns(@Param("poolId") poolId: string, @Param("n", ParseIntPipe) n: number) {
+    const pool = PROVIDER_POOLS.find((p) => p.id === poolId);
+    if (!pool) {
+      throw new BadRequestException(
+        `Unknown pool '${poolId}'. Expected one of: ${PROVIDER_POOLS.map((p) => p.id).join(", ")}.`,
+      );
+    }
+    if (n < 1) {
+      throw new BadRequestException(`'n' must be a positive integer, got ${n}.`);
+    }
+
+    const { strategyName } = pool;
+    const modelNames = await this.supportedModelService.findModelNamesByStrategy(strategyName);
+    if (modelNames.length === 0) {
+      throw new BadRequestException(`No supported models for pool '${poolId}'.`);
+    }
+
+    const targetsByModel = await Promise.all(
+      modelNames.map(async (modelName) => ({
+        modelName,
+        targets: await this.strategyDispatch.findUnrunPuzzleDatesForModel(
+          strategyName,
+          modelName,
+          n,
+        ),
+      })),
+    );
+
+    // Sequential, not Promise.all: enqueue order is the point here.
+    let totalQueued = 0;
+    for (let round = 0; round < n; round++) {
+      for (const { modelName, targets } of targetsByModel) {
+        const target = targets[round];
+        if (!target) continue;
+        await this.strategyDispatch.triggerStrategyRuns(
+          target.puzzleId,
+          strategyName,
+          target.date,
+          modelName,
+        );
+        totalQueued++;
+      }
+    }
+
+    const models = targetsByModel
+      .filter(({ targets }) => targets.length > 0)
+      .map(({ modelName, targets }) => ({
+        modelName,
+        dates: targets.map((target) => target.date),
+        shortfall: n - targets.length,
+      }));
+    const skipped = targetsByModel
+      .filter(({ targets }) => targets.length === 0)
+      .map(({ modelName }) => modelName);
+
+    return {
+      message: `Queued ${totalQueued} job(s) across ${models.length} model(s) on pool '${poolId}' (strategy '${strategyName}')`,
+      poolId,
+      strategyName,
+      requestedPerModel: n,
+      totalQueued,
+      models,
+      skipped,
     };
   }
 
