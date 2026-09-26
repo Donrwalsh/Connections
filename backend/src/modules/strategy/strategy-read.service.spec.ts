@@ -1932,7 +1932,7 @@ describe("RunHistoryReadModel", () => {
       await service.getRecentActivity();
 
       expect(mockStrategyRunRepo.createQueryBuilder).toHaveBeenCalledWith("run");
-      expect(runQb.orderBy).toHaveBeenCalledWith("run.startedAt", "DESC");
+      expect(runQb.orderBy).toHaveBeenCalledWith("run.updatedAt", "DESC");
       expect(runQb.addOrderBy).toHaveBeenCalledWith("run.id", "DESC");
       expect(runQb.limit).toHaveBeenCalledWith(100);
     });

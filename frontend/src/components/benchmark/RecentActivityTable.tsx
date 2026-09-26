@@ -26,8 +26,10 @@ export interface RecentActivityTableProps {
 
 /** Live feed of the most recent activity across every strategy/model (see
  * ActivityPage, which polls fetchRecentActivity) — one reverse-chronological
- * stream mixing two event kinds: a run starting, and a category-judge
- * verdict landing. No sorting/filtering; that's what the per-strategy
+ * stream mixing two event kinds: a run's most recent activity (its last
+ * progress save, which is also what a manual retry bumps — see
+ * StrategyReadService.getRecentActivity), and a category-judge verdict
+ * landing. No sorting/filtering; that's what the per-strategy
  * RunHistoryTable is for. Clicking a row goes to that run's puzzle-run page,
  * where the guess chain and (for judgments) the judge diagnostics live —
  * keyed by model for LLM rows (the leaderboard's :strategyId is the model
@@ -50,7 +52,7 @@ export function RecentActivityTable({
           <tr>
             <th scope="col">Puzzle</th>
             <th scope="col">Model</th>
-            <th scope="col">When</th>
+            <th scope="col">Last activity</th>
             <th scope="col">Detail</th>
           </tr>
         </thead>

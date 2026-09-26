@@ -1209,14 +1209,21 @@ export class RunHistoryReadModel {
 
   /**
    * The Activity page's live feed, as two independent newest-first lists —
-   * puzzle solves (a StrategyRun starting, event time = startedAt) and
-   * category-judge verdicts (a CategoryEvaluation landing, event time =
+   * puzzle solves (a StrategyRun's last activity, event time = updatedAt)
+   * and category-judge verdicts (a CategoryEvaluation landing, event time =
    * evaluatedAt) — which the page renders as separate sections rather than
    * one interleaved stream. Polled, so it's deliberately cheap: no
    * guessCount/tokenCostUsd correlated subqueries or SupportedModel/
    * ModelPrice joins like getRunHistory has, just the columns a feed row
    * renders. Each list is a rolling RECENT_ACTIVITY_LIMIT window, not a
    * page a caller steps through.
+   *
+   * The run list sorts by `updatedAt`, not `startedAt`: `updatedAt` is
+   * bumped both on ordinary progress (StrategyRunStoreService.flushBatch
+   * saves the run on every batch) and — critically — the instant a run is
+   * manually retried (StrategyDispatch.retryRun flips it back to RUNNING
+   * without changing startedAt), so a retried run rises back to the top of
+   * the feed instead of staying wherever its original startedAt placed it.
    *
    * `strategyNames`, when non-empty, narrows both lists to runs dispatched
    * by those strategies (the provider-pool filter — a judgment carries its
@@ -1239,11 +1246,12 @@ export class RunHistoryReadModel {
       .addSelect("run.modelName", "modelName")
       .addSelect("run.trialNumber", "trialNumber")
       .addSelect("run.status", "status")
-      .addSelect("run.startedAt", "occurredAt")
-      .orderBy("run.startedAt", "DESC")
+      .addSelect("run.updatedAt", "occurredAt")
+      .orderBy("run.updatedAt", "DESC")
       // Stable tiebreaker: without one, ties on the event time (plausible
-      // under concurrent dispatch) could reorder rows between polls even
-      // though the underlying set hasn't changed.
+      // under concurrent dispatch, or two batches flushing in the same
+      // millisecond) could reorder rows between polls even though the
+      // underlying set hasn't changed.
       .addOrderBy("run.id", "DESC")
       .limit(RECENT_ACTIVITY_LIMIT);
 
