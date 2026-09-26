@@ -910,11 +910,11 @@ export class LlmStrategyRunner {
    */
   private async loadLatestPrompt(
     strategyRunId: number,
-  ): Promise<Pick<SolvePrompt, "requestBody"> | null> {
+  ): Promise<Pick<SolvePrompt, "status" | "requestBody" | "rawResponseText"> | null> {
     return this.solvePromptRepo.findOne({
       where: { strategyRunId },
       order: { promptNumber: "DESC", attemptNumber: "DESC" },
-      select: { requestBody: true },
+      select: { status: true, requestBody: true, rawResponseText: true },
     });
   }
 
@@ -927,27 +927,36 @@ export class LlmStrategyRunner {
    * always this run's full conversation history up through and including
    * that call's own user turn.
    *
-   * That trailing user turn is dropped rather than kept and answered,
-   * deliberately, for two reasons: (1) if the last row is CALL_ERROR, that
-   * turn was never actually answered — the live runner's own
+   * What happens to that trailing turn depends on whether it was actually
+   * answered. A CALL_ERROR row's own turn never was — the live runner's own
    * `messages.pop()` in the failed-call branch above already treats it as
-   * never having been sent; (2) even for a successful last row, replaying
-   * its assistant reply verbatim would need to match whatever the runner
-   * actually echoed back into history, which isn't always
-   * `rawResponseText` — a response tagged MULTIPLE_PROPOSALS gets a
-   * compacted stand-in instead (see `assistantContent` above), and that
-   * compaction isn't persisted anywhere to replay. Dropping the trailing
-   * turn sidesteps needing to reconstruct it: the resumed run's own next
+   * never having been sent — so it's dropped, same as that pop. Any other
+   * status means the call succeeded and produced a real reply, so it's kept
+   * and paired with that reply (from `rawResponseText`) as a genuine
+   * assistant turn, rather than discarded. Dropping it unconditionally
+   * (an earlier version of this method did) is wrong precisely when the
+   * run's last surviving row is its *only* row — e.g. right after
+   * trim-manual-retry-history-loss.ts rolls a run back to its last success
+   * — since there is nothing else in the array to preserve once that one
+   * turn is gone: the run's one real exchange would vanish outright instead
+   * of just losing its own most literal replay fidelity.
+   *
+   * The replayed reply isn't always byte-identical to what the live run
+   * actually echoed into its own in-memory history — a response tagged
+   * MULTIPLE_PROPOSALS gets a compacted stand-in there instead (see
+   * `assistantContent` above), which isn't persisted anywhere to replay
+   * verbatim — but the real rawResponseText is a far closer approximation
+   * than the alternative of no reply at all, and the resumed run's own next
    * prompt (buildInitialPrompt/buildRetryPrompt, built from
    * lockedInGroups/lastFailedGuess, both correctly rebuilt above from real
-   * guesses) already restates the puzzle's true current state, so the
-   * model doesn't need that one specific prior turn replayed to continue
-   * correctly — it needs everything *before* it, which this preserves.
+   * guesses) already restates the puzzle's true current state regardless.
    *
    * Falls back to an empty history for a fresh run, or defensively for any
    * historical row predating requestBody capture or shaped unexpectedly.
    */
-  private reconstructMessages(latestPrompt: Pick<SolvePrompt, "requestBody"> | null): ChatMessage[] {
+  private reconstructMessages(
+    latestPrompt: Pick<SolvePrompt, "status" | "requestBody" | "rawResponseText"> | null,
+  ): ChatMessage[] {
     if (!latestPrompt) return [];
 
     const requestBody = latestPrompt.requestBody as
@@ -969,6 +978,14 @@ export class LlmStrategyRunner {
       this.normalizeTurns(requestBody.contents, "parts", { assistantRole: "model" });
 
     if (!priorMessages || priorMessages.length === 0) return [];
+
+    if (latestPrompt.status === SolvePromptStatus.CALL_ERROR) {
+      return priorMessages.slice(0, -1);
+    }
+
+    if (typeof latestPrompt.rawResponseText === "string") {
+      return [...priorMessages, { role: "assistant", content: latestPrompt.rawResponseText }];
+    }
 
     return priorMessages.slice(0, -1);
   }
