@@ -148,21 +148,27 @@ describe("Game Component", () => {
     expect(await screen.findByText("Not quite.")).toBeInTheDocument();
   });
 
-  it("wins the game when all categories are solved", async () => {
+  it("wins the game when all categories are solved", () => {
+    // Each correct guess sits in pendingSolve for a 700ms reveal animation
+    // before the next guess is accepted; fake timers skip the real wait.
+    vi.useFakeTimers();
     render(<Game puzzle={puzzle} />);
 
     for (const cat of categories) {
       cat.words.forEach((word) => fireEvent.click(screen.getByText(word)));
       fireEvent.click(screen.getByText("Submit"));
+      act(() => {
+        vi.advanceTimersByTime(700);
+      });
 
-      expect(await screen.findByText(cat.name)).toBeInTheDocument();
+      expect(screen.getByText(cat.name)).toBeInTheDocument();
     }
 
-    expect(await screen.findByText("Solved it!")).toBeInTheDocument();
+    expect(screen.getByText("Solved it!")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Close"));
     expect(screen.queryByText("Solved it!")).not.toBeInTheDocument();
-  }, 15000);
+  });
 
   it("loses the game after four incorrect guesses and reveals the answers", async () => {
     render(<Game puzzle={puzzle} />);
