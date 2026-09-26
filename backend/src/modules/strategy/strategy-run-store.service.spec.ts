@@ -384,6 +384,38 @@ describe("StrategyRunStore", () => {
     });
   });
 
+  describe("markFailedIfStillRunning", () => {
+    it("should no-op when the run does not exist", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(null);
+
+      await store.markFailedIfStillRunning(100, "llm-openai", 0, "boom");
+
+      expect(mockStrategyRunRepo.save).not.toHaveBeenCalled();
+    });
+
+    it("should no-op when the run is no longer RUNNING", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ status: StrategyRunStatus.COMPLETED }));
+
+      await store.markFailedIfStillRunning(100, "llm-openai", 0, "boom");
+
+      expect(mockStrategyRunRepo.save).not.toHaveBeenCalled();
+    });
+
+    it("should mark a still-RUNNING run FAILED with finishedAt set", async () => {
+      const run = makeRun({ status: StrategyRunStatus.RUNNING, finishedAt: null });
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(run);
+
+      await store.markFailedIfStillRunning(100, "llm-openai", 0, "model_error exhausted retries");
+
+      expect(mockStrategyRunRepo.findOne).toHaveBeenCalledWith({
+        where: { puzzleId: 100, strategyName: "llm-openai", trialNumber: 0 },
+      });
+      expect(run.status).toBe(StrategyRunStatus.FAILED);
+      expect(run.finishedAt).toBeInstanceOf(Date);
+      expect(mockStrategyRunRepo.save).toHaveBeenCalledWith(run);
+    });
+  });
+
   describe("deleteErroredRuns", () => {
     it("should return zeroed totals when no run has error status", async () => {
       mockManager.find.mockResolvedValueOnce([]);

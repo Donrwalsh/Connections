@@ -5,6 +5,7 @@ import { AppModule } from "./app.module";
 import { DeterministicSolver } from "./modules/strategy/deterministic-solver.service";
 import { LlmStrategyRunner } from "./modules/strategy/llm-strategy-runner.service";
 import { CategoryEvaluatorService } from "./modules/strategy/category-evaluator.service";
+import { StrategyRunStore } from "./modules/strategy/strategy-run-store.service";
 import {
   handleLlmJob,
   type LlmJobDeps,
@@ -38,6 +39,7 @@ async function bootstrap() {
   const deterministicSolver = appContext.get(DeterministicSolver);
   const llmStrategyRunner = appContext.get(LlmStrategyRunner);
   const categoryEvaluatorService = appContext.get(CategoryEvaluatorService);
+  const strategyRunStore = appContext.get(StrategyRunStore);
   const puzzleIngestionService = appContext.get(PuzzleIngestionService);
   const freeTierDispatchService = appContext.get(FreeTierDispatchService);
   const freeDispatchService = appContext.get(FreeDispatchService);
@@ -47,6 +49,19 @@ async function bootstrap() {
 
   const activeWorkers: Worker[] = [];
   const activeQueueNames: string[] = [];
+
+  // BullMQ's 'failed' event fires once a solve job has exhausted its retries;
+  // without this the run's row would stay 'running' forever. Judge jobs
+  // (evaluate-category) share the LLM queues but have no StrategyRun.
+  const syncFailedRun = (job: Job | undefined, err: Error | undefined) => {
+    if (job?.name !== "run-strategy") return;
+    const { puzzleId, strategyName, trialNumber } = job.data as RunStrategyJobData;
+    strategyRunStore
+      .markFailedIfStillRunning(puzzleId, strategyName, trialNumber, err?.message ?? String(err))
+      .catch((markErr) =>
+        logger.error(`failed to mark run FAILED for job ${job.id}`, markErr?.stack || markErr),
+      );
+  };
 
   // role 'ollama' runs only the llm-ollama-runs queue (see createLlmWorker
   // below) — everything else in this file is skipped for that role.
@@ -97,6 +112,7 @@ async function bootstrap() {
 
     strategyRunsWorker.on("failed", (job, err) => {
       logger.error(`job ${job?.id} failed`, err?.stack || err);
+      syncFailedRun(job, err);
     });
 
     activeWorkers.push(strategyRunsWorker);
@@ -134,6 +150,7 @@ async function bootstrap() {
 
     llmWorker.on("failed", (job, err) => {
       logger.error(`job ${job?.id} failed`, err?.stack || err);
+      syncFailedRun(job, err);
     });
 
     return llmWorker;
