@@ -33,8 +33,8 @@ import { formatCompactAnswer, GROUP_SIZE } from "answer-grammar";
 import { applyOneOffWordFixups } from "./normalize-puzzle-word";
 import { findCaseInsensitiveGroupMatch } from "./case-insensitive-match";
 
-const MODEL_ERROR_RETRY_BASE_DELAY_MS = 1000;
-const MODEL_ERROR_RETRY_MAX_DELAY_MS = 300000;
+const MODEL_ERROR_RETRY_BASE_DELAY_MS = 7500;
+const MODEL_ERROR_RETRY_MAX_DELAY_MS = 60000;
 
 /**
  * Mutable state threaded through one runLlmStrategy call's while loop —
@@ -320,7 +320,8 @@ export class LlmStrategyRunner {
     const maxDuplicates = llmMaxDuplicateGuesses();
     const maxFailedGuesses = llmMaxFailedGuesses();
     const maxMalformed = llmMaxMalformedResponses();
-    const maxModelErrors = llmMaxModelErrors();
+    // OpenAI model errors are never retried: the first one ends the run.
+    const maxModelErrors = provider === "openai" ? 1 : llmMaxModelErrors();
     const temperature = llmTemperature();
     // A pool uses its own configured fallback; non-pool strategies keep the
     // historical default (the old ternary's final branch was Google's).

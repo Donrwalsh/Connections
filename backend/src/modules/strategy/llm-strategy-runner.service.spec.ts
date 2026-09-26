@@ -1448,6 +1448,8 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should retry after a transient model error and not fail the run", async () => {
+      // OpenAI never retries a model_error, so use a provider that does.
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-nvidia" }));
       jest
         .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
         .mockResolvedValue(undefined);
@@ -1459,7 +1461,7 @@ describe("LlmStrategyRunner", () => {
         .mockResolvedValueOnce(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]))
         .mockResolvedValueOnce(makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]));
 
-      const result = await runner.runLlmStrategy(100, "llm-openai");
+      const result = await runner.runLlmStrategy(100, "llm-nvidia");
 
       expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
       expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(3);
@@ -1470,6 +1472,8 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should terminate with 'error' only after max consecutive model errors", async () => {
+      // OpenAI never retries a model_error, so use a provider that does.
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-nvidia" }));
       jest
         .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
         .mockResolvedValue(undefined);
@@ -1480,7 +1484,7 @@ describe("LlmStrategyRunner", () => {
           error: { error: "ollama is down", code: "model_error" },
         });
 
-        const result = await runner.runLlmStrategy(100, "llm-openai");
+        const result = await runner.runLlmStrategy(100, "llm-nvidia");
 
         expect(result).toEqual({ status: StrategyRunStatus.ERROR, guessCount: 0 });
         expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(2);
@@ -1497,6 +1501,45 @@ describe("LlmStrategyRunner", () => {
       } finally {
         delete process.env.LLM_MAX_MODEL_ERRORS;
       }
+    });
+
+    it("should back off 7.5s, 15s, 30s, then 60s between consecutive model errors", async () => {
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-nvidia" }));
+      const delaySpy = jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      process.env.LLM_MAX_MODEL_ERRORS = "8";
+      try {
+        mockOrchestratorService.requestSolveStep.mockResolvedValue({
+          ok: false,
+          error: { error: "model down", code: "model_error", statusCode: 500 },
+        });
+
+        await runner.runLlmStrategy(100, "llm-nvidia");
+
+        // Capped at 60s from the 4th wait on; none after the terminal 8th error.
+        expect(delaySpy.mock.calls.map((call) => call[0])).toEqual([
+          7500, 15000, 30000, 60000, 60000, 60000, 60000,
+        ]);
+      } finally {
+        delete process.env.LLM_MAX_MODEL_ERRORS;
+      }
+    });
+
+    it("should never retry an OpenAI model error, terminating the run on the first one", async () => {
+      const delaySpy = jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
+      mockOrchestratorService.requestSolveStep.mockResolvedValue({
+        ok: false,
+        error: { error: "model down", code: "model_error", statusCode: 500 },
+      });
+
+      const result = await runner.runLlmStrategy(100, "llm-openai");
+
+      expect(result).toEqual({ status: StrategyRunStatus.ERROR, guessCount: 0 });
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(1);
+      expect(delaySpy).not.toHaveBeenCalled();
     });
 
     it("should write a CALL_ERROR row for a terminal failure, carrying whatever raw detail the orchestrator returned", async () => {
@@ -1557,6 +1600,11 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should persist promptText on a CALL_ERROR row as the pre-pop transcript, for both INITIAL and RETRY prompts", async () => {
+      // OpenAI never retries a model_error, so use a provider that does.
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-nvidia" }));
+      jest
+        .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
+        .mockResolvedValue(undefined);
       // Three calls: (1) an INITIAL call that errors outright, (2) a
       // successful INITIAL call whose guess fails and sets up a RETRY
       // prompt, (3) a RETRY call that errors. LLM_MAX_DUPLICATE_GUESSES=1
@@ -1571,7 +1619,7 @@ describe("LlmStrategyRunner", () => {
           { ok: false, error: { error: "duplicate", code: "duplicate_group" } },
         ]);
 
-        await runner.runLlmStrategy(100, "llm-openai");
+        await runner.runLlmStrategy(100, "llm-nvidia");
 
         const promptRows = mockManager.insert.mock.calls
           .filter((call) => call[0] === "SolvePrompt")
@@ -1730,10 +1778,12 @@ describe("LlmStrategyRunner", () => {
       // 7s rate-limit wait, then backoff for streak lengths 3, 4. No delay
       // is issued for the 5th (terminal) model_error, since the run is no
       // longer RUNNING by the time the loop checks.
-      expect(delaySpy.mock.calls.map((call) => call[0])).toEqual([1000, 2000, 7000, 4000, 8000]);
+      expect(delaySpy.mock.calls.map((call) => call[0])).toEqual([7500, 15000, 7000, 30000, 60000]);
     });
 
     it("should record attemptNumber 1 on every row, even across repeated outer-loop retries of the same failing step", async () => {
+      // OpenAI never retries a model_error, so use a provider that does.
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-nvidia" }));
       jest
         .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
         .mockResolvedValue(undefined);
@@ -1744,7 +1794,7 @@ describe("LlmStrategyRunner", () => {
           error: { error: "model down", code: "model_error", statusCode: 502 },
         });
 
-        await runner.runLlmStrategy(100, "llm-openai");
+        await runner.runLlmStrategy(100, "llm-nvidia");
 
         expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(3);
 
@@ -1800,6 +1850,8 @@ describe("LlmStrategyRunner", () => {
     });
 
     it("should parse a string responseBody into JSON when writing a CALL_ERROR row, and fall back to the raw string when it isn't valid JSON", async () => {
+      // OpenAI never retries a model_error, so use a provider that does.
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(makeRun({ strategyName: "llm-nvidia" }));
       jest
         .spyOn(runner as unknown as { delay(ms: number): Promise<void> }, "delay")
         .mockResolvedValue(undefined);
@@ -1823,7 +1875,7 @@ describe("LlmStrategyRunner", () => {
             },
           });
 
-        await runner.runLlmStrategy(100, "llm-openai");
+        await runner.runLlmStrategy(100, "llm-nvidia");
 
         const promptRows = mockManager.insert.mock.calls
           .filter((call) => call[0] === "SolvePrompt")

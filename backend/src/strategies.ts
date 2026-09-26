@@ -153,8 +153,9 @@ export function llmMaxMalformedResponses(env: NodeJS.ProcessEnv = process.env): 
  * Maximum consecutive transient model failures (e.g. the Ollama model still
  * loading, or the orchestrator warming up) an LLM run tolerates before it is
  * terminated with an 'error' status, from LLM_MAX_MODEL_ERRORS. Each failure
- * is retried with an exponential backoff instead of killing the run outright,
- * so a cold-started model has time to load.
+ * is retried with an exponential backoff (7.5s, 15s, 30s, then 60s)
+ * instead of killing the run outright, so a cold-started model has time to
+ * load. OpenAI runs ignore this and end on their first model error.
  */
 export function llmMaxModelErrors(env: NodeJS.ProcessEnv = process.env): number {
   return positiveTrialCount(env.LLM_MAX_MODEL_ERRORS, DEFAULT_LLM_MAX_MODEL_ERRORS);

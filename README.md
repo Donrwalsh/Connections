@@ -124,7 +124,7 @@ Environment variables are defined in `.env` at the project root (see [`.env.samp
 | `LLM_TRIALS_PER_MODEL` | `3` | Maximum number of independent trials a single LLM model may accumulate per puzzle. Applies per model, not per strategy run — each LLM dispatch queues one new trial (rejecting once a model hits this cap), and a different model gets its own independent budget |
 | `LLM_MAX_DUPLICATE_GUESSES` | `10` | Maximum repeated groups an LLM run may propose before it ends with a `duplicate` status (applies to both `llm-openai` and `llm-ollama`) |
 | `LLM_MAX_MALFORMED_RESPONSES` | `3` | Maximum consecutive malformed LLM responses before a run ends with a `malformedResponse` status |
-| `LLM_MAX_MODEL_ERRORS` | `5` | Maximum consecutive transient model failures before a run ends with an `error` status |
+| `LLM_MAX_MODEL_ERRORS` | `5` | Maximum consecutive transient model failures before a run ends with an `error` status (backoff 7.5s, 15s, 30s, then 60s between them). OpenAI runs ignore this and end on their first model error |
 | `LLM_MAX_PROMPTS` | `19` | Maximum prompts a single solve step makes before the orchestrator accepts a duplicate |
 | `LLM_NUM_RESPONSES` | `1` | Number of candidate groups the LLM proposes per solve step (clamped to 10); the orchestrator asks for one more on each duplicate re-prompt |
 | `LLM_TEMPERATURE_BASE` | `0.2` | Fixed sampling temperature for every LLM solve step — the temperature never ramps; only the requested candidate count escalates on re-prompts |
