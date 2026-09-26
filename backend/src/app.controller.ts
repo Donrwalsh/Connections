@@ -23,6 +23,6 @@ export class AppController {
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post("api/diagnose")
   async diagnose(@Body() body: DiagnoseDto) {
-    return this.appService.diagnose(body.messages);
+    return this.appService.diagnose(body.messages, body.boardWords);
   }
 }

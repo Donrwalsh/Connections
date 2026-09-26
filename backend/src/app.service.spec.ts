@@ -160,6 +160,22 @@ describe("AppService", () => {
       );
     });
 
+    it("should forward boardWords to the orchestrator when given", async () => {
+      fetchSpy = jest
+        .spyOn(global, "fetch")
+        .mockResolvedValue(
+          mockResponse(200, "OK", { response: "", groups: [], model: "test-model" }),
+        );
+      const boardWords = ["TEE (GOLF)", "YO-YO"];
+
+      await service.diagnose(messages, boardWords);
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "http://ai_orchestrator:3001/diagnose",
+        expect.objectContaining({ body: JSON.stringify({ messages, boardWords }) }),
+      );
+    });
+
     it("should surface the orchestrator's error message on a non-2xx response", async () => {
       fetchSpy = jest.spyOn(global, "fetch").mockResolvedValue(
         mockResponse(400, "Bad Request", {

@@ -76,7 +76,10 @@ app.post(
       // The frontend's own prompts (aiAssistPrompts.ts) now ask for the same
       // ### GROUPS / ### ANSWER format the automated solving path does, so
       // this shares the exact same step function and grammar.
-      const result = await runAnswerStep(parsed.data.messages, { captureTelemetry: false });
+      const result = await runAnswerStep(parsed.data.messages, {
+        captureTelemetry: false,
+        boardWords: parsed.data.boardWords,
+      });
       return c.json({ response: result.response, groups: result.groups, model: result.model }, 200);
     } catch (err) {
       console.error("Diagnose failed:", err);
@@ -119,6 +122,7 @@ app.post(
         provider: parsed.data.provider as ModelProvider,
         contextWindow: parsed.data.contextWindow,
         abortSignal: c.req.raw.signal,
+        boardWords: parsed.data.boardWords,
       });
       const response: SolveStepResponse = result;
       return c.json(response, 200);

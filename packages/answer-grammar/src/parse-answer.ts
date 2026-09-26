@@ -35,6 +35,56 @@ export interface ParsedAnswer {
 // both cases at once, since either way what's left is the 4 bare words.
 const WORDS_PARENTHETICAL_RE = /\([^)]*\)/g;
 
+// Characters any of the stripping steps below remove. Only a board word
+// containing one of these needs protecting from them.
+const STRIPPABLE_CHAR_RE = /[()`*#-]/;
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Guards the puzzle's own words from the cleanup stripping below. Image
+ * puzzles use card alt text as the word, and that text can legitimately
+ * contain what the cleanup treats as noise: "TEE (GOLF)" (2024-12-12), a
+ * literal "(" / ")" card (2025-04-01), or any hyphenated word like "YO-YO".
+ *
+ * Swaps each occurrence of such a board word in `line` for a placeholder
+ * the strippers can't touch, and returns a `restore` that puts the model's
+ * original text (its own casing included — case normalization happens
+ * later, against the board) back into each split-out word. A match only
+ * counts on an item boundary (line start/end, comma, whitespace, or
+ * markdown emphasis), so the "(" card never claims the opening of an aside
+ * like "DATE (these are fruits)". Longer words are matched first so
+ * "TEE (GOLF)" wins over any shorter overlapping board word.
+ */
+function protectBoardWords(
+  line: string,
+  boardWords: readonly string[],
+): { masked: string; restore: (word: string) => string } {
+  const protectedWords = boardWords
+    .filter((word) => STRIPPABLE_CHAR_RE.test(word))
+    .sort((a, b) => b.length - a.length);
+  if (protectedWords.length === 0) {
+    return { masked: line, restore: (word) => word };
+  }
+
+  const originals: string[] = [];
+  const pattern = new RegExp(
+    `(?<=^|[\\s,*\`])(?:${protectedWords.map(escapeRegExp).join("|")})(?=$|[\\s,*\`])`,
+    "gi",
+  );
+  const masked = line.replace(pattern, (match) => {
+    originals.push(match);
+    return `${originals.length - 1}`;
+  });
+
+  return {
+    masked,
+    restore: (word) => word.replace(/(\d+)/g, (_, index) => originals[Number(index)]),
+  };
+}
+
 /**
  * Splits the "### ANSWER" block into one word list per line — the model's
  * terse final restatement of its answer, independent of the "### GROUPS"
@@ -42,7 +92,7 @@ const WORDS_PARENTHETICAL_RE = /\([^)]*\)/g;
  * and as the fallback source for `proposalWords` when the GROUPS block
  * itself is empty or malformed.
  */
-function parseAnswerBlock(responseText: string): string[][] {
+function parseAnswerBlock(responseText: string, boardWords: readonly string[]): string[][] {
   const parts = responseText.split(/###?\s*ANSWER:?/i);
   if (parts.length < 2) return [];
 
@@ -54,9 +104,10 @@ function parseAnswerBlock(responseText: string): string[][] {
 
   const groups: string[][] = [];
   for (const line of lines) {
-    const words = line
+    const { masked, restore } = protectBoardWords(line, boardWords);
+    const words = masked
       .split(",")
-      .map((w) => w.replace(/[`*#-]/g, "").trim())
+      .map((w) => restore(w.replace(/[`*#-]/g, "").trim()))
       .filter(Boolean);
 
     if (words.length === GROUP_SIZE) {
@@ -83,9 +134,18 @@ function parseAnswerBlock(responseText: string): string[][] {
  *     (unchanged from the backend's own prior behaviour — previously
  *     fed by the orchestrator's `groups` as an external `fallbackGroups`
  *     argument; now derived from the same response text directly instead).
+ *
+ * `boardWords` is the puzzle's full original word list (not just the words
+ * still unsolved — a model may restate an already-solved group). Any of
+ * them that contain characters the cleanup would otherwise strip are kept
+ * intact; see protectBoardWords. Omitted, every such character is stripped
+ * as before.
  */
-export function parseAnswer(responseText: string): ParsedAnswer {
-  const answerBlockGroups = parseAnswerBlock(responseText);
+export function parseAnswer(
+  responseText: string,
+  boardWords: readonly string[] = [],
+): ParsedAnswer {
+  const answerBlockGroups = parseAnswerBlock(responseText, boardWords);
 
   const categoryByGroup = new Map<number, string>();
   const parsedGroupWords: string[][] = [];
@@ -131,7 +191,9 @@ export function parseAnswer(responseText: string): ParsedAnswer {
     }
 
     if (wordsMatch) {
-      const rawWordsLine = wordsMatch[1];
+      // Board words are masked first, so a card's own parenthetical (e.g.
+      // "TEE (GOLF)") is neither stripped nor flagged as an aside.
+      const { masked: rawWordsLine, restore } = protectBoardWords(wordsMatch[1], boardWords);
       // .replace() with a global regex, not .test() — WORDS_PARENTHETICAL_RE
       // is a shared module-level instance, and a global regex's .test()
       // mutates its own lastIndex across calls, which would silently
@@ -144,7 +206,7 @@ export function parseAnswer(responseText: string): ParsedAnswer {
 
       const wordsLine = strippedWordsLine
         .split(",")
-        .map((w) => w.replace(/[`*]/g, "").trim())
+        .map((w) => restore(w.replace(/[`*]/g, "").trim()))
         .filter(Boolean);
 
       if (wordsLine.length === GROUP_SIZE) {

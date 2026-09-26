@@ -29,6 +29,12 @@ export const AssistRequestSchema = z.object({
     .describe(
       "Full conversation history to submit to the model, oldest first",
     ),
+  boardWords: z
+    .array(z.string().min(1))
+    .optional()
+    .describe(
+      "The puzzle's full original word list. Board words containing characters the answer parser would otherwise strip (e.g. image-puzzle alt text like \"TEE (GOLF)\", or \"YO-YO\") are kept intact. Optional so an older client keeps working.",
+    ),
 });
 export type AssistRequest = z.infer<typeof AssistRequestSchema>;
 

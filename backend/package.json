@@ -26,7 +26,8 @@
     "find:manual-retry-history-loss": "node dist/scripts/find-manual-retry-history-loss.js",
     "trim:manual-retry-history-loss": "node dist/scripts/trim-manual-retry-history-loss.js",
     "eval:categories": "tsx src/scripts/evaluate-categories.ts",
-    "purge:case-mismatch-runs": "node dist/scripts/purge-case-mismatch-runs.js"
+    "purge:case-mismatch-runs": "node dist/scripts/purge-case-mismatch-runs.js",
+    "purge:parenthetical-board-word-runs": "node dist/scripts/purge-parenthetical-board-word-runs.js"
   },
   "dependencies": {
     "@bull-board/api": "^8.4.0",

@@ -37,10 +37,12 @@ export class AppService {
    * press. The backend just forwards it and relays the model's raw answer
    * back to the frontend; nothing is persisted. A single attempt is made —
    * a non-2xx already reflects a failed model call or unusable output, so
-   * retrying would just re-burn tokens.
+   * retrying would just re-burn tokens. `boardWords` (the puzzle's full
+   * word list) is forwarded as-is when the frontend sends it.
    */
   async diagnose(
     messages: ChatMessageDto[],
+    boardWords?: string[],
   ): Promise<
     | { orchestrator: "healthy"; data: AssistResponseDto }
     | { orchestrator: "unhealthy"; error: string }
@@ -52,7 +54,7 @@ export class AppService {
         "Content-Type": "application/json",
         "x-internal-api-key": this.internalApiKey,
       },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ messages, boardWords }),
     };
 
     try {
