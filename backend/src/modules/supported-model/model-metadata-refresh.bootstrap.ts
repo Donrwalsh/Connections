@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from "@nestjs/common";
 import { Queue } from "bullmq";
-import { MODEL_METADATA_QUEUE } from "../queue/queue.module";
+import { MODEL_METADATA_QUEUE } from "../queue/queue.tokens";
 
 @Injectable()
 export class ModelMetadataRefreshBootstrap implements OnApplicationBootstrap {

@@ -3,7 +3,7 @@ import { BadRequestException } from "@nestjs/common";
 import { getRepositoryToken } from "@nestjs/typeorm";
 import { FreeTierDispatchService } from "./free-tier-dispatch.service";
 import { FreeTierDispatchState } from "./entities/free-tier-dispatch-state.entity";
-import { FREE_TIER_DISPATCH_QUEUE } from "../queue/queue.module";
+import { FREE_TIER_DISPATCH_QUEUE } from "../queue/queue.tokens";
 import { StrategyDispatch } from "../strategy/strategy-dispatch.service";
 import { FreeTierId, FreeTierUsageService } from "../strategy/free-tier-usage.service";
 

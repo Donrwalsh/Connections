@@ -8,8 +8,8 @@ import { AnswerGroup } from "./entities/answer-group.entity";
 import { GroupMember } from "./entities/group-member.entity";
 import { InjectDataSource } from "@nestjs/typeorm";
 import { NYT_CONNECTIONS_ORIGIN_DATE } from "./constants";
-import { STRATEGY_QUEUE } from "../queue/queue.module";
-import { runStrategyJobId } from "../queue/strategy.queue";
+import { STRATEGY_QUEUE } from "../queue/queue.tokens";
+import { runStrategyJobId } from "../queue/strategy-queue.utils";
 import { AUTOMATIC_STRATEGIES, strategyTrialNumbers } from "../../strategies";
 
 interface ConnectionsTextCard {

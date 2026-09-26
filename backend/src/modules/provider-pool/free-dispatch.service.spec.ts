@@ -2,7 +2,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { BadRequestException } from "@nestjs/common";
 import { getRepositoryToken } from "@nestjs/typeorm";
 
-import { FREE_DISPATCH_QUEUE_BY_POOL } from "../queue/queue.module";
+import { FREE_DISPATCH_QUEUE_BY_POOL } from "../queue/queue.tokens";
 import { RateLimitHoldService } from "../strategy/rate-limit-hold.service";
 import { StrategyDispatch } from "../strategy/strategy-dispatch.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";

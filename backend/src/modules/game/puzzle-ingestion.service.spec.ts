@@ -4,7 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import * as fs from "fs";
 import { PuzzleIngestionService } from "./puzzle-ingestion.service";
-import { STRATEGY_QUEUE } from "../queue/queue.module";
+import { STRATEGY_QUEUE } from "../queue/queue.tokens";
 import { AUTOMATIC_STRATEGIES } from "../../strategies";
 
 const PUZZLE_DATA = {
