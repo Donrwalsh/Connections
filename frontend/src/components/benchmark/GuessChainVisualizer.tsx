@@ -2,8 +2,10 @@ import { useState } from "react";
 import { useAdminAuth } from "../../auth/useAdminAuth";
 import { fetchRunDetail } from "../../data/benchmark/api";
 import { useResource } from "../../hooks/useResource";
-import { formatDuration } from "../../data/benchmark/metrics";
+import { useRelativeNow } from "../../hooks/useRelativeNow";
+import { formatDuration, formatTimestamp } from "../../data/benchmark/metrics";
 import { poolFromStrategyName, providerPoolLabel } from "../../data/benchmark/providerPools";
+import { formatRelativeTime } from "../../data/benchmark/relativeTime";
 import {
   categoryVerdictLabel,
   categoryVerdictTone,
@@ -44,6 +46,9 @@ export function GuessChainVisualizer({ runId, onDeleted }: GuessChainVisualizerP
   } = useResource(["runDetail", runId], (signal) => fetchRunDetail(runId, signal));
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showRetryModal, setShowRetryModal] = useState(false);
+  // One shared tick for every relative-time label on the page, rather than a
+  // timer per row.
+  const now = useRelativeNow();
   const providerLabel = resolveProviderLabel(detail?.strategyName);
 
   return (
@@ -78,9 +83,13 @@ export function GuessChainVisualizer({ runId, onDeleted }: GuessChainVisualizerP
 
       {detail && !isLoading && !error ? (
         detail.solvePrompts.length > 0 ? (
-          <PromptChain solvePrompts={detail.solvePrompts} providerLabel={providerLabel} />
+          <PromptChain
+            solvePrompts={detail.solvePrompts}
+            providerLabel={providerLabel}
+            now={now}
+          />
         ) : (
-          <PlainGuessList guesses={detail.guesses} />
+          <PlainGuessList guesses={detail.guesses} now={now} />
         )
       ) : null}
 
@@ -111,15 +120,17 @@ function resolveProviderLabel(strategyName: string | null | undefined): string {
 function PromptChain({
   solvePrompts,
   providerLabel,
+  now,
 }: {
   solvePrompts: SolvePromptRecord[];
   providerLabel: string;
+  now: number;
 }) {
   return (
     <ol className="bench-chain">
       {solvePrompts.map((prompt) => (
         <li key={prompt.id} className="bench-chain__step">
-          <PromptStep prompt={prompt} providerLabel={providerLabel} />
+          <PromptStep prompt={prompt} providerLabel={providerLabel} now={now} />
         </li>
       ))}
     </ol>
@@ -129,9 +140,11 @@ function PromptChain({
 function PromptStep({
   prompt,
   providerLabel,
+  now,
 }: {
   prompt: SolvePromptRecord;
   providerLabel: string;
+  now: number;
 }) {
   const isCallError = prompt.status === "callError";
   const telemetry = [
@@ -158,6 +171,12 @@ function PromptStep({
         {telemetry.length > 0 ? (
           <span className="bench-mono bench-step__telemetry">{telemetry.join(" · ")}</span>
         ) : null}
+        <span
+          className="bench-mono bench-step__timestamp"
+          title={formatTimestamp(prompt.createdAt)}
+        >
+          {formatRelativeTime(prompt.createdAt, now)}
+        </span>
       </div>
 
       {prompt.reconstructedPrompt ? (
@@ -349,7 +368,7 @@ function ProposalRow({ proposal }: { proposal: LlmProposalRecord }) {
 
 /** Fallback for strategies with no LLM solve-prompt chain (deterministic,
  * shuffle) — just the ordered guesses. */
-function PlainGuessList({ guesses }: { guesses: GuessRecord[] }) {
+function PlainGuessList({ guesses, now }: { guesses: GuessRecord[]; now: number }) {
   if (guesses.length === 0) {
     return <p className="bench-muted">No guesses recorded for this run.</p>;
   }
@@ -360,6 +379,12 @@ function PlainGuessList({ guesses }: { guesses: GuessRecord[] }) {
           <span className="bench-mono">#{guess.sequenceNumber}</span>
           <span className="bench-mono bench-guess-list__words">{guess.words.join(", ")}</span>
           <StatusPill label={guessResultLabel(guess.result)} tone={guessResultTone(guess.result)} />
+          <span
+            className="bench-mono bench-guess-list__timestamp"
+            title={formatTimestamp(guess.guessedAt)}
+          >
+            {formatRelativeTime(guess.guessedAt, now)}
+          </span>
         </li>
       ))}
     </ol>
