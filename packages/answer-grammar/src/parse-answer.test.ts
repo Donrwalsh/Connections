@@ -172,6 +172,109 @@ describe("parseAnswer", () => {
   });
 });
 
+describe("parseAnswer with boardWords", () => {
+  // 2024-12-12 is an image puzzle whose card alt text itself carries
+  // parentheticals.
+  const teeBoard = [
+    "TEA", "TEE (GOLF)", "TEE (SHIRT)", "TI (MUSICAL NOTE)",
+    "COMB", "GEAR", "SAW", "ZIPPER",
+  ];
+  // 2025-04-01's "EMOTICON MOUTHS" group has literal "(" and ")" cards.
+  const emoticonBoard = ["(", ")", "O", "P", "$", "€", "£", "¥"];
+
+  it("keeps a board word's own parenthetical and does not flag parentheticalStripped", () => {
+    const response =
+      "### GROUPS\n#### Group 1\nCategory: Sounds like T\n" +
+      "Words: TEA, TEE (GOLF), TEE (SHIRT), TI (MUSICAL NOTE)\n\n" +
+      "### ANSWER\nTEA, TEE (GOLF), TEE (SHIRT), TI (MUSICAL NOTE)";
+    const result = parseAnswer(response, teeBoard);
+
+    expect(result.proposalWords).toEqual([["TEA", "TEE (GOLF)", "TEE (SHIRT)", "TI (MUSICAL NOTE)"]]);
+    expect(result.groups).toEqual([["TEA", "TEE (GOLF)", "TEE (SHIRT)", "TI (MUSICAL NOTE)"]]);
+    expect(result.textIssues).toEqual([]);
+  });
+
+  it("still strips a trailing aside that follows a protected board word", () => {
+    const response =
+      "### GROUPS\n#### Group 1\nCategory: Sounds like T\n" +
+      "Words: TEA, TEE (GOLF), TEE (SHIRT), TI (MUSICAL NOTE) (homophones, all of them)\n\n" +
+      "### ANSWER\nTEA, TEE (GOLF), TEE (SHIRT), TI (MUSICAL NOTE)";
+    const result = parseAnswer(response, teeBoard);
+
+    expect(result.proposalWords).toEqual([["TEA", "TEE (GOLF)", "TEE (SHIRT)", "TI (MUSICAL NOTE)"]]);
+    expect(result.textIssues).toEqual(["parentheticalStripped"]);
+  });
+
+  it("protects board words case-insensitively but keeps the model's own casing", () => {
+    const response =
+      "### GROUPS\n#### Group 1\nCategory: Sounds like T\n" +
+      "Words: Tea, Tee (golf), Tee (shirt), Ti (musical note)\n\n" +
+      "### ANSWER\nTea, Tee (golf), Tee (shirt), Ti (musical note)";
+    const result = parseAnswer(response, teeBoard);
+
+    expect(result.proposalWords).toEqual([["Tea", "Tee (golf)", "Tee (shirt)", "Ti (musical note)"]]);
+    expect(result.textIssues).toEqual([]);
+  });
+
+  it("protects a board word wrapped in markdown emphasis", () => {
+    const response =
+      "### GROUPS\n#### Group 1\nCategory: Sounds like T\n" +
+      "Words: **TEA**, **TEE (GOLF)**, `TEE (SHIRT)`, TI (MUSICAL NOTE)\n\n" +
+      "### ANSWER\nTEA, TEE (GOLF), TEE (SHIRT), TI (MUSICAL NOTE)";
+    const result = parseAnswer(response, teeBoard);
+
+    expect(result.proposalWords).toEqual([["TEA", "TEE (GOLF)", "TEE (SHIRT)", "TI (MUSICAL NOTE)"]]);
+    expect(result.textIssues).toEqual([]);
+  });
+
+  it("keeps literal ( and ) cards instead of stripping them as one parenthetical", () => {
+    const response =
+      "### GROUPS\n#### Group 1\nCategory: Emoticon mouths\nWords: (, ), O, P\n\n" +
+      "### ANSWER\n(, ), O, P";
+    const result = parseAnswer(response, emoticonBoard);
+
+    expect(result.proposalWords).toEqual([["(", ")", "O", "P"]]);
+    expect(result.groups).toEqual([["(", ")", "O", "P"]]);
+    expect(result.textIssues).toEqual([]);
+  });
+
+  it("does not treat a lone ( board word as protecting the start of an aside", () => {
+    const response =
+      "### GROUPS\n#### Group 1\nCategory: Currency\nWords: $, €, £, ¥ (currency signs)\n\n" +
+      "### ANSWER\n$, €, £, ¥";
+    const result = parseAnswer(response, emoticonBoard);
+
+    expect(result.proposalWords).toEqual([["$", "€", "£", "¥"]]);
+    expect(result.textIssues).toEqual(["parentheticalStripped"]);
+  });
+
+  it("keeps a hyphenated board word intact in the ANSWER block while still stripping bullets", () => {
+    const response = "### ANSWER\n- YO-YO, KITE, TOP, JACKS";
+    const result = parseAnswer(response, ["YO-YO", "KITE", "TOP", "JACKS"]);
+
+    expect(result.groups).toEqual([["YO-YO", "KITE", "TOP", "JACKS"]]);
+    expect(result.proposalWords).toEqual([["YO-YO", "KITE", "TOP", "JACKS"]]);
+  });
+
+  it("still strips hyphens in the ANSWER block when no boardWords are given", () => {
+    const response = "### ANSWER\nYO-YO, KITE, TOP, JACKS";
+    const result = parseAnswer(response);
+
+    expect(result.groups).toEqual([["YOYO", "KITE", "TOP", "JACKS"]]);
+  });
+
+  it("strips the board word's parenthetical like any aside when boardWords is omitted", () => {
+    const response =
+      "### GROUPS\n#### Group 1\nCategory: Sounds like T\n" +
+      "Words: TEA, TEE (GOLF), TEE (SHIRT), TI (MUSICAL NOTE)\n\n" +
+      "### ANSWER\nTEA, TEE (GOLF), TEE (SHIRT), TI (MUSICAL NOTE)";
+    const result = parseAnswer(response);
+
+    expect(result.proposalWords).toEqual([["TEA", "TEE", "TEE", "TI"]]);
+    expect(result.textIssues).toEqual(["parentheticalStripped"]);
+  });
+});
+
 describe("formatCompactAnswer", () => {
   it("rebuilds a compact GROUPS/ANSWER block from the parsed proposal data", () => {
     const proposalWords = [

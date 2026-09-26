@@ -127,17 +127,20 @@ export class OrchestratorService {
    * refresh yet. For Ollama, the orchestrator always caps what it actually
    * requests at its own MODEL_CONTEXT_WINDOW regardless of this value, and
    * reports the true effective context window back on
-   * `SolveStepSuccess.contextWindow`.
+   * `SolveStepSuccess.contextWindow`. `boardWords` is the puzzle's full
+   * original word list, so the orchestrator's parser keeps board words it
+   * would otherwise strip (e.g. "TEE (GOLF)").
    */
   async requestSolveStep(
     messages: ChatMessage[],
     model?: string,
     provider?: "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral" | "sambanova" | "nvidia",
     contextWindow?: number | null,
+    boardWords?: string[],
   ): Promise<SolveStepOutcome> {
     return this.executeCall<SolveStepSuccess>(
       "/solve-step",
-      { messages, model, provider, contextWindow: contextWindow ?? undefined },
+      { messages, model, provider, contextWindow: contextWindow ?? undefined, boardWords },
       (raw) => ({
         response: raw.response,
         groups: raw.groups,

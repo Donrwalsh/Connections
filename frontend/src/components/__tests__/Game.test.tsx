@@ -217,7 +217,12 @@ describe("Game Component", () => {
     expect(url).toContain("/api/diagnose");
     const body = JSON.parse(init.body as string) as {
       messages: { role: string; content: string }[];
+      boardWords: string[];
     };
+    // The full board goes along so the parser keeps board words intact.
+    expect([...body.boardWords].sort()).toEqual(
+      puzzle.categories.flatMap((cat) => cat.words).sort(),
+    );
     expect(body.messages).toHaveLength(1);
     expect(body.messages[0].role).toBe("user");
     expect(body.messages[0].content).toContain(

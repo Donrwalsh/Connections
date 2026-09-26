@@ -192,6 +192,24 @@ describe("runAnswerStep", () => {
     expect(result.textIssues).toEqual([]);
   });
 
+  it("hands boardWords to the parser so a board word's own parenthetical survives", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text:
+        "### GROUPS\n#### Group 1\nCategory: Sounds like T\n" +
+        "Words: TEA, TEE (GOLF), TEE (SHIRT), TI (MUSICAL NOTE)\n\n" +
+        "### ANSWER\nTEA, TEE (GOLF), TEE (SHIRT), TI (MUSICAL NOTE)",
+      response: { modelId: "gpt-4.1-nano" },
+      request: {},
+    });
+
+    const result = await runAnswerStep(MESSAGES, {
+      boardWords: ["TEA", "TEE (GOLF)", "TEE (SHIRT)", "TI (MUSICAL NOTE)"],
+    });
+
+    expect(result.proposalWords).toEqual([["TEA", "TEE (GOLF)", "TEE (SHIRT)", "TI (MUSICAL NOTE)"]]);
+    expect(result.textIssues).toEqual([]);
+  });
+
   it("rejects a response with no parseable ANSWER or GROUPS section as invalid_group", async () => {
     generateTextMock.mockResolvedValueOnce({
       text: "I don't know the answer",

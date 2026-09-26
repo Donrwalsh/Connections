@@ -335,6 +335,15 @@ export class LlmStrategyRunner {
     // than a conversation that silently restarted mid-run.
     const messages: ChatMessage[] = this.reconstructMessages(latestPrompt);
 
+    // The puzzle's full original word list, sent with every step so the
+    // orchestrator's parser keeps board words it would otherwise strip as
+    // noise (image-puzzle alt text like "TEE (GOLF)", a literal "(" card, a
+    // hyphenated "YO-YO"). The full list rather than run.availableWords,
+    // because a model may restate an already-solved group.
+    const boardWords = puzzle.answerGroups.flatMap((group) =>
+      group.members.map((member) => member.word),
+    );
+
     const pendingGuesses: Partial<Guess>[] = [];
     const pendingProposals: Partial<LlmProposal>[] = [];
     const pendingPrompts: Partial<SolvePrompt>[] = [];
@@ -367,6 +376,7 @@ export class LlmStrategyRunner {
         model,
         provider,
         contextWindow,
+        boardWords,
       );
 
       // One promptNumber per loop iteration.
@@ -470,6 +480,7 @@ export class LlmStrategyRunner {
           );
           pendingProposals.push(...proposalEntries);
 
+          const guessCountBefore = state.guessCount;
           this.evaluateProposals(
             proposalEntries,
             run,
@@ -480,6 +491,20 @@ export class LlmStrategyRunner {
             maxDuplicates,
             maxFailedGuesses,
           );
+
+          // A reply that parsed but submitted no guess at all — every
+          // proposal skipped as wordNotOnList or as an already-solved group,
+          // or none were well-formed — counts toward the malformed limit.
+          // Otherwise no counter moves, and a model stuck repeating an
+          // unusable answer loops forever (the prompt keeps growing until
+          // the call itself fails).
+          if (run.status === StrategyRunStatus.RUNNING && state.guessCount === guessCountBefore) {
+            state.malformedCount++;
+            if (state.malformedCount >= maxMalformed) {
+              run.status = StrategyRunStatus.MALFORMED_RESPONSE;
+              run.finishedAt = new Date();
+            }
+          }
         }
 
         // Append the assistant response to conversation history.

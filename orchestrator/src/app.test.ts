@@ -162,6 +162,26 @@ describe("orchestrator app", () => {
       });
     });
 
+    it("passes boardWords through to runAnswerStep when given", async () => {
+      runAnswerStepMock.mockResolvedValueOnce({
+        response: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
+        groups: [["AAAA", "BBBB", "CCCC", "DDDD"]],
+        proposalWords: [["AAAA", "BBBB", "CCCC", "DDDD"]],
+        categoryByGroup: {},
+        textIssues: [],
+        model: "test-model",
+      });
+      const boardWords = ["TEE (GOLF)", "YO-YO"];
+
+      const res = await diagnoseRequest({ ...DIAGNOSE_BODY, boardWords });
+
+      expect(res.status).toBe(200);
+      expect(runAnswerStepMock).toHaveBeenCalledWith(DIAGNOSE_BODY.messages, {
+        captureTelemetry: false,
+        boardWords,
+      });
+    });
+
     it("maps an unusable response to 400", async () => {
       runAnswerStepMock.mockRejectedValueOnce(
         new SolveError(
@@ -232,6 +252,19 @@ describe("orchestrator app", () => {
           contextWindow: 131072,
           abortSignal: expect.any(AbortSignal),
         }),
+      );
+    });
+
+    it("passes boardWords through to runAnswerStep when given", async () => {
+      runAnswerStepMock.mockResolvedValueOnce({ ...BASE_RESULT, model: "gpt-4.1-nano-2025-04-14" });
+      const boardWords = ["TEE (GOLF)", "TEE (SHIRT)", "TI (MUSICAL NOTE)", "TEA"];
+
+      const res = await solveStepRequest({ ...SOLVE_STEP_BODY, boardWords });
+
+      expect(res.status).toBe(200);
+      expect(runAnswerStepMock).toHaveBeenCalledWith(
+        SOLVE_STEP_BODY.messages,
+        expect.objectContaining({ boardWords }),
       );
     });
 

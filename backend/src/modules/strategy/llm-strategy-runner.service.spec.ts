@@ -835,6 +835,7 @@ describe("LlmStrategyRunner", () => {
         "mistral",
         "ollama",
         null,
+        expect.any(Array),
       );
     });
 
@@ -857,6 +858,7 @@ describe("LlmStrategyRunner", () => {
         "gemini-3.6-flash",
         "google",
         null,
+        expect.any(Array),
       );
     });
 
@@ -882,6 +884,7 @@ describe("LlmStrategyRunner", () => {
         "gpt-4.1-nano-2025-04-14",
         "openai",
         null,
+        expect.any(Array),
       );
     });
 
@@ -908,6 +911,7 @@ describe("LlmStrategyRunner", () => {
         "mistral-nemo",
         "ollama",
         131072,
+        expect.any(Array),
       );
     });
 
@@ -1355,6 +1359,70 @@ describe("LlmStrategyRunner", () => {
         StrategyRun,
         expect.objectContaining({ status: StrategyRunStatus.MALFORMED_RESPONSE }),
       );
+    });
+
+    it("should count a parsed reply that submits no guess toward the malformed limit instead of looping forever", async () => {
+      // Every proposal names a word not on the board, so each reply is
+      // skipped as wordNotOnList and no guess is ever submitted.
+      mockOrchestratorService.requestSolveStep.mockResolvedValue(
+        makeAssistResponse([["OCEAN", "BANANA", "CHERRY", "DATE"]]),
+      );
+
+      const result = await runner.runLlmStrategy(100, "llm-openai");
+
+      expect(result).toEqual({ status: StrategyRunStatus.MALFORMED_RESPONSE, guessCount: 0 });
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(3);
+      const promptRows = mockManager.insert.mock.calls
+        .filter((call) => call[0] === "SolvePrompt")
+        .flatMap((call) => call[1] as Array<Record<string, unknown>>);
+      expect(promptRows).toHaveLength(3);
+      expect(promptRows.every((row) => row.status === "parsed")).toBe(true);
+      expect(mockManager.insert).not.toHaveBeenCalledWith("Guess", expect.anything());
+    });
+
+    it("should count a reply that only restates an already-solved group toward the malformed limit", async () => {
+      mockOrchestratorService.requestSolveStep
+        .mockResolvedValueOnce(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]))
+        .mockResolvedValue(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]));
+
+      const result = await runner.runLlmStrategy(100, "llm-openai");
+
+      expect(result).toEqual({ status: StrategyRunStatus.MALFORMED_RESPONSE, guessCount: 1 });
+      expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledTimes(4);
+    });
+
+    it("should not count a reply that submits a guess toward the malformed limit", async () => {
+      // Two unusable replies, then a solve: stays under the limit of 3.
+      mockOrchestratorService.requestSolveStep
+        .mockResolvedValueOnce(makeAssistResponse([["OCEAN", "BANANA", "CHERRY", "DATE"]]))
+        .mockResolvedValueOnce(makeAssistResponse([["OCEAN", "BANANA", "CHERRY", "DATE"]]))
+        .mockResolvedValueOnce(
+          makeAssistResponse([
+            ["APPLE", "BANANA", "CHERRY", "DATE"],
+            ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+          ]),
+        );
+
+      const result = await runner.runLlmStrategy(100, "llm-openai");
+
+      expect(result).toEqual({ status: StrategyRunStatus.COMPLETED, guessCount: 2 });
+    });
+
+    it("should send the puzzle's full original word list as boardWords, even once groups are solved", async () => {
+      mockOrchestratorService.requestSolveStep
+        .mockResolvedValueOnce(makeAssistResponse([["APPLE", "BANANA", "CHERRY", "DATE"]]))
+        .mockResolvedValueOnce(makeAssistResponse([["EGGPLANT", "FIG", "GRAPE", "HONEY"]]));
+
+      await runner.runLlmStrategy(100, "llm-openai");
+
+      const allWords = ["APPLE", "BANANA", "CHERRY", "DATE", "EGGPLANT", "FIG", "GRAPE", "HONEY"];
+      const boardWordsPerCall = mockOrchestratorService.requestSolveStep.mock.calls.map(
+        (call) => call[4] as string[],
+      );
+      expect(boardWordsPerCall).toHaveLength(2);
+      for (const boardWords of boardWordsPerCall) {
+        expect([...boardWords].sort()).toEqual(allWords);
+      }
     });
 
     it("should terminate with 'malformedResponse' after consecutive invalid responses", async () => {

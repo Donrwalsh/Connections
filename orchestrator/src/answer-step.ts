@@ -46,6 +46,9 @@ export interface AnswerStepOpts {
   // (include: {requestBody, responseBody}) rather than compute-then-discard
   // it.
   captureTelemetry?: boolean;
+  // The puzzle's full original word list, handed to parseAnswer so board
+  // words it would otherwise strip (e.g. "TEE (GOLF)") survive the parse.
+  boardWords?: string[];
 }
 
 const ANSWER_STEP_TEMPERATURE = 0.7;
@@ -127,7 +130,7 @@ export async function runAnswerStep(
     });
   }
 
-  const parsed = parseAnswer(text);
+  const parsed = parseAnswer(text, opts.boardWords);
 
   if (parsed.groups.length === 0) {
     throw new SolveError(

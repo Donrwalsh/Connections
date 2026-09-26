@@ -968,6 +968,18 @@ describe("App (e2e)", () => {
     expect(after).toBe(before);
   });
 
+  it("POST /api/diagnose accepts the optional boardWords list", async () => {
+    const res = await request(app.getHttpServer())
+      .post("/api/diagnose")
+      .send({
+        messages: [{ role: "user", content: "hi" }],
+        boardWords: ["TEE (GOLF)", "YO-YO"],
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.orchestrator).toBe("healthy");
+  });
+
   it("POST /api/diagnose rejects an invalid body", async () => {
     const res = await request(app.getHttpServer()).post("/api/diagnose").send({ messages: [] });
 

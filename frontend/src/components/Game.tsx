@@ -79,7 +79,10 @@ export function Game({ puzzle }: GameProps) {
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ messages }),
+            // The full board (not just the remaining words — the model may
+            // restate a solved group), so the parser keeps board words it
+            // would otherwise strip, e.g. "TEE (GOLF)" or "YO-YO".
+            body: JSON.stringify({ messages, boardWords: initialWords }),
             signal: controller.signal,
           },
         );
@@ -135,6 +138,7 @@ export function Game({ puzzle }: GameProps) {
     state.remainingWords,
     state.solved,
     state.aiSession,
+    initialWords,
     aiSolveSuccess,
     aiSolveError,
   ]);
