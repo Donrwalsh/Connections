@@ -48,13 +48,13 @@ services:
       timeout: 3s
       retries: 5
     # For an NVIDIA GPU + nvidia-container-toolkit, uncomment:
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   orchestrator:
     build:
