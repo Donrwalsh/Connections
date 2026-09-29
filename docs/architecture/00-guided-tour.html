@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Guided tour — Connections Lab</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .font-serif { font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .lbl { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+      .deep-fill { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      pre.code { background:#0f172a; color:#e2e8f0; padding:1rem 1.15rem; border-radius:.6rem; overflow-x:auto; font-size:12.5px; line-height:1.55; }
+      pre.code .c { color:#7dd3fc; } pre.code .k { color:#f0abfc; } pre.code .s { color:#86efac; }
+      table.t { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+      table.t th, table.t td { border: 1px solid #e2e8f0; padding: 7px 9px; text-align: left; vertical-align: top; }
+      table.t th { background: #f1f5f9; font-weight: 600; }
+      .stop { counter-increment: stop; }
+      h2 .n { color:#94a3b8; font-size: .8em; margin-right: .35em; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-14">
+
+      <!-- ============================ HEADER ============================ -->
+      <header class="space-y-5">
+        <div>
+          <p class="lbl text-slate-400">Onboarding · guided tour</p>
+          <h1 class="font-serif text-4xl mt-1">A guided tour of Connections Lab</h1>
+          <p class="text-slate-500 mt-1">2026-09-24 · for a developer on their first day in the repo</p>
+        </div>
+        <p class="text-slate-700 max-w-3xl">
+          This page walks through the codebase in the order you'll meet it: what the product is, the
+          services, a strategy run from start to finish, and where each architectural decision came
+          from. It ends with recipes for the changes people make most often, plus the traps that have
+          caught people before. Read it once end to end. After that, the recipes and gotchas work as
+          a checklist.
+        </p>
+        <div class="flex flex-wrap gap-4 text-xs text-slate-600 border-t border-b border-slate-200 py-3">
+          <span class="flex items-center gap-2"><span class="inline-block w-4 h-4 border-2 border-slate-800 bg-white"></span> service / module</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-4 h-4 deep-fill"></span> deep module (small interface, lots behind it)</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-4 h-4 bg-emerald-50 border border-emerald-600"></span> single source of truth</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-4 h-4 bg-amber-50 border border-amber-400"></span> gotcha</span>
+        </div>
+      </header>
+
+      <!-- ============================ TOC ============================ -->
+      <nav class="rounded-xl border border-slate-200 bg-white p-6">
+        <p class="lbl text-slate-400 mb-3">The stops</p>
+        <ol class="text-sm grid sm:grid-cols-2 gap-x-8 gap-y-1 list-decimal pl-5 text-slate-700">
+          <li><a class="hover:underline" href="#product">What the product is</a></li>
+          <li><a class="hover:underline" href="#map">The system map</a></li>
+          <li><a class="hover:underline" href="#repo">Repo layout &amp; first run</a></li>
+          <li><a class="hover:underline" href="#vocab">Vocabulary &amp; data model</a></li>
+          <li><a class="hover:underline" href="#backend">Backend (NestJS)</a></li>
+          <li><a class="hover:underline" href="#worker">The worker process</a></li>
+          <li><a class="hover:underline" href="#run">Life of a strategy run</a></li>
+          <li><a class="hover:underline" href="#orchestrator">Orchestrator &amp; answer-grammar</a></li>
+          <li><a class="hover:underline" href="#pools">Provider pools, rate limits &amp; free tiers</a></li>
+          <li><a class="hover:underline" href="#frontend">Frontend</a></li>
+          <li><a class="hover:underline" href="#auth">Auth &amp; trust boundaries</a></li>
+          <li><a class="hover:underline" href="#db">Database &amp; migrations</a></li>
+          <li><a class="hover:underline" href="#testing">Testing</a></li>
+          <li><a class="hover:underline" href="#recipes">Recipes</a></li>
+          <li><a class="hover:underline" href="#decisions">Architectural decisions, and why</a></li>
+          <li><a class="hover:underline" href="#gotchas">Gotchas</a></li>
+          <li><a class="hover:underline" href="#workflow">Docs &amp; workflow</a></li>
+        </ol>
+      </nav>
+
+      <!-- ============================ 1 PRODUCT ============================ -->
+      <section id="product" class="space-y-4">
+        <h2 class="font-serif text-2xl"><span class="n">1</span>What the product is</h2>
+        <p class="text-sm text-slate-700 max-w-3xl">
+          <strong>Connections Lab</strong> is two products in one app, and they share a database:
+        </p>
+        <div class="grid md:grid-cols-2 gap-5">
+          <div class="rounded-xl border border-slate-200 bg-white p-5 space-y-2">
+            <p class="lbl text-slate-400">Half 1 — the game</p>
+            <p class="text-sm text-slate-700">A playable copy of NYT Connections. There are 16 words; the player picks 4, submits, and gets a colour-coded reveal. Four mistakes end the game. There's date navigation back to 2023-06-12, a share-grid, and an <strong>AI Assist</strong> button that asks an LLM to propose one group. Route: <span class="mono text-xs">/</span> and <span class="mono text-xs">/puzzle/:date</span>.</p>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-white p-5 space-y-2">
+            <p class="lbl text-slate-400">Half 2 — the benchmark</p>
+            <p class="text-sm text-slate-700">A leaderboard of <em>strategies</em> solving every historical puzzle. Brute-force strategies (alphabetical, shuffle, and so on) run automatically. LLM strategies run across eight provider pools (OpenAI, Google, Groq, OpenRouter, Mistral, SambaNova, NVIDIA NIM, Ollama), and every prompt, proposal and guess is recorded. Routes: <span class="mono text-xs">/leaderboard/**</span>, <span class="mono text-xs">/activity</span>, <span class="mono text-xs">/maintenance</span>.</p>
+          </div>
+        </div>
+        <p class="text-sm text-slate-700 max-w-3xl">
+          Most of the code, and nearly all of the complexity, is in half 2. The expensive part is
+          running LLM trials across a range of providers, many of them on free tiers with strict
+          and poorly documented rate limits, and recording enough about each run to
+          debug it afterwards. If some code looks over-engineered, it's usually because of a real
+          provider behaviour that has already bitten the project once.
+        </p>
+      </section>
+
+      <!-- ============================ 2 MAP ============================ -->
+      <section id="map" class="space-y-5">
+        <h2 class="font-serif text-2xl"><span class="n">2</span>The system map</h2>
+        <div class="rounded-xl border border-slate-300 bg-white p-5">
+          <p class="lbl text-slate-400 mb-3">Local dev — docker-compose.yml (compose project <span class="mono normal-case">connections-dev</span>)</p>
+          <svg viewBox="0 0 860 400" class="w-full">
+            <defs>
+              <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+            </defs>
+            <g font-size="11" fill="#0f172a">
+              <!-- browser / frontend -->
+              <rect x="20" y="30" width="170" height="70" rx="8" fill="#fff" stroke="#0f172a" stroke-width="2"/>
+              <text x="105" y="55" text-anchor="middle" font-weight="600">frontend</text>
+              <text x="105" y="72" text-anchor="middle" font-size="10" fill="#475569">Vite + React 19 · :5173</text>
+              <text x="105" y="87" text-anchor="middle" font-size="10" fill="#475569" class="mono">frontend/</text>
+
+              <!-- backend -->
+              <rect x="300" y="30" width="200" height="70" rx="8" fill="#fff" stroke="#0f172a" stroke-width="2"/>
+              <text x="400" y="55" text-anchor="middle" font-weight="600">backend</text>
+              <text x="400" y="72" text-anchor="middle" font-size="10" fill="#475569">NestJS HTTP · :4000</text>
+              <text x="400" y="87" text-anchor="middle" font-size="10" fill="#475569" class="mono">src/main.ts</text>
+
+              <!-- worker -->
+              <rect x="300" y="230" width="200" height="70" rx="8" fill="#1e293b"/>
+              <text x="400" y="255" text-anchor="middle" font-weight="600" fill="#f1f5f9">worker</text>
+              <text x="400" y="272" text-anchor="middle" font-size="10" fill="#cbd5e1">BullMQ consumers · no port</text>
+              <text x="400" y="287" text-anchor="middle" font-size="10" fill="#cbd5e1" class="mono">src/worker.ts</text>
+
+              <!-- shared code bracket -->
+              <rect x="285" y="18" width="230" height="298" rx="12" fill="none" stroke="#94a3b8" stroke-dasharray="4 4"/>
+              <text x="400" y="332" text-anchor="middle" font-size="10" fill="#64748b">same codebase (backend/), same AppModule, two processes</text>
+
+              <!-- redis -->
+              <rect x="300" y="135" width="200" height="56" rx="8" fill="#fff" stroke="#0f172a" stroke-width="2"/>
+              <text x="400" y="158" text-anchor="middle" font-weight="600">redis 7</text>
+              <text x="400" y="175" text-anchor="middle" font-size="10" fill="#475569">BullMQ broker · ~20 queues</text>
+
+              <!-- postgres -->
+              <rect x="20" y="230" width="170" height="70" rx="8" fill="#fff" stroke="#0f172a" stroke-width="2"/>
+              <text x="105" y="255" text-anchor="middle" font-weight="600">postgres 15</text>
+              <text x="105" y="272" text-anchor="middle" font-size="10" fill="#475569">schema = migrations</text>
+              <text x="105" y="287" text-anchor="middle" font-size="10" fill="#475569" class="mono">src/migrations/</text>
+
+              <!-- orchestrator -->
+              <rect x="610" y="230" width="220" height="70" rx="8" fill="#fff" stroke="#0f172a" stroke-width="2"/>
+              <text x="720" y="255" text-anchor="middle" font-weight="600">orchestrator</text>
+              <text x="720" y="272" text-anchor="middle" font-size="10" fill="#475569">Hono + Vercel AI SDK · :3001</text>
+              <text x="720" y="287" text-anchor="middle" font-size="10" fill="#475569">holds every provider API key</text>
+
+              <!-- providers -->
+              <rect x="610" y="345" width="220" height="44" rx="8" fill="#f8fafc" stroke="#94a3b8"/>
+              <text x="720" y="364" text-anchor="middle" font-size="10" fill="#334155">OpenAI · Google · Groq · OpenRouter · Mistral</text>
+              <text x="720" y="378" text-anchor="middle" font-size="10" fill="#334155">SambaNova · NVIDIA NIM · Ollama (local)</text>
+
+              <!-- NYT -->
+              <rect x="20" y="345" width="170" height="44" rx="8" fill="#f8fafc" stroke="#94a3b8"/>
+              <text x="105" y="371" text-anchor="middle" font-size="10" fill="#334155">NYT puzzle JSON endpoint</text>
+
+              <!-- package -->
+              <rect x="610" y="120" width="220" height="56" rx="8" fill="#ecfdf5" stroke="#059669"/>
+              <text x="720" y="143" text-anchor="middle" font-weight="600" fill="#065f46">packages/answer-grammar</text>
+              <text x="720" y="160" text-anchor="middle" font-size="10" fill="#065f46">one parser for model output</text>
+            </g>
+            <g stroke="#475569" stroke-width="1.4" fill="none">
+              <line x1="190" y1="65" x2="298" y2="65" marker-end="url(#ar)"/>
+              <line x1="400" y1="100" x2="400" y2="133" marker-end="url(#ar)"/>
+              <line x1="400" y1="191" x2="400" y2="228" marker-end="url(#ar)"/>
+              <line x1="300" y1="80" x2="190" y2="245" marker-end="url(#ar)"/>
+              <line x1="300" y1="265" x2="192" y2="265" marker-end="url(#ar)"/>
+              <line x1="500" y1="265" x2="608" y2="265" marker-end="url(#ar)"/>
+              <path d="M500,50 C560,50 650,120 700,228" marker-end="url(#ar)"/>
+              <line x1="720" y1="300" x2="720" y2="343" marker-end="url(#ar)"/>
+              <line x1="330" y1="300" x2="160" y2="345" marker-end="url(#ar)"/>
+              <line x1="720" y1="176" x2="720" y2="228" stroke="#059669" stroke-dasharray="3 3"/>
+              <path d="M610,150 C560,150 540,200 500,250" stroke="#059669" stroke-dasharray="3 3"/>
+            </g>
+            <g font-size="9.5" fill="#475569">
+              <text x="200" y="58">REST (VITE_API_URL)</text>
+              <text x="408" y="120">enqueue</text>
+              <text x="408" y="214">consume</text>
+              <text x="505" y="258">POST /solve-step</text>
+              <text x="560" y="72">POST /api/diagnose → /diagnose</text>
+              <text x="505" y="291" fill="#64748b">x-internal-api-key</text>
+              <text x="196" y="226">TypeORM</text>
+              <text x="200" y="330">ingestion fetch</text>
+            </g>
+          </svg>
+        </div>
+        <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+          <p><span class="lbl text-slate-400">The key split</span><br />The <strong>backend</strong> answers HTTP and <em>enqueues</em>. The <strong>worker</strong> <em>does the work</em>. It's a separate Node process started with <span class="mono text-xs">npx tsx --watch src/worker.ts</span>, and it boots the same <span class="mono text-xs">AppModule</span> as an application context with no HTTP listener. A slow LLM run never blocks a request, and the worker can be split across machines (<a class="underline" href="#worker">stop 6</a>).</p>
+          <p><span class="lbl text-slate-400">Only the orchestrator talks to models</span><br />The worker never calls a model API. It posts the conversation to the orchestrator's <span class="mono text-xs">/solve-step</span>, and the orchestrator picks the provider, calls it with the AI SDK, classifies failures, and parses the text. All provider API keys live there and nowhere else. The one exception to "backend never talks to providers" is the OpenRouter <em>metadata</em> client in <span class="mono text-xs">supported-model/</span>, which only reads the public catalog.</p>
+        </div>
+        <p class="text-sm text-slate-600">
+          Production (<span class="mono text-xs">docker-compose.prod.yml</span>, deployed via Coolify) has no Ollama. It runs the worker with
+          <span class="mono text-xs">WORKER_ROLE=cloud</span>, and an optional <span class="mono text-xs">WORKER_ROLE=ollama</span> worker on someone's own machine
+          <em>pulls</em> Ollama jobs from the deployed Redis (<span class="mono text-xs">docker-compose.local-ollama-worker.yml</span>). Production also runs Adminer on :8091.
+          The containers you can reach locally are <strong>dev</strong>. You don't have direct access to production.
+        </p>
+      </section>
+
+      <!-- ============================ 3 REPO ============================ -->
+      <section id="repo" class="space-y-4">
+        <h2 class="font-serif text-2xl"><span class="n">3</span>Repo layout &amp; first run</h2>
+        <table class="t">
+          <thead><tr><th>Path</th><th>What it is</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td class="mono text-xs">backend/</td><td>NestJS API <em>and</em> the worker entrypoint</td><td>Jest. Unit specs sit next to source as <span class="mono text-xs">*.spec.ts</span>; e2e suites are in <span class="mono text-xs">backend/test/</span>. Jest config is inline in <span class="mono text-xs">package.json</span>.</td></tr>
+            <tr><td class="mono text-xs">orchestrator/</td><td>Hono service wrapping the Vercel AI SDK</td><td>Vitest. Routes in <span class="mono text-xs">src/app.ts</span>; <span class="mono text-xs">src/index.ts</span> only binds the port.</td></tr>
+            <tr><td class="mono text-xs">packages/answer-grammar/</td><td>Shared parser for model answer text</td><td>Must be <strong>built</strong> (<span class="mono text-xs">dist/</span>) before backend/orchestrator can import it.</td></tr>
+            <tr><td class="mono text-xs">frontend/</td><td>Vite + React 19 SPA</td><td>Vitest + Playwright. <strong>Not</strong> an npm workspace: it has its own lockfile and <span class="mono text-xs">npm ci</span>.</td></tr>
+            <tr><td class="mono text-xs">docs/</td><td>Design history</td><td>See <a class="underline" href="#workflow">stop 17</a> for what goes where.</td></tr>
+            <tr><td class="mono text-xs">docker-compose*.yml</td><td>dev / prod / local-ollama-worker / gpu overlay</td><td>Dev compose bind-mounts source for hot reload.</td></tr>
+            <tr><td class="mono text-xs">.env.sample</td><td>Every env var, with defaults and rationale</td><td>The README's config table mirrors it. Read both once.</td></tr>
+          </tbody>
+        </table>
+        <p class="text-sm text-slate-700">The root <span class="mono text-xs">package.json</span> declares npm workspaces <span class="mono text-xs">orchestrator</span>, <span class="mono text-xs">backend</span> and <span class="mono text-xs">packages/*</span>. Install once at the root. First run:</p>
+<pre class="code"><span class="c"># 1. secrets — at minimum INTERNAL_API_KEY (any string) and OPENAI_API_KEY</span>
+cp .env.sample .env
+
+<span class="c"># 2. the whole stack (db, redis, ollama, orchestrator, backend, worker, frontend)</span>
+docker compose -p connections-dev up
+
+<span class="c"># 3. look around</span>
+http://localhost:5173            <span class="c"># the app</span>
+http://localhost:4000/api/docs   <span class="c"># Swagger — every backend route</span>
+http://localhost:4000/bull/login <span class="c"># Bull Board — queues and jobs (admin / bullboard)</span>
+
+<span class="c"># for running tests / typechecks on the host (Node 24)</span>
+npm ci                                              <span class="c"># root: backend + orchestrator + answer-grammar</span>
+npm run build --workspace=packages/answer-grammar   <span class="c"># once, and after grammar changes</span>
+(cd frontend &amp;&amp; npm ci)</pre>
+        <p class="text-sm text-slate-600">On first boot the worker catches up <em>every</em> historical puzzle from NYT and queues the deterministic and shuffle strategies for each one. It takes a while, and you can watch it in Bull Board. Raw NYT payloads are cached in <span class="mono text-xs">./.puzzle-cache</span>, so a <span class="mono text-xs">down -v</span> doesn't re-download everything. LLM strategies are <strong>never</strong> queued automatically, because they cost tokens.</p>
+      </section>
+
+      <!-- ============================ 4 VOCAB ============================ -->
+      <section id="vocab" class="space-y-4">
+        <h2 class="font-serif text-2xl"><span class="n">4</span>Vocabulary &amp; data model</h2>
+        <p class="text-sm text-slate-700 max-w-3xl">These terms appear everywhere: in code, in table names, in the UI. Tables are PascalCase (<span class="mono text-xs">"StrategyRun"</span>), so quote them in raw SQL.</p>
+        <table class="t">
+          <thead><tr><th style="width:18%">Term</th><th>Meaning</th><th style="width:30%">Where</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Puzzle</strong> → <strong>AnswerGroup</strong> → <strong>GroupMember</strong></td><td>One NYT puzzle per date, with 4 groups (levels 0–3, yellow→purple) of 4 words each. <span class="mono text-xs">GroupMember.position</span> is NYT's board order, and <span class="mono text-xs">imageUrl</span> covers the image-card puzzles.</td><td class="mono text-xs">modules/game/entities/</td></tr>
+            <tr><td><strong>Strategy</strong></td><td>A named way of solving. 6 automatic (<span class="mono text-xs">alphabetical</span>, <span class="mono text-xs">reverse-alphabetical</span>, <span class="mono text-xs">order</span>, <span class="mono text-xs">reverse-order</span>, <span class="mono text-xs">shuffle-smart</span>, <span class="mono text-xs">shuffle-foolish</span>) plus 8 LLM strategies <span class="mono text-xs">llm-&lt;pool&gt;</span>. Strategies are plain string constants, not a table.</td><td class="mono text-xs">backend/src/strategies.ts</td></tr>
+            <tr><td><strong>StrategyRun</strong> (a "trial")</td><td>One attempt of one strategy (and, for LLMs, one <em>model</em>) at one puzzle. Unique on <span class="mono text-xs">(puzzle, strategyName, modelName, trialNumber)</span>. Deterministic strategies get trial 0; shuffles get 1..<span class="mono text-xs">SHUFFLE_TRIALS</span>; each LLM model gets up to <span class="mono text-xs">LLM_TRIALS_PER_MODEL</span>. Has a <span class="mono text-xs">status</span> (see <a class="underline" href="#run">stop 7</a>).</td><td class="mono text-xs">strategy/entities/strategy-run.entity.ts</td></tr>
+            <tr><td><strong>Guess</strong></td><td>One submitted 4-word group within a run, with its result (<span class="mono text-xs">correct / incorrect / oneAway</span>, plus duplicates).</td><td class="mono text-xs">guess.entity.ts</td></tr>
+            <tr><td><strong>SolvePrompt</strong></td><td>LLM runs only: one model call. Stores the request/response bodies, prompt text, tokens (including reasoning tokens), latency, HTTP status, a status such as <span class="mono text-xs">PARSED</span>, <span class="mono text-xs">CALL_ERROR</span> or <span class="mono text-xs">MALFORMED_NO_ANSWER_BLOCK</span>, and a <span class="mono text-xs">manualRetry</span> flag. This is the audit trail.</td><td class="mono text-xs">solve-prompt.entity.ts</td></tr>
+            <tr><td><strong>LlmProposal</strong></td><td>Each group the model proposed in one SolvePrompt, including its category label. At most one per prompt becomes the Guess (<span class="mono text-xs">USED</span>); the rest are <span class="mono text-xs">NOT_SELECTED</span>.</td><td class="mono text-xs">llm-proposal.entity.ts</td></tr>
+            <tr><td><strong>CategoryEvaluation</strong> ("judge")</td><td>An LLM-as-judge verdict on whether a proposal's <em>category label</em> matches the real one. Used for the category-accuracy metric.</td><td class="mono text-xs">category-evaluation.entity.ts · category-evaluator.service.ts</td></tr>
+            <tr><td><strong>SupportedModel</strong> / <strong>ModelPrice</strong></td><td>The allowlist of models that can be dispatched per LLM strategy, plus metadata (context window, release date, and OpenRouter-sourced pricing refreshed daily). Rows are seeded <strong>by migrations</strong>.</td><td class="mono text-xs">modules/supported-model/</td></tr>
+            <tr><td><strong>Provider pool</strong></td><td>"Which API actually served this call." Not the model's vendor: <span class="mono text-xs">openai/gpt-oss-20b</span> served via Groq is in the <em>groq</em> pool. A pool is one <span class="mono text-xs">llm-&lt;id&gt;</span> strategy plus its queue, concurrency and free-tier behaviour.</td><td class="mono text-xs">provider-pool/provider-pool.config.ts</td></tr>
+            <tr><td><strong>RateLimitHold</strong></td><td>A persisted "don't call this (model or whole account) until <span class="mono text-xs">resetAt</span>" record, written when a provider says its daily quota is spent.</td><td class="mono text-xs">rate-limit-hold.entity.ts · rate-limit-hold.service.ts</td></tr>
+            <tr><td><strong>Dispatch</strong></td><td>Queueing runs. Can be manual (HTTP), automatic (ingestion queues the non-LLM strategies), or a <em>free-tier dispatch cycle</em>: a self-rescheduling tick that keeps a pool busy until its free quota runs out.</td><td class="mono text-xs">modules/dispatch/ · provider-pool/free-dispatch.service.ts</td></tr>
+            <tr><td><strong>AI Assist</strong></td><td><strong>Only</strong> the in-game button. Don't use "solve-assist" or "AI Assist" naming for automated-solving code.</td><td class="mono text-xs">frontend/src/lib/aiAssistPrompts.ts</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ============================ 5 BACKEND ============================ -->
+      <section id="backend" class="space-y-4">
+        <h2 class="font-serif text-2xl"><span class="n">5</span>Backend (NestJS)</h2>
+        <div class="text-sm mono text-slate-600 leading-relaxed">
+          backend/src/main.ts <span class="text-slate-400">→ loadEnv(), NestFactory.create(AppModule), configureApp(app), listen :4000</span><br />
+          backend/src/app.setup.ts <span class="text-slate-400">→ CORS, ValidationPipe, cookie parsing, Bull Board (+ its login), Swagger — shared with the e2e suite</span><br />
+          backend/src/app.module.ts <span class="text-slate-400">→ ConfigModule(validate: loadEnv), TypeORM root connection, throttler, global filter + logging interceptor, feature modules</span><br />
+          backend/src/config/env.ts <span class="text-slate-400">→ the one typed env loader; fails fast on missing secrets (e.g. DISPATCH_PASSWORD in production)</span>
+        </div>
+        <table class="t">
+          <thead><tr><th style="width:20%">Module (<span class="mono">modules/…</span>)</th><th>Owns</th><th style="width:28%">Look here first</th></tr></thead>
+          <tbody>
+            <tr><td class="mono text-xs">game/</td><td>Puzzle reads (<span class="mono text-xs">/game/puzzle/:date</span>), guess evaluation (<span class="mono text-xs">GameService.evaluateGuessOnPuzzle</span>), NYT ingestion and the daily 06:00 UTC population cron.</td><td class="mono text-xs">game.service.ts · puzzle-ingestion.service.ts · puzzle-queue.bootstrap.ts</td></tr>
+            <tr><td class="mono text-xs">strategy/</td><td>The heart of the app. Split along its seams: <span class="mono text-xs">DeterministicSolver</span> (brute-force and shuffle), <span class="mono text-xs">LlmStrategyRunner</span> (the LLM loop), <span class="mono text-xs">StrategyDispatch</span> (queue/count/retry/delete runs), <span class="mono text-xs">RunHistoryReadModel</span> (leaderboard and run-history queries, <span class="mono text-xs">strategy-read.service.ts</span>), <span class="mono text-xs">StrategyRunStore</span> (create/load runs), <span class="mono text-xs">OrchestratorService</span> (HTTP client), <span class="mono text-xs">RateLimitHoldService</span>, <span class="mono text-xs">FreeTierUsageService</span>, <span class="mono text-xs">CategoryEvaluatorService</span>.</td><td class="mono text-xs">llm-strategy-runner.service.ts · strategy-read.service.ts</td></tr>
+            <tr><td class="mono text-xs">dispatch/</td><td>The write-side HTTP surface: queue runs, start/stop free-tier cycles, delete or retry errored runs, refresh model metadata. Mutating routes sit behind <span class="mono text-xs">DispatchAuthGuard</span>.</td><td class="mono text-xs">dispatch.controller.ts</td></tr>
+            <tr><td class="mono text-xs">provider-pool/</td><td><span class="mono text-xs">PROVIDER_POOLS</span> config, the generic free-tier dispatcher, the RPD-resume sweep, env-backed knobs, and the unified <span class="mono text-xs">DispatchState</span> entity.</td><td class="mono text-xs">provider-pool.config.ts</td></tr>
+            <tr><td class="mono text-xs">free-tier-dispatch/</td><td>The <em>OpenAI</em> free-tier cycle (daily "flagship"/"mini" token budgets). It predates the generic pool dispatcher and is budgeted by tokens, not by holds.</td><td class="mono text-xs">free-tier-dispatch.service.ts</td></tr>
+            <tr><td class="mono text-xs">automation/</td><td>The 00:15 UTC daily job: metadata refresh, then judge backlog, then each pool's free-tier "burn". Each leg is isolated, so one leg's failure doesn't stop the rest.</td><td class="mono text-xs">daily-automation.service.ts</td></tr>
+            <tr><td class="mono text-xs">supported-model/</td><td>Model allowlist, <span class="mono text-xs">assertSupported</span>, ambiguous-name resolution, and the OpenRouter metadata/pricing refresh.</td><td class="mono text-xs">supported-model.service.ts</td></tr>
+            <tr><td class="mono text-xs">category-evaluation/</td><td>HTTP for the judge backlog: dispatch, coverage, failed.</td><td class="mono text-xs">category-evaluation.controller.ts</td></tr>
+            <tr><td class="mono text-xs">auth/</td><td>Admin login: a signed session cookie derived from <span class="mono text-xs">DISPATCH_PASSWORD</span>.</td><td class="mono text-xs">session.ts · auth.controller.ts</td></tr>
+            <tr><td class="mono text-xs">queue/</td><td>Every BullMQ <span class="mono text-xs">Queue</span> instance (module-level singletons) and the DI tokens that expose them, including the <span class="mono text-xs">RUNS_QUEUE_BY_POOL</span> maps.</td><td class="mono text-xs">queue.module.ts · strategy.queue.ts</td></tr>
+          </tbody>
+        </table>
+        <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+          <p><span class="lbl text-slate-400">Controllers are thin</span><br />Controllers validate params (DTOs in <span class="mono text-xs">dto/</span> with class-validator), call one service method, and map errors to HTTP. Business rules live in services, which is what the specs test. Read endpoints are grouped under <span class="mono text-xs">/strategy/**</span> and write endpoints under <span class="mono text-xs">/dispatch/**</span>.</p>
+          <p><span class="lbl text-slate-400">Env access goes through functions</span><br />Tunables are read with small accessor functions (<span class="mono text-xs">llmMaxPrompts()</span>, <span class="mono text-xs">shuffleTrialCount()</span>, pool knobs as thunks) that take an optional <span class="mono text-xs">env</span> argument. They're read at call time, not snapshotted, so tests can override them per case. Add new knobs the same way.</p>
+        </div>
+        <div class="text-xs bg-amber-50 border border-amber-300 rounded-lg p-3 text-amber-900">
+          <strong>Always write an explicit <span class="mono">@Inject(Token)</span></strong> (or <span class="mono">@InjectRepository</span> / <span class="mono">@InjectDataSource</span>) on every constructor parameter. The worker runs under <span class="mono">tsx</span>/esbuild, which doesn't emit decorator metadata. A bare typed parameter silently resolves to <span class="mono">undefined</span> in the worker, yet it works under ts-jest and in unit tests. This has shipped as a bug more than once.
+        </div>
+      </section>
+
+      <!-- ============================ 6 WORKER ============================ -->
+      <section id="worker" class="space-y-4">
+        <h2 class="font-serif text-2xl"><span class="n">6</span>The worker process</h2>
+        <p class="text-sm text-slate-700 max-w-3xl">
+          <span class="mono text-xs">backend/src/worker.ts</span> is short and worth reading in full. It creates
+          <span class="mono text-xs">NestFactory.createApplicationContext(AppModule)</span>, pulls services out with
+          <span class="mono text-xs">appContext.get(...)</span>, and registers one BullMQ <span class="mono text-xs">Worker</span> per queue.
+          It isn't a Nest module and has no DI of its own. It's the glue between queues and services.
+        </p>
+        <table class="t">
+          <thead><tr><th>Queue(s)</th><th>Handler</th><th>Concurrency</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td class="mono text-xs">strategy-runs</td><td class="mono text-xs">DeterministicSolver</td><td>1</td><td>Cheap and CPU-bound. Serialized so runs don't contend on DB writes.</td></tr>
+            <tr><td class="mono text-xs">llm-&lt;pool&gt;-runs ×8</td><td class="mono text-xs">handleLlmJob → LlmStrategyRunner or CategoryEvaluator</td><td><span class="mono text-xs">LLM_&lt;POOL&gt;_CONCURRENCY</span> (default 1)</td><td>One queue per provider, so a slow or rate-limited provider never blocks another provider or the brute-force strategies. Judge jobs share the queue so they share the provider's rate budget.</td></tr>
+            <tr><td class="mono text-xs">puzzle-population</td><td class="mono text-xs">PuzzleIngestionService</td><td>1</td><td>Mutates the "latest date" cursor.</td></tr>
+            <tr><td class="mono text-xs">&lt;pool&gt;-free-dispatch ×5, free-tier-dispatch</td><td class="mono text-xs">FreeDispatchService / FreeTierDispatchService .runTick</td><td>1</td><td>Each tick queues a batch, then schedules its own successor tick with a delay.</td></tr>
+            <tr><td class="mono text-xs">&lt;pool&gt;-rpd-resume ×5</td><td class="mono text-xs">RpdResumeService</td><td>1</td><td>Clears expired holds and restarts parked runs once a daily quota resets.</td></tr>
+            <tr><td class="mono text-xs">model-metadata-refresh, daily-automation</td><td class="mono text-xs">ModelMetadataRefreshService, DailyAutomationService</td><td>1</td><td>Cron jobs.</td></tr>
+          </tbody>
+        </table>
+        <p class="text-sm text-slate-700"><span class="mono text-xs">WORKER_ROLE</span> (<span class="mono text-xs">all</span> | <span class="mono text-xs">cloud</span> | <span class="mono text-xs">ollama</span>) chooses which of these a process registers. Crons are scheduled by <span class="mono text-xs">*.bootstrap.ts</span> providers using BullMQ job schedulers, so schedules live in Redis rather than in a Node timer.</p>
+        <div class="text-xs bg-slate-100 border border-slate-300 rounded-lg p-3 text-slate-700">
+          <strong>Never rename a queue.</strong> Queue names are persisted in Redis alongside in-flight jobs, and renaming one orphans them. <span class="mono">PROVIDER_POOLS</span> keeps the historical names verbatim for this reason. Job ids are deterministic (<span class="mono">runStrategyJobId</span> = <span class="mono">run-{puzzle}-{strategy}-{model}-{trial}</span>, with colons stripped because BullMQ rejects them), so a double-enqueue collapses into one job.
+        </div>
+      </section>
+
+      <!-- ============================ 7 RUN ============================ -->
+      <section id="run" class="space-y-5">
+        <h2 class="font-serif text-2xl"><span class="n">7</span>Life of a strategy run</h2>
+        <p class="text-sm text-slate-700 max-w-3xl">The best way to learn the codebase is to trace one LLM trial end to end. Follow along in the files named below.</p>
+
+        <div class="rounded-xl border border-slate-300 bg-white p-5">
+          <p class="lbl text-slate-400 mb-3">One LLM trial — POST /dispatch/model/gpt-4.1-nano/2025-01-01</p>
+          <svg viewBox="0 0 860 470" class="w-full">
+            <defs>
+              <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+            </defs>
+            <g font-size="10.5" fill="#0f172a" text-anchor="middle">
+              <rect x="10" y="10" width="140" height="34" rx="6" fill="#fff" stroke="#0f172a" stroke-width="1.5"/><text x="80" y="31">DispatchController</text>
+              <rect x="190" y="10" width="140" height="34" rx="6" fill="#fff" stroke="#0f172a" stroke-width="1.5"/><text x="260" y="31">StrategyDispatch</text>
+              <rect x="370" y="10" width="140" height="34" rx="6" fill="#fff" stroke="#0f172a" stroke-width="1.5"/><text x="440" y="31">llm-openai-runs</text>
+              <rect x="550" y="10" width="140" height="34" rx="6" fill="#1e293b"/><text x="620" y="31" fill="#f1f5f9">LlmStrategyRunner</text>
+              <rect x="720" y="10" width="130" height="34" rx="6" fill="#fff" stroke="#0f172a" stroke-width="1.5"/><text x="785" y="31">orchestrator</text>
+            </g>
+            <g stroke="#cbd5e1" stroke-dasharray="3 3">
+              <line x1="80" y1="44" x2="80" y2="460"/><line x1="260" y1="44" x2="260" y2="460"/><line x1="440" y1="44" x2="440" y2="460"/><line x1="620" y1="44" x2="620" y2="460"/><line x1="785" y1="44" x2="785" y2="460"/>
+            </g>
+            <g stroke="#475569" stroke-width="1.3" fill="none">
+              <line x1="80" y1="70" x2="258" y2="70" marker-end="url(#ar2)"/>
+              <line x1="260" y1="120" x2="438" y2="120" marker-end="url(#ar2)"/>
+              <line x1="440" y1="160" x2="618" y2="160" marker-end="url(#ar2)"/>
+              <line x1="620" y1="215" x2="783" y2="215" marker-end="url(#ar2)"/>
+              <line x1="785" y1="265" x2="622" y2="265" marker-end="url(#ar2)"/>
+            </g>
+            <rect x="560" y="190" width="290" height="190" fill="none" stroke="#6366f1" stroke-dasharray="5 3" rx="6"/>
+            <g font-size="9.5" fill="#334155">
+              <text x="88" y="64">DispatchAuthGuard → triggerStrategyRuns</text>
+              <text x="268" y="84">assertSupported(model) → resolve strategy</text>
+              <text x="268" y="97">from SupportedModel · check trial cap</text>
+              <text x="268" y="114">queueForStrategy() → pool's runs queue</text>
+              <text x="448" y="154">handleLlmJob (worker.ts)</text>
+              <text x="566" y="206" fill="#4f46e5">loop until terminal status</text>
+              <text x="628" y="209">POST /solve-step {messages, model, provider}</text>
+              <text x="790" y="238" text-anchor="end">runAnswerStep: generateText</text>
+              <text x="790" y="251" text-anchor="end">→ parseAnswer (answer-grammar)</text>
+              <text x="628" y="280">{groups, proposalWords, categoryByGroup,</text>
+              <text x="628" y="292">usage, latency, request/response bodies}</text>
+              <text x="628" y="312">save SolvePrompt + LlmProposal ×N</text>
+              <text x="628" y="325">pick first non-duplicate → Guess</text>
+              <text x="628" y="338">GameService.evaluateGuessOnPuzzle</text>
+              <text x="628" y="351">build next prompt (retry / feedback)</text>
+              <text x="628" y="364">or: classify call error → backoff / hold</text>
+              <text x="566" y="405">StrategyRun.status = completed | failed | duplicate |</text>
+              <text x="566" y="418">malformedResponse | error | rateLimitedDaily (parked)</text>
+              <text x="566" y="445" fill="#64748b">on category-labelled proposals → judge jobs later (CategoryEvaluator)</text>
+            </g>
+          </svg>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+          <p><span class="lbl text-slate-400">The conversation is the state</span><br />Each step sends the <em>full</em> message history. The initial prompt (<span class="mono text-xs">buildInitialPrompt</span>) lists the remaining words and asks for a <span class="mono text-xs">### GROUPS</span> block (Category/Words) followed by an <span class="mono text-xs">### ANSWER</span> block. After each guess the runner appends feedback (<span class="mono text-xs">buildRetryPrompt</span>). A run can be <strong>resumed</strong> after a crash, a hold or a manual retry, because <span class="mono text-xs">reconstructMessages</span> rebuilds the history from the last persisted <span class="mono text-xs">SolvePrompt.requestBody</span>.</p>
+          <p><span class="lbl text-slate-400">Failure is a first-class outcome</span><br />Each bad outcome has its own counter and cap: duplicates (<span class="mono text-xs">LLM_MAX_DUPLICATE_GUESSES</span>), malformed output (<span class="mono text-xs">LLM_MAX_MALFORMED_RESPONSES</span>), transient model errors with exponential backoff (<span class="mono text-xs">LLM_MAX_MODEL_ERRORS</span>), and wrong guesses (the NYT four-mistake rule). A per-minute 429 is <em>never</em> a failure: the run waits and retries forever. A daily-quota 429 parks the run as <span class="mono text-xs">rateLimitedDaily</span> and writes a hold.</p>
+        </div>
+
+        <table class="t">
+          <thead><tr><th>StrategyRun.status</th><th>Meaning</th><th>Can resume?</th></tr></thead>
+          <tbody>
+            <tr><td class="mono text-xs">running</td><td>In progress (or crashed mid-run; the maintenance page finds these).</td><td>—</td></tr>
+            <tr><td class="mono text-xs">completed</td><td>All 4 groups found.</td><td>terminal</td></tr>
+            <tr><td class="mono text-xs">failed</td><td>Hit the mistake limit.</td><td>terminal</td></tr>
+            <tr><td class="mono text-xs">duplicate</td><td>Kept re-proposing guessed groups.</td><td>terminal</td></tr>
+            <tr><td class="mono text-xs">malformedResponse</td><td>Output couldn't be parsed, several times in a row.</td><td>terminal</td></tr>
+            <tr><td class="mono text-xs">error</td><td>Too many consecutive transport/model errors.</td><td>yes, via manual retry (<span class="mono text-xs">POST /dispatch/run/:id/retry</span>)</td></tr>
+            <tr><td class="mono text-xs">rateLimitedDaily</td><td>Parked behind a daily-quota hold.</td><td>yes, automatically, by the pool's RPD-resume sweep</td></tr>
+          </tbody>
+        </table>
+
+        <p class="text-sm text-slate-700">
+          The <strong>deterministic path</strong> is much simpler. <span class="mono text-xs">DeterministicSolver.runDeterministicStrategy</span> orders the 16 words
+          (<span class="mono text-xs">computeInitialWordOrder</span> in <span class="mono text-xs">strategy-run-store.service.ts</span>), walks 4-combinations
+          (<span class="mono text-xs">combinatorics.ts</span>) or random groups for the shuffles, and records a Guess for each attempt. It runs on the
+          shared <span class="mono text-xs">strategy-runs</span> queue. Ingestion (<span class="mono text-xs">PuzzleIngestionService</span>) queues these automatically for every new puzzle, using
+          <span class="mono text-xs">AUTOMATIC_STRATEGIES</span> and <span class="mono text-xs">strategyTrialNumbers()</span>.
+        </p>
+        <p class="text-sm text-slate-700">
+          On the <strong>read side</strong>, <span class="mono text-xs">RunHistoryReadModel</span> (<span class="mono text-xs">strategy-read.service.ts</span>) builds the leaderboard
+          (with a short in-memory cache), per-puzzle runs, run detail and recent activity. It's the biggest service. If a leaderboard number looks wrong, the bug is almost always here, in a SQL aggregate.
+        </p>
+      </section>
+
+      <!-- ============================ 8 ORCHESTRATOR ============================ -->
+      <section id="orchestrator" class="space-y-4">
+        <h2 class="font-serif text-2xl"><span class="n">8</span>Orchestrator &amp; answer-grammar</h2>
+        <table class="t">
+          <thead><tr><th>Route</th><th>Caller</th><th>Does</th></tr></thead>
+          <tbody>
+            <tr><td class="mono text-xs">POST /solve-step</td><td>worker (<span class="mono text-xs">OrchestratorService</span>)</td><td><span class="mono text-xs">runAnswerStep</span> with a model/provider override. Captures telemetry (usage, latency, raw bodies) for the SolvePrompt row.</td></tr>
+            <tr><td class="mono text-xs">POST /diagnose</td><td>backend <span class="mono text-xs">/api/diagnose</span> (AI Assist, throttled 5/min/IP)</td><td>The same <span class="mono text-xs">runAnswerStep</span>, on the default provider, with no telemetry. The <em>frontend</em> owns the conversation.</td></tr>
+            <tr><td class="mono text-xs">POST /judge-category</td><td>worker (<span class="mono text-xs">CategoryEvaluatorService</span>)</td><td>Asks a judge model whether two category labels mean the same thing.</td></tr>
+            <tr><td class="mono text-xs">GET /health</td><td>compose healthcheck</td><td>—</td></tr>
+          </tbody>
+        </table>
+        <div class="grid md:grid-cols-3 gap-5 text-sm">
+          <div class="rounded-xl border border-slate-200 bg-white p-4"><p class="lbl text-slate-400 mb-1">provider.ts</p><p><span class="mono text-xs">ModelProvider</span> union and <span class="mono text-xs">getModel(provider, model, contextWindow)</span>, one branch per AI SDK provider package. Ollama's <span class="mono text-xs">num_ctx</span> is capped by <span class="mono text-xs">MODEL_CONTEXT_WINDOW</span> to avoid OOM.</p></div>
+          <div class="rounded-xl border border-slate-200 bg-white p-4"><p class="lbl text-slate-400 mb-1">solver.ts</p><p><span class="mono text-xs">SolveError</span> and <span class="mono text-xs">classifyModelCallError</span>. The per-provider <span class="mono text-xs">RATE_LIMIT_429_CLASSIFIERS</span> tell a per-minute limit apart from a daily one, using each provider's real headers and body shape. The codes map to HTTP 409/400/429/502, and the backend maps them back.</p></div>
+          <div class="rounded-xl border border-slate-200 bg-white p-4"><p class="lbl text-slate-400 mb-1">answer-step.ts</p><p>One <span class="mono text-xs">generateText</span> call with <span class="mono text-xs">maxRetries: 0</span> (the runner is the only retry layer) and the incoming request's <span class="mono text-xs">abortSignal</span> forwarded, so a backend timeout actually cancels the billed call.</p></div>
+        </div>
+        <p class="text-sm text-slate-700">
+          <strong><span class="mono text-xs">packages/answer-grammar</span></strong> is the single parser for the
+          <span class="mono text-xs">### GROUPS</span>/<span class="mono text-xs">### ANSWER</span> text format. It returns <span class="mono text-xs">groups</span> (from ANSWER),
+          <span class="mono text-xs">proposalWords</span> + <span class="mono text-xs">categoryByGroup</span> (from GROUPS), and <span class="mono text-xs">textIssues</span>
+          (<span class="mono text-xs">parentheticalStripped</span>, <span class="mono text-xs">groupCountOff</span> and so on). The orchestrator uses it on the live response.
+          The backend imports it too: <span class="mono text-xs">LlmStrategyRunner</span> uses <span class="mono text-xs">formatCompactAnswer</span>, and scripts like <span class="mono text-xs">backfill-issue-tags.ts</span> use it to re-parse historical responses. It was made a package because the two copies had drifted
+          (<span class="mono text-xs">docs/architecture/06-model-answer-parser.html</span>). Every odd rule in it corresponds to a real model habit, and each one has a test.
+        </p>
+        <div class="text-xs bg-amber-50 border border-amber-300 rounded-lg p-3 text-amber-900">
+          <strong>Stale knobs.</strong> The temperature actually used for a solve is <span class="mono">ANSWER_STEP_TEMPERATURE = 0.7</span>, hard-coded in <span class="mono">answer-step.ts</span>. <span class="mono">/solve-step</span>'s request schema has no temperature field. <span class="mono">LLM_TEMPERATURE_BASE</span> is only <em>recorded</em> on each <span class="mono">SolvePrompt</span>. <span class="mono">LLM_NUM_RESPONSES</span> and <span class="mono">LLM_MAX_PROMPTS</span> aren't read by anything outside <span class="mono">strategies.ts</span>. All three are still documented in <span class="mono">.env.sample</span> and the README. Don't tune them expecting a change in behaviour.
+        </div>
+      </section>
+
+      <!-- ============================ 9 POOLS ============================ -->
+      <section id="pools" class="space-y-4">
+        <h2 class="font-serif text-2xl"><span class="n">9</span>Provider pools, rate limits &amp; free tiers</h2>
+        <p class="text-sm text-slate-700 max-w-3xl">
+          This area went through the biggest refactor (<span class="mono text-xs">docs/architecture/01–04</span>). Adding a free-tier provider used to mean hand-copying
+          ~15 near-identical files. Now the provider-specific differences are <em>data</em>: one row in
+          <span class="mono text-xs">PROVIDER_POOLS</span>. Generic services read that row and branch on its fields, never on a provider's name.
+        </p>
+        <div class="rounded-xl border border-emerald-600 bg-emerald-50/40 p-5 text-sm space-y-2">
+          <p class="lbl text-emerald-700">PROVIDER_POOLS row — backend/src/modules/provider-pool/provider-pool.config.ts</p>
+<pre class="code">{
+  id: <span class="s">"groq"</span>, label: <span class="s">"Groq"</span>, strategyName: <span class="s">"llm-groq"</span>, orchestratorProvider: <span class="s">"groq"</span>,
+  queues: { runs: <span class="s">"llm-groq-runs"</span>, freeDispatch: <span class="s">"…"</span>, rpdResume: <span class="s">"…"</span> },   <span class="c">// verbatim, never renamed</span>
+  concurrency: () =&gt; intEnv(<span class="s">"LLM_GROQ_CONCURRENCY"</span>, 1),               <span class="c">// thunks, read at call time</span>
+  freeTier: {                                                        <span class="c">// null for openai, ollama, nvidia</span>
+    holdScope: <span class="s">"model"</span>,                    <span class="c">// or "account" (openrouter)</span>
+    resetSchedule: { kind: <span class="s">"fixed-cron"</span> | <span class="s">"self-rearm"</span>, … },
+    dispatch: { stop: <span class="s">"until-held"</span> | <span class="s">"account-budget"</span>, pacing },
+    rateLimitFallbackSeconds, dailyHoldFallbackSeconds, persistentRateLimitPark?,
+  },
+}</pre>
+        </div>
+        <ul class="text-sm grid md:grid-cols-2 gap-x-8 gap-y-2 list-disc pl-5 marker:text-emerald-600 text-slate-700">
+          <li><strong>Readers:</strong> the queue router (<span class="mono text-xs">queueForStrategy</span>), the worker's registration loops, <span class="mono text-xs">LlmStrategyRunner</span>'s hold logic, <span class="mono text-xs">FreeDispatchService</span>, <span class="mono text-xs">RpdResumeService</span>, daily automation, and <span class="mono text-xs">/dispatch/pool/:poolId</span>.</li>
+          <li><strong>Frontend twin:</strong> <span class="mono text-xs">frontend/src/data/benchmark/providerPools.ts</span> holds id/label/strategyName only. Parity tests stop the two lists drifting.</li>
+          <li><strong>Holds:</strong> a daily 429 writes a <span class="mono text-xs">RateLimitHold</span> for a model (or the whole account, for OpenRouter). The runner checks the hold before each call and parks the run. The pool's resume sweep clears expired holds and re-queues parked runs.</li>
+          <li><strong>Free-dispatch cycle:</strong> a tick counts in-flight runs, picks unrun puzzle dates for each unheld model, queues a small batch, then re-enqueues itself with a delay. It stops when every model is held (<span class="mono text-xs">until-held</span>) or when the day's call budget is spent (<span class="mono text-xs">account-budget</span>). State is kept in <span class="mono text-xs">DispatchState</span>.</li>
+          <li><strong>OpenAI is different:</strong> OpenAI's free tier is a daily <em>token</em> allowance ("mini"/"flagship"), so <span class="mono text-xs">FreeTierDispatchService</span> budgets against <span class="mono text-xs">FreeTierUsageService</span>'s token sums with a safety ceiling.</li>
+          <li><strong>Rule for rate-limit code:</strong> classify from a <em>real captured error</em>, never from vendor docs. Until one has been captured, ship <span class="mono text-xs">null</span> (generic retry), as NVIDIA currently does. Check model availability against the account itself, too: NVIDIA's catalog listed models that returned 410.</li>
+        </ul>
+      </section>
+
+      <!-- ============================ 10 FRONTEND ============================ -->
+      <section id="frontend" class="space-y-4">
+        <h2 class="font-serif text-2xl"><span class="n">10</span>Frontend</h2>
+        <table class="t">
+          <thead><tr><th>Area</th><th>Files</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>Routing</td><td class="mono text-xs">src/App.tsx · main.tsx · components/SiteLayout.tsx</td><td>react-router v7. The benchmark pages are <span class="mono text-xs">lazy()</span> so a player loading <span class="mono text-xs">/</span> only downloads the game.</td></tr>
+            <tr><td>Game</td><td class="mono text-xs">lib/gameReducer.ts · hooks/useConnectionsGame.ts · components/Game.tsx, Board, Tile…</td><td>A pure reducer with all rules in one testable function. The hook wires in fetching and timers, and components only render.</td></tr>
+            <tr><td>AI Assist</td><td class="mono text-xs">lib/aiAssistPrompts.ts</td><td>The browser builds the prompts and keeps the session, and the backend proxies it to <span class="mono text-xs">/diagnose</span>. Prompts use the same GROUPS/ANSWER grammar as the automated path.</td></tr>
+            <tr><td>Benchmark</td><td class="mono text-xs">pages/benchmark/* · components/benchmark/*</td><td>Leaderboard, per-strategy calendar, per-puzzle runs with the guess-chain visualizer, activity, maintenance, and dispatch widgets.</td></tr>
+            <tr><td>Data layer</td><td class="mono text-xs">data/benchmark/api.ts · types.ts · hooks/useResource.ts · @tanstack/react-query</td><td><span class="mono text-xs">api.ts</span> holds every call. <span class="mono text-xs">fetchJsonAdmin</span> sends the cookie and <span class="mono text-xs">x-admin-request</span>, and fires <span class="mono text-xs">ADMIN_SESSION_EXPIRED_EVENT</span> on a 401/403.</td></tr>
+            <tr><td>Admin</td><td class="mono text-xs">auth/AdminAuthContext.tsx · pages/AdminLoginPage.tsx</td><td>A hidden <span class="mono text-xs">/admin-login</span> page. <span class="mono text-xs">useAdminAuth().isAdmin</span> controls whether dispatch/delete/retry controls are shown.</td></tr>
+          </tbody>
+        </table>
+        <div class="text-xs bg-slate-100 border border-slate-300 rounded-lg p-3 text-slate-700">
+          <strong>Data fetching is in transition.</strong> The 18 hand-rolled <span class="mono">AbortController</span> blocks (<span class="mono">docs/architecture/09</span>) were replaced by <span class="mono">useResource</span> / <span class="mono">useResources</span>. After that, TanStack React Query was adopted, starting with <span class="mono">LeaderboardPage</span>, <span class="mono">ActivityPage</span> and <span class="mono">MaintenancePanel</span>. For new server state, follow the React Query pages and don't add more <span class="mono">useResource</span> call sites. Check <span class="mono">git log</span> or ask if you're unsure.
+        </div>
+        <p class="text-sm text-slate-700"><strong>Styling:</strong> plain CSS (<span class="mono text-xs">App.css</span>, <span class="mono text-xs">benchmark.css</span>, <span class="mono text-xs">header.css</span>). Read <span class="mono text-xs">DESIGN.md</span> at the repo root before styling anything. It sets serif for editorial headings, mono for every number, a single blue accent for "active/leading", a teal→amber gradient for performance, and hairline borders.</p>
+      </section>
+
+      <!-- ============================ 11 AUTH ============================ -->
+      <section id="auth" class="space-y-4">
+        <h2 class="font-serif text-2xl"><span class="n">11</span>Auth &amp; trust boundaries</h2>
+        <table class="t">
+          <thead><tr><th>Boundary</th><th>Mechanism</th><th>Where</th></tr></thead>
+          <tbody>
+            <tr><td>backend/worker → orchestrator</td><td>Shared secret header <span class="mono text-xs">x-internal-api-key</span> (<span class="mono text-xs">INTERNAL_API_KEY</span>). The orchestrator returns 500 if the key isn't set, so it never runs open by accident.</td><td class="mono text-xs">orchestrator/src/app.ts</td></tr>
+            <tr><td>Paid or destructive dispatch routes</td><td><span class="mono text-xs">DispatchAuthGuard</span>, only when <span class="mono text-xs">NODE_ENV=production</span>. Accepts a <span class="mono text-xs">body.password</span> matching <span class="mono text-xs">DISPATCH_PASSWORD</span>, <em>or</em> a signed <span class="mono text-xs">admin_session</span> cookie plus the <span class="mono text-xs">x-admin-request</span> header. Dev is unauthenticated.</td><td class="mono text-xs">dispatch/dispatch-auth.guard.ts · auth/session.ts</td></tr>
+            <tr><td>Bull Board</td><td>Its own login page and cookie (<span class="mono text-xs">BULL_BOARD_USER/PASS</span>).</td><td class="mono text-xs">app.setup.ts</td></tr>
+            <tr><td>Public reads</td><td>Global throttler (100/min), with <span class="mono text-xs">/api/diagnose</span> at 5/min/IP because it spends OpenAI tokens.</td><td class="mono text-xs">app.module.ts · app.controller.ts</td></tr>
+          </tbody>
+        </table>
+        <p class="text-sm text-slate-600">If you add a route that spends money or deletes data, put it under <span class="mono text-xs">@UseGuards(DispatchAuthGuard)</span> and call it from the frontend through <span class="mono text-xs">fetchJsonAdmin</span>.</p>
+      </section>
+
+      <!-- ============================ 12 DB ============================ -->
+      <section id="db" class="space-y-4">
+        <h2 class="font-serif text-2xl"><span class="n">12</span>Database &amp; migrations</h2>
+        <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+          <p><span class="lbl text-slate-400">Migrations only</span><br /><span class="mono text-xs">synchronize: false</span>, <span class="mono text-xs">migrationsRun: true</span>. An empty database is built from <span class="mono text-xs">1754400000000-initial-schema.ts</span> onward when the backend or worker boots, so there's no SQL init script. Generate with <span class="mono text-xs">npm run migration:generate</span> (uses <span class="mono text-xs">src/data-source.ts</span>). Filenames are <span class="mono text-xs">&lt;timestamp&gt;-kebab-name.ts</span>. Migrations are append-only history: don't consolidate old ones or edit them.</p>
+          <p><span class="lbl text-slate-400">Reference data lives in migrations too</span><br />New <span class="mono text-xs">SupportedModel</span> rows are added by migration (for example <span class="mono text-xs">1803000000000-add-nvidia-models.ts</span>), with a doc comment saying why each model is included and how its <span class="mono text-xs">openRouterSlug</span> was confirmed. Pricing and context window are backfilled later by the metadata refresh. A worker that shares a DB with another instance sets <span class="mono text-xs">DB_MIGRATIONS_RUN=false</span>.</p>
+        </div>
+        <div class="text-xs bg-amber-50 border border-amber-300 rounded-lg p-3 text-amber-900">
+          <strong>Hand-maintained registration lists.</strong> <span class="mono">TypeOrmModule.forFeature([X])</span> alone isn't enough. A new entity must also be added to the <span class="mono">entities: [...]</span> arrays in <strong>both</strong> <span class="mono">app.module.ts</span> and <span class="mono">data-source.ts</span>. If you miss one, the first real query fails with <span class="mono">EntityMetadataNotFoundError</span>, even though unit tests and often e2e pass. Likewise a new queue must be added to Bull Board's list in <span class="mono">app.setup.ts</span> and to <span class="mono">queue.module.ts</span>. Every provider addition so far has needed a follow-up fix for one of these.
+        </div>
+        <p class="text-sm text-slate-700"><span class="mono text-xs">backend/src/scripts/</span> holds one-off backfills and repairs (<span class="mono text-xs">backfill:*</span>, <span class="mono text-xs">trim:*</span>, <span class="mono text-xs">purge:*</span>). They run from compiled <span class="mono text-xs">dist/</span> with <span class="mono text-xs">node</span>, not <span class="mono text-xs">tsx</span>, so they work inside the production image. Each has a spec. Follow that pattern: a pure planning function that's tested, plus a thin script that applies the plan.</p>
+      </section>
+
+      <!-- ============================ 13 TESTING ============================ -->
+      <section id="testing" class="space-y-4">
+        <h2 class="font-serif text-2xl"><span class="n">13</span>Testing</h2>
+        <table class="t">
+          <thead><tr><th>Package</th><th>Command</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>backend unit</td><td class="mono text-xs">cd backend &amp;&amp; npm test [-- file.spec.ts -t "name"]</td><td>Always go through <span class="mono text-xs">npm test</span>. Bare <span class="mono text-xs">npx jest</span> skips <span class="mono text-xs">--forceExit</span> and hangs forever on open BullMQ/TypeORM handles.</td></tr>
+            <tr><td>backend e2e</td><td class="mono text-xs">docker compose up -d db redis<br/>docker exec postgres_db psql -U postgres -c "CREATE DATABASE connections_test"<br/>cd backend &amp;&amp; npm run test:e2e</td><td>Boots the real app against the <span class="mono text-xs">connections_test</span> DB (defaults in <span class="mono text-xs">test/setup-env.ts</span>). Suites: app, provider-pool dispatch, rate-limit hold.</td></tr>
+            <tr><td>backend lint</td><td class="mono text-xs">npm run lint &amp;&amp; npm run format</td><td>Flat ESLint + Prettier. CI runs lint → build → test → e2e.</td></tr>
+            <tr><td>orchestrator</td><td class="mono text-xs">cd orchestrator &amp;&amp; npm run test:run</td><td>Routes are tested via <span class="mono text-xs">app.request()</span> with no port, which is why <span class="mono text-xs">app.ts</span> and <span class="mono text-xs">index.ts</span> are separate.</td></tr>
+            <tr><td>answer-grammar</td><td class="mono text-xs">npm run test:run --workspace=packages/answer-grammar</td><td>Build it before testing the backend or orchestrator.</td></tr>
+            <tr><td>frontend</td><td class="mono text-xs">cd frontend &amp;&amp; npm run test:run<br/>npm run test:e2e</td><td><span class="mono text-xs">npm test</span> opens watch mode. Playwright e2e is in <span class="mono text-xs">frontend/e2e/</span> with fixtures in place of a backend.</td></tr>
+          </tbody>
+        </table>
+        <p class="text-sm text-slate-700">There's no "test all" command. Run each package you touched. Specs sit next to source, and service specs build a Nest <span class="mono text-xs">Test.createTestingModule</span> with <span class="mono text-xs">{ provide: Token, useValue: mock }</span>. That's also why missing <span class="mono text-xs">@Inject</span> decorators and missing entity registrations get past unit tests (see the gotchas). For anything touching the DB or queue wiring, run the e2e suite or exercise the live dev stack.</p>
+      </section>
+
+      <!-- ============================ 14 RECIPES ============================ -->
+      <section id="recipes" class="space-y-8">
+        <h2 class="font-serif text-2xl"><span class="n">14</span>Recipes</h2>
+
+        <article class="space-y-3">
+          <h3 class="font-serif text-xl">Make a new model dispatchable on an existing provider</h3>
+          <ol class="text-sm list-decimal pl-5 space-y-1 text-slate-700">
+            <li>Confirm with a live call that the model works on <em>our</em> API account. Vendor catalogs are not reliable here.</li>
+            <li>Add a migration that inserts <span class="mono text-xs">SupportedModel</span> rows (<span class="mono text-xs">strategyName</span>, <span class="mono text-xs">modelName</span> = provider's id, <span class="mono text-xs">openRouterSlug</span> if confirmed, <span class="mono text-xs">freeTier</span> if applicable). Copy the latest <span class="mono text-xs">add-*-models</span> migration.</li>
+            <li>That's all. Dispatch is gated on <span class="mono text-xs">SupportedModelService.assertSupported</span>, and the UI reads <span class="mono text-xs">/strategy/models</span>.</li>
+          </ol>
+        </article>
+
+        <article class="space-y-3">
+          <h3 class="font-serif text-xl">Add a new provider pool</h3>
+          <p class="text-sm text-slate-600">Use <span class="mono text-xs">docs/specs/2026-09-21-nvidia-nim-provider-design.md</span> as the template. It lists every file that had to change:</p>
+          <ol class="text-sm list-decimal pl-5 space-y-1 text-slate-700">
+            <li><span class="mono text-xs">orchestrator/package.json</span>: the AI SDK provider package.</li>
+            <li><span class="mono text-xs">orchestrator/src/provider.ts</span>: <span class="mono text-xs">ModelProvider</span> union, <span class="mono text-xs">getModel</span>/<span class="mono text-xs">getModelName</span>/<span class="mono text-xs">defaultProvider</span>, default model.</li>
+            <li><span class="mono text-xs">orchestrator/src/solver.ts</span>: <span class="mono text-xs">RATE_LIMIT_429_CLASSIFIERS.&lt;id&gt;</span> (<span class="mono text-xs">null</span> until you have a real captured 429).</li>
+            <li><span class="mono text-xs">backend/src/strategies.ts</span>: <span class="mono text-xs">LLM_&lt;ID&gt;</span>, <span class="mono text-xs">SUPPORTED_STRATEGIES</span>, <span class="mono text-xs">LLM_STRATEGIES</span>.</li>
+            <li><span class="mono text-xs">provider-pool.config.ts</span>: the <span class="mono text-xs">ProviderPoolId</span> union and a new <span class="mono text-xs">PROVIDER_POOLS</span> row (<span class="mono text-xs">freeTier: null</span> to start).</li>
+            <li>Queue wiring: <span class="mono text-xs">strategy.queue.ts</span> (new <span class="mono text-xs">Queue</span>), <span class="mono text-xs">queue.module.ts</span> (token + <span class="mono text-xs">RUNS_QUEUE_BY_POOL</span>), the injections in <span class="mono text-xs">strategy-dispatch.service.ts</span> / <span class="mono text-xs">strategy-read.service.ts</span>, and <strong>Bull Board in <span class="mono text-xs">app.setup.ts</span></strong>.</li>
+            <li><span class="mono text-xs">frontend/src/data/benchmark/providerPools.ts</span>: the UI row (the parity test will fail until you add it).</li>
+            <li><span class="mono text-xs">backend/src/config/env.ts</span>: <span class="mono text-xs">JUDGE_PROVIDERS</span>. Env vars also go in <span class="mono text-xs">.env.sample</span>, the README table and all compose files.</li>
+            <li>A migration that seeds its <span class="mono text-xs">SupportedModel</span> rows.</li>
+          </ol>
+          <p class="text-sm text-slate-600">The worker picks up the new runs queue automatically from <span class="mono text-xs">PROVIDER_POOLS</span>. Free-tier automation (holds, resume, dispatch cycle) is a separate step, taken only once the provider's real rate-limit behaviour has been observed.</p>
+        </article>
+
+        <article class="space-y-3">
+          <h3 class="font-serif text-xl">Add a backend endpoint</h3>
+          <ol class="text-sm list-decimal pl-5 space-y-1 text-slate-700">
+            <li>Reads go on <span class="mono text-xs">StrategyController</span> → <span class="mono text-xs">RunHistoryReadModel</span>. Writes go on <span class="mono text-xs">DispatchController</span> → <span class="mono text-xs">StrategyDispatch</span> (or the relevant service), with <span class="mono text-xs">DispatchAuthGuard</span> if the route spends money or deletes data.</li>
+            <li>DTO with class-validator in <span class="mono text-xs">dto/</span>, plus Swagger decorators (the docs at <span class="mono text-xs">/api/docs</span> are part of the contract).</li>
+            <li>Explicit <span class="mono text-xs">@Inject(...)</span> on every new constructor parameter.</li>
+            <li>A service spec next to the file. Extend e2e if routing or guards changed.</li>
+            <li>Frontend: a typed function in <span class="mono text-xs">data/benchmark/api.ts</span>, types in <span class="mono text-xs">types.ts</span>, consumed through React Query.</li>
+          </ol>
+        </article>
+
+        <article class="space-y-3">
+          <h3 class="font-serif text-xl">Add an entity or column</h3>
+          <ol class="text-sm list-decimal pl-5 space-y-1 text-slate-700">
+            <li>Entity in the feature module's <span class="mono text-xs">entities/</span>, plus <span class="mono text-xs">TypeOrmModule.forFeature</span> in that module.</li>
+            <li>Add it to <strong>both</strong> <span class="mono text-xs">entities</span> arrays (<span class="mono text-xs">app.module.ts</span>, <span class="mono text-xs">data-source.ts</span>).</li>
+            <li><span class="mono text-xs">npm run migration:generate</span>, then review the SQL by hand. Don't touch the index and constraint names that the generator doesn't own.</li>
+            <li>Restart the dev backend to apply it, and check a real query against the dev DB.</li>
+          </ol>
+        </article>
+
+        <article class="space-y-3">
+          <h3 class="font-serif text-xl">Change the solve prompt or the answer format</h3>
+          <p class="text-sm text-slate-700">The prompts are in <span class="mono text-xs">llm-strategy-runner.service.ts</span> (<span class="mono text-xs">buildInitialPrompt</span> / <span class="mono text-xs">buildRetryPrompt</span>) for automated runs and in <span class="mono text-xs">frontend/src/lib/aiAssistPrompts.ts</span> for AI Assist. Both must keep producing text that <span class="mono text-xs">answer-grammar</span> can parse. Prompt text is persisted on each <span class="mono text-xs">SolvePrompt</span>, so historical runs keep the exact prompt they were given. A format change needs a grammar test first, then a grammar rebuild.</p>
+        </article>
+      </section>
+
+      <!-- ============================ 15 DECISIONS ============================ -->
+      <section id="decisions" class="space-y-4">
+        <h2 class="font-serif text-2xl"><span class="n">15</span>Architectural decisions, and why</h2>
+        <table class="t">
+          <thead><tr><th style="width:28%">Decision</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td>A separate worker process, not in-app BullMQ processors</td><td>LLM runs take minutes. Keeping them off the HTTP process makes the API responsive and lets the worker be split by role (cloud/ollama) across machines without exposing Ollama to the internet.</td></tr>
+            <tr><td>A separate orchestrator service for all model calls</td><td>Provider keys are isolated in one small service, and the AI SDK dependency surface stays out of the backend. A second orchestrator can run next to a local Ollama, and it's the one place where provider error shapes get normalized.</td></tr>
+            <tr><td>One queue per provider</td><td>Provider-level isolation: a rate-limited Mistral doesn't delay Groq or the brute-force strategies, and each provider gets its own concurrency. Judge jobs ride the judge provider's queue so they share its rate budget.</td></tr>
+            <tr><td>Provider differences as config (<span class="mono text-xs">PROVIDER_POOLS</span>)</td><td>Adding a provider used to mean copying ~15 files. The row captures the small, closed set of axes that actually differ (hold scope, reset schedule, dispatch stop rule, pacing). <span class="mono text-xs">docs/architecture/01</span>.</td></tr>
+            <tr><td>Persist everything about every LLM call</td><td>Debugging model behaviour after the fact needs the raw request/response, tokens and latency. Runs can be resumed from persisted history, and costs can be backfilled. This costs storage, and it's worth it.</td></tr>
+            <tr><td>Deterministic BullMQ job ids</td><td>Re-dispatching the same trial is idempotent (issue #43 fixed a collision where the model wasn't part of the id).</td></tr>
+            <tr><td>LLM strategies never auto-dispatched from ingestion</td><td>Token spend is always either a deliberate human action or a budgeted free-tier cycle with hard stop rules.</td></tr>
+            <tr><td>Per-minute 429 = wait forever; daily 429 = park + hold</td><td>Free tiers make per-minute limits routine, and treating them as failures would poison the leaderboard. Daily limits would waste calls if retried, so the run parks until the reset.</td></tr>
+            <tr><td>Schema by migrations only; reference data by migrations</td><td>The same mechanism boots CI, fresh dev databases and production, and the model allowlist is versioned with the code that relies on it.</td></tr>
+            <tr><td>Orchestrator <span class="mono text-xs">app.ts</span> / <span class="mono text-xs">index.ts</span> split</td><td>Route tests call <span class="mono text-xs">app.request()</span> without binding a port.</td></tr>
+            <tr><td>Split of the old <span class="mono text-xs">StrategyService</span></td><td>A 1,700-line class had four jobs with non-overlapping callers. It's now <span class="mono text-xs">DeterministicSolver</span> / <span class="mono text-xs">StrategyDispatch</span> / <span class="mono text-xs">RunHistoryReadModel</span>. <span class="mono text-xs">docs/architecture/05</span>.</td></tr>
+          </tbody>
+        </table>
+        <p class="text-sm text-slate-600">The <span class="mono text-xs">docs/architecture/00-overview*.html</span> reviews list known friction that hasn't been addressed yet, and modules already judged healthy. Read them before starting a refactor, so you don't repeat an analysis that's already been done.</p>
+      </section>
+
+      <!-- ============================ 16 GOTCHAS ============================ -->
+      <section id="gotchas" class="space-y-4">
+        <h2 class="font-serif text-2xl"><span class="n">16</span>Gotchas</h2>
+        <ul class="text-sm space-y-2 list-disc pl-5 marker:text-amber-500 text-slate-700">
+          <li><strong>Bare constructor types resolve to <span class="mono text-xs">undefined</span> in the worker.</strong> Always use <span class="mono text-xs">@Inject(Token)</span>.</li>
+          <li><strong>Entity/queue registration lists</strong>: <span class="mono text-xs">app.module.ts</span> + <span class="mono text-xs">data-source.ts</span> + Bull Board in <span class="mono text-xs">app.setup.ts</span>.</li>
+          <li><strong><span class="mono text-xs">npx jest</span> hangs forever.</strong> Use <span class="mono text-xs">npm test -- …</span> with a bounded timeout.</li>
+          <li><strong>answer-grammar changes are invisible until rebuilt</strong> (consumers import <span class="mono text-xs">dist/</span>). In Docker dev, <span class="mono text-xs">packages/answer-grammar/src</span> is bind-mounted but <span class="mono text-xs">dist/</span> is built into the image. After a grammar edit, rebuild inside the backend/orchestrator containers (or rebuild the images) before trusting what the live stack does.</li>
+          <li><strong><span class="mono text-xs">npm test</span> in <span class="mono text-xs">frontend/</span> is watch mode.</strong> Use <span class="mono text-xs">npm run test:run</span>.</li>
+          <li><strong>The frontend's <span class="mono text-xs">"proxy"</span> field is for Docker networking.</strong> Local dev uses <span class="mono text-xs">VITE_API_URL</span>, which is baked in at build time.</li>
+          <li><strong>WSL:</strong> inline env vars (<span class="mono text-xs">DB_PORT=… npm …</span>) don't reach Windows <span class="mono text-xs">node.exe</span> unless they're listed in <span class="mono text-xs">WSLENV</span>. Rely on <span class="mono text-xs">test/setup-env.ts</span> defaults instead.</li>
+          <li><strong>Never rename a BullMQ queue</strong> or change a job-id shape casually. In-flight jobs are keyed by both.</li>
+          <li><strong>Case matters in words.</strong> Models change capitalization, and puzzle words can have odd casing. Compare through <span class="mono text-xs">normalize-puzzle-word.ts</span> / <span class="mono text-xs">case-insensitive-match.ts</span>, not <span class="mono text-xs">===</span>.</li>
+          <li><strong>Model name ≠ unique.</strong> The same <span class="mono text-xs">modelName</span> can exist under two strategies (e.g. <span class="mono text-xs">gpt-oss-20b</span> on Groq and NIM), so always carry <span class="mono text-xs">strategyName</span> with it. The UI has an <span class="mono text-xs">AmbiguousModelPicker</span> for this.</li>
+          <li><strong>"Today" is UTC</strong> for quotas (<span class="mono text-xs">startOfTodayUtc</span>) but local for the player's "today's puzzle". Don't mix them up.</li>
+          <li><strong>Local containers are dev.</strong> Production is a separate Coolify deployment that you can't reach directly.</li>
+        </ul>
+      </section>
+
+      <!-- ============================ 17 WORKFLOW ============================ -->
+      <section id="workflow" class="space-y-4">
+        <h2 class="font-serif text-2xl"><span class="n">17</span>Docs &amp; workflow</h2>
+        <table class="t">
+          <thead><tr><th>Location</th><th>Contains</th></tr></thead>
+          <tbody>
+            <tr><td class="mono text-xs">AGENTS.md · README.md · DESIGN.md</td><td>Short conventions and commands · full config and deploy reference · visual design system.</td></tr>
+            <tr><td class="mono text-xs">docs/architecture/*.html</td><td>Architecture reviews (<span class="mono text-xs">00-*</span>, including this tour) and numbered "deepening" candidates. Self-contained Tailwind pages with inline SVG.</td></tr>
+            <tr><td class="mono text-xs">docs/architecture/specs/*.md</td><td>Implementation specs that carry out those candidates: goal, scope, out-of-scope with reasons, step-by-step PR plan.</td></tr>
+            <tr><td class="mono text-xs">docs/specs/</td><td>Design notes for features that are written outside the Superpowers workflow (e.g. the NVIDIA provider).</td></tr>
+            <tr><td class="mono text-xs">docs/superpowers/specs · plans</td><td>Feature designs and plans from the Superpowers brainstorm → plan → execute workflow, dated. Good background reading for any feature area. Keep other design notes out of here, so the provenance of each doc stays clear.</td></tr>
+          </tbody>
+        </table>
+        <ul class="text-sm space-y-1.5 list-disc pl-5 text-slate-700">
+          <li>Never commit to <span class="mono text-xs">master</span> directly, docs included. Branch as <span class="mono text-xs">feat/…</span>, <span class="mono text-xs">fix/…</span>, <span class="mono text-xs">refactor/…</span>, <span class="mono text-xs">test/…</span> or <span class="mono text-xs">docs/…</span> and open a PR. CI runs three workflows (backend, frontend, orchestrator).</li>
+          <li>Commit messages use Conventional Commits with a scope: <span class="mono text-xs">fix(backend): …</span>, <span class="mono text-xs">test(frontend): …</span>, <span class="mono text-xs">docs(architecture): …</span>.</li>
+          <li>Code comments explain <em>why</em>, and often cite the incident or design doc behind a decision. Match that density. When a comment and the code disagree, trust the code and fix the comment.</li>
+        </ul>
+      </section>
+
+      <!-- ============================ FIRST WEEK ============================ -->
+      <section class="rounded-2xl border-2 border-emerald-600 bg-white p-8 space-y-4">
+        <p class="lbl text-emerald-700">Suggested first week</p>
+        <h2 class="font-serif text-2xl">Read the loop, run the loop, change the loop.</h2>
+        <ol class="text-sm list-decimal pl-5 space-y-1.5 text-slate-700 max-w-3xl">
+          <li>Bring the stack up. Play a puzzle. Open Swagger and Bull Board and watch ingestion drain.</li>
+          <li>Read <span class="mono text-xs">worker.ts</span>, <span class="mono text-xs">provider-pool.config.ts</span> and <span class="mono text-xs">strategies.ts</span> in full.</li>
+          <li>Dispatch one Ollama trial (<span class="mono text-xs">POST /dispatch/model/llama3.2/&lt;date&gt;</span>, free and local), then follow it through <span class="mono text-xs">LlmStrategyRunner</span>, the orchestrator logs, and the <span class="mono text-xs">SolvePrompt</span>/<span class="mono text-xs">LlmProposal</span>/<span class="mono text-xs">Guess</span> rows it wrote. Then find it in the UI's guess-chain visualizer.</li>
+          <li>Run all four test suites locally, including backend e2e.</li>
+          <li>Skim <span class="mono text-xs">docs/architecture/00-overview*.html</span> and one Superpowers spec for the area you'll work on first.</li>
+          <li>Pick a small change, such as a new column on a leaderboard table or a new grammar edge case, and ship it through a branch and PR.</li>
+        </ol>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-8 border-t border-slate-200">
+        Connections Lab · guided tour for new developers · reflects <span class="mono">master</span> as of 2026-09-24 · when this drifts from the code, trust the code and update this page
+      </footer>
+
+    </main>
+  </body>
+</html>
