@@ -9,6 +9,7 @@ import { Guess } from "./entities/guess.entity";
 import { SolvePrompt, SolvePromptType } from "./entities/solve-prompt.entity";
 import { LlmProposal, LlmProposalStatus } from "./entities/llm-proposal.entity";
 import { CategoryEvaluation } from "./entities/category-evaluation.entity";
+import { FreeTierReservation } from "./entities/free-tier-reservation.entity";
 
 describe("StrategyRunStore", () => {
   let store: StrategyRunStore;
@@ -171,6 +172,7 @@ describe("StrategyRunStore", () => {
           currentCombination: [0, 1, 2, 3],
           modelName: null,
           contextWindow: null,
+          budgetTier: null,
         });
       },
     );
@@ -200,6 +202,20 @@ describe("StrategyRunStore", () => {
 
       expect(mockStrategyRunRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ contextWindow: 131072 }),
+      );
+    });
+
+    it("should set budgetTier on a newly created run when given", async () => {
+      mockPuzzleRepo.findOne.mockResolvedValueOnce(puzzle);
+      mockStrategyRunRepo.findOne.mockResolvedValueOnce(null);
+      const created = makeRun();
+      mockStrategyRunRepo.create.mockReturnValueOnce(created);
+      mockStrategyRunRepo.save.mockResolvedValueOnce(created);
+
+      await store.loadOrCreateRun(100, "llm-openai", 1, "gpt-5", null, "flagship");
+
+      expect(mockStrategyRunRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ budgetTier: "flagship" }),
       );
     });
 
@@ -268,6 +284,24 @@ describe("StrategyRunStore", () => {
   });
 
   describe("flushBatch", () => {
+    it("should settle a budget reservation inside the flush transaction", async () => {
+      await store.flushBatch(makeRun() as StrategyRun, [], [], [], {
+        reservationId: 55,
+        recorded: true,
+      });
+
+      expect(mockManager.delete).toHaveBeenCalledWith(FreeTierReservation, { id: 55 });
+      expect(mockManager.delete.mock.invocationCallOrder[0]).toBeLessThan(
+        mockManager.save.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("should not touch reservations when no settlement is given", async () => {
+      await store.flushBatch(makeRun() as StrategyRun, []);
+
+      expect(mockManager.delete).not.toHaveBeenCalled();
+    });
+
     it("should persist run state even when there are no new guesses", async () => {
       await store.flushBatch(makeRun() as StrategyRun, []);
 

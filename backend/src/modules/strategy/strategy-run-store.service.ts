@@ -9,6 +9,7 @@ import { CategoryEvaluation } from "./entities/category-evaluation.entity";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { firstCombination } from "./combinatorics";
 import { SHUFFLE_SMART, SHUFFLE_FOOLISH, LLM_OPENAI, LLM_OLLAMA } from "../../strategies";
+import { settleReservationTx, type ReservationSettlement } from "./free-tier-budget.service";
 
 const GROUP_SIZE = 4;
 
@@ -75,6 +76,7 @@ export class StrategyRunStore {
     trialNumber = 0,
     model?: string,
     contextWindow?: number | null,
+    budgetTier?: string | null,
   ): Promise<{ run: StrategyRun; puzzle: Puzzle }> {
     const puzzle = await this.puzzleRepo.findOne({
       where: { id: puzzleId },
@@ -116,6 +118,8 @@ export class StrategyRunStore {
       // it (the previous behavior, still the fallback when model is unset).
       modelName: model ?? null,
       contextWindow: contextWindow ?? null,
+      // Only FreeTierDispatchService passes this — see StrategyRun.budgetTier.
+      budgetTier: budgetTier ?? null,
     });
 
     const saved = await this.strategyRunRepo.save(run);
@@ -157,6 +161,7 @@ export class StrategyRunStore {
     pendingGuesses: Partial<Guess>[],
     pendingProposals: Partial<LlmProposal>[] = [],
     pendingPrompts: Partial<SolvePrompt>[] = [],
+    settlement?: ReservationSettlement,
   ): Promise<void> {
     const guessesToInsert = [...pendingGuesses];
     pendingGuesses.length = 0;
@@ -236,6 +241,10 @@ export class StrategyRunStore {
           }),
         );
       }
+
+      // Release (or keep, as 'unrecorded') this call's budget reservation in
+      // the same commit as its SolvePrompt row — see FreeTierBudgetService.
+      if (settlement) await settleReservationTx(manager, settlement);
 
       await manager.save(StrategyRun, run);
     });

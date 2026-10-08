@@ -18,6 +18,8 @@ import { StaleRunSweepService } from "./stale-run-sweep.service";
 import { OrchestratorService } from "./orchestrator.service";
 import { CategoryEvaluatorService } from "./category-evaluator.service";
 import { FreeTierUsageService } from "./free-tier-usage.service";
+import { FreeTierBudgetService } from "./free-tier-budget.service";
+import { FreeTierReservation } from "./entities/free-tier-reservation.entity";
 import { RateLimitHoldService } from "./rate-limit-hold.service";
 import { RpdResumeService } from "../provider-pool/rpd-resume.service";
 import { RpdResumeBootstrap } from "../provider-pool/rpd-resume.bootstrap";
@@ -34,6 +36,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
       SolvePrompt,
       CategoryEvaluation,
       RateLimitHold,
+      FreeTierReservation,
     ]),
     QueueModule,
     GameModule,
@@ -50,6 +53,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     OrchestratorService,
     CategoryEvaluatorService,
     FreeTierUsageService,
+    FreeTierBudgetService,
     RateLimitHoldService,
     RpdResumeService,
     RpdResumeBootstrap,
@@ -60,6 +64,7 @@ import { SupportedModelModule } from "../supported-model/supported-model.module"
     LlmStrategyRunner,
     CategoryEvaluatorService,
     FreeTierUsageService,
+    FreeTierBudgetService,
     RateLimitHoldService,
     RpdResumeService,
   ],
