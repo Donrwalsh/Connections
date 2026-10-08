@@ -2,6 +2,7 @@ import { Logger } from "@nestjs/common";
 import { Job } from "bullmq";
 import type { LlmStrategyRunner } from "./llm-strategy-runner.service";
 import type { CategoryEvaluatorService } from "./category-evaluator.service";
+import type { FreeTierId } from "./free-tier-usage.service";
 
 export interface RunStrategyJobData {
   puzzleId: number;
@@ -18,6 +19,10 @@ export interface RunStrategyJobData {
   // execution creates gets manualRetry stamped (see solve-prompt.entity.ts).
   // Absent/false for an ordinary dispatch.
   manualRetry?: boolean;
+  // Set only by FreeTierDispatchService — the free-tier program ('flagship' |
+  // 'mini') this run's calls must reserve against. Written onto
+  // StrategyRun.budgetTier at creation; a resumed run reads it from the row.
+  budgetTier?: string | null;
 }
 
 export interface LlmJobDeps {
@@ -49,7 +54,7 @@ export async function handleLlmJob(
     return result;
   }
 
-  const { puzzleId, strategyName, date, trialNumber, model, manualRetry } =
+  const { puzzleId, strategyName, date, trialNumber, model, manualRetry, budgetTier } =
     job.data as RunStrategyJobData;
   if (strategyName !== deps.expectedStrategy) {
     throw new Error(
@@ -65,6 +70,7 @@ export async function handleLlmJob(
     trialNumber,
     model ?? undefined,
     manualRetry ?? false,
+    (budgetTier ?? null) as FreeTierId | null,
   );
   deps.logger.log(
     `finished job ${job.id}: puzzle=${puzzleId} date=${date} strategy=${strategyName} trial=${trialNumber} status=${result.status}`,

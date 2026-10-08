@@ -11,6 +11,9 @@ import { LlmProposalStatus } from "./entities/llm-proposal.entity";
 import { OrchestratorService, type SolveStepOutcome, type ChatMessage } from "./orchestrator.service";
 import { SupportedModelService } from "../supported-model/supported-model.service";
 import { RateLimitHoldService } from "./rate-limit-hold.service";
+import { FreeTierBudgetService } from "./free-tier-budget.service";
+import { FreeTierReservation } from "./entities/free-tier-reservation.entity";
+import { inputTokenUpperBound, knownPrefixAfterReply } from "./token-bound";
 import { formatCompactAnswer, parseAnswer } from "answer-grammar";
 import {
   DEFAULT_RATE_LIMIT_FALLBACK_SECONDS,
@@ -37,7 +40,8 @@ describe("LlmStrategyRunner", () => {
   let mockOrchestratorService: {
     requestSolveStep: jest.Mock<Promise<SolveStepOutcome>, unknown[]>;
   };
-  let mockSupportedModelService: { getContextWindow: jest.Mock };
+  let mockSupportedModelService: { getContextWindow: jest.Mock; getMaxOutputTokens: jest.Mock };
+  let mockFreeTierBudget: { reserve: jest.Mock };
   let mockRateLimitHold: {
     isHeld: jest.Mock;
     hold: jest.Mock;
@@ -46,7 +50,7 @@ describe("LlmStrategyRunner", () => {
     nextResetAt: jest.Mock;
     clearExpired: jest.Mock;
   };
-  let mockManager: { insert: jest.Mock; save: jest.Mock };
+  let mockManager: { insert: jest.Mock; save: jest.Mock; delete: jest.Mock; update: jest.Mock };
   let mockDataSource: { transaction: jest.Mock };
 
   const makeRun = (overrides: Partial<StrategyRun> = {}) => ({
@@ -103,7 +107,9 @@ describe("LlmStrategyRunner", () => {
     };
     mockSupportedModelService = {
       getContextWindow: jest.fn().mockResolvedValue(null),
+      getMaxOutputTokens: jest.fn().mockResolvedValue(null),
     };
+    mockFreeTierBudget = { reserve: jest.fn().mockResolvedValue(55) };
     mockRateLimitHold = {
       isHeld: jest.fn().mockResolvedValue(false),
       hold: jest.fn().mockResolvedValue(undefined),
@@ -121,6 +127,8 @@ describe("LlmStrategyRunner", () => {
         return { identifiers: [{ id: 1 }] };
       }),
       save: jest.fn().mockResolvedValue(undefined),
+      delete: jest.fn().mockResolvedValue(undefined),
+      update: jest.fn().mockResolvedValue(undefined),
     };
     mockDataSource = {
       transaction: jest.fn(async (cb: (manager: unknown) => Promise<unknown>) => cb(mockManager)),
@@ -138,6 +146,7 @@ describe("LlmStrategyRunner", () => {
         { provide: OrchestratorService, useValue: mockOrchestratorService },
         { provide: SupportedModelService, useValue: mockSupportedModelService },
         { provide: RateLimitHoldService, useValue: mockRateLimitHold },
+        { provide: FreeTierBudgetService, useValue: mockFreeTierBudget },
       ],
     }).compile();
 
@@ -204,6 +213,143 @@ describe("LlmStrategyRunner", () => {
       mockStrategyRunRepo.findOne.mockResolvedValue(makeRun({ strategyName: "llm-openai" }));
       mockGuessRepo.find.mockResolvedValue([]);
       mockPuzzleRepo.findOne.mockResolvedValue(solvePuzzle);
+    });
+
+    describe("free-tier budget", () => {
+      const openaiRun = (overrides: Partial<StrategyRun> = {}) =>
+        makeRun({ strategyName: "llm-openai", modelName: "gpt-5", ...overrides });
+      const solved = () =>
+        makeAssistResponse([
+          ["APPLE", "BANANA", "CHERRY", "DATE"],
+          ["EGGPLANT", "FIG", "GRAPE", "HONEY"],
+        ]);
+
+      it("sends the model's maxOutputTokens on every llm-openai call, budgeted or not", async () => {
+        mockSupportedModelService.getMaxOutputTokens.mockResolvedValue(47000);
+        mockStrategyRunRepo.findOne.mockResolvedValueOnce(openaiRun());
+        mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(solved());
+
+        await runner.runLlmStrategy(100, "llm-openai", 0, "gpt-5");
+
+        expect(mockOrchestratorService.requestSolveStep).toHaveBeenCalledWith(
+          expect.any(Array),
+          "gpt-5",
+          "openai",
+          null,
+          expect.any(Array),
+          47000,
+        );
+        expect(mockFreeTierBudget.reserve).not.toHaveBeenCalled();
+      });
+
+      it("reserves the call's worst case (cap + input bound) for a budgeted run", async () => {
+        mockSupportedModelService.getMaxOutputTokens.mockResolvedValue(47000);
+        mockStrategyRunRepo.findOne.mockResolvedValueOnce(openaiRun({ budgetTier: "flagship" }));
+        const sent = captureMessages([solved()]);
+
+        await runner.runLlmStrategy(100, "llm-openai", 0, "gpt-5", false, "flagship");
+
+        // Bounded from exactly what was sent — a fresh run has no known
+        // prefix, so the whole conversation is counted by bytes.
+        expect(mockFreeTierBudget.reserve).toHaveBeenCalledWith(
+          "flagship",
+          7,
+          47000 + inputTokenUpperBound(sent[0], null),
+        );
+      });
+
+      it("pauses without calling OpenAI when the reservation is refused", async () => {
+        mockSupportedModelService.getMaxOutputTokens.mockResolvedValue(47000);
+        mockFreeTierBudget.reserve.mockResolvedValueOnce(null);
+        mockStrategyRunRepo.findOne.mockResolvedValueOnce(openaiRun({ budgetTier: "flagship" }));
+
+        const result = await runner.runLlmStrategy(100, "llm-openai", 0, "gpt-5", false, "flagship");
+
+        expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+        expect(mockOrchestratorService.requestSolveStep).not.toHaveBeenCalled();
+        expect(mockStrategyRunRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            status: StrategyRunStatus.RATE_LIMITED_DAILY,
+            finishedAt: expect.any(Date),
+          }),
+        );
+      });
+
+      it("pauses a budgeted run whose model has no output cap, without reserving", async () => {
+        mockStrategyRunRepo.findOne.mockResolvedValueOnce(openaiRun({ budgetTier: "flagship" }));
+
+        const result = await runner.runLlmStrategy(100, "llm-openai", 0, "gpt-5", false, "flagship");
+
+        expect(result.status).toBe(StrategyRunStatus.RATE_LIMITED_DAILY);
+        expect(mockFreeTierBudget.reserve).not.toHaveBeenCalled();
+        expect(mockOrchestratorService.requestSolveStep).not.toHaveBeenCalled();
+      });
+
+      it("stays budgeted on resume: budgetTier comes from the run row, not the job", async () => {
+        mockSupportedModelService.getMaxOutputTokens.mockResolvedValue(47000);
+        mockFreeTierBudget.reserve.mockResolvedValueOnce(null);
+        mockStrategyRunRepo.findOne.mockResolvedValueOnce(
+          openaiRun({ budgetTier: "mini", status: StrategyRunStatus.RATE_LIMITED_DAILY }),
+        );
+
+        await runner.runLlmStrategy(100, "llm-openai", 0, "gpt-5");
+
+        expect(mockFreeTierBudget.reserve).toHaveBeenCalledWith("mini", 7, expect.any(Number));
+      });
+
+      it("releases the reservation in the flush when the call reports usage", async () => {
+        mockSupportedModelService.getMaxOutputTokens.mockResolvedValue(47000);
+        mockStrategyRunRepo.findOne.mockResolvedValueOnce(openaiRun({ budgetTier: "flagship" }));
+        const outcome = solved();
+        if (outcome.ok) {
+          outcome.data.usage = { promptTokens: 400, completionTokens: 100, totalTokens: 500 };
+        }
+        mockOrchestratorService.requestSolveStep.mockResolvedValueOnce(outcome);
+
+        await runner.runLlmStrategy(100, "llm-openai", 0, "gpt-5", false, "flagship");
+
+        expect(mockManager.delete).toHaveBeenCalledWith(FreeTierReservation, { id: 55 });
+      });
+
+      it("keeps the reservation as 'unrecorded' when a failed call reports no usage", async () => {
+        mockSupportedModelService.getMaxOutputTokens.mockResolvedValue(47000);
+        mockStrategyRunRepo.findOne.mockResolvedValueOnce(openaiRun({ budgetTier: "flagship" }));
+        mockOrchestratorService.requestSolveStep.mockResolvedValueOnce({
+          ok: false,
+          error: { error: "Request timed out", code: "model_error" },
+        });
+
+        await runner.runLlmStrategy(100, "llm-openai", 0, "gpt-5", false, "flagship");
+
+        expect(mockManager.update).toHaveBeenCalledWith(
+          FreeTierReservation,
+          { id: 55 },
+          { status: "unrecorded" },
+        );
+      });
+
+      it("bounds a later call from the previous call's real promptTokens, not the whole conversation", async () => {
+        mockSupportedModelService.getMaxOutputTokens.mockResolvedValue(1000);
+        mockStrategyRunRepo.findOne.mockResolvedValueOnce(openaiRun({ budgetTier: "mini" }));
+        // First reply's leading group is wrong, so a second call follows.
+        const wrong = makeAssistResponse([
+          ["APPLE", "BANANA", "CHERRY", "FIG"],
+          ["EGGPLANT", "DATE", "GRAPE", "HONEY"],
+        ]);
+        if (wrong.ok) wrong.data.usage = { promptTokens: 7, completionTokens: 3, totalTokens: 10 };
+        const sent = captureMessages([wrong, solved()]);
+
+        await runner.runLlmStrategy(100, "llm-openai", 0, "gpt-5", false, "mini");
+
+        const second = mockFreeTierBudget.reserve.mock.calls[1][2] as number;
+        const [, reply] = sent[1];
+        // The first request (one message) reported 7 prompt tokens, which
+        // replaces that message's ~1 KB byte count in the second bound.
+        expect(second).toBe(
+          1000 + inputTokenUpperBound(sent[1], knownPrefixAfterReply(1, 7, reply.content)),
+        );
+        expect(second).toBeLessThan(1000 + inputTokenUpperBound(sent[1], null));
+      });
     });
 
     it("should short-circuit for a terminal run", async () => {
@@ -836,6 +982,7 @@ describe("LlmStrategyRunner", () => {
         "ollama",
         null,
         expect.any(Array),
+        null,
       );
     });
 
@@ -859,6 +1006,7 @@ describe("LlmStrategyRunner", () => {
         "google",
         null,
         expect.any(Array),
+        null,
       );
     });
 
@@ -885,6 +1033,7 @@ describe("LlmStrategyRunner", () => {
         "openai",
         null,
         expect.any(Array),
+        null,
       );
     });
 
@@ -912,6 +1061,7 @@ describe("LlmStrategyRunner", () => {
         "ollama",
         131072,
         expect.any(Array),
+        null,
       );
     });
 
