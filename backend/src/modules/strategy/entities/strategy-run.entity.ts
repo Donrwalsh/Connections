@@ -95,6 +95,13 @@ export class StrategyRun {
   @Column({ type: "int", nullable: true })
   contextWindow: number | null;
 
+  // Set only when FreeTierDispatchService created this run ('flagship' |
+  // 'mini' — see FreeTierId). A run with a budgetTier reserves each call's
+  // worst case against that tier's threshold before making it, and pauses
+  // (RATE_LIMITED_DAILY) when it doesn't fit. Null for manual dispatches.
+  @Column({ type: "varchar", nullable: true })
+  budgetTier: string | null;
+
   @OneToMany(() => Guess, (guess) => guess.strategyRun)
   guesses: Guess[];
 

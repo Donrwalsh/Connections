@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { In, Repository } from "typeorm";
 import { SupportedModel } from "./entities/supported-model.entity";
 import { ModelPrice } from "./entities/model-price.entity";
 
@@ -178,6 +178,30 @@ export class SupportedModelService {
   async getContextWindow(strategyName: string, modelName: string): Promise<number | null> {
     const row = await this.repo.findOne({ where: { strategyName, modelName } });
     return row?.contextWindow ?? null;
+  }
+
+  /** The model's per-call output cap (SupportedModel.maxOutputTokens), or
+   * null when it has no row or no cap set. */
+  async getMaxOutputTokens(strategyName: string, modelName: string): Promise<number | null> {
+    const row = await this.repo.findOne({ where: { strategyName, modelName } });
+    return row?.maxOutputTokens ?? null;
+  }
+
+  /** Batch form of getMaxOutputTokens — every requested name is present in
+   * the result, null when it has no row or no cap. Used by the free-tier
+   * dispatch tick to size each candidate model's worst-case call. */
+  async getMaxOutputTokensByModel(
+    strategyName: string,
+    modelNames: readonly string[],
+  ): Promise<Map<string, number | null>> {
+    const result = new Map<string, number | null>(modelNames.map((name) => [name, null]));
+    if (modelNames.length === 0) return result;
+
+    const rows = await this.repo.find({
+      where: { strategyName, modelName: In([...modelNames]) },
+    });
+    for (const row of rows) result.set(row.modelName, row.maxOutputTokens ?? null);
+    return result;
   }
 
   /**

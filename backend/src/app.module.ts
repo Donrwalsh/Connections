@@ -28,6 +28,7 @@ import { ModelPrice } from "./modules/supported-model/entities/model-price.entit
 import { FreeTierDispatchState } from "./modules/free-tier-dispatch/entities/free-tier-dispatch-state.entity";
 import { AutomationRunLog } from "./modules/automation/entities/automation-run-log.entity";
 import { DispatchState } from "./modules/provider-pool/entities/dispatch-state.entity";
+import { FreeTierReservation } from "./modules/strategy/entities/free-tier-reservation.entity";
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { DispatchState } from "./modules/provider-pool/entities/dispatch-state.e
           FreeTierDispatchState,
           AutomationRunLog,
           DispatchState,
+          FreeTierReservation,
         ],
         synchronize: false,
         migrations: [__dirname + "/migrations/*{.ts,.js}"],
