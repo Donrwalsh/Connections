@@ -1018,6 +1018,93 @@ describe("StrategyDispatch", () => {
       expect(mockStrategyRunRepo.findOne).toHaveBeenCalledWith({ where: { id: 7 } });
     });
   });
+  describe("triggerStrategyRuns budgetTier", () => {
+    it("puts budgetTier into the job data when given", async () => {
+      mockManager.find.mockResolvedValueOnce([]);
+
+      await service.triggerStrategyRuns(100, "llm-openai", "2024-01-01", "gpt-5", "flagship");
+
+      expect(mockOpenAIQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
+        expect.objectContaining({ model: "gpt-5", budgetTier: "flagship" }),
+        expect.anything(),
+      );
+    });
+
+    it("leaves budgetTier out of the job data when not given", async () => {
+      mockManager.find.mockResolvedValueOnce([]);
+
+      await service.triggerStrategyRuns(100, "llm-openai", "2024-01-01", "gpt-5");
+
+      expect(mockOpenAIQueue.add.mock.calls[0][1]).not.toHaveProperty("budgetTier");
+    });
+  });
+
+  describe("resumeBudgetParkedRuns", () => {
+    it("re-queues paused budget runs oldest-first, then flips them to running", async () => {
+      const parked = makeRun({
+        id: 9,
+        puzzleId: 100,
+        strategyName: "llm-openai",
+        trialNumber: 2,
+        modelName: "gpt-5",
+        status: StrategyRunStatus.RATE_LIMITED_DAILY,
+        finishedAt: new Date("2026-10-07T23:59:00Z"),
+        puzzle: { date: "2024-01-01" } as Puzzle,
+      });
+      mockStrategyRunRepo.find.mockResolvedValueOnce([parked]);
+
+      const resumed = await service.resumeBudgetParkedRuns(
+        "llm-openai",
+        "flagship",
+        ["gpt-5", "o3"],
+        3,
+      );
+
+      expect(resumed).toEqual(["gpt-5"]);
+      expect(mockStrategyRunRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            strategyName: "llm-openai",
+            budgetTier: "flagship",
+            status: StrategyRunStatus.RATE_LIMITED_DAILY,
+          }),
+          order: { startedAt: "ASC" },
+          take: 3,
+        }),
+      );
+      expect(mockOpenAIQueue.add).toHaveBeenCalledWith(
+        "run-strategy",
+        {
+          puzzleId: 100,
+          strategyName: "llm-openai",
+          date: "2024-01-01",
+          trialNumber: 2,
+          model: "gpt-5",
+        },
+        expect.objectContaining({
+          jobId: expect.stringContaining("run-100-llm-openai-gpt-5-2-budget-resume-"),
+        }),
+      );
+      expect(mockOpenAIQueue.add.mock.invocationCallOrder[0]).toBeLessThan(
+        mockStrategyRunRepo.save.mock.invocationCallOrder[0],
+      );
+      expect(mockStrategyRunRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: StrategyRunStatus.RUNNING, finishedAt: null }),
+      );
+    });
+
+    it("does nothing for a zero limit or no models", async () => {
+      await expect(
+        service.resumeBudgetParkedRuns("llm-openai", "flagship", ["gpt-5"], 0),
+      ).resolves.toEqual([]);
+      await expect(service.resumeBudgetParkedRuns("llm-openai", "flagship", [], 3)).resolves.toEqual(
+        [],
+      );
+      expect(mockStrategyRunRepo.find).not.toHaveBeenCalled();
+    });
+  });
+
   describe("retryRun", () => {
     it("flips an errored run back to running, clears finishedAt, and re-enqueues its job with manualRetry set", async () => {
       mockStrategyRunRepo.findOne.mockResolvedValueOnce(
