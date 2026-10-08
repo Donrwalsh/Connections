@@ -6,6 +6,7 @@ import { FreeTierDispatchState } from "./entities/free-tier-dispatch-state.entit
 import { FREE_TIER_DISPATCH_QUEUE } from "../queue/queue.module";
 import { StrategyDispatch } from "../strategy/strategy-dispatch.service";
 import { FreeTierId, FreeTierUsageService } from "../strategy/free-tier-usage.service";
+import { FreeTierBudgetService } from "../strategy/free-tier-budget.service";
 
 const FLAGSHIP_MODELS = ["gpt-5.4", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1", "gpt-4o", "o1", "o3"];
 const MINI_MODELS = [
@@ -33,8 +34,10 @@ describe("FreeTierDispatchService", () => {
     countTodayDispatchByModel: jest.Mock;
     findUnrunPuzzleDatesForModel: jest.Mock;
     triggerStrategyRuns: jest.Mock;
+    resumeBudgetParkedRuns: jest.Mock;
   };
   let mockFreeTierUsageService: { getUsage: jest.Mock };
+  let mockFreeTierBudget: { committedTokens: jest.Mock; modelCaps: jest.Mock };
 
   const zeroCounts = (tier: FreeTierId = "mini") => {
     const models = tier === "mini" ? MINI_MODELS : FLAGSHIP_MODELS;
@@ -68,9 +71,18 @@ describe("FreeTierDispatchService", () => {
       countTodayDispatchByModel: jest.fn().mockResolvedValue(zeroCounts()),
       findUnrunPuzzleDatesForModel: jest.fn().mockResolvedValue([{ puzzleId: 1, date: "2024-01-01" }]),
       triggerStrategyRuns: jest.fn().mockResolvedValue(undefined),
+      resumeBudgetParkedRuns: jest.fn().mockResolvedValue([]),
     };
     mockFreeTierUsageService = {
       getUsage: jest.fn().mockImplementation(async (tier: FreeTierId) => usageStub(tier)),
+    };
+    mockFreeTierBudget = {
+      committedTokens: jest.fn().mockResolvedValue(0),
+      // Default: every model capped at 1,000 → a 3,000-token soft worst case,
+      // so budget is never the limiting factor unless a test says so.
+      modelCaps: jest
+        .fn()
+        .mockImplementation(async (models: string[]) => new Map(models.map((model) => [model, 1000]))),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -80,6 +92,7 @@ describe("FreeTierDispatchService", () => {
         { provide: FREE_TIER_DISPATCH_QUEUE, useValue: mockQueue },
         { provide: StrategyDispatch, useValue: mockStrategyDispatch },
         { provide: FreeTierUsageService, useValue: mockFreeTierUsageService },
+        { provide: FreeTierBudgetService, useValue: mockFreeTierBudget },
       ],
     }).compile();
 
@@ -90,7 +103,6 @@ describe("FreeTierDispatchService", () => {
     jest.clearAllMocks();
     delete process.env.FREE_TIER_DISPATCH_MAX_BATCH;
     delete process.env.FREE_TIER_DISPATCH_MAX_IN_FLIGHT;
-    delete process.env.FREE_TIER_DISPATCH_TOKEN_ESTIMATE;
     delete process.env.FREE_TIER_DISPATCH_TICK_MS;
   });
 
@@ -295,7 +307,6 @@ describe("FreeTierDispatchService", () => {
     it("should dispatch only enough to fill the remaining in-flight headroom, not the full batch cap", async () => {
       process.env.FREE_TIER_DISPATCH_MAX_BATCH = "5";
       process.env.FREE_TIER_DISPATCH_MAX_IN_FLIGHT = "3";
-      process.env.FREE_TIER_DISPATCH_TOKEN_ESTIMATE = "1"; // budget is never the limiting factor here
       const inFlight = zeroCounts();
       inFlight.set("gpt-4.1-nano", 2); // cap is 3, so only 1 more trial has headroom
       mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
@@ -308,15 +319,12 @@ describe("FreeTierDispatchService", () => {
     });
 
     it("should hold off on new dispatches, but keep ticking, when the token budget is nearly spoken for", async () => {
-      process.env.FREE_TIER_DISPATCH_TOKEN_ESTIMATE = "4000";
-      // Raise the in-flight cap so this test exercises the token-budget
-      // check specifically, not the (lower-priority) in-flight cap above.
+      // Raise the in-flight cap so this test exercises the budget sizing
+      // specifically, not the (lower-priority) in-flight cap above.
       process.env.FREE_TIER_DISPATCH_MAX_IN_FLIGHT = "1000";
       mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
-      // thresholdTokens = 2,250,000; remainingBudget = 2,250,000. With 900
-      // trials in flight (100 per model) at the 4000-token estimate, that's
-      // 3,600,000 reserved — already well over budget on its own.
+      // 900 in flight × (1,000 cap + 2,000 allowance) = 2.7M soft-reserved > 2.25M room.
       const heavyInFlight = new Map(MINI_MODELS.map((model) => [model, 100]));
       mockStrategyDispatch.countInFlightByModel.mockResolvedValueOnce(heavyInFlight);
 
@@ -331,9 +339,111 @@ describe("FreeTierDispatchService", () => {
       );
     });
 
+    it("stops with 'budget reached' when no model's worst case fits and nothing is in flight", async () => {
+      mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
+      mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
+      // threshold 2,250,000; room 2,500 < 1,000 cap + 2,000 allowance.
+      mockFreeTierBudget.committedTokens.mockResolvedValueOnce(2_247_500);
+
+      await service.runTick("mini");
+
+      expect(mockStateRepo.update).toHaveBeenCalledWith({ tier: "mini" }, { active: false });
+      expect(mockStrategyDispatch.triggerStrategyRuns).not.toHaveBeenCalled();
+      expect(mockQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("keeps ticking (doesn't stop) when nothing fits but trials are still in flight", async () => {
+      const inFlight = zeroCounts();
+      inFlight.set("gpt-4.1-nano", 1);
+      mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
+      mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
+      mockStrategyDispatch.countInFlightByModel.mockResolvedValueOnce(inFlight);
+      mockFreeTierBudget.committedTokens.mockResolvedValueOnce(2_247_500);
+
+      await service.runTick("mini");
+
+      expect(mockStateRepo.update).not.toHaveBeenCalled();
+      expect(mockStrategyDispatch.triggerStrategyRuns).not.toHaveBeenCalled();
+      expect(mockQueue.add).toHaveBeenCalledWith("tick", { tier: "mini" }, expect.anything());
+    });
+
+    it("only dispatches models whose worst case fits the remaining room", async () => {
+      process.env.FREE_TIER_DISPATCH_MAX_BATCH = "1";
+      mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
+      mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
+      mockFreeTierBudget.committedTokens.mockResolvedValueOnce(2_240_000); // room 10,000
+      mockFreeTierBudget.modelCaps.mockResolvedValueOnce(
+        new Map(MINI_MODELS.map((m) => [m, m === "gpt-4.1-nano" ? 4000 : 36000])),
+      );
+
+      await service.runTick("mini");
+
+      expect(mockStrategyDispatch.triggerStrategyRuns).toHaveBeenCalledTimes(1);
+      expect(mockStrategyDispatch.triggerStrategyRuns).toHaveBeenCalledWith(
+        1,
+        "llm-openai",
+        "2024-01-01",
+        "gpt-4.1-nano",
+        "mini",
+      );
+    });
+
+    it("never dispatches a model with no output cap", async () => {
+      process.env.FREE_TIER_DISPATCH_MAX_BATCH = "3";
+      mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
+      mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
+      mockFreeTierBudget.modelCaps.mockResolvedValueOnce(
+        new Map(MINI_MODELS.map((m) => [m, m === "o3-mini" ? 29000 : null])),
+      );
+
+      await service.runTick("mini");
+
+      const models = mockStrategyDispatch.triggerStrategyRuns.mock.calls.map((call) => call[3]);
+      expect(models.length).toBeGreaterThan(0);
+      expect(new Set(models)).toEqual(new Set(["o3-mini"]));
+    });
+
+    it("sets aside a worst-case call for each in-flight trial before sizing new ones", async () => {
+      process.env.FREE_TIER_DISPATCH_MAX_BATCH = "5";
+      const inFlight = zeroCounts();
+      inFlight.set("o4-mini", 1); // 4,000 cap + 2,000 allowance = 6,000 set aside
+      mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
+      mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
+      mockStrategyDispatch.countInFlightByModel.mockResolvedValueOnce(inFlight);
+      mockFreeTierBudget.committedTokens.mockResolvedValueOnce(2_240_000); // room 10,000 → 4,000 left
+      mockFreeTierBudget.modelCaps.mockResolvedValueOnce(
+        new Map(MINI_MODELS.map((m) => [m, m === "gpt-5.4-nano" ? 1000 : 4000])),
+      );
+
+      await service.runTick("mini");
+
+      // Only one 3,000-token model fits in the 4,000 left; the 6,000 ones never do.
+      const models = mockStrategyDispatch.triggerStrategyRuns.mock.calls.map((call) => call[3]);
+      expect(models).toEqual(["gpt-5.4-nano"]);
+    });
+
+    it("resumes budget-paused runs before dispatching new trials, sharing the batch", async () => {
+      process.env.FREE_TIER_DISPATCH_MAX_BATCH = "2";
+      mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
+      mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
+      mockStrategyDispatch.resumeBudgetParkedRuns.mockResolvedValueOnce(["o3-mini"]);
+
+      await service.runTick("mini");
+
+      expect(mockStrategyDispatch.resumeBudgetParkedRuns).toHaveBeenCalledWith(
+        "llm-openai",
+        "mini",
+        expect.arrayContaining(MINI_MODELS),
+        2,
+      );
+      expect(mockStrategyDispatch.resumeBudgetParkedRuns.mock.invocationCallOrder[0]).toBeLessThan(
+        mockStrategyDispatch.countTodayDispatchByModel.mock.invocationCallOrder[0],
+      );
+      expect(mockStrategyDispatch.triggerStrategyRuns).toHaveBeenCalledTimes(1);
+    });
+
     it("should dispatch to the least-allocated models first, up to the batch cap", async () => {
       process.env.FREE_TIER_DISPATCH_MAX_BATCH = "2";
-      process.env.FREE_TIER_DISPATCH_TOKEN_ESTIMATE = "1"; // budget is never the limiting factor here
       mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
 
@@ -356,7 +466,6 @@ describe("FreeTierDispatchService", () => {
 
     it("should schedule a further tick after a successful partial dispatch", async () => {
       process.env.FREE_TIER_DISPATCH_MAX_BATCH = "1";
-      process.env.FREE_TIER_DISPATCH_TOKEN_ESTIMATE = "1";
       mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
 
@@ -373,7 +482,6 @@ describe("FreeTierDispatchService", () => {
 
     it("should skip a model with no unrun puzzles left and try the next one", async () => {
       process.env.FREE_TIER_DISPATCH_MAX_BATCH = "1";
-      process.env.FREE_TIER_DISPATCH_TOKEN_ESTIMATE = "1";
       mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
 
@@ -395,6 +503,7 @@ describe("FreeTierDispatchService", () => {
         "llm-openai",
         "2024-01-01",
         "gpt-5-nano",
+        "mini",
       );
     });
 
@@ -412,7 +521,6 @@ describe("FreeTierDispatchService", () => {
 
     it("should treat a triggerStrategyRuns failure as that model being unavailable this tick, not a hard failure", async () => {
       process.env.FREE_TIER_DISPATCH_MAX_BATCH = "1";
-      process.env.FREE_TIER_DISPATCH_TOKEN_ESTIMATE = "1";
       mockStateRepo.findOne.mockResolvedValueOnce({ tier: "mini", active: true, thresholdPercent: 90 });
       mockFreeTierUsageService.getUsage.mockResolvedValueOnce(usageStub("mini"));
       mockStrategyDispatch.triggerStrategyRuns.mockRejectedValue(new Error("model rejected"));
@@ -444,7 +552,6 @@ describe("FreeTierDispatchService", () => {
 
       it("should dispatch across flagship's own models, evenly, the same way as mini", async () => {
         process.env.FREE_TIER_DISPATCH_MAX_BATCH = "2";
-        process.env.FREE_TIER_DISPATCH_TOKEN_ESTIMATE = "1";
         mockStateRepo.findOne.mockResolvedValueOnce({
           tier: "flagship",
           active: true,

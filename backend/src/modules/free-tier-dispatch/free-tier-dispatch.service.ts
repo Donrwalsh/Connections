@@ -6,15 +6,21 @@ import { FREE_TIER_DISPATCH_QUEUE } from "../queue/queue.module";
 import { FreeTierDispatchState } from "./entities/free-tier-dispatch-state.entity";
 import { StrategyDispatch } from "../strategy/strategy-dispatch.service";
 import { FreeTierUsageService, FreeTierId } from "../strategy/free-tier-usage.service";
+import { FreeTierBudgetService } from "../strategy/free-tier-budget.service";
 import {
   LLM_OPENAI,
   freeTierDispatchMaxBatch,
   freeTierDispatchMaxInFlight,
   freeTierDispatchTickMs,
-  freeTierDispatchTokenEstimate,
 } from "../../strategies";
 
 const TICK_JOB_NAME = "tick";
+
+// A generous allowance for a run's input on its first call (the initial
+// 16-word prompt is ~1.5 KB) — used only by the tick's *soft* "could this
+// model plausibly fit" sizing. The hard guarantee is FreeTierBudgetService.reserve,
+// which bounds every real call's input exactly before making it.
+const SOFT_INPUT_ALLOWANCE_TOKENS = 2_000;
 
 export interface FreeTierDispatchStatusDto {
   tier: FreeTierId;
@@ -57,6 +63,7 @@ export class FreeTierDispatchService {
     @Inject(FREE_TIER_DISPATCH_QUEUE) private readonly queue: Queue,
     @Inject(StrategyDispatch) private readonly strategyDispatch: StrategyDispatch,
     @Inject(FreeTierUsageService) private readonly freeTierUsageService: FreeTierUsageService,
+    @Inject(FreeTierBudgetService) private readonly freeTierBudget: FreeTierBudgetService,
   ) {}
 
   /**
@@ -133,13 +140,19 @@ export class FreeTierDispatchService {
   /**
    * One tick of the dispatch cycle — called by the worker processing the
    * free-tier-dispatch queue. Checks state/usage from scratch (no in-memory
-   * loop state carries between ticks): stops if the cycle was deactivated,
-   * has reached its threshold, or has run out of unrun puzzles for every
-   * model in the tier. Otherwise it paces itself against two independent
-   * caps — the in-flight backlog (freeTierDispatchMaxInFlight) and the
-   * remaining token budget — dispatching nothing new and just rescheduling
-   * if either is already saturated, or a budget-safe batch spread across
-   * whichever models are currently behind if there's room under both.
+   * loop state carries between ticks). Stops the cycle when it was
+   * deactivated, when recorded usage has reached the threshold, when no
+   * model's next call could fit in the room left and nothing is in flight
+   * ("budget reached"), or when every model has run out of unrun puzzles.
+   *
+   * Otherwise it waits out a full in-flight backlog (freeTierDispatchMaxInFlight),
+   * then fills this tick's batch: budget-paused runs first (they've already
+   * spent tokens mid-puzzle), then new trials on whichever models are behind
+   * — but only models with a maxOutputTokens cap whose worst-case call still
+   * fits after setting one aside for every trial already in flight. That
+   * sizing is soft (it just keeps new trials from starting only to pause);
+   * the hard guarantee is FreeTierBudgetService.reserve, which every
+   * budgeted call goes through before it's made.
    */
   async runTick(tier: FreeTierId): Promise<void> {
     const state = await this.stateRepo.findOne({ where: { tier } });
@@ -160,15 +173,13 @@ export class FreeTierDispatchService {
       return;
     }
 
-    const tokenEstimate = freeTierDispatchTokenEstimate();
     const maxInFlight = freeTierDispatchMaxInFlight();
     const inFlight = await this.strategyDispatch.countInFlightByModel(LLM_OPENAI, usage.models);
     const inFlightTotal = [...inFlight.values()].reduce((sum, count) => sum + count, 0);
 
     if (inFlightTotal >= maxInFlight) {
-      // A backlog this deep makes the token-budget estimate below stale by
-      // the time it lands — real usage only updates once a trial actually
-      // finishes — so don't add to it; just wait for it to drain.
+      // A deep backlog keeps reservations and real usage far apart — wait
+      // for it to drain before adding to it.
       this.logger.log(
         `free-tier dispatch tick for '${tier}': ${inFlightTotal} trial(s) already queued/running` +
           ` (cap ${maxInFlight}) — waiting for the backlog to clear before dispatching more`,
@@ -177,35 +188,56 @@ export class FreeTierDispatchService {
       return;
     }
 
-    const remainingBudget = thresholdTokens - usage.usedTokens;
-    const safeRemainingBudget = remainingBudget - inFlightTotal * tokenEstimate;
+    const caps = await this.freeTierBudget.modelCaps(usage.models);
+    // A model's soft worst case for one call; a model with no cap is never a
+    // candidate (and a manually-dispatched in-flight run on one only counts
+    // its input allowance).
+    const worstCase = (model: string) => (caps.get(model) ?? 0) + SOFT_INPUT_ALLOWANCE_TOKENS;
+    const fits = (model: string, budget: number) =>
+      caps.get(model) != null && worstCase(model) <= budget;
 
-    if (safeRemainingBudget < tokenEstimate) {
-      // Enough is already queued/running to plausibly reach the threshold
-      // on its own — let it land before committing to more.
+    const room = thresholdTokens - (await this.freeTierBudget.committedTokens(tier));
+
+    if (inFlightTotal === 0 && !usage.models.some((model) => fits(model, room))) {
+      await this.stateRepo.update({ tier }, { active: false });
       this.logger.log(
-        `free-tier dispatch tick for '${tier}': ${inFlightTotal} trial(s) already in flight, ` +
-          "holding off on new dispatches this tick",
+        `free-tier dispatch for '${tier}' budget reached — ${room} token(s) left under the ` +
+          `${state.thresholdPercent}% threshold, too few for any model's next call — stopping`,
       );
-      await this.scheduleNextTick(tier);
       return;
     }
 
-    const maxNewTrials = Math.min(
-      freeTierDispatchMaxBatch(),
-      Math.floor(safeRemainingBudget / tokenEstimate),
-      // Never let a single tick's batch push the backlog past the in-flight
-      // cap either, even though the check above already confirmed there's
-      // room for at least one more.
-      maxInFlight - inFlightTotal,
+    // Soft: leave room for each in-flight trial's next call too, so new
+    // trials don't start only to pause mid-puzzle. reserve() is the hard limit.
+    let budgetForNew = room;
+    for (const [model, count] of inFlight) budgetForNew -= count * worstCase(model);
+
+    const slots = Math.min(freeTierDispatchMaxBatch(), maxInFlight - inFlightTotal);
+
+    // Paused runs first — they've already spent tokens mid-puzzle.
+    const resumed = await this.strategyDispatch.resumeBudgetParkedRuns(
+      LLM_OPENAI,
+      tier,
+      usage.models.filter((model) => fits(model, budgetForNew)),
+      slots,
     );
+    for (const model of resumed) budgetForNew -= worstCase(model);
 
     const allocation = await this.strategyDispatch.countTodayDispatchByModel(LLM_OPENAI, usage.models);
+    // `exhausted`: no unrun puzzles / dispatch failed. `skipped`: doesn't fit
+    // this tick. Only `exhausted` covering every model ends the cycle.
     const exhausted = new Set<string>();
+    const skipped = new Set<string>();
     let dispatched = 0;
 
-    while (dispatched < maxNewTrials && exhausted.size < usage.models.length) {
-      const model = FreeTierDispatchService.leastAllocatedModel(allocation, exhausted);
+    while (dispatched < slots - resumed.length) {
+      for (const model of usage.models) {
+        if (!fits(model, budgetForNew)) skipped.add(model);
+      }
+      const excluded = new Set([...exhausted, ...skipped]);
+      if (excluded.size >= usage.models.length) break;
+
+      const model = FreeTierDispatchService.leastAllocatedModel(allocation, excluded);
 
       let target: { puzzleId: number; date: string } | undefined;
       try {
@@ -230,8 +262,10 @@ export class FreeTierDispatchService {
           LLM_OPENAI,
           target.date,
           model,
+          tier,
         );
         allocation.set(model, (allocation.get(model) ?? 0) + 1);
+        budgetForNew -= worstCase(model);
         dispatched++;
       } catch (err) {
         this.logger.warn(
@@ -242,7 +276,9 @@ export class FreeTierDispatchService {
       }
     }
 
-    this.logger.log(`free-tier dispatch tick for '${tier}': queued ${dispatched} new trial(s)`);
+    this.logger.log(
+      `free-tier dispatch tick for '${tier}': resumed ${resumed.length}, queued ${dispatched} new trial(s)`,
+    );
 
     if (exhausted.size === usage.models.length) {
       await this.stateRepo.update({ tier }, { active: false });
@@ -276,18 +312,18 @@ export class FreeTierDispatchService {
     return `free-tier-dispatch-${tier}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
-  /** The model with the fewest trials so far today, excluding any already
-   * marked exhausted (no unrun puzzles left) this tick. Ties resolve to
+  /** The model with the fewest trials so far today, excluding any model in
+   * `excluded` (no unrun puzzles, or doesn't fit this tick). Ties resolve to
    * whichever model sorts first — arbitrary but stable, not meaningful. */
   private static leastAllocatedModel(
     allocation: Map<string, number>,
-    exhausted: Set<string>,
+    excluded: Set<string>,
   ): string {
     let best: string | null = null;
     let bestCount = Infinity;
 
     for (const [model, count] of allocation) {
-      if (exhausted.has(model)) continue;
+      if (excluded.has(model)) continue;
       if (count < bestCount) {
         best = model;
         bestCount = count;
@@ -295,7 +331,7 @@ export class FreeTierDispatchService {
     }
 
     if (best === null) {
-      throw new Error("leastAllocatedModel called with every model already exhausted");
+      throw new Error("leastAllocatedModel called with every model excluded");
     }
 
     return best;

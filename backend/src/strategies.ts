@@ -246,17 +246,10 @@ export function nextDailyAutomationRunAt(now: Date = new Date()): Date {
 
 export const DEFAULT_FREE_TIER_DISPATCH_TICK_MS = 60_000;
 export const DEFAULT_FREE_TIER_DISPATCH_MAX_BATCH = 5;
-// Conservative per-trial token estimate used to size a dispatch batch
-// without overshooting a free-tier threshold. Deliberately on the high side
-// (real mini/nano trials are often cheaper) — see
-// FreeTierDispatchService.runTick for how it's used as a safety margin, not
-// a precise prediction; actual usage is re-checked every tick regardless.
-export const DEFAULT_FREE_TIER_DISPATCH_TOKEN_ESTIMATE = 4000;
 // Trials can take anywhere from seconds to several minutes, and the worker
 // only processes so many of an LLM provider's queue at once
-// (LLM_OPENAI_CONCURRENCY) — so a deep backlog just sits waiting while its
-// estimated token cost is already reserved against the budget on every tick
-// in the meantime. Capping total queued+running trials keeps the backlog
+// (LLM_OPENAI_CONCURRENCY) — so a deep backlog just sits waiting while the
+// tick sets aside a worst-case call per in-flight trial in the meantime. Capping total queued+running trials keeps the backlog
 // shallow, so real usage (which only updates once a trial actually
 // finishes) stays a close, frequently-refreshed approximation of what's
 // committed instead of drifting further out of sync the longer a large
@@ -274,9 +267,9 @@ export function freeTierDispatchTickMs(env: NodeJS.ProcessEnv = process.env): nu
 
 /**
  * Maximum number of new trials a single free-tier dispatch tick may queue,
- * from FREE_TIER_DISPATCH_MAX_BATCH. Caps how much a single (necessarily
- * imprecise) budget estimate can commit to before the next tick re-checks
- * real usage.
+ * from FREE_TIER_DISPATCH_MAX_BATCH. Caps how much a single tick's soft
+ * worst-case sizing can commit to before the next tick re-checks real usage
+ * (resumed budget-paused runs count toward it too).
  */
 export function freeTierDispatchMaxBatch(env: NodeJS.ProcessEnv = process.env): number {
   return positiveTrialCount(env.FREE_TIER_DISPATCH_MAX_BATCH, DEFAULT_FREE_TIER_DISPATCH_MAX_BATCH);
@@ -287,23 +280,12 @@ export function freeTierDispatchMaxBatch(env: NodeJS.ProcessEnv = process.env): 
  * cycle, from FREE_TIER_DISPATCH_MAX_IN_FLIGHT. Once this many are already
  * in flight, a tick dispatches nothing new — it just waits for the backlog
  * to drain — regardless of how much token budget looks available, since
- * that budget estimate only gets less reliable the deeper the backlog gets.
+ * reservations and real usage drift further apart the deeper the backlog gets.
  */
 export function freeTierDispatchMaxInFlight(env: NodeJS.ProcessEnv = process.env): number {
   return positiveTrialCount(
     env.FREE_TIER_DISPATCH_MAX_IN_FLIGHT,
     DEFAULT_FREE_TIER_DISPATCH_MAX_IN_FLIGHT,
-  );
-}
-
-/**
- * Conservative tokens-per-trial estimate for free-tier dispatch batch
- * sizing, from FREE_TIER_DISPATCH_TOKEN_ESTIMATE.
- */
-export function freeTierDispatchTokenEstimate(env: NodeJS.ProcessEnv = process.env): number {
-  return positiveTrialCount(
-    env.FREE_TIER_DISPATCH_TOKEN_ESTIMATE,
-    DEFAULT_FREE_TIER_DISPATCH_TOKEN_ESTIMATE,
   );
 }
 
