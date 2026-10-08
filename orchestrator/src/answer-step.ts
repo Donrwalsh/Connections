@@ -22,6 +22,9 @@ export interface AnswerStepResult {
   // MODEL_CONTEXT_WINDOW (see provider.ts's effectiveContextWindow).
   contextWindow?: number;
   latencyMs?: number;
+  // The AI SDK's finish reason — "length" means maxOutputTokens cut the
+  // reply off before the model finished.
+  finishReason?: string;
   usage?: {
     promptTokens?: number;
     completionTokens?: number;
@@ -49,6 +52,10 @@ export interface AnswerStepOpts {
   // The puzzle's full original word list, handed to parseAnswer so board
   // words it would otherwise strip (e.g. "TEE (GOLF)") survive the parse.
   boardWords?: string[];
+  // Hard cap on this call's output (reasoning tokens included) — the
+  // backend sends SupportedModel.maxOutputTokens so every call has a known
+  // worst-case cost it can reserve against a free-tier budget.
+  maxOutputTokens?: number;
 }
 
 const ANSWER_STEP_TEMPERATURE = 0.7;
@@ -81,6 +88,7 @@ export async function runAnswerStep(
   let responseBody: unknown;
   const startTime = captureTelemetry ? Date.now() : undefined;
   let latencyMs: number | undefined;
+  let finishReason: string | undefined;
 
   try {
     const result = await generateText({
@@ -99,6 +107,7 @@ export async function runAnswerStep(
       // re-bills a doomed call (e.g. a Google daily-quota 429) before it
       // ever reaches classifyModelCallError.
       maxRetries: 0,
+      ...(opts.maxOutputTokens !== undefined ? { maxOutputTokens: opts.maxOutputTokens } : {}),
       // Forwards the incoming HTTP request's own abort signal (see app.ts),
       // so a client that gives up (e.g. the backend's ORCHESTRATOR_TIMEOUT_MS)
       // actually cancels this call instead of leaving it running server-side
@@ -122,6 +131,7 @@ export async function runAnswerStep(
       }
     }
     text = result.text;
+    finishReason = result.finishReason;
     modelId = result.response.modelId;
   } catch (err) {
     throw classifyModelCallError(err, resolvedProvider, {
@@ -149,6 +159,7 @@ export async function runAnswerStep(
     model: modelId,
     contextWindow: effectiveContextWindow(resolvedProvider, opts.contextWindow),
     latencyMs,
+    finishReason,
     usage,
     requestBody,
     responseId,

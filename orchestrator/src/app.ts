@@ -123,6 +123,7 @@ app.post(
         contextWindow: parsed.data.contextWindow,
         abortSignal: c.req.raw.signal,
         boardWords: parsed.data.boardWords,
+        maxOutputTokens: parsed.data.maxOutputTokens,
       });
       const response: SolveStepResponse = result;
       return c.json(response, 200);
