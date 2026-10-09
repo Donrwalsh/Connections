@@ -33,6 +33,9 @@ export interface SolveStepSuccess {
   // effectiveContextWindow on the orchestrator side).
   contextWindow?: number;
   latencyMs: number;
+  // The AI SDK's finish reason — "length" means the call hit its
+  // maxOutputTokens before the model finished.
+  finishReason?: string;
   usage?: SolveUsage;
   requestBody?: unknown;
   responseId?: string;
@@ -137,10 +140,18 @@ export class OrchestratorService {
     provider?: "openai" | "ollama" | "google" | "groq" | "openrouter" | "mistral" | "sambanova" | "nvidia",
     contextWindow?: number | null,
     boardWords?: string[],
+    maxOutputTokens?: number | null,
   ): Promise<SolveStepOutcome> {
     return this.executeCall<SolveStepSuccess>(
       "/solve-step",
-      { messages, model, provider, contextWindow: contextWindow ?? undefined, boardWords },
+      {
+        messages,
+        model,
+        provider,
+        contextWindow: contextWindow ?? undefined,
+        boardWords,
+        maxOutputTokens: maxOutputTokens ?? undefined,
+      },
       (raw) => ({
         response: raw.response,
         groups: raw.groups,
@@ -150,6 +161,7 @@ export class OrchestratorService {
         model: raw.model,
         contextWindow: raw.contextWindow,
         latencyMs: raw.latencyMs ?? 0,
+        finishReason: raw.finishReason,
         usage: raw.usage,
         requestBody: raw.requestBody,
         responseId: raw.responseId,

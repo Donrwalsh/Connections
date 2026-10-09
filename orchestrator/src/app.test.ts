@@ -238,6 +238,23 @@ describe("orchestrator app", () => {
       );
     });
 
+    it("passes maxOutputTokens through to runAnswerStep when given", async () => {
+      runAnswerStepMock.mockResolvedValueOnce({ ...BASE_RESULT, model: "gpt-5" });
+
+      const res = await solveStepRequest({ ...SOLVE_STEP_BODY, maxOutputTokens: 47000 });
+
+      expect(res.status).toBe(200);
+      expect(runAnswerStepMock).toHaveBeenCalledWith(
+        SOLVE_STEP_BODY.messages,
+        expect.objectContaining({ maxOutputTokens: 47000 }),
+      );
+    });
+
+    it("rejects a non-positive maxOutputTokens", async () => {
+      const res = await solveStepRequest({ ...SOLVE_STEP_BODY, maxOutputTokens: 0 });
+      expect(res.status).toBe(400);
+    });
+
     it("passes contextWindow through to runAnswerStep when given", async () => {
       runAnswerStepMock.mockResolvedValueOnce({ ...BASE_RESULT, model: "mistral-nemo" });
 

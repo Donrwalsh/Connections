@@ -296,6 +296,48 @@ describe("SupportedModelService", () => {
     });
   });
 
+  describe("getMaxOutputTokens", () => {
+    it("returns the model's maxOutputTokens", async () => {
+      mockRepo.findOne.mockResolvedValueOnce({ maxOutputTokens: 47000 });
+      await expect(service.getMaxOutputTokens("llm-openai", "gpt-5")).resolves.toBe(47000);
+      expect(mockRepo.findOne).toHaveBeenCalledWith({
+        where: { strategyName: "llm-openai", modelName: "gpt-5" },
+      });
+    });
+
+    it("returns null when the model has no row or no limit", async () => {
+      mockRepo.findOne.mockResolvedValueOnce(null);
+      await expect(service.getMaxOutputTokens("llm-openai", "nope")).resolves.toBeNull();
+      mockRepo.findOne.mockResolvedValueOnce({ maxOutputTokens: null });
+      await expect(service.getMaxOutputTokens("llm-openai", "gpt-x")).resolves.toBeNull();
+    });
+  });
+
+  describe("getMaxOutputTokensByModel", () => {
+    it("maps every requested model, null for missing rows or limits", async () => {
+      mockRepo.find.mockResolvedValueOnce([
+        { modelName: "gpt-5", maxOutputTokens: 47000 },
+        { modelName: "gpt-4o", maxOutputTokens: null },
+      ]);
+
+      const result = await service.getMaxOutputTokensByModel("llm-openai", ["gpt-5", "gpt-4o", "o3"]);
+
+      expect(result).toEqual(
+        new Map<string, number | null>([
+          ["gpt-5", 47000],
+          ["gpt-4o", null],
+          ["o3", null],
+        ]),
+      );
+    });
+
+    it("skips the query for an empty model list", async () => {
+      const result = await service.getMaxOutputTokensByModel("llm-openai", []);
+      expect(result.size).toBe(0);
+      expect(mockRepo.find).not.toHaveBeenCalled();
+    });
+  });
+
   describe("findModelNamesByFreeTier", () => {
     it("should return only model names matching the given free tier", async () => {
       mockRepo.find.mockResolvedValueOnce([

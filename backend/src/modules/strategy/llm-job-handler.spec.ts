@@ -52,7 +52,7 @@ describe("handleLlmJob", () => {
       logger,
     });
 
-    expect(runner.runLlmStrategy).toHaveBeenCalledWith(1, "llm-openai", 1, "gpt-4.1-nano", false);
+    expect(runner.runLlmStrategy).toHaveBeenCalledWith(1, "llm-openai", 1, "gpt-4.1-nano", false, null);
     expect(evaluator.evaluateProposal).not.toHaveBeenCalled();
   });
 
@@ -79,7 +79,7 @@ describe("handleLlmJob", () => {
       logger,
     });
 
-    expect(runner.runLlmStrategy).toHaveBeenCalledWith(1, "llm-openai", 1, "gpt-4.1-nano", true);
+    expect(runner.runLlmStrategy).toHaveBeenCalledWith(1, "llm-openai", 1, "gpt-4.1-nano", true, null);
   });
 
   it("throws when a run-strategy job's strategy doesn't match the queue", async () => {

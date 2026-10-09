@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { Puzzle } from "../game/entities/puzzle.entity";
@@ -32,6 +32,9 @@ import { firstCombination } from "./combinatorics";
 import { formatCompactAnswer, GROUP_SIZE } from "answer-grammar";
 import { applyOneOffWordFixups } from "./normalize-puzzle-word";
 import { findCaseInsensitiveGroupMatch } from "./case-insensitive-match";
+import { FreeTierBudgetService, type ReservationSettlement } from "./free-tier-budget.service";
+import type { FreeTierId } from "./free-tier-usage.service";
+import { inputTokenUpperBound, knownPrefixAfterReply, type KnownPrefix } from "./token-bound";
 
 const MODEL_ERROR_RETRY_BASE_DELAY_MS = 7500;
 const MODEL_ERROR_RETRY_MAX_DELAY_MS = 60000;
@@ -168,6 +171,8 @@ export function buildRetryPrompt(
  */
 @Injectable()
 export class LlmStrategyRunner {
+  private readonly logger = new Logger(LlmStrategyRunner.name);
+
   constructor(
     @Inject(StrategyRunStore) private readonly store: StrategyRunStore,
     @InjectRepository(Guess) private readonly guessRepo: Repository<Guess>,
@@ -176,6 +181,7 @@ export class LlmStrategyRunner {
     @Inject(OrchestratorService) private readonly orchestratorService: OrchestratorService,
     @Inject(SupportedModelService) private readonly supportedModelService: SupportedModelService,
     @Inject(RateLimitHoldService) private readonly rateLimitHold: RateLimitHoldService,
+    @Inject(FreeTierBudgetService) private readonly freeTierBudget: FreeTierBudgetService,
   ) {}
 
   async runLlmStrategy(
@@ -184,6 +190,7 @@ export class LlmStrategyRunner {
     trialNumber = 0,
     model?: string,
     manualRetry = false,
+    budgetTier: FreeTierId | null = null,
   ) {
     // The strategy name alone determines the provider pool (there's no per-run
     // choice of provider today, only of model within it) — resolved once so
@@ -199,12 +206,21 @@ export class LlmStrategyRunner {
       ? await this.supportedModelService.getContextWindow(strategyName, model)
       : null;
 
+    // Every llm-openai call carries its model's output cap — a runaway guard
+    // sized above anything the model has produced, and the output half of a
+    // budgeted call's worst-case reservation below.
+    const maxOutputTokens =
+      model && provider === "openai"
+        ? await this.supportedModelService.getMaxOutputTokens(strategyName, model)
+        : null;
+
     const { run, puzzle } = await this.store.loadOrCreateRun(
       puzzleId,
       strategyName,
       trialNumber,
       model,
       contextWindow,
+      budgetTier,
     );
 
     // One-off: rewrite words whose literal text (e.g. an embedded comma)
@@ -350,6 +366,14 @@ export class LlmStrategyRunner {
     const pendingPrompts: Partial<SolvePrompt>[] = [];
     let globalPromptNumber = await this.store.lastPromptNumber(run.id);
 
+    // Taken from the row so a resumed run stays budgeted even though its
+    // resume job carries no budgetTier of its own.
+    const runBudgetTier = (run.budgetTier as FreeTierId | null) ?? null;
+    // Exact token cost of a conversation prefix, from the last call that
+    // reported usage — null on a fresh or resumed run, which falls back to
+    // counting the whole conversation by bytes (see token-bound.ts).
+    let knownPrefix: KnownPrefix | null = null;
+
     while (true) {
       const N = run.availableWords.length / GROUP_SIZE;
 
@@ -357,6 +381,33 @@ export class LlmStrategyRunner {
       const prompt = state.lastFailedGuess
         ? buildRetryPrompt(run.availableWords, state.lockedInGroups, state.lastFailedGuess, N)
         : buildInitialPrompt(run.availableWords, N);
+
+      // A free-tier-dispatched run reserves this call's worst case before
+      // making it; no room (or no cap to size it by) pauses the run instead.
+      // RATE_LIMITED_DAILY is resumable: FreeTierDispatchService re-queues
+      // it once there's room again, and state is rebuilt from saved guesses.
+      let reservationId: number | null = null;
+      if (runBudgetTier) {
+        const worstCase =
+          maxOutputTokens === null
+            ? null
+            : maxOutputTokens +
+              inputTokenUpperBound([...messages, { role: "user", content: prompt }], knownPrefix);
+        reservationId =
+          worstCase === null
+            ? null
+            : await this.freeTierBudget.reserve(runBudgetTier, run.id, worstCase);
+        if (reservationId === null) {
+          run.status = StrategyRunStatus.RATE_LIMITED_DAILY;
+          run.finishedAt = new Date();
+          await this.store.saveRun(run);
+          this.logger.log(
+            `run ${run.id} (${model}) paused: no room in the '${runBudgetTier}' budget for its next call` +
+              (maxOutputTokens === null ? " (model has no maxOutputTokens)" : ""),
+          );
+          break;
+        }
+      }
 
       // Append the user message to conversation history.
       messages.push({ role: "user", content: prompt });
@@ -378,6 +429,7 @@ export class LlmStrategyRunner {
         provider,
         contextWindow,
         boardWords,
+        maxOutputTokens,
       );
 
       // One promptNumber per loop iteration.
@@ -393,6 +445,12 @@ export class LlmStrategyRunner {
 
       if (outcome.ok) {
         const data = outcome.data;
+        if (data.finishReason === "length") {
+          this.logger.warn(
+            `run ${run.id}: ${model} hit its maxOutputTokens (${maxOutputTokens}) — consider raising` +
+              " SupportedModel.maxOutputTokens if this recurs",
+          );
+        }
         state.consecutiveModelErrors = 0;
         // A good reply clears any Mistral rate-limit streak so a later lone
         // 429 does not inherit an old count and trip the park early.
@@ -510,6 +568,15 @@ export class LlmStrategyRunner {
 
         // Append the assistant response to conversation history.
         messages.push({ role: "assistant", content: assistantContent });
+        // The request was every message before this reply; with its real
+        // promptTokens in hand, later bounds count only what's added after.
+        if (data.usage?.promptTokens != null) {
+          knownPrefix = knownPrefixAfterReply(
+            messages.length - 1,
+            data.usage.promptTokens,
+            assistantContent,
+          );
+        }
       } else {
         // The prompt was already pushed as a user turn before this call; the
         // call failed with no assistant reply, so drop it rather than let
@@ -579,8 +646,14 @@ export class LlmStrategyRunner {
         }
       }
 
+      const reportedTotal = outcome.ok
+        ? outcome.data.usage?.totalTokens
+        : outcome.error.usage?.totalTokens;
+      const settlement: ReservationSettlement | undefined =
+        reservationId === null ? undefined : { reservationId, recorded: reportedTotal != null };
+
       // Flush every iteration.
-      await this.store.flushBatch(run, pendingGuesses, pendingProposals, pendingPrompts);
+      await this.store.flushBatch(run, pendingGuesses, pendingProposals, pendingPrompts, settlement);
 
       // A rate-limited hit waits exactly as long as Google says to, taking
       // priority over the model-error backoff below — the two never apply

@@ -75,6 +75,54 @@ describe("runAnswerStep", () => {
     expect(result.latencyMs).toEqual(expect.any(Number));
   });
 
+  it("passes maxOutputTokens to generateText when given", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
+      finishReason: "stop",
+      response: { modelId: "gpt-5", id: "r", headers: {}, body: {} },
+      request: { body: {} },
+      usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+    });
+
+    await runAnswerStep(MESSAGES, { model: "gpt-5", provider: "openai", maxOutputTokens: 47000 });
+
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ maxOutputTokens: 47000 }),
+    );
+  });
+
+  it("omits maxOutputTokens from generateText when not given", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
+      finishReason: "stop",
+      response: { modelId: "gpt-5", id: "r", headers: {}, body: {} },
+      request: { body: {} },
+      usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+    });
+
+    await runAnswerStep(MESSAGES, { model: "gpt-5", provider: "openai" });
+
+    expect(generateTextMock.mock.calls[0][0]).not.toHaveProperty("maxOutputTokens");
+  });
+
+  it("reports the call's finishReason", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",
+      finishReason: "length",
+      response: { modelId: "o3", id: "r", headers: {}, body: {} },
+      request: { body: {} },
+      usage: { inputTokens: 10, outputTokens: 46000, totalTokens: 46010 },
+    });
+
+    const result = await runAnswerStep(MESSAGES, {
+      model: "o3",
+      provider: "openai",
+      maxOutputTokens: 46000,
+    });
+
+    expect(result.finishReason).toBe("length");
+  });
+
   it("captures reasoningTokens alongside the rest of usage on a successful call", async () => {
     generateTextMock.mockResolvedValueOnce({
       text: "### ANSWER\nAAAA, BBBB, CCCC, DDDD",

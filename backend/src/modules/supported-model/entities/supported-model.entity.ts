@@ -50,6 +50,15 @@ export class SupportedModel {
   @Column({ type: "int", nullable: true })
   contextWindow: number | null;
 
+  // Hard cap on one call's output tokens (reasoning included), sent to the
+  // orchestrator as maxOutputTokens on every llm-openai call. Doubles as the
+  // output half of a call's worst-case cost for free-tier budget
+  // reservations (see FreeTierBudgetService). Seeded from historical max
+  // output × 1.2; null = no cap, and the model can't be auto-dispatched
+  // on a free-tier budget. Editable via Adminer.
+  @Column({ type: "int", nullable: true })
+  maxOutputTokens: number | null;
+
   // Best-effort: parsed from the OpenRouter slug/name or description prose.
   // null for most OpenAI rows — OpenAI doesn't publish parameter counts.
   @Column({ type: "bigint", nullable: true })

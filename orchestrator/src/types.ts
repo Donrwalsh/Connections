@@ -101,6 +101,14 @@ export const SolveStepRequestSchema = AssistRequestSchema.extend({
     .describe(
       "This model's real context window, overriding MODEL_CONTEXT_WINDOW for Ollama's num_ctx",
     ),
+  maxOutputTokens: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      "Upper bound on this call's output tokens (reasoning included) — the backend's per-model SupportedModel.maxOutputTokens",
+    ),
 });
 export type SolveStepRequest = z.infer<typeof SolveStepRequestSchema>;
 
@@ -125,6 +133,10 @@ export const SolveStepResponseSchema = AssistResponseSchema.extend({
     )
     .describe("Text-parsing issues found in the response, from the shared answer-grammar parser"),
   latencyMs: z.number().optional(),
+  finishReason: z
+    .string()
+    .optional()
+    .describe("The AI SDK's finish reason — 'length' means maxOutputTokens cut the reply off"),
   // The context window actually used for this call — see
   // answer-step.ts's AnswerStepResult for why it can differ from the
   // request's contextWindow.

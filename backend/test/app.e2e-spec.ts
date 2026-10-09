@@ -25,6 +25,7 @@ import {
 import { LlmStrategyRunner } from "../src/modules/strategy/llm-strategy-runner.service";
 import { llmOpenAIQueue } from "../src/modules/queue/strategy.queue";
 import { freeTierDispatchQueue } from "../src/modules/queue/free-tier-dispatch.queue";
+import { FreeTierBudgetService } from "../src/modules/strategy/free-tier-budget.service";
 import { parseAnswer } from "answer-grammar";
 
 const TEST_DATE = "1999-12-31";
@@ -818,6 +819,74 @@ describe("App (e2e)", () => {
 
       expect(res.status).toBe(200);
       expect(res.body.active).toBe(false);
+    });
+  });
+
+  describe("free-tier budget reservation", () => {
+    it("seeds maxOutputTokens for the llm-openai models present", async () => {
+      const expected: Record<string, number> = {
+        "o4-mini": 49000,
+        "gpt-5": 47000,
+        o3: 46000,
+        "gpt-5-nano": 36000,
+        o1: 33000,
+        "o3-mini": 29000,
+        "gpt-5-mini": 27000,
+        "gpt-4.1-mini": 14000,
+        "gpt-4.1-nano": 4000,
+        "gpt-4.1": 2000,
+        "gpt-4o": 1000,
+        "gpt-4o-mini": 1000,
+        "gpt-5.1": 1000,
+        "gpt-5.2": 1000,
+        "gpt-5.4": 1000,
+        "gpt-5.4-mini": 1000,
+        "gpt-5.4-nano": 1000,
+      };
+      const rows: { modelName: string; maxOutputTokens: number | null }[] = await dataSource.query(
+        `SELECT "modelName", "maxOutputTokens" FROM "SupportedModel" WHERE "strategyName" = 'llm-openai'`,
+      );
+      const seeded = rows.filter((row) => row.modelName in expected);
+
+      expect(seeded.length).toBeGreaterThan(0);
+      for (const row of seeded) expect(row.maxOutputTokens).toBe(expected[row.modelName]);
+    });
+
+    it("lets exactly one of two concurrent reservations take the last of the room", async () => {
+      const budget = app.get(FreeTierBudgetService);
+      await dataSource.query(
+        `INSERT INTO "FreeTierDispatchState" ("tier", "active", "thresholdPercent", "startedAt")
+         VALUES ('flagship', true, 100, now())
+         ON CONFLICT ("tier") DO UPDATE SET "active" = true, "thresholdPercent" = 100`,
+      );
+      const [{ id: puzzleId }] = await dataSource.query(
+        `SELECT "id" FROM "Puzzle" WHERE "date" = $1`,
+        [TEST_DATE],
+      );
+      const [{ id: runId }] = await dataSource.query(
+        `INSERT INTO "StrategyRun" ("puzzleId", "strategyName", "trialNumber", "status", "availableWords", "currentCombination", "modelName")
+         VALUES ($1, 'llm-openai', 999, 'running', '[]', '[0,1,2,3]', 'gpt-5') RETURNING "id"`,
+        [puzzleId],
+      );
+
+      try {
+        const room = 250_000 - (await budget.committedTokens("flagship"));
+        expect(room).toBeGreaterThan(2);
+        const each = Math.floor(room / 2) + 1; // two of these can never both fit
+
+        const results = await Promise.all([
+          budget.reserve("flagship", runId, each),
+          budget.reserve("flagship", runId, each),
+        ]);
+
+        expect(results.filter((id) => id !== null)).toHaveLength(1);
+      } finally {
+        // Cascades to this run's FreeTierReservation rows.
+        await dataSource.query(`DELETE FROM "StrategyRun" WHERE "id" = $1`, [runId]);
+        await dataSource.query(
+          `UPDATE "FreeTierDispatchState" SET "active" = false WHERE "tier" = 'flagship'`,
+        );
+      }
     });
   });
 

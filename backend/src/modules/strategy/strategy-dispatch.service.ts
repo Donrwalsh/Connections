@@ -12,7 +12,7 @@ import {
   LLM_NVIDIA_QUEUE,
 } from "../queue/queue.module";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
-import { DataSource, Repository } from "typeorm";
+import { DataSource, In, Repository } from "typeorm";
 import { StrategyRun, StrategyRunStatus } from "./entities/strategy-run.entity";
 import { Puzzle } from "../game/entities/puzzle.entity";
 import { SolvePrompt } from "./entities/solve-prompt.entity";
@@ -129,10 +129,16 @@ export class StrategyDispatch {
    * queued at all), and repeated calls advance the trial number until that
    * model hits its cap (see triggerNextLlmTrial).
    */
-  async triggerStrategyRuns(puzzleId: number, strategyName: string, date: string, model?: string) {
+  async triggerStrategyRuns(
+    puzzleId: number,
+    strategyName: string,
+    date: string,
+    model?: string,
+    budgetTier?: string,
+  ) {
     if (isLlmStrategy(strategyName)) {
       await this.supportedModelService.assertSupported(strategyName, model);
-      await this.triggerNextLlmTrial(puzzleId, strategyName, date, model as string);
+      await this.triggerNextLlmTrial(puzzleId, strategyName, date, model as string, budgetTier);
       return;
     }
 
@@ -371,6 +377,58 @@ export class StrategyDispatch {
   }
 
   /**
+   * Re-queues up to `limit` free-tier runs paused (RATE_LIMITED_DAILY) for
+   * lack of budget — oldest first, restricted to `models` (the ones the
+   * dispatch tick judged able to fit right now). Same enqueue-then-flip order
+   * as RpdResumeService: if the add throws, the run stays paused for the
+   * next tick instead of stranded in RUNNING with no job. The runner's own
+   * RATE_LIMITED_DAILY normalization and guess-replay resume it mid-puzzle;
+   * its budgetTier comes from the row, not the job.
+   */
+  async resumeBudgetParkedRuns(
+    strategyName: string,
+    budgetTier: string,
+    models: readonly string[],
+    limit: number,
+  ): Promise<string[]> {
+    if (limit <= 0 || models.length === 0) return [];
+
+    const parked = await this.strategyRunRepo.find({
+      where: {
+        strategyName,
+        budgetTier,
+        status: StrategyRunStatus.RATE_LIMITED_DAILY,
+        modelName: In([...models]),
+      },
+      relations: { puzzle: true },
+      order: { startedAt: "ASC" },
+      take: limit,
+    });
+
+    const resumed: string[] = [];
+    for (const run of parked) {
+      await this.queueFor(strategyName).add(
+        "run-strategy",
+        {
+          puzzleId: run.puzzleId,
+          strategyName,
+          date: run.puzzle.date,
+          trialNumber: run.trialNumber,
+          model: run.modelName,
+        },
+        {
+          jobId: `${runStrategyJobId(run.puzzleId, strategyName, run.modelName, run.trialNumber)}-budget-resume-${Date.now()}`,
+        },
+      );
+      run.status = StrategyRunStatus.RUNNING;
+      run.finishedAt = null;
+      await this.strategyRunRepo.save(run);
+      resumed.push(run.modelName as string);
+    }
+    return resumed;
+  }
+
+  /**
    * Bulk version of retryRun, scoped to one strategy — retries every run
    * currently in the 'error' status for strategyName through the exact same
    * retryRun path, so each inherits its per-run status check, job-id
@@ -524,6 +582,7 @@ export class StrategyDispatch {
     strategyName: string,
     date: string,
     model: string,
+    budgetTier?: string,
   ): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
       // hashtext() gives a stable int4 from strategyName; pg_advisory_xact_lock
@@ -572,7 +631,15 @@ export class StrategyDispatch {
 
       await this.queueFor(strategyName).add(
         "run-strategy",
-        { puzzleId, strategyName, date, trialNumber: nextTrialNumber, model },
+        {
+          puzzleId,
+          strategyName,
+          date,
+          trialNumber: nextTrialNumber,
+          model,
+          // Only free-tier dispatch tags its runs — see StrategyRun.budgetTier.
+          ...(budgetTier ? { budgetTier } : {}),
+        },
         { jobId: runStrategyJobId(puzzleId, strategyName, model, nextTrialNumber) },
       );
     });
